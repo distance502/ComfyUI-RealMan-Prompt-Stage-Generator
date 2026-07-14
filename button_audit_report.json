@@ -1,0 +1,712 @@
+{
+  "totalButtons": 81,
+  "withHandler": 81,
+  "withoutHandler": [],
+  "destructiveButtons": [
+    {
+      "varName": "clearButton",
+      "label": "清空报告",
+      "handlerLine": 3350
+    },
+    {
+      "varName": "clearSelectionButton",
+      "label": "清空勾选",
+      "handlerLine": 4497
+    },
+    {
+      "varName": "batchDeleteButton",
+      "label": "批量删除",
+      "handlerLine": 4340
+    },
+    {
+      "varName": "stopContinuousButton",
+      "label": "停止连续测试",
+      "handlerLine": 4428
+    },
+    {
+      "varName": "reportClearButton",
+      "label": "清空报告",
+      "handlerLine": 4579
+    },
+    {
+      "varName": "del",
+      "label": "删除",
+      "handlerLine": 4099
+    },
+    {
+      "varName": "clearAllButton",
+      "label": "清空全部",
+      "handlerLine": 5453
+    },
+    {
+      "varName": "deleteSelectedButton",
+      "label": "删除已选",
+      "handlerLine": 6026
+    },
+    {
+      "varName": "clearSelectedButton",
+      "label": "清空勾选",
+      "handlerLine": 6054
+    },
+    {
+      "varName": "resetButton",
+      "label": "清空本次选择",
+      "handlerLine": 7549
+    },
+    {
+      "varName": "clearCustomButton",
+      "label": "清空自定义",
+      "handlerLine": 7571
+    }
+  ],
+  "buttons": [
+    {
+      "varName": "closeButton",
+      "label": "关闭",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 3368,
+      "destructive": false
+    },
+    {
+      "varName": "copyButton",
+      "label": "复制报告",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 3280,
+      "destructive": false
+    },
+    {
+      "varName": "exportJsonButton",
+      "label": "导出 JSON",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 3291,
+      "destructive": false
+    },
+    {
+      "varName": "exportCsvButton",
+      "label": "导出 CSV",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 3307,
+      "destructive": false
+    },
+    {
+      "varName": "exportMarkdownButton",
+      "label": "导出 Markdown",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 3324,
+      "destructive": false
+    },
+    {
+      "varName": "saveHistoryButton",
+      "label": "存入历史",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 3341,
+      "destructive": false
+    },
+    {
+      "varName": "clearButton",
+      "label": "清空报告",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 3350,
+      "destructive": true
+    },
+    {
+      "varName": "doneButton",
+      "label": "完成",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 3367,
+      "destructive": false
+    },
+    {
+      "varName": "button",
+      "label": "",
+      "className": "qwen-te-modal__preset",
+      "hasHandler": true,
+      "handlerLine": 2869,
+      "destructive": false
+    },
+    {
+      "varName": "saveButton",
+      "label": "保存当前",
+      "className": "qwen-te-modal__footer-button qwen-te-modal__footer-button--primary",
+      "hasHandler": true,
+      "handlerLine": 4597,
+      "destructive": false
+    },
+    {
+      "varName": "clearSelectionButton",
+      "label": "清空勾选",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 4497,
+      "destructive": true
+    },
+    {
+      "varName": "batchFavoriteButton",
+      "label": "批量置顶",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 4328,
+      "destructive": false
+    },
+    {
+      "varName": "batchUnfavoriteButton",
+      "label": "批量取消置顶",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 4334,
+      "destructive": false
+    },
+    {
+      "varName": "batchDeleteButton",
+      "label": "批量删除",
+      "className": "qwen-te-modal__footer-button qwen-te-modal__footer-button--danger",
+      "hasHandler": true,
+      "handlerLine": 4340,
+      "destructive": true
+    },
+    {
+      "varName": "batchLoadButton",
+      "label": "载入所选首个",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 4356,
+      "destructive": false
+    },
+    {
+      "varName": "batchLoadQueueButton",
+      "label": "首个并入队",
+      "className": "qwen-te-modal__footer-button qwen-te-modal__footer-button--accent",
+      "hasHandler": true,
+      "handlerLine": 4367,
+      "destructive": false
+    },
+    {
+      "varName": "batchCycleButton",
+      "label": "轮流载入所选",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 4378,
+      "destructive": false
+    },
+    {
+      "varName": "batchCycleQueueButton",
+      "label": "轮流并入队",
+      "className": "qwen-te-modal__footer-button qwen-te-modal__footer-button--accent",
+      "hasHandler": true,
+      "handlerLine": 4390,
+      "destructive": false
+    },
+    {
+      "varName": "batchRandomLoadButton",
+      "label": "随机载入所选",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 4402,
+      "destructive": false
+    },
+    {
+      "varName": "batchRandomQueueButton",
+      "label": "随机载入并入队",
+      "className": "qwen-te-modal__footer-button qwen-te-modal__footer-button--accent",
+      "hasHandler": true,
+      "handlerLine": 4414,
+      "destructive": false
+    },
+    {
+      "varName": "batchRandomRunButton",
+      "label": "随机载入并随机跑",
+      "className": "qwen-te-modal__footer-button qwen-te-modal__footer-button--accent",
+      "hasHandler": true,
+      "handlerLine": 4429,
+      "destructive": false
+    },
+    {
+      "varName": "continuousCycleButton",
+      "label": "连续轮流测试",
+      "className": "qwen-te-modal__footer-button qwen-te-modal__footer-button--accent",
+      "hasHandler": true,
+      "handlerLine": 4426,
+      "destructive": false
+    },
+    {
+      "varName": "continuousRandomButton",
+      "label": "连续随机测试",
+      "className": "qwen-te-modal__footer-button qwen-te-modal__footer-button--accent",
+      "hasHandler": true,
+      "handlerLine": 4427,
+      "destructive": false
+    },
+    {
+      "varName": "stopContinuousButton",
+      "label": "停止连续测试",
+      "className": "qwen-te-modal__footer-button qwen-te-modal__footer-button--danger",
+      "hasHandler": true,
+      "handlerLine": 4428,
+      "destructive": true
+    },
+    {
+      "varName": "exportSelectedButton",
+      "label": "导出所选",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 4441,
+      "destructive": false
+    },
+    {
+      "varName": "exportAllButton",
+      "label": "导出当前筛选",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 4451,
+      "destructive": false
+    },
+    {
+      "varName": "exportFavoritesButton",
+      "label": "导出置顶",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 4460,
+      "destructive": false
+    },
+    {
+      "varName": "exportArrangeButton",
+      "label": "导出整理预设",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 4469,
+      "destructive": false
+    },
+    {
+      "varName": "exportHistoryAggregateButton",
+      "label": "导出聚合快照",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 4478,
+      "destructive": false
+    },
+    {
+      "varName": "exportManualButton",
+      "label": "导出手存预设",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 4487,
+      "destructive": false
+    },
+    {
+      "varName": "importButton",
+      "label": "导入文件",
+      "className": "qwen-te-modal__footer-button qwen-te-modal__footer-button--accent",
+      "hasHandler": true,
+      "handlerLine": 4496,
+      "destructive": false
+    },
+    {
+      "varName": "reportCopyButton",
+      "label": "复制报告",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 4530,
+      "destructive": false
+    },
+    {
+      "varName": "reportExportButton",
+      "label": "导出报告",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 4540,
+      "destructive": false
+    },
+    {
+      "varName": "reportExportCsvButton",
+      "label": "导出 CSV",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 4547,
+      "destructive": false
+    },
+    {
+      "varName": "reportExportMarkdownButton",
+      "label": "导出 Markdown",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 4555,
+      "destructive": false
+    },
+    {
+      "varName": "reportSaveHistoryButton",
+      "label": "报告存入历史",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 4563,
+      "destructive": false
+    },
+    {
+      "varName": "reportClearButton",
+      "label": "清空报告",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 4579,
+      "destructive": true
+    },
+    {
+      "varName": "selectButton",
+      "label": "",
+      "className": "",
+      "hasHandler": true,
+      "handlerLine": 3920,
+      "destructive": false
+    },
+    {
+      "varName": "toggleDetail",
+      "label": "",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 3970,
+      "destructive": false
+    },
+    {
+      "varName": "load",
+      "label": "载入",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 3980,
+      "destructive": false
+    },
+    {
+      "varName": "addBatch",
+      "label": "加入连测",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 3992,
+      "destructive": false
+    },
+    {
+      "varName": "setExclusive",
+      "label": "唯一连测",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 4004,
+      "destructive": false
+    },
+    {
+      "varName": "runExclusive",
+      "label": "唯一并开跑",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 4017,
+      "destructive": false
+    },
+    {
+      "varName": "copySummary",
+      "label": "复制摘要",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 4035,
+      "destructive": false
+    },
+    {
+      "varName": "copyJson",
+      "label": "复制 JSON",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 4044,
+      "destructive": false
+    },
+    {
+      "varName": "exportMarkdown",
+      "label": "导出 Markdown",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 4053,
+      "destructive": false
+    },
+    {
+      "varName": "exportCsv",
+      "label": "导出 CSV",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 4063,
+      "destructive": false
+    },
+    {
+      "varName": "saveReportHistory",
+      "label": "报告入历史",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 4073,
+      "destructive": false
+    },
+    {
+      "varName": "favorite",
+      "label": "",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 4090,
+      "destructive": false
+    },
+    {
+      "varName": "del",
+      "label": "删除",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 4099,
+      "destructive": true
+    },
+    {
+      "varName": "exportButton",
+      "label": "导出",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 5450,
+      "destructive": false
+    },
+    {
+      "varName": "clearAllButton",
+      "label": "清空全部",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 5453,
+      "destructive": true
+    },
+    {
+      "varName": "restore",
+      "label": "恢复",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 5151,
+      "destructive": false
+    },
+    {
+      "varName": "restoreAndRun",
+      "label": "恢复并开跑",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 5237,
+      "destructive": false
+    },
+    {
+      "varName": "saveSnapshot",
+      "label": "存为快照",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 5263,
+      "destructive": false
+    },
+    {
+      "varName": "copyReport",
+      "label": "复制 JSON",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 5309,
+      "destructive": false
+    },
+    {
+      "varName": "exportReport",
+      "label": "导出报告",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 5319,
+      "destructive": false
+    },
+    {
+      "varName": "cancelButton",
+      "label": "取消",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 5688,
+      "destructive": false
+    },
+    {
+      "varName": "applyButton",
+      "label": "应用模板",
+      "className": "qwen-te-modal__footer-button qwen-te-modal__footer-button--primary",
+      "hasHandler": true,
+      "handlerLine": 5658,
+      "destructive": false
+    },
+    {
+      "varName": "addButton",
+      "label": "批量加入标签库",
+      "className": "qwen-te-modal__footer-button qwen-te-modal__footer-button--primary",
+      "hasHandler": true,
+      "handlerLine": 5996,
+      "destructive": false
+    },
+    {
+      "varName": "deleteSelectedButton",
+      "label": "删除已选",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 6026,
+      "destructive": true
+    },
+    {
+      "varName": "clearSelectedButton",
+      "label": "清空勾选",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 6054,
+      "destructive": true
+    },
+    {
+      "varName": "expandAllButton",
+      "label": "全部展开",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 6069,
+      "destructive": false
+    },
+    {
+      "varName": "collapseAllButton",
+      "label": "全部折叠",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 6070,
+      "destructive": false
+    },
+    {
+      "varName": "chip",
+      "label": "",
+      "className": "qwen-te-chip",
+      "hasHandler": true,
+      "handlerLine": 5980,
+      "destructive": false
+    },
+    {
+      "varName": "searchButton",
+      "label": "联网搜索",
+      "className": "qwen-te-modal__footer-button qwen-te-modal__footer-button--primary",
+      "hasHandler": true,
+      "handlerLine": 6452,
+      "destructive": false
+    },
+    {
+      "varName": "importHighButton",
+      "label": "高置信入库",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 6455,
+      "destructive": false
+    },
+    {
+      "varName": "resetButton",
+      "label": "清空本次选择",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 7549,
+      "destructive": true
+    },
+    {
+      "varName": "manageButton",
+      "label": "管理标签",
+      "className": "qwen-te-modal__footer-button",
+      "hasHandler": true,
+      "handlerLine": 7586,
+      "destructive": false
+    },
+    {
+      "varName": "sectionToggle",
+      "label": "",
+      "className": "qwen-te-group__section-toggle",
+      "hasHandler": true,
+      "handlerLine": 6767,
+      "destructive": false
+    },
+    {
+      "varName": "navButton",
+      "label": "",
+      "className": "qwen-te-modal__nav-button",
+      "hasHandler": true,
+      "handlerLine": 6828,
+      "destructive": false
+    },
+    {
+      "varName": "autoArrangeButton",
+      "label": "智能整理到分组",
+      "className": "qwen-te-modal__mini-button",
+      "hasHandler": true,
+      "handlerLine": 7568,
+      "destructive": false
+    },
+    {
+      "varName": "clearCustomButton",
+      "label": "清空自定义",
+      "className": "qwen-te-modal__mini-button",
+      "hasHandler": true,
+      "handlerLine": 7571,
+      "destructive": true
+    },
+    {
+      "varName": "onlineSearchButton",
+      "label": "联网补词",
+      "className": "qwen-te-modal__mini-button",
+      "hasHandler": true,
+      "handlerLine": 6926,
+      "destructive": false
+    },
+    {
+      "varName": "applyArrangeButton",
+      "label": "应用整理结果",
+      "className": "qwen-te-modal__mini-button",
+      "hasHandler": true,
+      "handlerLine": 7569,
+      "destructive": false
+    },
+    {
+      "varName": "undoArrangeButton",
+      "label": "撤销整理",
+      "className": "qwen-te-modal__mini-button",
+      "hasHandler": true,
+      "handlerLine": 7570,
+      "destructive": false
+    },
+    {
+      "varName": "toggleButton",
+      "label": "",
+      "className": "qwen-te-modal__mini-button",
+      "hasHandler": true,
+      "handlerLine": 7134,
+      "destructive": false
+    },
+    {
+      "varName": "splitButton",
+      "label": "拆成多个标签",
+      "className": "qwen-te-modal__mini-button",
+      "hasHandler": true,
+      "handlerLine": 7471,
+      "destructive": false
+    },
+    {
+      "varName": "actionButton",
+      "label": "已在库中",
+      "className": "qwen-te-modal__mini-button",
+      "hasHandler": true,
+      "handlerLine": 7483,
+      "destructive": false
+    },
+    {
+      "varName": "continuousBadge",
+      "label": "",
+      "className": "qwen-te-panel__hero-badge qwen-te-panel__hero-badge--secondary",
+      "hasHandler": true,
+      "handlerLine": 7667,
+      "destructive": false
+    },
+    {
+      "varName": "b",
+      "label": "",
+      "className": "",
+      "hasHandler": true,
+      "handlerLine": 7702,
+      "destructive": false
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+output/
+.pytest_cache/
+.ruff_cache/
+temp/
+models/
+*.log
+*.tmp
+*.invalid.bak
+.DS_Store

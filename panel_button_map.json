@@ -1,0 +1,96 @@
+{
+  "count": 13,
+  "rows": [
+    {
+      "key": "tag",
+      "label": "标签",
+      "icon": "⌘",
+      "className": "qwen-te-panel__button--warm",
+      "hint": "按当前规则随机重排标签。"
+    },
+    {
+      "key": "randomRun",
+      "label": "随机跑",
+      "icon": "▷",
+      "className": "qwen-te-panel__button--run",
+      "hint": "随机后自动入队执行。"
+    },
+    {
+      "key": "runCycle",
+      "label": "连测轮",
+      "icon": "⟲",
+      "className": "qwen-te-panel__button--accent",
+      "hint": "按所选预设轮流连续测试。"
+    },
+    {
+      "key": "runRandom",
+      "label": "连测随",
+      "icon": "◌",
+      "className": "qwen-te-panel__button--accent",
+      "hint": "按所选预设随机连续测试。"
+    },
+    {
+      "key": "stopRun",
+      "label": "停连测",
+      "icon": "■",
+      "className": "qwen-te-panel__button--danger",
+      "hint": "停止当前连续测试。"
+    },
+    {
+      "key": "copyPrompt",
+      "label": "复制",
+      "icon": "⎘",
+      "className": "qwen-te-panel__button--cool",
+      "hint": "复制最近一次正向提示词。"
+    },
+    {
+      "key": "copyNegative",
+      "label": "负面",
+      "icon": "⊖",
+      "className": "qwen-te-panel__button--cool",
+      "hint": "复制最近一次推荐负面词。"
+    },
+    {
+      "key": "syncNegative",
+      "label": "同步负",
+      "icon": "⇄",
+      "className": "qwen-te-panel__button--accent",
+      "hint": "把推荐负面词同步到图里的负面编码节点。"
+    },
+    {
+      "key": "presets",
+      "label": "预设",
+      "icon": "◈",
+      "className": "",
+      "hint": "回退到上一组随机结果。"
+    },
+    {
+      "key": "toggleRawSlots",
+      "label": "槽位",
+      "icon": "▤",
+      "className": "",
+      "hint": "显示或收起底层槽位控件。"
+    },
+    {
+      "key": "toggleAdvanced",
+      "label": "高级",
+      "icon": "⚙",
+      "className": "",
+      "hint": "显示或收起高级参数控件。"
+    },
+    {
+      "key": "autoNegativeSync",
+      "label": "自负",
+      "icon": "⇄",
+      "className": "qwen-te-panel__button--accent",
+      "hint": "执行后自动同步推荐负面词。"
+    },
+    {
+      "key": "clearTags",
+      "label": "清空",
+      "icon": "⌫",
+      "className": "qwen-te-panel__button--danger",
+      "hint": "清空当前所有已选标签。"
+    }
+  ]
+}

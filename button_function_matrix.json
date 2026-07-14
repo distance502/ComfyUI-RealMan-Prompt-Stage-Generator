@@ -1,0 +1,491 @@
+{
+  "total": 81,
+  "buttons": [
+    {
+      "var": "closeButton",
+      "label": "关闭",
+      "handler_line": 3368,
+      "has_confirm": false
+    },
+    {
+      "var": "copyButton",
+      "label": "复制报告",
+      "handler_line": 3280,
+      "has_confirm": false
+    },
+    {
+      "var": "exportJsonButton",
+      "label": "导出 JSON",
+      "handler_line": 3291,
+      "has_confirm": false
+    },
+    {
+      "var": "exportCsvButton",
+      "label": "导出 CSV",
+      "handler_line": 3307,
+      "has_confirm": false
+    },
+    {
+      "var": "exportMarkdownButton",
+      "label": "导出 Markdown",
+      "handler_line": 3324,
+      "has_confirm": false
+    },
+    {
+      "var": "saveHistoryButton",
+      "label": "存入历史",
+      "handler_line": 3341,
+      "has_confirm": false
+    },
+    {
+      "var": "clearButton",
+      "label": "清空报告",
+      "handler_line": 3350,
+      "has_confirm": false
+    },
+    {
+      "var": "doneButton",
+      "label": "完成",
+      "handler_line": 3367,
+      "has_confirm": false
+    },
+    {
+      "var": "button",
+      "label": "",
+      "handler_line": 2869,
+      "has_confirm": false
+    },
+    {
+      "var": "saveButton",
+      "label": "保存当前",
+      "handler_line": 4592,
+      "has_confirm": false
+    },
+    {
+      "var": "clearSelectionButton",
+      "label": "清空勾选",
+      "handler_line": 4492,
+      "has_confirm": false
+    },
+    {
+      "var": "batchFavoriteButton",
+      "label": "批量置顶",
+      "handler_line": 4323,
+      "has_confirm": false
+    },
+    {
+      "var": "batchUnfavoriteButton",
+      "label": "批量取消置顶",
+      "handler_line": 4329,
+      "has_confirm": false
+    },
+    {
+      "var": "batchDeleteButton",
+      "label": "批量删除",
+      "handler_line": 4335,
+      "has_confirm": true
+    },
+    {
+      "var": "batchLoadButton",
+      "label": "载入所选首个",
+      "handler_line": 4351,
+      "has_confirm": false
+    },
+    {
+      "var": "batchLoadQueueButton",
+      "label": "首个并入队",
+      "handler_line": 4362,
+      "has_confirm": false
+    },
+    {
+      "var": "batchCycleButton",
+      "label": "轮流载入所选",
+      "handler_line": 4373,
+      "has_confirm": false
+    },
+    {
+      "var": "batchCycleQueueButton",
+      "label": "轮流并入队",
+      "handler_line": 4385,
+      "has_confirm": false
+    },
+    {
+      "var": "batchRandomLoadButton",
+      "label": "随机载入所选",
+      "handler_line": 4397,
+      "has_confirm": false
+    },
+    {
+      "var": "batchRandomQueueButton",
+      "label": "随机载入并入队",
+      "handler_line": 4409,
+      "has_confirm": false
+    },
+    {
+      "var": "batchRandomRunButton",
+      "label": "随机载入并随机跑",
+      "handler_line": 4424,
+      "has_confirm": false
+    },
+    {
+      "var": "continuousCycleButton",
+      "label": "连续轮流测试",
+      "handler_line": 4421,
+      "has_confirm": false
+    },
+    {
+      "var": "continuousRandomButton",
+      "label": "连续随机测试",
+      "handler_line": 4422,
+      "has_confirm": false
+    },
+    {
+      "var": "stopContinuousButton",
+      "label": "停止连续测试",
+      "handler_line": 4423,
+      "has_confirm": false
+    },
+    {
+      "var": "exportSelectedButton",
+      "label": "导出所选",
+      "handler_line": 4436,
+      "has_confirm": false
+    },
+    {
+      "var": "exportAllButton",
+      "label": "导出当前筛选",
+      "handler_line": 4446,
+      "has_confirm": false
+    },
+    {
+      "var": "exportFavoritesButton",
+      "label": "导出置顶",
+      "handler_line": 4455,
+      "has_confirm": false
+    },
+    {
+      "var": "exportArrangeButton",
+      "label": "导出整理预设",
+      "handler_line": 4464,
+      "has_confirm": false
+    },
+    {
+      "var": "exportHistoryAggregateButton",
+      "label": "导出聚合快照",
+      "handler_line": 4473,
+      "has_confirm": false
+    },
+    {
+      "var": "exportManualButton",
+      "label": "导出手存预设",
+      "handler_line": 4482,
+      "has_confirm": false
+    },
+    {
+      "var": "importButton",
+      "label": "导入文件",
+      "handler_line": 4491,
+      "has_confirm": false
+    },
+    {
+      "var": "reportCopyButton",
+      "label": "复制报告",
+      "handler_line": 4525,
+      "has_confirm": false
+    },
+    {
+      "var": "reportExportButton",
+      "label": "导出报告",
+      "handler_line": 4535,
+      "has_confirm": false
+    },
+    {
+      "var": "reportExportCsvButton",
+      "label": "导出 CSV",
+      "handler_line": 4542,
+      "has_confirm": false
+    },
+    {
+      "var": "reportExportMarkdownButton",
+      "label": "导出 Markdown",
+      "handler_line": 4550,
+      "has_confirm": false
+    },
+    {
+      "var": "reportSaveHistoryButton",
+      "label": "报告存入历史",
+      "handler_line": 4558,
+      "has_confirm": false
+    },
+    {
+      "var": "reportClearButton",
+      "label": "清空报告",
+      "handler_line": 4574,
+      "has_confirm": true
+    },
+    {
+      "var": "selectButton",
+      "label": "",
+      "handler_line": 3920,
+      "has_confirm": false
+    },
+    {
+      "var": "toggleDetail",
+      "label": "",
+      "handler_line": 3970,
+      "has_confirm": false
+    },
+    {
+      "var": "load",
+      "label": "载入",
+      "handler_line": 3980,
+      "has_confirm": false
+    },
+    {
+      "var": "addBatch",
+      "label": "加入连测",
+      "handler_line": 3992,
+      "has_confirm": false
+    },
+    {
+      "var": "setExclusive",
+      "label": "唯一连测",
+      "handler_line": 4004,
+      "has_confirm": false
+    },
+    {
+      "var": "runExclusive",
+      "label": "唯一并开跑",
+      "handler_line": 4017,
+      "has_confirm": false
+    },
+    {
+      "var": "copySummary",
+      "label": "复制摘要",
+      "handler_line": 4035,
+      "has_confirm": false
+    },
+    {
+      "var": "copyJson",
+      "label": "复制 JSON",
+      "handler_line": 4044,
+      "has_confirm": false
+    },
+    {
+      "var": "exportMarkdown",
+      "label": "导出 Markdown",
+      "handler_line": 4053,
+      "has_confirm": false
+    },
+    {
+      "var": "exportCsv",
+      "label": "导出 CSV",
+      "handler_line": 4063,
+      "has_confirm": false
+    },
+    {
+      "var": "saveReportHistory",
+      "label": "报告入历史",
+      "handler_line": 4073,
+      "has_confirm": false
+    },
+    {
+      "var": "favorite",
+      "label": "",
+      "handler_line": 4090,
+      "has_confirm": false
+    },
+    {
+      "var": "del",
+      "label": "删除",
+      "handler_line": 4099,
+      "has_confirm": true
+    },
+    {
+      "var": "exportButton",
+      "label": "导出",
+      "handler_line": 5440,
+      "has_confirm": false
+    },
+    {
+      "var": "clearAllButton",
+      "label": "清空全部",
+      "handler_line": 5443,
+      "has_confirm": true
+    },
+    {
+      "var": "restore",
+      "label": "恢复",
+      "handler_line": 5146,
+      "has_confirm": false
+    },
+    {
+      "var": "restoreAndRun",
+      "label": "恢复并开跑",
+      "handler_line": 5232,
+      "has_confirm": false
+    },
+    {
+      "var": "saveSnapshot",
+      "label": "存为快照",
+      "handler_line": 5258,
+      "has_confirm": false
+    },
+    {
+      "var": "copyReport",
+      "label": "复制 JSON",
+      "handler_line": 5304,
+      "has_confirm": false
+    },
+    {
+      "var": "exportReport",
+      "label": "导出报告",
+      "handler_line": 5314,
+      "has_confirm": true
+    },
+    {
+      "var": "cancelButton",
+      "label": "取消",
+      "handler_line": 5678,
+      "has_confirm": false
+    },
+    {
+      "var": "applyButton",
+      "label": "应用模板",
+      "handler_line": 5648,
+      "has_confirm": false
+    },
+    {
+      "var": "addButton",
+      "label": "批量加入标签库",
+      "handler_line": 5986,
+      "has_confirm": false
+    },
+    {
+      "var": "deleteSelectedButton",
+      "label": "删除已选",
+      "handler_line": 6016,
+      "has_confirm": true
+    },
+    {
+      "var": "clearSelectedButton",
+      "label": "清空勾选",
+      "handler_line": 6044,
+      "has_confirm": true
+    },
+    {
+      "var": "expandAllButton",
+      "label": "全部展开",
+      "handler_line": 6059,
+      "has_confirm": false
+    },
+    {
+      "var": "collapseAllButton",
+      "label": "全部折叠",
+      "handler_line": 6060,
+      "has_confirm": false
+    },
+    {
+      "var": "chip",
+      "label": "",
+      "handler_line": 5970,
+      "has_confirm": false
+    },
+    {
+      "var": "searchButton",
+      "label": "联网搜索",
+      "handler_line": 6442,
+      "has_confirm": false
+    },
+    {
+      "var": "importHighButton",
+      "label": "高置信入库",
+      "handler_line": 6445,
+      "has_confirm": false
+    },
+    {
+      "var": "resetButton",
+      "label": "清空本次选择",
+      "handler_line": 7539,
+      "has_confirm": false
+    },
+    {
+      "var": "manageButton",
+      "label": "管理标签",
+      "handler_line": 7560,
+      "has_confirm": true
+    },
+    {
+      "var": "sectionToggle",
+      "label": "",
+      "handler_line": 6757,
+      "has_confirm": false
+    },
+    {
+      "var": "navButton",
+      "label": "",
+      "handler_line": 6818,
+      "has_confirm": false
+    },
+    {
+      "var": "autoArrangeButton",
+      "label": "智能整理到分组",
+      "handler_line": 7549,
+      "has_confirm": false
+    },
+    {
+      "var": "clearCustomButton",
+      "label": "清空自定义",
+      "handler_line": 7552,
+      "has_confirm": true
+    },
+    {
+      "var": "onlineSearchButton",
+      "label": "联网补词",
+      "handler_line": 6916,
+      "has_confirm": false
+    },
+    {
+      "var": "applyArrangeButton",
+      "label": "应用整理结果",
+      "handler_line": 7550,
+      "has_confirm": false
+    },
+    {
+      "var": "undoArrangeButton",
+      "label": "撤销整理",
+      "handler_line": 7551,
+      "has_confirm": false
+    },
+    {
+      "var": "toggleButton",
+      "label": "",
+      "handler_line": 7124,
+      "has_confirm": false
+    },
+    {
+      "var": "splitButton",
+      "label": "拆成多个标签",
+      "handler_line": 7461,
+      "has_confirm": false
+    },
+    {
+      "var": "actionButton",
+      "label": "已在库中",
+      "handler_line": 7473,
+      "has_confirm": false
+    },
+    {
+      "var": "continuousBadge",
+      "label": "",
+      "handler_line": 7641,
+      "has_confirm": false
+    },
+    {
+      "var": "b",
+      "label": "",
+      "handler_line": 7676,
+      "has_confirm": false
+    }
+  ]
+}
