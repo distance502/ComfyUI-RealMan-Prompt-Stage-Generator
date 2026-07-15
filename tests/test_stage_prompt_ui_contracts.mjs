@@ -175,6 +175,19 @@ globalThis.__stagePromptUiTestExports = {
 	invalidatePromptLibraryCache,
 	refreshLibraryOnNode,
 	getFreshLibraryForUi,
+	buildOnlineSearchQuery,
+	chunkOnlineImportTags,
+	normalizeOnlineSearchTagItems,
+	normalizeOnlineSearchSamples,
+	formatOnlineSearchWarning,
+	resolveOnlineSearchLibraryTags,
+	resolveOnlineSearchSelectedTags,
+	pushOnlineSearchBrowserHistory,
+	stepOnlineSearchBrowserHistory,
+	resolvePromptBrowserTarget,
+	openPromptBrowserExternal,
+	searchOnlinePromptTags,
+	openOnlinePromptSearchDialog,
 	setWidgetGroupVisibility,
 	toggleWidget,
 	scheduleNodeLayoutUpdate,
@@ -301,6 +314,7 @@ globalThis.__stagePromptUiTestExports = {
 			observe() {}
 			disconnect() {}
 		},
+		URL,
 		window: {},
 		localStorage: {
 			getItem(key) {
@@ -819,10 +833,337 @@ test("legacy widget cleanup runs onRemove instead of leaving DOM cleanup behind"
 	assert.equal(node.widgets.includes(legacyWidget), false);
 });
 
-test("tag dialog does not expose the online prompt search shortcut", async () => {
+test("retained terminal header exposes the web browser without restoring the legacy tag shortcut", async () => {
 	const source = await fs.readFile(UI_PATH, "utf8");
 	assert.equal(source.includes('textContent = "联网补词"'), false);
 	assert.equal(source.includes("onlineSearchButton.onclick"), false);
+	assert.equal(source.includes('displaySearch.textContent="浏览器"'), true);
+	assert.equal(source.includes('displaySearch.setAttribute("aria-label","打开网页浏览器")'), true);
+	assert.equal(source.includes("openOnlinePromptSearchDialog(node, node?.[PANEL_KEY]?.library ?? library)"), true);
+	assert.equal(source.includes("const panelButtons = { onlineSearch: displaySearch };"), true);
+});
+
+test("online prompt search query removes low-value terms and deduplicates keywords", async () => {
+	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	const result = exports.buildOnlineSearchQuery("８Ｋ, cinematic portrait, 无水印, cinematic", 6);
+	assert.equal(result.query, "cinematic portrait editorial portrait");
+	assert.equal(result.dropped, 2);
+	assert.equal(result.normalized, true);
+});
+
+test("online prompt search calls only the fixed backend route and filters transport noise", async () => {
+	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	let captured = null;
+	exports.__context.fetch = async (url, options) => {
+		captured = { url, payload: JSON.parse(options.body) };
+		return {
+			ok: true,
+			status: 200,
+			json: async () => ({
+				source: "searxng",
+				tag_items: [
+					{ tag: "cinematic portrait", confidence: 0.9, group: "风格", section: "电影", count: 3 },
+					{ tag: "DuckDuckGo search results", confidence: 0.8 },
+				],
+				samples: ["cinematic portrait, soft rim lighting"],
+			}),
+		};
+	};
+
+	const result = await exports.searchOnlinePromptTags(" cinematic portrait ", 12);
+
+	assert.equal(captured.url, "/qwen_te/tag_library/online_search");
+	assert.deepEqual(captured.payload, { query: "cinematic portrait", limit: 12 });
+	assert.deepEqual(Array.from(result.tags), ["cinematic portrait"]);
+	assert.equal(result.source, "searxng");
+});
+
+test("online prompt search defensively deduplicates tag and sample variants", async () => {
+	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	const items = exports.normalizeOnlineSearchTagItems([
+		{ tag: "Glitch Art", confidence: 0.51, count: 1, group: "" },
+		{ tag: "  glitch   art ", confidence: 0.86, count: 3, group: "风格", exists: true },
+		{ tag: "DuckDuckGo search results", confidence: 0.99 },
+	]);
+	const samples = exports.normalizeOnlineSearchSamples([
+		"Cinematic   portrait, rim light",
+		"cinematic portrait, rim light",
+		"Second sample",
+	]);
+
+	assert.equal(items.length, 1);
+	assert.equal(items[0].tag, "Glitch Art");
+	assert.equal(items[0].confidence, 0.86);
+	assert.equal(items[0].count, 3);
+	assert.equal(items[0].group, "风格");
+	assert.equal(items[0].exists, true);
+	assert.deepEqual(Array.from(samples), ["Cinematic portrait, rim light", "Second sample"]);
+});
+
+test("online prompt search renders sanitized diagnostics as readable status", async () => {
+	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	assert.equal(
+		exports.formatOnlineSearchWarning("civitai:timeout,lexica:http_500,policy:public_sources_disabled"),
+		"Civitai：超时；Lexica：HTTP 500；策略：已关闭公开来源回退",
+	);
+	assert.equal(exports.formatOnlineSearchWarning("extract:token=secret"), "标签提取：请求失败");
+});
+
+test("online prompt search import resolution is canonical and reports partial completion", async () => {
+	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	const library = {
+		slot_config: [{ name: "风格", slots: 1 }],
+		tag_library: { 风格: { default: ["Glitch Art", "电影感"] } },
+	};
+	const resolution = exports.resolveOnlineSearchLibraryTags(
+		[" glitch   art ", "电影感", "film grain", "FILM GRAIN"],
+		library,
+	);
+
+	assert.deepEqual(Array.from(resolution.resolvedTags), ["glitch   art", "电影感"]);
+	assert.deepEqual(Array.from(resolution.unresolvedTags), ["film grain"]);
+	const source = await fs.readFile(UI_PATH, "utf8");
+	assert.equal(source.includes("批量入库未完全完成：已确认"), true);
+	assert.equal(source.includes("const resolution = resolveOnlineSearchLibraryTags(tagsToImport, refreshedLibrary);"), true);
+});
+
+test("online prompt search batches every selected import tag without truncation", async () => {
+	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	const tags = Array.from({ length: 30 }, (_, index) => `tag-${index}`);
+	const batches = exports.chunkOnlineImportTags([...tags, "tag-0", ""], 12);
+
+	assert.deepEqual(Array.from(batches, (batch) => Array.from(batch).length), [12, 12, 6]);
+	assert.deepEqual(Array.from(batches, (batch) => Array.from(batch)).flat(), tags);
+});
+
+test("online prompt search actions use only explicitly selected candidates", async () => {
+	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	const candidates = [
+		{ tag: "high-a", confidence: 0.92 },
+		{ tag: "low-a", confidence: 0.41 },
+		{ tag: "high-b", confidence: 0.81 },
+	];
+
+	assert.deepEqual(Array.from(exports.resolveOnlineSearchSelectedTags(candidates, [])), []);
+	assert.deepEqual(
+		Array.from(exports.resolveOnlineSearchSelectedTags(candidates, ["low-a"], { onlyHighConfidence: true })),
+		[],
+	);
+	assert.deepEqual(
+		Array.from(exports.resolveOnlineSearchSelectedTags(candidates, ["low-a", "high-b"], { onlyHighConfidence: true })),
+		["high-b"],
+	);
+});
+
+test("online prompt search browser history supports navigation and drops forward entries", async () => {
+	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	let state = exports.pushOnlineSearchBrowserHistory([], -1, "alpha", 3);
+	state = exports.pushOnlineSearchBrowserHistory(state.items, state.index, "beta", 3);
+	state = exports.pushOnlineSearchBrowserHistory(state.items, state.index, "charlie", 3);
+	assert.deepEqual(Array.from(state.items), ["alpha", "beta", "charlie"]);
+
+	const back = exports.stepOnlineSearchBrowserHistory(state.items, state.index, -1);
+	assert.equal(back.query, "beta");
+	state = exports.pushOnlineSearchBrowserHistory(back.items, back.index, "delta", 3);
+	assert.deepEqual(Array.from(state.items), ["alpha", "beta", "delta"]);
+	assert.equal(state.index, 2);
+
+	state = exports.pushOnlineSearchBrowserHistory(state.items, state.index, "echo", 3);
+	assert.deepEqual(Array.from(state.items), ["beta", "delta", "echo"]);
+	const forwardAtEnd = exports.stepOnlineSearchBrowserHistory(state.items, state.index, 1);
+	assert.equal(forwardAtEnd.query, "echo");
+	assert.equal(forwardAtEnd.index, 2);
+});
+
+test("prompt browser resolves public websites and search text without accepting dangerous targets", async () => {
+	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	const options = { currentOrigin: "http://127.0.0.1:8188/" };
+	const explicit = exports.resolvePromptBrowserTarget("https://example.com/path?q=1#part", options);
+	assert.equal(explicit.ok, true);
+	assert.equal(explicit.kind, "url");
+	assert.equal(explicit.url, "https://example.com/path?q=1#part");
+
+	const domain = exports.resolvePromptBrowserTarget("example.com/docs", options);
+	assert.equal(domain.ok, true);
+	assert.equal(domain.url, "https://example.com/docs");
+
+	const search = exports.resolvePromptBrowserTarget("cinematic portrait lighting", options);
+	assert.equal(search.ok, true);
+	assert.equal(search.kind, "search");
+	assert.equal(search.url, "https://www.google.com/search?igu=1&q=cinematic%20portrait%20lighting");
+
+	for (const [target, reason] of [
+		["javascript:alert(1)", "blocked_scheme"],
+		["data:text/html,hello", "blocked_scheme"],
+		["https://user:secret@example.com", "credentials"],
+		["https://example.com:0", "invalid_port"],
+		["127.1", "private_host"],
+		["0x7f000001", "private_host"],
+		["https://10.0.0.1", "private_host"],
+		["https://169.254.169.254", "private_host"],
+		["https://[::1]", "private_host"],
+		["https://[::ffff:127.0.0.1]", "private_host"],
+		["http://127.0.0.1:8188/queue", "private_host"],
+	]) {
+		const result = exports.resolvePromptBrowserTarget(target, options);
+		assert.equal(result.ok, false, `${target} should be rejected`);
+		assert.equal(result.reason, reason, `${target} should report ${reason}`);
+	}
+
+	const sameOrigin = exports.resolvePromptBrowserTarget("https://comfy.example.com/view", { currentOrigin: "https://comfy.example.com/" });
+	assert.equal(sameOrigin.ok, false);
+	assert.equal(sameOrigin.reason, "same_origin");
+});
+
+test("prompt browser external open uses noopener and never opens rejected targets", async () => {
+	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	const calls = [];
+	const child = { opener: "parent" };
+	const opened = exports.openPromptBrowserExternal("example.com", {
+		currentOrigin: "http://127.0.0.1:8188/",
+		openWindow(url, target, features) {
+			calls.push({ url, target, features });
+			return child;
+		},
+	});
+	assert.equal(opened.opened, true);
+	assert.deepEqual(calls, [{ url: "https://example.com/", target: "_blank", features: "noopener,noreferrer" }]);
+	assert.equal(child.opener, null);
+
+	const rejected = exports.openPromptBrowserExternal("file:///etc/passwd", {
+		openWindow() { throw new Error("must not open"); },
+	});
+	assert.equal(rejected.opened, false);
+	assert.equal(rejected.reason, "blocked_scheme");
+});
+
+test("prompt browser external open falls back to a secure anchor in browser pages", async () => {
+	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	let clicked = 0;
+	let removed = 0;
+	let appended = null;
+	const link = {
+		style: {},
+		click() { clicked += 1; },
+		remove() { removed += 1; },
+	};
+	const result = exports.openPromptBrowserExternal("example.com", {
+		document: {
+			body: { appendChild(value) { appended = value; } },
+			createElement(tagName) {
+				assert.equal(tagName, "a");
+				return link;
+			},
+		},
+	});
+
+	assert.equal(result.opened, true);
+	assert.equal(appended, link);
+	assert.equal(link.href, "https://example.com/");
+	assert.equal(link.target, "_blank");
+	assert.equal(link.rel, "noopener noreferrer");
+	assert.equal(link.style.display, "none");
+	assert.equal(clicked, 1);
+	assert.equal(removed, 1);
+});
+
+test("online prompt search keeps tag tools inside a real dual-mode web browser", async () => {
+	const source = await fs.readFile(UI_PATH, "utf8");
+	const start = source.indexOf("function openOnlinePromptSearchDialog");
+	const end = source.indexOf("\nfunction openCharacterSheetDialog", start + 1);
+	const dialogSource = source.slice(start, end > start ? end : undefined);
+	const initialRender = dialogSource.slice(dialogSource.lastIndexOf("document.body.appendChild(overlay)"));
+	const externalOpenStart = dialogSource.indexOf("const openCurrentWebExternally =");
+	const externalOpenEnd = dialogSource.indexOf("\n\tconst setBrowserMode =", externalOpenStart);
+	const externalOpenSource = dialogSource.slice(externalOpenStart, externalOpenEnd);
+
+	for (const marker of [
+		"qwen-te-online-search__browser",
+		"qwen-te-online-search__browser-toolbar",
+		"qwen-te-online-search__addressbar",
+		"qwen-te-online-search__web-workspace",
+		"qwen-te-online-search__web-frame",
+		"qwen-te-online-search__filter-rail",
+		"qwen-te-online-search__result-route",
+		"qwen-te-online-search__selected-preview",
+		'let activeBrowserMode = "web";',
+		'createBrowserModeTab("web", "网页浏览器"',
+		'createBrowserModeTab("tags", "标签搜索"',
+		"const navigateWebHistory = (direction) =>",
+		'if (activeBrowserMode === "web") navigateWebHistory(-1);',
+		'if (activeBrowserMode === "web") navigateWebHistory(1);',
+		"reloadButton.onclick = () =>",
+	]) assert.equal(dialogSource.includes(marker), true, `${marker} should exist in the search browser`);
+	assert.equal(dialogSource.includes("doneButton"), false);
+	assert.equal(dialogSource.includes('footer.className = "qwen-te-modal__footer"'), false);
+	assert.equal(dialogSource.includes('statusEl.setAttribute("aria-live", "polite")'), true);
+	assert.equal(dialogSource.includes('dialog.setAttribute("aria-busy", tagMode && busyState ? "true" : "false")'), true);
+	assert.equal(dialogSource.includes('if (event.key !== "Escape") return;'), true);
+	assert.equal(dialogSource.includes('resultPanel.setAttribute("role", "region")'), true);
+	assert.equal(dialogSource.includes('samplePanel.setAttribute("role", "region")'), true);
+	assert.equal(dialogSource.includes('resultList.setAttribute("role", "group")'), true);
+	assert.equal(dialogSource.includes('webFrame.setAttribute("sandbox", "allow-forms allow-modals allow-scripts")'), true);
+	assert.equal(dialogSource.includes('webFrame.setAttribute("referrerpolicy", "no-referrer")'), true);
+	assert.equal(dialogSource.includes("allow-same-origin"), false);
+	assert.equal(dialogSource.includes("allow-top-navigation"), false);
+	assert.equal(dialogSource.includes("allow-downloads"), false);
+	assert.equal(dialogSource.includes('let queryHistory = [];'), true);
+	assert.equal(dialogSource.includes('let webHistory = [PROMPT_BROWSER_HOME_ENTRY];'), true);
+	assert.equal(dialogSource.includes('let tagAddressBadgeText = "提示词";'), true);
+	assert.equal(dialogSource.includes('if (activeBrowserMode === "tags") addressBadge.textContent = tagAddressBadgeText;'), true);
+	assert.equal(dialogSource.includes('const historyQuery = String(queryHistory[queryHistoryIndex] ?? "").trim();'), true);
+	assert.equal(dialogSource.includes('const compacted = options.queryIsEffective'), true);
+	assert.equal(dialogSource.includes('runSearch({ recordHistory: false, queryIsEffective: true })'), true);
+	assert.equal(dialogSource.includes('recordHistory: !reusingHistoryQuery, queryIsEffective: reusingHistoryQuery'), true);
+	assert.equal(dialogSource.includes('webFrame.src = "about:blank";'), true);
+	assert.equal(externalOpenSource.includes("pushOnlineSearchBrowserHistory"), false, "external tabs must not enter embedded browsing history");
+	assert.equal(externalOpenSource.includes("currentWebUrl = result.url"), false, "external tabs must not replace the embedded current page");
+	assert.equal(initialRender.includes('showWebHome({ recordHistory: false });'), true);
+	assert.equal(initialRender.includes('setBrowserMode("web");'), true);
+	assert.equal(initialRender.includes("navigateWebsite("), false, "opening the dialog must not automatically visit an external website");
+	assert.equal(source.includes("grid-template-columns:210px minmax(400px,1fr) 320px"), true);
+	assert.equal(source.includes("qwen-te-online-search__web-frame-shell"), true);
+	assert.equal(source.includes("@media (max-width:1120px)"), true);
+	assert.equal(source.includes("@media (max-width:920px)"), true);
+	assert.equal(source.includes("@media (max-width:640px)"), true);
+	assert.equal(source.includes("@media (max-width:640px) and (max-height:720px)"), true);
+});
+
+test("online prompt search close guard prevents a late library refresh from mutating the node", async () => {
+	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	const initialLibrary = { slot_config: [], tag_library: {} };
+	const refreshedLibrary = { slot_config: [{ name: "主体", slots: 1 }], tag_library: { 主体: { default: ["成年女性"] } } };
+	const node = { widgets: [], properties: {}, [exports.PANEL_KEY]: { library: initialLibrary } };
+	let resolveFetch;
+	let dialogOpen = true;
+	exports.__context.fetch = () => new Promise((resolve) => { resolveFetch = resolve; });
+
+	const refresh = exports.refreshLibraryOnNode(node, { commitGuard: () => dialogOpen });
+	dialogOpen = false;
+	resolveFetch({ ok: true, status: 200, json: async () => refreshedLibrary });
+	const result = await refresh;
+
+	assert.equal(node[exports.PANEL_KEY].library, initialLibrary);
+	assert.equal(result, initialLibrary);
+});
+
+test("online prompt search keeps modal mutations blocked during continuous runs", async () => {
+	const source = await fs.readFile(UI_PATH, "utf8");
+	assert.equal(source.includes("if (busyState || rejectDuringContinuousRun()) return;"), true);
+	assert.equal(source.includes("for (const batch of chunkOnlineImportTags(tagsToImport, 12))"), true);
+	assert.equal(source.includes("candidateItems = candidateItems.map((item) => ({"), true);
+	assert.equal(source.includes('document.querySelector?.(\'[data-qwen-modal="online-search"]\')'), true);
+});
+
+test("online prompt search locks interactive state and ignores IME commit enter", async () => {
+	const source = await fs.readFile(UI_PATH, "utf8");
+	assert.equal(source.includes("searchInput.disabled = tagMode && interactionBlocked;"), true);
+	assert.equal(source.includes("searchButton.disabled = tagMode ? interactionBlocked : !webTarget.ok;"), true);
+	assert.equal(source.includes("card.disabled = isInteractionBlocked();"), true);
+	assert.equal(source.includes('card.setAttribute("aria-pressed", selectedTags.has(tag) ? "true" : "false");'), true);
+	assert.equal(source.includes('if (event.isComposing || event.key !== "Enter") return;'), true);
+	assert.equal(source.includes("commitGuard: isDialogOperationCurrent"), true);
+	assert.equal(source.includes("if (!isDialogOperationCurrent() || !isNodeStateMutationCurrent(node, mutationRevision)) return;"), true);
 });
 
 test("stage panel omits decorative hero theme shortcuts and status card", async () => {

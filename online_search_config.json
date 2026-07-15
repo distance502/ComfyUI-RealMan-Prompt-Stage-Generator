@@ -27,5 +27,8 @@
     "魅惑凝视"
   ],
   "long_query_term_threshold": 16,
-  "generic_penalty_score": 6
+  "generic_penalty_score": 6,
+  "searxng_base_url": "",
+  "searxng_timeout_seconds": 8,
+  "public_source_fallback_enabled": true
 }
