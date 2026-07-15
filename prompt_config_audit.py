@@ -6,14 +6,43 @@
 from __future__ import annotations
 
 import importlib.util
+import ipaddress
 import json
+import re
 import sys
+import unicodedata
+import urllib.parse
 from collections import Counter
 from pathlib import Path
 from typing import Any
 
 
 ROOT = Path(__file__).resolve().parent
+
+
+def _配置主机有效(raw: Any) -> bool:
+    host = unicodedata.normalize("NFKC", str(raw or "")).strip().rstrip(".").casefold()
+    if not host or any(character.isspace() or unicodedata.category(character) in {"Cc", "Cf"} for character in host):
+        return False
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        pass
+    try:
+        ascii_host = host.encode("idna").decode("ascii").casefold()
+    except (UnicodeError, ValueError):
+        return False
+    if len(ascii_host) > 253:
+        return False
+    return all(
+        label
+        and len(label) <= 63
+        and not label.startswith("-")
+        and not label.endswith("-")
+        and re.fullmatch(r"[a-z0-9-]+", label) is not None
+        for label in ascii_host.split(".")
+    )
 
 预设允许值 = {
     "自动",
@@ -275,6 +304,41 @@ def _审核在线搜索配置() -> dict[str, list[str]]:
     penalty = payload.get("generic_penalty_score")
     if not isinstance(penalty, int) or penalty < 1 or penalty > 30:
         issues["generic_penalty_score"] = ["必须是 1-30 的整数"]
+
+    searxng_base_url = payload.get("searxng_base_url", "")
+    if not isinstance(searxng_base_url, str):
+        issues["searxng_base_url"] = ["必须是字符串"]
+    elif searxng_base_url.strip():
+        try:
+            parsed = urllib.parse.urlparse(searxng_base_url.strip())
+            _ = parsed.port
+        except (TypeError, ValueError):
+            parsed = None
+        if (
+            parsed is None
+            or parsed.scheme.casefold() != "https"
+            or not _配置主机有效(parsed.hostname)
+            or parsed.username
+            or parsed.password
+            or parsed.params
+            or parsed.query
+            or parsed.fragment
+        ):
+            issues["searxng_base_url"] = ["必须是无账号、查询参数和片段的 HTTPS 基础地址"]
+        elif parsed.port is not None and not 1 <= parsed.port <= 65535:
+            issues["searxng_base_url"] = ["端口必须是 1-65535"]
+        else:
+            decoded_path = unicodedata.normalize("NFKC", urllib.parse.unquote(parsed.path or ""))
+            if any(character.isspace() or unicodedata.category(character) in {"Cc", "Cf"} for character in decoded_path):
+                issues["searxng_base_url"] = ["路径不能包含空白或控制字符"]
+
+    searxng_timeout = payload.get("searxng_timeout_seconds", 8)
+    if not isinstance(searxng_timeout, int) or searxng_timeout < 3 or searxng_timeout > 20:
+        issues["searxng_timeout_seconds"] = ["必须是 3-20 的整数"]
+
+    public_fallback = payload.get("public_source_fallback_enabled", True)
+    if not isinstance(public_fallback, bool):
+        issues["public_source_fallback_enabled"] = ["必须是 true 或 false"]
 
     return issues
 

@@ -1487,9 +1487,10 @@ function injectStyles() {
 	.qwen-te-panel__display-top{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
 	.qwen-te-panel__display-title{font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:#8da7c7;font-family:Consolas,"Cascadia Code","SFMono-Regular",monospace}
 	.qwen-te-panel__display-meta{display:flex;align-items:center;gap:6px;min-width:0;margin-left:auto}
-	.qwen-te-panel__display-source{border:1px solid rgba(94,116,145,.74);border-radius:10px;padding:3px 7px;background:linear-gradient(180deg,rgba(39,53,69,.96),rgba(25,35,46,.98));font-size:10px;line-height:1.2;color:#d9e5f8;white-space:nowrap}
+	.qwen-te-panel__display-source{min-width:0;max-width:160px;overflow:hidden;text-overflow:ellipsis;border:1px solid rgba(94,116,145,.74);border-radius:10px;padding:3px 7px;background:linear-gradient(180deg,rgba(39,53,69,.96),rgba(25,35,46,.98));font-size:10px;line-height:1.2;color:#d9e5f8;white-space:nowrap}
 	.qwen-te-panel__display-expand{border:1px solid rgba(94,116,145,.72);border-radius:10px;padding:3px 8px;background:linear-gradient(180deg,rgba(44,58,74,.96),rgba(29,38,49,.98));font-size:10px;line-height:1.2;color:#e5eefc;cursor:pointer;white-space:nowrap}
 	.qwen-te-panel__display-expand:hover{border-color:#cfaa69;background:linear-gradient(180deg,#5c4520,#3f3117);color:#fff0ca}
+	.qwen-te-panel__display-search{border-color:rgba(176,137,70,.82);color:#fff0ca}
 	.qwen-te-panel__display-tabs{display:flex;flex-wrap:wrap;gap:5px}
 	.qwen-te-panel__display-tab{border:1px solid rgba(87,107,133,.72);background:linear-gradient(180deg,rgba(42,55,71,.96),rgba(27,37,49,.98));color:#dfe8f7;border-radius:10px;padding:4px 8px;font-size:10px;line-height:1.1;cursor:pointer}
 	.qwen-te-panel__display-tab:hover{background:linear-gradient(180deg,rgba(52,68,87,.98),rgba(34,45,58,.98));border-color:#7592b5}
@@ -1776,44 +1777,101 @@ function injectStyles() {
 	.qwen-te-modal__footer-button--primary{background:#8a6730;border-color:#b48a43;color:#fff4df}
 	.qwen-te-modal__footer-button--danger{background:linear-gradient(180deg,#4d2e36,#3a2228);border-color:#9f606d;color:#ffdce3}
 	.qwen-te-modal__footer-button--danger:hover{background:linear-gradient(180deg,#613743,#482932);border-color:#bd7280}
-	.qwen-te-modal[data-qwen-modal="online-search"] .qwen-te-modal__dialog{width:min(1240px,96vw);max-height:92vh}
-	.qwen-te-modal[data-qwen-modal="online-search"] .qwen-te-modal__body{gap:10px;overflow:auto}
-	.qwen-te-online-search__stack{display:flex;flex-direction:column;gap:10px;min-height:0;padding-bottom:2px}
-	.qwen-te-online-search__topbar{display:flex;flex-direction:column;gap:10px;flex:0 0 auto}
-	.qwen-te-online-search__filters{display:flex;flex-direction:column;gap:8px;flex:0 0 auto}
-	.qwen-te-online-search__grid{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(300px,.9fr);gap:12px;align-items:start}
-	.qwen-te-online-search__grid--workspace{flex:1 1 auto;min-height:360px;align-items:stretch}
-	.qwen-te-online-search__panel{border:1px solid #3b4655;border-radius:14px;padding:12px;background:linear-gradient(180deg,#191f28,#141a22);display:flex;flex-direction:column;gap:10px;min-height:0;overflow:hidden}
-	.qwen-te-online-search__panel--results{min-height:0}
-	.qwen-te-online-search__panel--samples{min-height:0}
-	.qwen-te-online-search__panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
-	.qwen-te-online-search__panel-title{font-size:12px;line-height:1.25;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#eef4ff}
-	.qwen-te-online-search__panel-sub{font-size:11px;line-height:1.45;color:#9fb1c8;white-space:pre-wrap}
-	.qwen-te-online-search__cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;flex:1 1 auto;min-height:0;overflow:auto;padding-right:2px;align-content:start}
-	.qwen-te-online-search__card{border:1px solid #465468;border-radius:14px;padding:10px 12px;background:linear-gradient(180deg,#232d3a,#1a222c);display:flex;flex-direction:column;gap:8px;text-align:left;cursor:pointer;transition:border-color .14s ease,background .14s ease,box-shadow .14s ease,transform .08s ease;min-height:118px}
-	.qwen-te-online-search__card:hover{border-color:#6c7f9c;background:linear-gradient(180deg,#283444,#1e2834);box-shadow:0 10px 18px rgba(0,0,0,.16)}
-	.qwen-te-online-search__card:active{transform:translateY(1px)}
-	.qwen-te-online-search__card.is-selected{border-color:#d7b36a;background:linear-gradient(180deg,#5a4520,#3f3118);box-shadow:0 0 0 1px rgba(255,223,155,.14),0 10px 18px rgba(0,0,0,.18)}
-	.qwen-te-online-search__card.is-existing{opacity:.9}
-	.qwen-te-online-search__card.is-high{box-shadow:0 0 0 1px rgba(110,168,255,.16),0 10px 18px rgba(0,0,0,.12)}
-	.qwen-te-online-search__card.is-high.is-selected{box-shadow:0 0 0 1px rgba(255,223,155,.16),0 0 0 2px rgba(110,168,255,.12),0 10px 18px rgba(0,0,0,.18)}
-	.qwen-te-online-search__card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
-	.qwen-te-online-search__card-name{font-size:14px;font-weight:700;line-height:1.35;color:#f3f6fb;word-break:break-word}
-	.qwen-te-online-search__card-summary{font-size:11px;line-height:1.45;color:#afc0d6;white-space:pre-wrap}
+	.qwen-te-modal[data-qwen-modal="online-search"]{padding:10px;background:rgba(0,0,0,.72)}
+	.qwen-te-modal[data-qwen-modal="online-search"] .qwen-te-modal__dialog{width:min(1320px,97vw);height:min(860px,94vh);max-height:94vh;border-radius:8px;overflow:hidden;background:#11151a;border-color:#3b424c;display:flex;flex-direction:column}
+	.qwen-te-modal[data-qwen-modal="online-search"] .qwen-te-online-search__tabstrip{min-height:44px;padding:7px 8px 0;background:#20242a;border-bottom:1px solid #30363f;align-items:flex-end;gap:8px}
+	.qwen-te-online-search__tabs{display:flex;flex:1 1 auto;align-items:flex-end;gap:5px;min-width:0}
+	.qwen-te-online-search__tab{appearance:none;display:flex;flex-direction:column;justify-content:center;min-width:180px;max-width:300px;height:37px;padding:5px 12px;border:1px solid #383f48;border-bottom:none;border-radius:7px 7px 0 0;background:#181d23;color:#aeb7c2;position:relative;min-height:0;text-align:left;cursor:pointer}
+	.qwen-te-online-search__tab:hover{background:#20262d;color:#eef3f8}
+	.qwen-te-online-search__tab.is-active{background:#11151a;border-color:#46515d;color:#f3f6fa;box-shadow:inset 0 2px 0 #b28843}
+	.qwen-te-online-search__tab:focus-visible{outline:2px solid #83a9d3;outline-offset:-2px}
+	.qwen-te-online-search__tab .qwen-te-modal__title{font-size:13px;line-height:1.15;letter-spacing:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+	.qwen-te-online-search__tab .qwen-te-modal__subtitle{font-size:9px;line-height:1.15;letter-spacing:0;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+	.qwen-te-online-search__window-button{width:34px;height:34px;flex:0 0 34px;margin:0 0 3px auto;border:1px solid transparent;border-radius:6px;background:transparent;color:#d8dde5;font-size:22px;line-height:1;cursor:pointer}
+	.qwen-te-online-search__window-button:hover{background:#493038;border-color:#73515b;color:#ffe4e8}
+	.qwen-te-modal[data-qwen-modal="online-search"] .qwen-te-online-search__body{flex:1 1 auto;min-height:0;padding:0;overflow:hidden}
+	.qwen-te-online-search__stack{display:flex;flex-direction:column;min-height:0;height:100%;padding:0;background:#11151a}
+	.qwen-te-online-search__topbar{display:flex;flex-direction:column;gap:7px;flex:0 0 auto;padding:9px 12px 8px;background:#171b20;border-bottom:1px solid #30363f}
+	.qwen-te-online-search__browser-toolbar{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;align-items:center;gap:8px;padding:0}
+	.qwen-te-online-search__nav{display:flex;align-items:center;gap:3px}
+	.qwen-te-online-search__nav-button{width:34px;height:34px;display:inline-flex;align-items:center;justify-content:center;border:1px solid transparent;border-radius:50%;background:transparent;color:#d3d8df;font-size:18px;line-height:1;cursor:pointer}
+	.qwen-te-online-search__nav-button:hover:not(:disabled){background:#2a3037;border-color:#3d4651}
+	.qwen-te-online-search__nav-button:disabled{opacity:.34;cursor:not-allowed}
+	.qwen-te-online-search__addressbar{min-width:0;height:38px;display:flex;align-items:center;gap:8px;border:1px solid #414954;border-radius:20px;padding:0 11px;background:#0b0f13;box-shadow:inset 0 1px 0 rgba(255,255,255,.03)}
+	.qwen-te-online-search__addressbar:focus-within{border-color:#7e9bc0;box-shadow:0 0 0 2px rgba(101,143,197,.16)}
+	.qwen-te-online-search__address-badge{flex:0 0 auto;max-width:92px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#9db4d2;font-size:10px;line-height:1}
+	.qwen-te-modal[data-qwen-modal="online-search"] .qwen-te-online-search__address-input{min-width:0;flex:1 1 auto;padding:0;border:0;border-radius:0;background:transparent;color:#f2f5f9;font-size:13px;outline:none;box-shadow:none}
+	.qwen-te-online-search__go-button{height:36px;min-width:74px;border:1px solid #a87d36;border-radius:7px;padding:0 14px;background:#76551f;color:#fff1ce;font-size:12px;font-weight:700;cursor:pointer}
+	.qwen-te-online-search__go-button:hover:not(:disabled){background:#8b6627;border-color:#c3984d}
+	.qwen-te-online-search__go-button:disabled{opacity:.48;cursor:not-allowed}
+	.qwen-te-online-search__external-button{border-radius:6px;border-color:#3b4652;background:#20262d;font-size:16px}
+	.qwen-te-online-search__bookmarks{display:flex;flex-wrap:nowrap;gap:5px;min-width:0;overflow-x:auto;padding:0 0 1px 111px;scrollbar-width:none}
+	.qwen-te-online-search__bookmarks::-webkit-scrollbar{display:none}
+	.qwen-te-modal[data-qwen-modal="online-search"] .qwen-te-online-search__bookmarks .qwen-te-modal__preset{flex:0 0 auto;border:0;border-radius:5px;padding:4px 8px;background:transparent;color:#b9c1cb;font-size:10.5px}
+	.qwen-te-modal[data-qwen-modal="online-search"] .qwen-te-online-search__bookmarks .qwen-te-modal__preset:hover{background:#292f36;color:#f1f4f8}
+	.qwen-te-online-search__status{min-height:16px;max-height:34px;padding-left:111px;color:#c9b47d;line-height:1.45;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2}
+	.qwen-te-online-search__grid{display:grid;grid-template-columns:210px minmax(400px,1fr) 320px;grid-template-rows:minmax(0,1fr);gap:0;align-items:stretch;flex:1 1 auto;min-height:0;overflow:hidden}
+	.qwen-te-online-search__filter-rail{display:flex;flex-direction:column;gap:7px;min-width:0;min-height:0;padding:12px 10px;background:#14191f;border-right:1px solid #30363f;overflow:auto}
+	.qwen-te-online-search__summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px;margin:0 0 6px}
+	.qwen-te-modal[data-qwen-modal="online-search"] .qwen-te-online-search__summary .qwen-te-modal__content-pill{min-width:0;border:1px solid #343e49;border-radius:5px;padding:5px 6px;background:#1b222a;color:#cbd4df;font-size:10px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+	.qwen-te-online-search__filter-label,.qwen-te-online-search__section-label{margin-top:5px;font-size:10px;font-weight:700;line-height:1.2;letter-spacing:0;color:#8795a7}
+	.qwen-te-online-search__filter-list{display:flex;flex-direction:column;gap:4px;padding:0}
+	.qwen-te-modal[data-qwen-modal="online-search"] .qwen-te-online-search__filter-list .qwen-te-modal__preset{width:100%;display:flex;align-items:center;justify-content:flex-start;border:1px solid transparent;border-radius:5px;padding:7px 8px;background:transparent;color:#c3ccd7;font-size:11px;text-align:left}
+	.qwen-te-modal[data-qwen-modal="online-search"] .qwen-te-online-search__filter-list .qwen-te-modal__preset:hover:not(:disabled){background:#1e252d;border-color:#34404c}
+	.qwen-te-modal[data-qwen-modal="online-search"] .qwen-te-online-search__filter-list .qwen-te-modal__preset.is-active{background:#2b2416;border-color:#9a783b;color:#ffe8b4}
+	.qwen-te-online-search__panel{display:flex;flex-direction:column;gap:0;min-width:0;min-height:0;padding:0;border:0;border-radius:0;background:#11151a;overflow:hidden}
+	.qwen-te-online-search__panel--results{border-right:1px solid #30363f}
+	.qwen-te-online-search__panel--samples{padding:12px;background:#151a20;overflow:hidden}
+	.qwen-te-online-search__panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex:0 0 auto;padding:13px 15px 10px;border-bottom:1px solid #2c333b}
+	.qwen-te-online-search__panel--samples .qwen-te-online-search__panel-head{padding:0 0 10px}
+	.qwen-te-online-search__panel-title{font-size:13px;line-height:1.25;font-weight:700;letter-spacing:0;color:#edf2f8}
+	.qwen-te-online-search__panel-sub{font-size:10.5px;line-height:1.4;color:#8f9dad;white-space:pre-wrap;margin-top:3px}
+	.qwen-te-online-search__panel-head .qwen-te-modal__content-tools{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:5px;margin:0}
+	.qwen-te-online-search__panel-head .qwen-te-modal__mini-button{border-radius:5px;padding:5px 8px;background:#1b222a;font-size:10px}
+	.qwen-te-online-search__cards{display:flex;flex-direction:column;gap:0;flex:1 1 auto;min-height:0;overflow:auto;align-content:stretch}
+	.qwen-te-online-search__card{position:relative;width:100%;min-height:104px;display:flex;flex-direction:column;gap:5px;padding:12px 16px 12px 18px;border:0;border-bottom:1px solid #2b323a;border-radius:0;background:transparent;color:#dbe2eb;text-align:left;cursor:pointer;transition:background .12s ease,border-color .12s ease}
+	.qwen-te-online-search__card:hover:not(:disabled){background:#171d23}
+	.qwen-te-online-search__card:focus-visible{outline:2px solid #80a8d8;outline-offset:-3px}
+	.qwen-te-online-search__card.is-selected{background:#211d14;box-shadow:inset 3px 0 0 #c59a4b}
+	.qwen-te-online-search__card.is-existing{opacity:.78}
+	.qwen-te-online-search__card.is-high:not(.is-selected){box-shadow:inset 3px 0 0 #557ba8}
+	.qwen-te-online-search__card:disabled{cursor:not-allowed;opacity:.48}
+	.qwen-te-online-search__result-route{font-size:10px;line-height:1.2;color:#78a889;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+	.qwen-te-online-search__card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+	.qwen-te-online-search__card-name{min-width:0;font-size:16px;font-weight:600;line-height:1.3;letter-spacing:0;color:#8ab4f8;word-break:break-word}
+	.qwen-te-online-search__result-badges{flex:0 0 auto;margin:0}
+	.qwen-te-online-search__result-badges .qwen-te-modal__content-pill{border-radius:4px;padding:3px 6px;font-size:9.5px}
+	.qwen-te-online-search__card-summary{font-size:11px;line-height:1.45;color:#aab5c2;white-space:normal}
 	.qwen-te-online-search__card-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:auto}
-	.qwen-te-online-search__card-empty{border:1px dashed #455467;border-radius:14px;padding:18px;color:#9eb0c6;font-size:12px;line-height:1.5;background:linear-gradient(180deg,rgba(35,45,58,.55),rgba(26,34,44,.72));grid-column:1/-1}
+	.qwen-te-online-search__card-empty{margin:18px;border:1px dashed #3e4853;border-radius:6px;padding:24px;color:#91a0b1;font-size:12px;line-height:1.5;background:#14191f}
+	.qwen-te-online-search__selection-status{flex:0 0 auto;border:1px solid #38434f;border-radius:6px;padding:7px 8px;background:#11161c;color:#dbe4ef;font-size:11px}
+	.qwen-te-online-search__selected-preview{display:flex;flex-wrap:wrap;gap:5px;flex:0 0 auto;max-height:108px;overflow:auto;padding:7px 0}
+	.qwen-te-online-search__selected-chip{max-width:100%;border:1px solid #52677f;border-radius:5px;padding:4px 7px;background:#202b37;color:#d8e8fb;font-size:10px;line-height:1.25;white-space:normal;word-break:break-word;cursor:pointer}
+	.qwen-te-online-search__selected-chip:hover:not(:disabled){border-color:#b08743;background:#342a19;color:#ffe9b8}
+	.qwen-te-online-search__selected-empty,.qwen-te-online-search__selected-more{font-size:10px;line-height:1.4;color:#8897a8}
+	.qwen-te-online-search__actions{display:grid;grid-template-columns:minmax(0,1fr);gap:6px;padding:0 0 8px;border-bottom:1px solid #303740}
+	.qwen-te-modal[data-qwen-modal="online-search"] .qwen-te-online-search__actions .qwen-te-modal__footer-button{min-height:34px;border-radius:5px;padding:6px 8px;background:#222a33;font-size:11px;white-space:normal}
+	.qwen-te-modal[data-qwen-modal="online-search"] .qwen-te-online-search__actions .qwen-te-modal__footer-button:first-child{border-color:#9d7938;background:#5f461d;color:#ffedc4}
 	.qwen-te-online-search__sample-box{flex:1 1 auto;min-height:0;height:100%;resize:none;overflow:auto}
-	.qwen-te-online-search__sample-list{display:flex;flex-direction:column;gap:8px;flex:1 1 auto;min-height:0;overflow:auto;padding-right:2px}
-	.qwen-te-online-search__sample-item{border:1px solid rgba(91,111,138,.42);border-radius:12px;padding:10px 12px;background:linear-gradient(180deg,#1a212b,#151c24);font-size:12px;line-height:1.55;color:#dde8f7;white-space:pre-wrap;word-break:break-word}
-	.qwen-te-online-search__sample-item-index{display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:22px;margin-right:8px;border-radius:999px;border:1px solid #5c7394;background:linear-gradient(180deg,#2f3c4d,#24303e);font-size:11px;line-height:1;color:#dbe9ff;vertical-align:top}
-	.qwen-te-online-search__hint{font-size:11px;line-height:1.45;color:#96a9c2}
-	.qwen-te-modal[data-qwen-modal="online-search"] .qwen-te-modal__pillbar{gap:6px;padding-bottom:2px}
-	.qwen-te-modal[data-qwen-modal="online-search"] .qwen-te-modal__preset{padding:5px 10px;font-size:11px}
-	.qwen-te-modal[data-qwen-modal="online-search"] .qwen-te-modal__content-pill{padding:3px 8px;font-size:10.5px}
-	.qwen-te-modal[data-qwen-modal="online-search"] .qwen-te-modal__status{font-size:11px;line-height:1.4}
-	.qwen-te-modal[data-qwen-modal="online-search"] .qwen-te-modal__status--inline{padding:7px 9px}
-	.qwen-te-modal[data-qwen-modal="online-search"] .qwen-te-modal__search{padding:9px 12px}
-	.qwen-te-modal[data-qwen-modal="online-search"] .qwen-te-modal__footer-button{padding:8px 14px}
+	.qwen-te-online-search__sample-list{display:flex;flex-direction:column;gap:0;flex:1 1 auto;min-height:0;overflow:auto;padding:0}
+	.qwen-te-online-search__sample-item{border:0;border-bottom:1px solid #2d343d;border-radius:0;padding:9px 2px;background:transparent;font-size:10.5px;line-height:1.5;color:#cbd5e1;white-space:pre-wrap;word-break:break-word}
+	.qwen-te-online-search__sample-item-index{display:inline-flex;align-items:center;justify-content:center;min-width:19px;height:19px;margin-right:6px;border-radius:4px;border:1px solid #52677e;background:#202936;font-size:9px;line-height:1;color:#dbe9fa;vertical-align:top}
+	.qwen-te-online-search__hint{flex:0 0 auto;padding-top:7px;font-size:9.5px;line-height:1.4;color:#79899a}
+	.qwen-te-modal[data-qwen-modal="online-search"] .qwen-te-modal__status{font-size:10.5px;line-height:1.4}
+	.qwen-te-online-search__web-workspace{display:flex;flex:1 1 auto;min-width:0;min-height:0;position:relative;background:#0f1318;overflow:hidden}
+	.qwen-te-online-search__web-home{display:flex;flex:1 1 auto;min-width:0;min-height:0;flex-direction:column;align-items:center;padding:clamp(24px,8vh,70px) 18px 24px;overflow:auto;background:#11151a}
+	.qwen-te-online-search__web-home-title{width:min(720px,100%);margin-bottom:13px;color:#dce3eb;font-size:13px;font-weight:700}
+	.qwen-te-online-search__web-home-grid{width:min(720px,100%);display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}
+	.qwen-te-online-search__site-button{appearance:none;display:flex;min-width:0;min-height:72px;flex-direction:column;align-items:center;justify-content:center;gap:7px;border:1px solid #323b45;border-radius:6px;padding:9px 7px;background:#171d23;color:#cdd5df;cursor:pointer}
+	.qwen-te-online-search__site-button:hover{border-color:#647891;background:#202730;color:#f2f5f9}
+	.qwen-te-online-search__site-button:focus-visible{outline:2px solid #83a9d3;outline-offset:2px}
+	.qwen-te-online-search__site-icon{display:inline-flex;width:28px;height:28px;align-items:center;justify-content:center;border:1px solid #526478;border-radius:50%;background:#24303d;color:#dceafa;font-size:12px;font-weight:700}
+	.qwen-te-online-search__site-label{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10.5px}
+	.qwen-te-online-search__web-frame-shell{position:relative;display:flex;flex:1 1 auto;min-width:0;min-height:0;background:#fff;overflow:hidden}
+	.qwen-te-online-search__web-frame{width:100%;height:100%;flex:1 1 auto;min-width:0;min-height:0;border:0;background:#fff}
+	.qwen-te-online-search__frame-external{position:absolute;top:9px;right:10px;z-index:2;min-height:31px;border:1px solid #6f7f91;border-radius:6px;padding:5px 10px;background:rgba(19,25,32,.92);color:#eef4fb;font-size:10.5px;font-weight:700;box-shadow:0 3px 12px rgba(0,0,0,.28);cursor:pointer}
+	.qwen-te-online-search__frame-external:hover:not(:disabled){background:#283543;border-color:#95abc2}
+	.qwen-te-online-search__frame-external:disabled{opacity:.45;cursor:not-allowed}
 	.qwen-te-modal[data-qwen-modal="preset-manager"] .qwen-te-modal__dialog{width:min(980px,95vw);max-height:90vh}
 	.qwen-te-modal[data-qwen-modal="preset-manager"] .qwen-te-modal__header{padding:12px 16px 10px}
 	.qwen-te-modal[data-qwen-modal="preset-manager"] .qwen-te-modal__body{padding:10px 16px 14px;gap:10px}
@@ -1907,14 +1965,25 @@ function injectStyles() {
 	.qwen-te-modal[data-qwen-modal="preset-manager"] .qwen-te-modal__preset-report-list .qwen-te-preset-card{padding:8px}
 	.qwen-te-modal[data-qwen-modal="preset-manager"] .qwen-te-modal__preset-report-list .qwen-te-preset-card__name{font-size:12px}
 	.qwen-te-modal[data-qwen-modal="preset-manager"] .qwen-te-modal__preset-report-list .qwen-te-preset-card__summary{font-size:10.5px;line-height:1.35}
+	@media (max-width:1120px){
+		.qwen-te-online-search__grid{grid-template-columns:190px minmax(0,1fr);grid-template-rows:minmax(300px,1fr) minmax(190px,220px)}
+		.qwen-te-online-search__filter-rail{grid-column:1;grid-row:1/3}
+		.qwen-te-online-search__panel--results{grid-column:2;grid-row:1;border-right:0}
+		.qwen-te-online-search__panel--samples{grid-column:2;grid-row:2;border-top:1px solid #30363f;overflow:auto}
+		.qwen-te-online-search__panel--samples .qwen-te-online-search__sample-list{flex:0 0 auto;min-height:82px;overflow:visible}
+	}
 	@media (max-width:920px){
-		.qwen-te-online-search__stack{gap:8px}
-		.qwen-te-online-search__grid{grid-template-columns:minmax(0,1fr)}
-		.qwen-te-online-search__grid--workspace{align-items:start}
-		.qwen-te-online-search__panel--samples{min-height:220px}
+		.qwen-te-modal[data-qwen-modal="online-search"] .qwen-te-modal__dialog{width:min(900px,98vw);height:min(900px,96vh);max-height:96vh}
+		.qwen-te-online-search__bookmarks,.qwen-te-online-search__status{padding-left:0}
+		.qwen-te-online-search__grid{grid-template-columns:minmax(0,1fr);grid-template-rows:140px minmax(260px,1fr) 210px}
+		.qwen-te-online-search__filter-rail{grid-column:1;grid-row:1;padding:8px 10px;border-right:0;border-bottom:1px solid #30363f}
+		.qwen-te-online-search__summary{grid-template-columns:repeat(4,minmax(0,1fr));margin-bottom:2px}
+		.qwen-te-online-search__filter-list{flex-direction:row;flex-wrap:wrap}
+		.qwen-te-modal[data-qwen-modal="online-search"] .qwen-te-online-search__filter-list .qwen-te-modal__preset{width:auto;padding:5px 8px}
+		.qwen-te-online-search__panel--results{grid-column:1;grid-row:2;border-right:0}
+		.qwen-te-online-search__panel--samples{grid-column:1;grid-row:3;min-height:0;border-top:1px solid #30363f}
 		.qwen-te-modal__batch-dashboard{grid-template-columns:1fr}
 		.qwen-te-modal__batch-dashboard-main,.qwen-te-modal__batch-dashboard-side{gap:10px}
-		.qwen-te-modal__toolbar--online-actions{grid-template-columns:repeat(2,minmax(0,1fr))}
 		.qwen-te-modal__toolbar-row--preset-meta{grid-template-columns:minmax(0,1fr) auto}
 		.qwen-te-modal__status--inline{grid-column:1/-1}
 		.qwen-te-modal__toolbar-row--preset-run{grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -1922,16 +1991,45 @@ function injectStyles() {
 		.qwen-te-modal__toolbar-row--preset-export{grid-template-columns:repeat(3,minmax(0,1fr))}
 	}
 	@media (max-width:640px){
-		.qwen-te-online-search__cards{grid-template-columns:minmax(0,1fr)}
+		.qwen-te-modal[data-qwen-modal="online-search"]{padding:4px}
+		.qwen-te-modal[data-qwen-modal="online-search"] .qwen-te-modal__dialog{width:100vw;height:98vh;max-height:98vh}
+		.qwen-te-modal[data-qwen-modal="online-search"] .qwen-te-online-search__tabstrip{min-height:40px;padding:5px 6px 0}
+		.qwen-te-online-search__tab{min-width:0;max-width:none;flex:1 1 auto;height:35px;padding-left:9px}
+		.qwen-te-online-search__topbar{gap:5px;padding:7px 8px}
+		.qwen-te-online-search__browser-toolbar{grid-template-columns:minmax(0,1fr) auto auto;gap:6px}
+		.qwen-te-online-search__nav{grid-column:1/-1}
+		.qwen-te-online-search__addressbar{height:36px;padding:0 9px}
+		.qwen-te-online-search__address-badge{max-width:58px}
+		.qwen-te-online-search__go-button{height:34px;min-width:66px;padding:0 10px}
+		.qwen-te-online-search__external-button{width:34px;height:34px}
+		.qwen-te-online-search__web-home{padding:24px 12px}
+		.qwen-te-online-search__web-home-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+		.qwen-te-online-search__site-button{min-height:64px}
+		.qwen-te-online-search__grid{grid-template-rows:126px minmax(220px,1fr) 190px}
+		.qwen-te-online-search__summary{grid-template-columns:repeat(2,minmax(0,1fr))}
+		.qwen-te-online-search__panel-head{flex-direction:column;padding:10px 11px 8px}
+		.qwen-te-online-search__panel-head .qwen-te-modal__content-tools{justify-content:flex-start}
+		.qwen-te-online-search__card{min-height:0;padding:10px 12px 10px 14px}
+		.qwen-te-online-search__card-name{font-size:14px}
+		.qwen-te-online-search__panel--samples{padding:9px}
+		.qwen-te-online-search__panel--samples .qwen-te-online-search__panel-head{padding-bottom:6px}
+		.qwen-te-online-search__selected-preview{max-height:54px;padding:5px 0}
+		.qwen-te-online-search__actions{grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;padding-bottom:6px}
+		.qwen-te-modal[data-qwen-modal="online-search"] .qwen-te-online-search__actions .qwen-te-modal__footer-button{min-width:0;min-height:32px;padding:5px 4px;font-size:10px}
 		.qwen-te-modal__toolbar-row--preset-run{grid-template-columns:minmax(0,1fr)}
 		.qwen-te-modal__toolbar-row--preset-continuous{grid-template-columns:minmax(0,1fr)}
 		.qwen-te-modal__toolbar-row--preset-export{grid-template-columns:minmax(0,1fr)}
-		.qwen-te-modal__toolbar--online-search{grid-template-columns:minmax(0,1fr)}
-		.qwen-te-modal__toolbar--online-actions{grid-template-columns:minmax(0,1fr)}
 		.qwen-te-modal__toolbar--preset-save{grid-template-columns:minmax(0,1fr)}
 		.qwen-te-modal__toolbar-row--preset-meta{grid-template-columns:minmax(0,1fr)}
 		.qwen-te-modal__input-inline{justify-content:space-between}
 		.qwen-te-modal__toolbar--preset-filter{grid-template-columns:minmax(0,1fr)}
+	}
+	@media (max-width:640px) and (max-height:720px){
+		.qwen-te-modal[data-qwen-modal="online-search"] .qwen-te-online-search__body{overflow:auto}
+		.qwen-te-online-search__stack{height:auto;min-height:670px}
+		.qwen-te-online-search__topbar{position:sticky;top:0;z-index:3}
+		.qwen-te-online-search__grid{flex:1 0 536px;min-height:536px}
+		.qwen-te-online-search__web-workspace{flex:1 0 536px;min-height:536px}
 	}
 	.qwen-te-preset-list{display:flex;flex-direction:column;gap:10px}
 		.qwen-te-preset-card{border:1px solid #343434;background:#1d1d1d;border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:8px}
@@ -2112,6 +2210,290 @@ function isOnlineNoiseTag(tagText) {
 	return false;
 }
 
+function getOnlineSearchCanonicalKey(value) {
+	let text = String(value ?? "").trim();
+	try { text = text.normalize("NFKC"); } catch (_error) {}
+	return text.replace(/\s+/gu, " ").toLowerCase();
+}
+
+function normalizeOnlineSearchTagItems(rawItems, maxItems = 60) {
+	const limit = Math.max(1, Math.min(60, Math.trunc(Number(maxItems) || 60)));
+	const items = [];
+	const byKey = new Map();
+	for (const rawItem of rawItems ?? []) {
+		const tag = String(rawItem?.tag ?? "").trim().replace(/\s+/gu, " ");
+		const key = getOnlineSearchCanonicalKey(tag);
+		if (!key || isOnlineNoiseTag(tag)) continue;
+		const normalized = {
+			tag,
+			count: Math.max(1, Number(rawItem?.count ?? 1) || 1),
+			confidence: Math.max(0, Math.min(1, Number(rawItem?.confidence ?? 0.5) || 0.5)),
+			group: String(rawItem?.group ?? "").trim(),
+			section: String(rawItem?.section ?? "").trim(),
+			exists: !!rawItem?.exists,
+			source: String(rawItem?.source ?? "").trim(),
+		};
+		const existing = byKey.get(key);
+		if (!existing) {
+			byKey.set(key, normalized);
+			items.push(normalized);
+			continue;
+		}
+		existing.count = Math.max(existing.count, normalized.count);
+		existing.confidence = Math.max(existing.confidence, normalized.confidence);
+		existing.exists = existing.exists || normalized.exists;
+		if (!existing.group && normalized.group) existing.group = normalized.group;
+		if (!existing.section && normalized.section) existing.section = normalized.section;
+		if (!existing.source && normalized.source) existing.source = normalized.source;
+	}
+	return items.slice(0, limit);
+}
+
+function normalizeOnlineSearchSamples(rawSamples, maxItems = 6) {
+	const limit = Math.max(1, Math.min(12, Math.trunc(Number(maxItems) || 6)));
+	const samples = [];
+	const seen = new Set();
+	for (const rawSample of rawSamples ?? []) {
+		const text = String(rawSample ?? "").trim().replace(/\s+/gu, " ").slice(0, 1200);
+		const key = getOnlineSearchCanonicalKey(text);
+		if (!key || seen.has(key)) continue;
+		seen.add(key);
+		samples.push(text);
+		if (samples.length >= limit) break;
+	}
+	return samples;
+}
+
+function formatOnlineSearchWarning(rawWarning) {
+	const providerNames = { searxng: "SearXNG", civitai: "Civitai", lexica: "Lexica", fetch: "检索", extract: "标签提取", policy: "策略" };
+	const codeNames = {
+		timeout: "超时",
+		tls_error: "TLS 证书错误",
+		invalid_json: "返回内容不是有效 JSON",
+		invalid_schema: "返回结构不兼容",
+		provider_error: "服务端拒绝请求",
+		network_error: "网络不可用",
+		request_failed: "请求失败",
+		busy: "搜索任务繁忙",
+		failed: "处理失败",
+		public_sources_disabled: "已关闭公开来源回退",
+		query_too_long_skip_online: "关键词较长，已跳过联网",
+	};
+	const messages = [];
+	for (const rawPart of String(rawWarning ?? "").split(",")) {
+		const part = rawPart.trim();
+		if (!part) continue;
+		const separator = part.indexOf(":");
+		const provider = separator >= 0 ? part.slice(0, separator).trim() : "";
+		const code = separator >= 0 ? part.slice(separator + 1).trim() : part;
+		const httpMatch = /^http_(\d{3})$/u.exec(code);
+		const codeText = httpMatch ? `HTTP ${httpMatch[1]}` : (codeNames[code] ?? "请求失败");
+		const providerText = providerNames[provider] ?? provider;
+		const message = providerText ? `${providerText}：${codeText}` : codeText;
+		if (!messages.includes(message)) messages.push(message);
+	}
+	return messages.join("；");
+}
+
+function resolveOnlineSearchLibraryTags(rawTags, library) {
+	const existingKeys = new Set(
+		[...buildTagGroupIndex(library ?? createEmptyPromptLibrary()).keys()]
+			.map((tag) => getOnlineSearchCanonicalKey(tag))
+			.filter(Boolean),
+	);
+	const resolvedTags = [];
+	const unresolvedTags = [];
+	const seen = new Set();
+	for (const rawTag of rawTags ?? []) {
+		const tag = String(rawTag ?? "").trim();
+		const key = getOnlineSearchCanonicalKey(tag);
+		if (!key || seen.has(key)) continue;
+		seen.add(key);
+		if (existingKeys.has(key)) resolvedTags.push(tag);
+		else unresolvedTags.push(tag);
+	}
+	return { existingKeys, resolvedTags, unresolvedTags };
+}
+
+function pushOnlineSearchBrowserHistory(rawItems, currentIndex, rawQuery, maxItems = 20) {
+	const query = String(rawQuery ?? "").trim();
+	const limit = Math.max(1, Math.min(50, Math.trunc(Number(maxItems) || 20)));
+	const items = Array.from(rawItems ?? [], (item) => String(item ?? "").trim()).filter(Boolean);
+	let index = Math.max(-1, Math.min(items.length - 1, Math.trunc(Number(currentIndex) || 0)));
+	if (!query) return { items, index };
+	if (index >= 0 && items[index] === query) return { items, index };
+	const nextItems = items.slice(0, index + 1);
+	nextItems.push(query);
+	if (nextItems.length > limit) nextItems.splice(0, nextItems.length - limit);
+	return { items: nextItems, index: nextItems.length - 1 };
+}
+
+function stepOnlineSearchBrowserHistory(rawItems, currentIndex, direction) {
+	const items = Array.from(rawItems ?? [], (item) => String(item ?? "").trim()).filter(Boolean);
+	if (!items.length) return { items, index: -1, query: "" };
+	const current = Math.max(0, Math.min(items.length - 1, Math.trunc(Number(currentIndex) || 0)));
+	const delta = Number(direction) < 0 ? -1 : 1;
+	const index = Math.max(0, Math.min(items.length - 1, current + delta));
+	return { items, index, query: items[index] ?? "" };
+}
+
+const PROMPT_BROWSER_HOME_ENTRY = "qwen-browser://home";
+const PROMPT_BROWSER_SEARCH_BASE_URL = "https://www.google.com/search?igu=1&q=";
+const PROMPT_BROWSER_BLOCKED_SCHEMES = new Set([
+	"about", "blob", "chrome", "data", "file", "ftp", "javascript", "mailto", "resource", "tel", "view-source", "ws", "wss",
+]);
+
+function parsePromptBrowserIpv4(hostname) {
+	const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/u.exec(String(hostname ?? ""));
+	if (!match) return null;
+	const parts = match.slice(1).map((part) => Number(part));
+	return parts.every((part) => Number.isInteger(part) && part >= 0 && part <= 255) ? parts : null;
+}
+
+function isPromptBrowserNonPublicIpv4(parts) {
+	if (!Array.isArray(parts) || parts.length !== 4) return true;
+	const [a, b, c] = parts;
+	if (a === 0 || a === 10 || a === 127 || a >= 224) return true;
+	if (a === 100 && b >= 64 && b <= 127) return true;
+	if (a === 169 && b === 254) return true;
+	if (a === 172 && b >= 16 && b <= 31) return true;
+	if (a === 192 && (b === 0 || b === 168)) return true;
+	if (a === 198 && (b === 18 || b === 19 || (b === 51 && c === 100))) return true;
+	if (a === 203 && b === 0 && c === 113) return true;
+	return false;
+}
+
+function parsePromptBrowserIpv6(hostname) {
+	let text = String(hostname ?? "").trim().toLowerCase();
+	if (text.startsWith("[") && text.endsWith("]")) text = text.slice(1, -1);
+	if (!text || text.includes("%")) return null;
+	const halves = text.split("::");
+	if (halves.length > 2) return null;
+	const parseHalf = (half) => {
+		if (!half) return [];
+		const values = [];
+		for (const token of half.split(":")) {
+			if (!/^[0-9a-f]{1,4}$/u.test(token)) return null;
+			values.push(Number.parseInt(token, 16));
+		}
+		return values;
+	};
+	const left = parseHalf(halves[0]);
+	const right = parseHalf(halves[1] ?? "");
+	if (!left || !right) return null;
+	const missing = 8 - left.length - right.length;
+	if ((halves.length === 1 && missing !== 0) || missing < 0) return null;
+	const groups = halves.length === 2 ? [...left, ...Array(missing).fill(0), ...right] : left;
+	return groups.length === 8 ? groups : null;
+}
+
+function isPromptBrowserNonPublicIpv6(groups) {
+	if (!Array.isArray(groups) || groups.length !== 8) return true;
+	const allZero = groups.every((group) => group === 0);
+	const loopback = groups.slice(0, 7).every((group) => group === 0) && groups[7] === 1;
+	if (allZero || loopback) return true;
+	const first = groups[0];
+	if ((first & 0xfe00) === 0xfc00) return true;
+	if ((first & 0xffc0) === 0xfe80) return true;
+	if ((first & 0xff00) === 0xff00) return true;
+	if (first === 0x2001 && groups[1] === 0x0db8) return true;
+	const isIpv4Mapped = groups.slice(0, 5).every((group) => group === 0) && (groups[5] === 0 || groups[5] === 0xffff);
+	if (isIpv4Mapped) {
+		return isPromptBrowserNonPublicIpv4([
+			(groups[6] >> 8) & 0xff,
+			groups[6] & 0xff,
+			(groups[7] >> 8) & 0xff,
+			groups[7] & 0xff,
+		]);
+	}
+	return false;
+}
+
+function isPromptBrowserBlockedHostname(rawHostname) {
+	let hostname = String(rawHostname ?? "").trim().toLowerCase().replace(/\.$/u, "");
+	if (hostname.startsWith("[") && hostname.endsWith("]")) hostname = hostname.slice(1, -1);
+	if (!hostname || hostname === "localhost" || !hostname.includes(".")) return true;
+	if ([".localhost", ".local", ".lan", ".internal", ".home", ".home.arpa", ".test", ".invalid"].some((suffix) => hostname.endsWith(suffix))) return true;
+	const ipv4 = parsePromptBrowserIpv4(hostname);
+	if (ipv4) return isPromptBrowserNonPublicIpv4(ipv4);
+	if (hostname.includes(":")) return isPromptBrowserNonPublicIpv6(parsePromptBrowserIpv6(hostname));
+	return false;
+}
+
+function resolvePromptBrowserTarget(rawTarget, options = {}) {
+	let input = String(rawTarget ?? "").trim();
+	try { input = input.normalize("NFKC"); } catch (_error) {}
+	const maxLength = Math.max(256, Math.min(4096, Math.trunc(Number(options.maxLength) || 2048)));
+	const invalid = (reason, message) => ({ ok: false, kind: "invalid", url: "", input, reason, message });
+	if (!input) return invalid("empty", "请输入网址或网页搜索词。");
+	if (input.length > maxLength) return invalid("too_long", `网址或搜索词不能超过 ${maxLength} 个字符。`);
+	if (/[\u0000-\u001f\u007f]/u.test(input)) return invalid("control_character", "网址不能包含控制字符。");
+	if (input.startsWith("//")) return invalid("ambiguous_url", "请输入包含 http:// 或 https:// 的完整网址。");
+	const schemeMatch = /^([a-z][a-z0-9+.-]*):/iu.exec(input);
+	const scheme = String(schemeMatch?.[1] ?? "").toLowerCase();
+	if (scheme && PROMPT_BROWSER_BLOCKED_SCHEMES.has(scheme)) return invalid("blocked_scheme", `不允许打开 ${scheme}: 地址。`);
+	const explicitHttpUrl = scheme === "http" || scheme === "https";
+	const hostLike = /^(?:localhost|\[[0-9a-f:.]+\]|(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63})(?::\d{1,5})?(?:[/?#]|$)/iu.test(input)
+		|| /^(?:0x[0-9a-f]+|0[0-7]+|\d+(?:\.\d+){1,3})(?::\d{1,5})?(?:[/?#]|$)/iu.test(input);
+	if (!explicitHttpUrl && !hostLike) {
+		const query = input.replace(/\s+/gu, " ").trim();
+		return {
+			ok: true,
+			kind: "search",
+			url: `${PROMPT_BROWSER_SEARCH_BASE_URL}${encodeURIComponent(query)}`,
+			input,
+			query,
+			display: query,
+		};
+	}
+	const candidate = explicitHttpUrl ? input : `https://${input}`;
+	let parsed;
+	try {
+		parsed = new URL(candidate);
+	} catch (_error) {
+		return invalid("invalid_url", "网址格式无效。");
+	}
+	if (!['http:', 'https:'].includes(parsed.protocol)) return invalid("blocked_scheme", "只允许打开 http 或 https 网站。");
+	if (parsed.username || parsed.password) return invalid("credentials", "网址不能包含用户名或密码。");
+	if (parsed.port === "0") return invalid("invalid_port", "网址端口不能为 0。");
+	if (isPromptBrowserBlockedHostname(parsed.hostname)) return invalid("private_host", "不能打开本机、局域网或保留地址。");
+	let currentOrigin = String(options.currentOrigin ?? "").trim();
+	try { currentOrigin = currentOrigin ? new URL(currentOrigin).origin : ""; } catch (_error) { currentOrigin = ""; }
+	if (currentOrigin && parsed.origin === currentOrigin) return invalid("same_origin", "不能在网页浏览器中嵌套当前 ComfyUI 页面。");
+	if (parsed.href.length > maxLength) return invalid("too_long", `网址不能超过 ${maxLength} 个字符。`);
+	return { ok: true, kind: "url", url: parsed.href, input, query: "", display: parsed.href };
+}
+
+function openPromptBrowserExternal(rawTarget, options = {}) {
+	const target = resolvePromptBrowserTarget(rawTarget, options);
+	if (!target.ok) return { ...target, opened: false };
+	if (typeof options.openWindow !== "function") {
+		const documentRef = options.document ?? globalThis.document;
+		const parent = documentRef?.body ?? documentRef?.documentElement;
+		if (typeof documentRef?.createElement === "function" && parent?.appendChild) {
+			try {
+				const link = documentRef.createElement("a");
+				link.href = target.url;
+				link.target = "_blank";
+				link.rel = "noopener noreferrer";
+				link.style.display = "none";
+				parent.appendChild(link);
+				link.click();
+				link.remove?.();
+				return { ...target, opened: true, reason: "" };
+			} catch (_error) {}
+		}
+	}
+	const openWindow = options.openWindow ?? globalThis.window?.open?.bind?.(globalThis.window);
+	if (typeof openWindow !== "function") return { ...target, opened: false, reason: "unavailable", message: "当前环境不能打开新标签页。" };
+	let child = null;
+	try { child = openWindow(target.url, "_blank", "noopener,noreferrer"); } catch (_error) {}
+	try { if (child) child.opener = null; } catch (_error) {}
+	return child
+		? { ...target, opened: true, reason: "" }
+		: { ...target, opened: false, reason: "popup_blocked", message: "新标签页被浏览器拦截。" };
+}
+
 const ONLINE_QUERY_LOW_VALUE_TERMS = new Set([
 	"8k",
 	"4k",
@@ -2195,6 +2577,44 @@ function buildOnlineSearchQuery(rawQuery, maxTerms = 6) {
 	};
 }
 
+function chunkOnlineImportTags(rawTags, batchSize = 12) {
+	const size = Math.max(1, Math.min(12, Math.trunc(Number(batchSize) || 12)));
+	const tags = [];
+	const seen = new Set();
+	for (const rawTag of rawTags ?? []) {
+		const tag = String(rawTag ?? "").trim();
+		if (!tag || seen.has(tag)) continue;
+		seen.add(tag);
+		tags.push(tag);
+	}
+	const batches = [];
+	for (let start = 0; start < tags.length; start += size) batches.push(tags.slice(start, start + size));
+	return batches;
+}
+
+function resolveOnlineSearchSelectedTags(candidateItems, selectedTags, options = {}) {
+	const selected = new Set();
+	for (const rawTag of selectedTags ?? []) {
+		const tag = String(rawTag ?? "").trim();
+		if (tag) selected.add(tag);
+	}
+	if (!selected.size) return [];
+	const onlyHigh = !!options.onlyHighConfidence;
+	const requestedThreshold = Number(options.highConfidenceThreshold ?? 0.72);
+	const highConfidenceThreshold = Number.isFinite(requestedThreshold) ? requestedThreshold : 0.72;
+	const resolved = [];
+	const seen = new Set();
+	for (const item of candidateItems ?? []) {
+		const tag = String(item?.tag ?? "").trim();
+		if (!tag || !selected.has(tag) || seen.has(tag)) continue;
+		const confidence = Number(item?.confidence ?? 0);
+		if (onlyHigh && (!Number.isFinite(confidence) || confidence < highConfidenceThreshold)) continue;
+		seen.add(tag);
+		resolved.push(tag);
+	}
+	return resolved;
+}
+
 async function searchOnlinePromptTags(query, limit = 24, options = {}) {
 	const normalized = String(query ?? "").trim();
 	if (!normalized) return { tags: [], tagItems: [], samples: [], source: "none", message: "请输入关键词后再搜索。" };
@@ -2203,20 +2623,9 @@ async function searchOnlinePromptTags(query, limit = 24, options = {}) {
 		timeoutMs: options.timeoutMs ?? 90000,
 	});
 	const rawItems = Array.isArray(data?.tag_items) ? data.tag_items : [];
-	const normalizedItems = rawItems
-		.map((item) => ({
-			tag: String(item?.tag ?? "").trim(),
-			count: Math.max(1, Number(item?.count ?? 1) || 1),
-			confidence: Math.max(0, Math.min(1, Number(item?.confidence ?? 0.5) || 0.5)),
-			group: String(item?.group ?? "").trim(),
-			section: String(item?.section ?? "").trim(),
-			exists: !!item?.exists,
-			source: String(item?.source ?? ""),
-		}))
-		.filter((item) => item.tag && !isOnlineNoiseTag(item.tag));
-	const fallbackItems = parseCustomTags((data?.tags ?? []).join(", "))
-		.filter((tag) => !isOnlineNoiseTag(tag))
-		.map((tag, index) => ({
+	const normalizedItems = normalizeOnlineSearchTagItems(rawItems, limit);
+	const fallbackItems = normalizeOnlineSearchTagItems(
+		parseCustomTags((data?.tags ?? []).join(", ")).map((tag, index) => ({
 		tag,
 		count: Math.max(1, normalizedItems.length - index),
 		confidence: 0.55,
@@ -2224,16 +2633,19 @@ async function searchOnlinePromptTags(query, limit = 24, options = {}) {
 		section: "",
 		exists: false,
 		source: "legacy_tags",
-	}));
+		})),
+		limit,
+	);
 	const tagItems = normalizedItems.length ? normalizedItems : fallbackItems;
 	const tags = tagItems.map((item) => item.tag);
 	return {
 		tags,
 		tagItems,
-		samples: Array.isArray(data?.samples) ? data.samples.map((item) => String(item ?? "")).filter(Boolean) : [],
+		samples: normalizeOnlineSearchSamples(Array.isArray(data?.samples) ? data.samples : [], 6),
 		source: String(data?.source ?? "unknown"),
 		message: String(data?.message ?? ""),
 		warning: String(data?.warning ?? ""),
+		cached: !!data?.cached,
 	};
 }
 
@@ -2285,6 +2697,7 @@ async function refreshLibraryOnNode(node, options = {}) {
 	const library = await getPromptLibrary(true);
 	if (!isNodeLibraryRefreshCurrent(node, refreshRevision)) return node?.[PANEL_KEY]?.library ?? library;
 	if (mutationRevision > 0 && !isNodeStateMutationCurrent(node, mutationRevision)) return node?.[PANEL_KEY]?.library ?? library;
+	if (typeof options.commitGuard === "function" && !options.commitGuard()) return node?.[PANEL_KEY]?.library ?? library;
 	if (node[PANEL_KEY]) {
 		node[PANEL_KEY].library = library;
 		node[PANEL_KEY].rawTagWidgetNames = getRawTagWidgetNames(library);
@@ -5924,6 +6337,13 @@ function formatStageOutputForReading(text, modeKey) {
 	return next.trim();
 }
 
+function setStageDisplaySourceText(target, value) {
+	if (!target?.sourceEl) return;
+	const text = String(value ?? "");
+	target.sourceEl.textContent = text;
+	target.sourceEl.title = text;
+}
+
 function renderStageDisplayTarget(node, target, modeKey) {
 	if (!target?.bodyEl) return;
 	const payload = getStageDisplayPayload(node, modeKey);
@@ -5933,7 +6353,7 @@ function renderStageDisplayTarget(node, target, modeKey) {
 	const metrics = computeStageTextMetrics(payload.text);
 	if (modeKey === "smart" && target.inlineSmart !== false) {
 		renderInlineSmartTextDisplay(node, bodyEl, payload, displayText);
-		if (target.sourceEl) target.sourceEl.textContent = payload.source;
+		setStageDisplaySourceText(target, payload.source);
 		for (const [key, button] of target.tabButtons ?? []) button.classList.toggle("is-active", key === modeKey);
 		return;
 	}
@@ -5941,7 +6361,7 @@ function renderStageDisplayTarget(node, target, modeKey) {
 		if (bodyEl.__qwenSmartUi) delete bodyEl.__qwenSmartUi;
 		bodyEl.classList.remove("qwen-te-panel__display-screen--smart");
 		renderInlineTagBlockComposer(node, bodyEl, payload);
-		if (target.sourceEl) target.sourceEl.textContent = payload.source;
+		setStageDisplaySourceText(target, payload.source);
 		for (const [key, button] of target.tabButtons ?? []) button.classList.toggle("is-active", key === modeKey);
 		return;
 	}
@@ -5959,7 +6379,7 @@ function renderStageDisplayTarget(node, target, modeKey) {
 	bodyEl.classList.toggle("is-empty", !!payload.empty);
 	if (target.sourceEl) {
 		const decisionSummary = formatStageDecisionSummary(node);
-		target.sourceEl.textContent = decisionSummary ? `${payload.source} · ${decisionSummary}` : payload.source;
+		setStageDisplaySourceText(target, decisionSummary ? `${payload.source} · ${decisionSummary}` : payload.source);
 	}
 	if (target.metricsEl) {
 		target.metricsEl.replaceChildren();
@@ -8017,6 +8437,7 @@ function refreshNodeActionButtons(node) {
 	const isContinuousRunning = !!runtime.running;
 
 	setPanelActionButtonState(panelButtons.tag, !isContinuousRunning, "连续测试进行中，先停止后再改标签。");
+	setPanelActionButtonState(panelButtons.onlineSearch, !isContinuousRunning, "连续测试进行中，先停止后再搜索和回填标签。");
 	setPanelActionButtonState(panelButtons.example, !isContinuousRunning, "连续测试进行中，先停止后再载入示例。");
 	setPanelActionButtonState(panelButtons.random, !isContinuousRunning, "连续测试进行中，先停止后再随机。");
 	setPanelActionButtonState(panelButtons.randomRun, !isContinuousRunning, "连续测试进行中，先停止后再随机跑。");
@@ -8042,6 +8463,8 @@ function refreshNodeActionButtons(node) {
 	if (library && node?.[PANEL_KEY]?.heroCaptionEl instanceof HTMLElement) {
 		node[PANEL_KEY].heroCaptionEl.textContent = buildHeroCaptionText(node, library);
 	}
+	const onlineSearchOverlay = document.querySelector?.('[data-qwen-modal="online-search"]');
+	if (onlineSearchOverlay?.__qwenNode === node) onlineSearchOverlay.__qwenSyncRuntimeState?.();
 }
 
 function setNodeStatusText(node, text) {
@@ -13711,34 +14134,58 @@ function openTagManager(node) {
 function openOnlinePromptSearchDialog(node, library) {
 	ensureSingleModal("online-search");
 	const modalContext = buildNodeModalContext(node, library);
+	let activeBrowserMode = "web";
 	const overlay = document.createElement("div");
 	overlay.className = "qwen-te-modal";
 	overlay.dataset.qwenModal = "online-search";
 	overlay.__qwenNode = node;
 	const dialog = document.createElement("div");
-	dialog.className = "qwen-te-modal__dialog";
+	dialog.className = "qwen-te-modal__dialog qwen-te-online-search__browser";
+	dialog.setAttribute("role", "dialog");
+	dialog.setAttribute("aria-modal", "true");
 	overlay.appendChild(dialog);
 
 	const header = document.createElement("div");
-	header.className = "qwen-te-modal__header";
+	header.className = "qwen-te-modal__header qwen-te-online-search__tabstrip";
 	dialog.appendChild(header);
-	const titleWrap = document.createElement("div");
-	header.appendChild(titleWrap);
-	const title = document.createElement("div");
-	title.className = "qwen-te-modal__title";
-	title.textContent = `联网补词 · ${modalContext.nodeName}`;
-	titleWrap.appendChild(title);
-	const subtitle = document.createElement("div");
-	subtitle.className = "qwen-te-modal__subtitle";
-	subtitle.textContent = `新版：左右双栏、结果卡片、多维筛选和批量选择工具。当前已选标签 ${modalContext.tagCount} 个，输出来源：${modalContext.outputSource}。`;
-	titleWrap.appendChild(subtitle);
+	const browserTabs = document.createElement("div");
+	browserTabs.className = "qwen-te-online-search__tabs";
+	browserTabs.setAttribute("role", "tablist");
+	browserTabs.setAttribute("aria-label", "浏览器页面");
+	header.appendChild(browserTabs);
+	const createBrowserModeTab = (mode, titleText, subtitleText, titleId) => {
+		const button = document.createElement("button");
+		button.type = "button";
+		button.className = "qwen-te-online-search__tab";
+		button.id = `${titleId}-tab`;
+		button.dataset.qwenBrowserMode = mode;
+		button.setAttribute("role", "tab");
+		button.setAttribute("aria-selected", mode === activeBrowserMode ? "true" : "false");
+		const tabTitle = document.createElement("span");
+		tabTitle.className = "qwen-te-modal__title";
+		tabTitle.id = titleId;
+		tabTitle.textContent = titleText;
+		button.appendChild(tabTitle);
+		const tabSubtitle = document.createElement("span");
+		tabSubtitle.className = "qwen-te-modal__subtitle";
+		tabSubtitle.textContent = subtitleText;
+		button.appendChild(tabSubtitle);
+		browserTabs.appendChild(button);
+		return { button, title: tabTitle };
+	};
+	const webModeTab = createBrowserModeTab("web", "网页浏览器", modalContext.nodeName, "qwen-te-online-search-web-title");
+	const tagModeTab = createBrowserModeTab("tags", "标签搜索", "候选标签与标签库", "qwen-te-online-search-tags-title");
+	dialog.setAttribute("aria-labelledby", webModeTab.title.id);
 	const closeButton = document.createElement("button");
-	closeButton.className = "qwen-te-modal__footer-button";
-	closeButton.textContent = "关闭";
+	closeButton.type = "button";
+	closeButton.className = "qwen-te-online-search__window-button";
+	closeButton.textContent = "×";
+	closeButton.title = "关闭浏览器";
+	closeButton.setAttribute("aria-label", "关闭浏览器");
 	header.appendChild(closeButton);
 
 	const body = document.createElement("div");
-	body.className = "qwen-te-modal__body";
+	body.className = "qwen-te-modal__body qwen-te-online-search__body";
 	dialog.appendChild(body);
 
 	const stack = document.createElement("div");
@@ -13750,83 +14197,176 @@ function openOnlinePromptSearchDialog(node, library) {
 	stack.appendChild(topbar);
 
 	const toolbar = document.createElement("div");
-	toolbar.className = "qwen-te-modal__toolbar qwen-te-modal__toolbar--online-search";
+	toolbar.className = "qwen-te-modal__toolbar qwen-te-modal__toolbar--online-search qwen-te-online-search__browser-toolbar";
+	toolbar.setAttribute("role", "search");
 	topbar.appendChild(toolbar);
+	const browserNav = document.createElement("div");
+	browserNav.className = "qwen-te-online-search__nav";
+	browserNav.setAttribute("aria-label", "网页导航");
+	toolbar.appendChild(browserNav);
+	const createBrowserNavButton = (text, label) => {
+		const button = document.createElement("button");
+		button.type = "button";
+		button.className = "qwen-te-online-search__nav-button";
+		button.textContent = text;
+		button.title = label;
+		button.setAttribute("aria-label", label);
+		browserNav.appendChild(button);
+		return button;
+	};
+	const backButton = createBrowserNavButton("←", "返回上一个手动打开的网址");
+	const forwardButton = createBrowserNavButton("→", "前进到下一个手动打开的网址");
+	const reloadButton = createBrowserNavButton("↻", "重新加载地址栏网址");
+	const homeButton = createBrowserNavButton("⌂", "浏览器主页");
+	const addressBar = document.createElement("div");
+	addressBar.className = "qwen-te-online-search__addressbar";
+	toolbar.appendChild(addressBar);
+	const addressBadge = document.createElement("span");
+	addressBadge.className = "qwen-te-online-search__address-badge";
+	addressBadge.textContent = "网页";
+	addressBar.appendChild(addressBadge);
 	const searchInput = document.createElement("input");
-	searchInput.className = "qwen-te-modal__search";
-	searchInput.placeholder = "输入联网检索关键词，例如：cinematic portrait、古风神女";
-	toolbar.appendChild(searchInput);
+	searchInput.className = "qwen-te-modal__search qwen-te-online-search__address-input";
+	searchInput.placeholder = "输入网址或网页搜索词";
+	searchInput.maxLength = 2048;
+	searchInput.setAttribute("aria-label", "网页浏览器地址栏");
+	addressBar.appendChild(searchInput);
 	const searchButton = document.createElement("button");
-	searchButton.className = "qwen-te-modal__footer-button qwen-te-modal__footer-button--primary";
-	searchButton.textContent = "联网搜索";
+	searchButton.type = "button";
+	searchButton.className = "qwen-te-online-search__go-button";
+	searchButton.textContent = "打开";
+	searchButton.title = "在内嵌网页中打开";
 	toolbar.appendChild(searchButton);
+	const openExternalButton = document.createElement("button");
+	openExternalButton.type = "button";
+	openExternalButton.className = "qwen-te-online-search__nav-button qwen-te-online-search__external-button";
+	openExternalButton.textContent = "↗";
+	openExternalButton.title = "在新标签页打开当前网址";
+	openExternalButton.setAttribute("aria-label", "在新标签页打开当前网址");
+	toolbar.appendChild(openExternalButton);
 
 	const actionBar = document.createElement("div");
-	actionBar.className = "qwen-te-modal__toolbar qwen-te-modal__toolbar--online-actions";
-	topbar.appendChild(actionBar);
+	actionBar.className = "qwen-te-modal__toolbar qwen-te-modal__toolbar--online-actions qwen-te-online-search__actions";
+	actionBar.setAttribute("role", "group");
+	actionBar.setAttribute("aria-label", "候选标签操作");
 	const applyButton = document.createElement("button");
+	applyButton.type = "button";
 	applyButton.className = "qwen-te-modal__footer-button";
 	applyButton.textContent = "回填到自定义";
 	actionBar.appendChild(applyButton);
 	const importButton = document.createElement("button");
+	importButton.type = "button";
 	importButton.className = "qwen-te-modal__footer-button";
 	importButton.textContent = "批量入库";
 	actionBar.appendChild(importButton);
 	const importHighButton = document.createElement("button");
+	importHighButton.type = "button";
 	importHighButton.className = "qwen-te-modal__footer-button";
 	importHighButton.textContent = "高置信入库";
 	actionBar.appendChild(importHighButton);
 
-	const quickBar = document.createElement("div");
-	quickBar.className = "qwen-te-modal__pillbar";
-	topbar.appendChild(quickBar);
+	const webQuickBar = document.createElement("div");
+	webQuickBar.className = "qwen-te-modal__pillbar qwen-te-online-search__bookmarks qwen-te-online-search__bookmarks--web";
+	topbar.appendChild(webQuickBar);
+	const websiteBookmarks = [
+		{ label: "Google", url: "https://www.google.com/webhp?igu=1" },
+		{ label: "Civitai", url: "https://civitai.com/" },
+		{ label: "Lexica", url: "https://lexica.art/" },
+		{ label: "GitHub", url: "https://github.com/" },
+		{ label: "Example", url: "https://example.com/" },
+	];
+	const webBookmarkButtons = [];
+	for (const item of websiteBookmarks) {
+		const button = document.createElement("button");
+		button.type = "button";
+		button.className = "qwen-te-modal__preset";
+		button.textContent = item.label;
+		button.title = `打开 ${item.url}`;
+		button.dataset.qwenBrowserUrl = item.url;
+		webQuickBar.appendChild(button);
+		webBookmarkButtons.push(button);
+	}
+
+	const tagQuickBar = document.createElement("div");
+	tagQuickBar.className = "qwen-te-modal__pillbar qwen-te-online-search__bookmarks qwen-te-online-search__bookmarks--tags qwen-te-hidden";
+	topbar.appendChild(tagQuickBar);
 	const quickQueries = ["cinematic portrait", "都市通勤大片", "古风神女", "赛博朋克夜景", "机甲写实"];
 	const quickButtons = [];
 	for (const item of quickQueries) {
 		const button = document.createElement("button");
+		button.type = "button";
 		button.className = "qwen-te-modal__preset";
 		button.textContent = item;
+		button.title = `搜索 ${item}`;
 		button.onclick = () => {
 			if (searchButton.disabled) return;
 			searchInput.value = item;
+			tagQueryDraft = item;
 			void runSearch();
 		};
-		quickBar.appendChild(button);
+		tagQuickBar.appendChild(button);
 		quickButtons.push(button);
 	}
 
 	const statusEl = document.createElement("div");
-	statusEl.className = "qwen-te-modal__status";
+	statusEl.className = "qwen-te-modal__status qwen-te-online-search__status qwen-te-hidden";
+	statusEl.setAttribute("aria-live", "polite");
 	statusEl.textContent = "先输入关键词并点击“联网搜索”。";
 	topbar.appendChild(statusEl);
+	const webStatusEl = document.createElement("div");
+	webStatusEl.className = "qwen-te-modal__status qwen-te-online-search__status qwen-te-online-search__web-status";
+	webStatusEl.setAttribute("aria-live", "polite");
+	webStatusEl.textContent = "主页";
+	topbar.appendChild(webStatusEl);
 
 	const filtersWrap = document.createElement("div");
-	filtersWrap.className = "qwen-te-online-search__filters";
-	stack.appendChild(filtersWrap);
+	filtersWrap.className = "qwen-te-online-search__filters qwen-te-online-search__filter-rail";
+	filtersWrap.setAttribute("role", "group");
+	filtersWrap.setAttribute("aria-label", "搜索结果筛选");
 
 	const summaryBar = document.createElement("div");
-	summaryBar.className = "qwen-te-modal__content-pills";
+	summaryBar.className = "qwen-te-modal__content-pills qwen-te-online-search__summary";
 	filtersWrap.appendChild(summaryBar);
 
 	const selectionBadge = document.createElement("div");
-	selectionBadge.className = "qwen-te-modal__status qwen-te-modal__status--inline";
+	selectionBadge.className = "qwen-te-modal__status qwen-te-modal__status--inline qwen-te-online-search__selection-status";
+	selectionBadge.setAttribute("role", "status");
 	selectionBadge.textContent = "未选择候选标签。";
-	filtersWrap.appendChild(selectionBadge);
 
+	const groupFilterLabel = document.createElement("div");
+	groupFilterLabel.className = "qwen-te-online-search__filter-label";
+	groupFilterLabel.id = "qwen-te-online-search-group-filter-label";
+	groupFilterLabel.textContent = "标签分组";
+	filtersWrap.appendChild(groupFilterLabel);
 	const filterBar = document.createElement("div");
-	filterBar.className = "qwen-te-modal__pillbar";
+	filterBar.className = "qwen-te-modal__pillbar qwen-te-online-search__filter-list qwen-te-online-search__filter-list--groups";
+	filterBar.setAttribute("role", "group");
+	filterBar.setAttribute("aria-labelledby", groupFilterLabel.id);
 	filtersWrap.appendChild(filterBar);
 
+	const metaFilterLabel = document.createElement("div");
+	metaFilterLabel.className = "qwen-te-online-search__filter-label";
+	metaFilterLabel.id = "qwen-te-online-search-meta-filter-label";
+	metaFilterLabel.textContent = "结果状态";
+	filtersWrap.appendChild(metaFilterLabel);
 	const metaFilterBar = document.createElement("div");
-	metaFilterBar.className = "qwen-te-modal__pillbar";
+	metaFilterBar.className = "qwen-te-modal__pillbar qwen-te-online-search__filter-list qwen-te-online-search__filter-list--status";
+	metaFilterBar.setAttribute("role", "group");
+	metaFilterBar.setAttribute("aria-labelledby", metaFilterLabel.id);
 	filtersWrap.appendChild(metaFilterBar);
 
 	const contentGrid = document.createElement("div");
-	contentGrid.className = "qwen-te-online-search__grid qwen-te-online-search__grid--workspace";
+	contentGrid.className = "qwen-te-online-search__grid qwen-te-online-search__grid--workspace qwen-te-hidden";
+	contentGrid.id = "qwen-te-online-search-tags-workspace";
+	contentGrid.setAttribute("role", "tabpanel");
+	contentGrid.setAttribute("aria-labelledby", tagModeTab.button.id);
+	tagModeTab.button.setAttribute("aria-controls", contentGrid.id);
 	stack.appendChild(contentGrid);
+	contentGrid.appendChild(filtersWrap);
 
 	const resultPanel = document.createElement("div");
 	resultPanel.className = "qwen-te-online-search__panel qwen-te-online-search__panel--results";
+	resultPanel.setAttribute("role", "region");
 	contentGrid.appendChild(resultPanel);
 
 	const resultHead = document.createElement("div");
@@ -13838,24 +14378,29 @@ function openOnlinePromptSearchDialog(node, library) {
 
 	const resultTitle = document.createElement("div");
 	resultTitle.className = "qwen-te-online-search__panel-title";
-	resultTitle.textContent = "候选标签";
+	resultTitle.id = "qwen-te-online-search-results-title";
+	resultTitle.textContent = "搜索结果";
+	resultPanel.setAttribute("aria-labelledby", resultTitle.id);
 	resultHeadText.appendChild(resultTitle);
 
 	const resultSub = document.createElement("div");
 	resultSub.className = "qwen-te-online-search__panel-sub";
-	resultSub.textContent = "搜索后会按高置信、是否已在库、推荐分组展示，可直接多选。";
+	resultSub.textContent = "点击结果即可加入或移出本次操作。";
 	resultHeadText.appendChild(resultSub);
 
 	const resultTools = document.createElement("div");
 	resultTools.className = "qwen-te-modal__content-tools";
-	resultPanel.appendChild(resultTools);
+	resultHead.appendChild(resultTools);
 
 	const resultList = document.createElement("div");
 	resultList.className = "qwen-te-online-search__cards";
+	resultList.setAttribute("role", "group");
+	resultList.setAttribute("aria-label", "候选标签");
 	resultPanel.appendChild(resultList);
 
 	const samplePanel = document.createElement("div");
 	samplePanel.className = "qwen-te-online-search__panel qwen-te-online-search__panel--samples";
+	samplePanel.setAttribute("role", "region");
 	contentGrid.appendChild(samplePanel);
 
 	const sampleHead = document.createElement("div");
@@ -13867,13 +14412,26 @@ function openOnlinePromptSearchDialog(node, library) {
 
 	const sampleTitle = document.createElement("div");
 	sampleTitle.className = "qwen-te-online-search__panel-title";
+	sampleTitle.id = "qwen-te-online-search-reference-title";
 	sampleTitle.textContent = "参考样本";
+	samplePanel.setAttribute("aria-labelledby", sampleTitle.id);
 	sampleHeadText.appendChild(sampleTitle);
 
 	const sampleSub = document.createElement("div");
 	sampleSub.className = "qwen-te-online-search__panel-sub";
-	sampleSub.textContent = "优先显示联网抓到的参考片段；如果外部样本不足，会退回到基于候选标签生成的摘要。";
+	sampleSub.textContent = "先检查已选标签，再决定回填当前节点或写入标签库。";
 	sampleHeadText.appendChild(sampleSub);
+	samplePanel.appendChild(selectionBadge);
+	const selectedPreview = document.createElement("div");
+	selectedPreview.className = "qwen-te-online-search__selected-preview";
+	selectedPreview.setAttribute("role", "group");
+	selectedPreview.setAttribute("aria-label", "已选择的候选标签");
+	samplePanel.appendChild(selectedPreview);
+	samplePanel.appendChild(actionBar);
+	const referenceLabel = document.createElement("div");
+	referenceLabel.className = "qwen-te-online-search__section-label";
+	referenceLabel.textContent = "参考内容";
+	samplePanel.appendChild(referenceLabel);
 
 	const sampleBox = document.createElement("textarea");
 	sampleBox.className = "qwen-te-modal__textarea qwen-te-online-search__sample-box";
@@ -13887,16 +14445,61 @@ function openOnlinePromptSearchDialog(node, library) {
 
 	const sampleHint = document.createElement("div");
 	sampleHint.className = "qwen-te-online-search__hint";
-	sampleHint.textContent = "先看右侧参考是否贴题，再决定是回填到当前节点，还是直接批量入库。";
+	sampleHint.textContent = "参考内容可能来自联网样本，也可能是根据候选标签生成的本地摘要。";
 	samplePanel.appendChild(sampleHint);
 
-	const footer = document.createElement("div");
-	footer.className = "qwen-te-modal__footer";
-	dialog.appendChild(footer);
-	const doneButton = document.createElement("button");
-	doneButton.className = "qwen-te-modal__footer-button";
-	doneButton.textContent = "关闭";
-	footer.appendChild(doneButton);
+	const webWorkspace = document.createElement("div");
+	webWorkspace.className = "qwen-te-online-search__web-workspace";
+	webWorkspace.id = "qwen-te-online-search-web-workspace";
+	webWorkspace.setAttribute("role", "tabpanel");
+	webWorkspace.setAttribute("aria-labelledby", webModeTab.button.id);
+	webModeTab.button.setAttribute("aria-controls", webWorkspace.id);
+	stack.appendChild(webWorkspace);
+	const webHome = document.createElement("div");
+	webHome.className = "qwen-te-online-search__web-home";
+	webWorkspace.appendChild(webHome);
+	const webHomeTitle = document.createElement("div");
+	webHomeTitle.className = "qwen-te-online-search__web-home-title";
+	webHomeTitle.textContent = "常用网站";
+	webHome.appendChild(webHomeTitle);
+	const webHomeGrid = document.createElement("div");
+	webHomeGrid.className = "qwen-te-online-search__web-home-grid";
+	webHome.appendChild(webHomeGrid);
+	const webHomeButtons = [];
+	for (const item of websiteBookmarks) {
+		const button = document.createElement("button");
+		button.type = "button";
+		button.className = "qwen-te-online-search__site-button";
+		button.dataset.qwenBrowserUrl = item.url;
+		const icon = document.createElement("span");
+		icon.className = "qwen-te-online-search__site-icon";
+		icon.textContent = item.label.slice(0, 1).toUpperCase();
+		button.appendChild(icon);
+		const label = document.createElement("span");
+		label.className = "qwen-te-online-search__site-label";
+		label.textContent = item.label;
+		button.appendChild(label);
+		webHomeGrid.appendChild(button);
+		webHomeButtons.push(button);
+	}
+	const webFrameShell = document.createElement("div");
+	webFrameShell.className = "qwen-te-online-search__web-frame-shell qwen-te-hidden";
+	webWorkspace.appendChild(webFrameShell);
+	const webFrame = document.createElement("iframe");
+	webFrame.className = "qwen-te-online-search__web-frame";
+	webFrame.title = "网页浏览区域";
+	webFrame.src = "about:blank";
+	webFrame.setAttribute("sandbox", "allow-forms allow-modals allow-scripts");
+	webFrame.setAttribute("referrerpolicy", "no-referrer");
+	webFrame.referrerPolicy = "no-referrer";
+	webFrameShell.appendChild(webFrame);
+	const frameExternalButton = document.createElement("button");
+	frameExternalButton.type = "button";
+	frameExternalButton.className = "qwen-te-online-search__frame-external";
+	frameExternalButton.textContent = "↗ 外部打开";
+	frameExternalButton.title = "网站拒绝内嵌、登录或下载不可用时，在新标签页完整打开";
+	frameExternalButton.disabled = true;
+	webFrameShell.appendChild(frameExternalButton);
 
 	let requestId = 0;
 	let candidateTags = [];
@@ -13906,10 +14509,26 @@ function openOnlinePromptSearchDialog(node, library) {
 	let activeMetaFilter = "all";
 	const groupFilterButtons = new Map();
 	const metaFilterButtons = new Map();
+	const resultCards = new Map();
 	const selectedTags = new Set();
 	const isHighConfidence = (item) => Number(item?.confidence ?? 0) >= 0.72;
-	const getSelectedCountLabel = () => `${selectedTags.size} / ${candidateItems.length}`;
+	let queryHistory = [];
+	let queryHistoryIndex = -1;
+	let tagQueryDraft = "";
+	let tagAddressBadgeText = "提示词";
+	let webAddressDraft = "";
+	let webHistory = [PROMPT_BROWSER_HOME_ENTRY];
+	let webHistoryIndex = 0;
+	let currentWebUrl = "";
 	let busyState = false;
+	const isContinuousRunActive = () => !!ensureNodeContinuousRuntime(node).running;
+	const isInteractionBlocked = () => busyState || isContinuousRunActive();
+	const rejectDuringContinuousRun = () => {
+		if (!isContinuousRunActive()) return false;
+		statusEl.textContent = "连续测试进行中，请先停止再搜索、回填或入库。";
+		syncActionButtons();
+		return true;
+	};
 	const matchesMetaFilter = (item) => {
 		if (activeMetaFilter === "high") return isHighConfidence(item);
 		if (activeMetaFilter === "new") return !item?.exists;
@@ -13925,17 +14544,6 @@ function openOnlinePromptSearchDialog(node, library) {
 	const getSelectedItems = () => {
 		if (!selectedTags.size) return [];
 		return candidateItems.filter((item) => selectedTags.has(item?.tag));
-	};
-	const dedupeTags = (tags) => {
-		const seen = new Set();
-		const result = [];
-		for (const rawTag of tags ?? []) {
-			const tag = String(rawTag ?? "").trim();
-			if (!tag || seen.has(tag)) continue;
-			seen.add(tag);
-			result.push(tag);
-		}
-		return result;
 	};
 	const renderSummaryBar = () => {
 		summaryBar.replaceChildren();
@@ -13960,23 +14568,48 @@ function openOnlinePromptSearchDialog(node, library) {
 		}
 	};
 	const setFilterButtonState = (button, active) => {
-		button.style.borderColor = active ? "#caa55b" : "#4a5568";
-		button.style.background = active ? "#59451a" : "#232a33";
-		button.style.color = active ? "#fff0ca" : "#e5ecf6";
+		button.classList.toggle("is-active", !!active);
 	};
 	const renderSelectionBadge = () => {
+		selectedPreview.replaceChildren();
 		if (!candidateItems.length) {
-			selectionBadge.textContent = "未选择候选标签。";
+			selectionBadge.textContent = "已选择 0 个标签";
+			const empty = document.createElement("div");
+			empty.className = "qwen-te-online-search__selected-empty";
+			empty.textContent = "搜索后可在结果列表中选择标签。";
+			selectedPreview.appendChild(empty);
 			return;
 		}
 		const selectedItems = getSelectedItems();
 		if (!selectedItems.length) {
-			selectionBadge.textContent = `当前未手动勾选，将默认作用于当前筛选下的前若干项。已选 ${getSelectedCountLabel()}。`;
+			selectionBadge.textContent = "已选择 0 个标签";
+			const empty = document.createElement("div");
+			empty.className = "qwen-te-online-search__selected-empty";
+			empty.textContent = "未选择时不会执行回填或入库。";
+			selectedPreview.appendChild(empty);
 			return;
 		}
-		const preview = selectedItems.slice(0, 5).map((item) => item.tag).join("、");
-		const remain = selectedItems.length - Math.min(selectedItems.length, 5);
-		selectionBadge.textContent = `已选 ${getSelectedCountLabel()}：${preview}${remain > 0 ? ` +${remain}` : ""}`;
+		selectionBadge.textContent = `已选择 ${selectedItems.length} 个标签`;
+		for (const item of selectedItems.slice(0, 12)) {
+			const chip = document.createElement("button");
+			chip.type = "button";
+			chip.className = "qwen-te-online-search__selected-chip";
+			chip.textContent = `${item.tag} ×`;
+			chip.title = `移除 ${item.tag}`;
+			chip.disabled = isInteractionBlocked();
+			chip.onclick = () => {
+				if (isInteractionBlocked()) return;
+				selectedTags.delete(item.tag);
+				renderResults();
+			};
+			selectedPreview.appendChild(chip);
+		}
+		if (selectedItems.length > 12) {
+			const more = document.createElement("span");
+			more.className = "qwen-te-online-search__selected-more";
+			more.textContent = `另有 ${selectedItems.length - 12} 个`;
+			selectedPreview.appendChild(more);
+		}
 	};
 	const getEffectiveSelectionCounts = () => {
 		const applyTags = getEffectiveSelection({ onlyHighConfidence: false });
@@ -13994,19 +14627,149 @@ function openOnlinePromptSearchDialog(node, library) {
 			importHighCount: importHighTags.length,
 		};
 	};
+	const getPromptBrowserCurrentOrigin = () => {
+		try { return new URL(String(location?.href ?? "")).origin; } catch (_error) { return ""; }
+	};
+	const setWebStatus = (text) => {
+		webStatusEl.textContent = String(text ?? "");
+		webStatusEl.title = webStatusEl.textContent;
+	};
+	const showWebHome = (options = {}) => {
+		if (options.recordHistory !== false) {
+			const next = pushOnlineSearchBrowserHistory(webHistory, webHistoryIndex, PROMPT_BROWSER_HOME_ENTRY, 30);
+			webHistory = next.items;
+			webHistoryIndex = next.index;
+		}
+		currentWebUrl = "";
+		webAddressDraft = "";
+		if (activeBrowserMode === "web") searchInput.value = "";
+		webFrame.src = "about:blank";
+		webFrameShell.classList.add("qwen-te-hidden");
+		webHome.classList.remove("qwen-te-hidden");
+		setWebStatus("主页");
+		syncActionButtons();
+	};
+	const navigateWebsite = (rawTarget, options = {}) => {
+		const target = options.resolved
+			? { ok: true, kind: "url", url: String(rawTarget ?? "").trim(), display: String(rawTarget ?? "").trim() }
+			: resolvePromptBrowserTarget(rawTarget, { currentOrigin: getPromptBrowserCurrentOrigin() });
+		if (!target.ok) {
+			setWebStatus(target.message || "网址无效。");
+			syncActionButtons();
+			return false;
+		}
+		if (options.recordHistory !== false) {
+			const next = pushOnlineSearchBrowserHistory(webHistory, webHistoryIndex, target.url, 30);
+			webHistory = next.items;
+			webHistoryIndex = next.index;
+		}
+		currentWebUrl = target.url;
+		webAddressDraft = target.url;
+		if (activeBrowserMode === "web") searchInput.value = target.url;
+		webHome.classList.add("qwen-te-hidden");
+		webFrameShell.classList.remove("qwen-te-hidden");
+		setWebStatus(`正在导航到 ${target.url}`);
+		webFrame.src = target.url;
+		syncActionButtons();
+		return true;
+	};
+	const renderWebHistoryEntry = (entry) => {
+		if (entry === PROMPT_BROWSER_HOME_ENTRY) {
+			showWebHome({ recordHistory: false });
+			return;
+		}
+		void navigateWebsite(entry, { recordHistory: false, resolved: true });
+	};
+	const openCurrentWebExternally = (rawTarget = "") => {
+		const source = String(rawTarget || searchInput.value || currentWebUrl).trim();
+		const result = openPromptBrowserExternal(source, { currentOrigin: getPromptBrowserCurrentOrigin() });
+		if (!result.ok || !result.opened) {
+			setWebStatus(result.message || "未能打开新标签页。");
+			return false;
+		}
+		webAddressDraft = result.url;
+		if (activeBrowserMode === "web") searchInput.value = result.url;
+		setWebStatus(`已在新标签页打开 ${result.url}`);
+		syncActionButtons();
+		return true;
+	};
+	const setBrowserMode = (mode) => {
+		const nextMode = mode === "tags" ? "tags" : "web";
+		if (activeBrowserMode === "web") webAddressDraft = String(searchInput.value ?? "");
+		else tagQueryDraft = String(searchInput.value ?? "");
+		activeBrowserMode = nextMode;
+		const tagMode = activeBrowserMode === "tags";
+		webModeTab.button.classList.toggle("is-active", !tagMode);
+		tagModeTab.button.classList.toggle("is-active", tagMode);
+		webModeTab.button.setAttribute("aria-selected", tagMode ? "false" : "true");
+		tagModeTab.button.setAttribute("aria-selected", tagMode ? "true" : "false");
+		webModeTab.button.tabIndex = tagMode ? -1 : 0;
+		tagModeTab.button.tabIndex = tagMode ? 0 : -1;
+		contentGrid.classList.toggle("qwen-te-hidden", !tagMode);
+		webWorkspace.classList.toggle("qwen-te-hidden", tagMode);
+		tagQuickBar.classList.toggle("qwen-te-hidden", !tagMode);
+		webQuickBar.classList.toggle("qwen-te-hidden", tagMode);
+		statusEl.classList.toggle("qwen-te-hidden", !tagMode);
+		webStatusEl.classList.toggle("qwen-te-hidden", tagMode);
+		homeButton.classList.toggle("qwen-te-hidden", tagMode);
+		openExternalButton.classList.toggle("qwen-te-hidden", tagMode);
+		addressBadge.textContent = tagMode ? tagAddressBadgeText : "网页";
+		searchInput.maxLength = tagMode ? 256 : 2048;
+		searchInput.placeholder = tagMode
+			? "输入联网检索关键词，例如：cinematic portrait、古风神女"
+			: "输入网址或网页搜索词";
+		searchInput.setAttribute("aria-label", tagMode ? "提示词搜索地址栏" : "网页浏览器地址栏");
+		searchInput.value = tagMode ? tagQueryDraft : webAddressDraft;
+		searchButton.textContent = tagMode ? "搜索" : "打开";
+		searchButton.title = tagMode ? "执行联网标签搜索" : "在内嵌网页中打开";
+		browserNav.setAttribute("aria-label", tagMode ? "标签搜索历史导航" : "网页导航");
+		dialog.setAttribute("aria-labelledby", tagMode ? tagModeTab.title.id : webModeTab.title.id);
+		syncActionButtons();
+	};
 	const syncActionButtons = () => {
-		const hasAny = candidateItems.length > 0;
-		const hasHigh = candidateItems.some((item) => isHighConfidence(item));
 		const counts = getEffectiveSelectionCounts();
-		searchButton.disabled = busyState;
-		applyButton.disabled = busyState || !hasAny;
-		importButton.disabled = busyState || counts.importCount <= 0;
-		importHighButton.disabled = busyState || !hasHigh || counts.importHighCount <= 0;
+		const runtimeBlocked = isContinuousRunActive();
+		const interactionBlocked = busyState || runtimeBlocked;
+		const tagMode = activeBrowserMode === "tags";
+		const webTarget = resolvePromptBrowserTarget(searchInput.value, { currentOrigin: getPromptBrowserCurrentOrigin() });
+		const externalTarget = resolvePromptBrowserTarget(
+			String(searchInput.value ?? "").trim() || currentWebUrl,
+			{ currentOrigin: getPromptBrowserCurrentOrigin() },
+		);
+		dialog.setAttribute("aria-busy", tagMode && busyState ? "true" : "false");
+		searchInput.disabled = tagMode && interactionBlocked;
+		searchButton.disabled = tagMode ? interactionBlocked : !webTarget.ok;
+		backButton.disabled = tagMode
+			? interactionBlocked || queryHistoryIndex <= 0
+			: webHistoryIndex <= 0;
+		forwardButton.disabled = tagMode
+			? interactionBlocked || queryHistoryIndex < 0 || queryHistoryIndex >= queryHistory.length - 1
+			: webHistoryIndex < 0 || webHistoryIndex >= webHistory.length - 1;
+		reloadButton.disabled = tagMode
+			? interactionBlocked || !String(searchInput.value ?? "").trim()
+			: !currentWebUrl;
+		homeButton.disabled = tagMode;
+		openExternalButton.disabled = tagMode || !externalTarget.ok;
+		frameExternalButton.disabled = !currentWebUrl;
+		applyButton.disabled = interactionBlocked || counts.applyCount <= 0;
+		importButton.disabled = interactionBlocked || counts.importCount <= 0;
+		importHighButton.disabled = interactionBlocked || counts.importHighCount <= 0;
 		applyButton.textContent = counts.applyCount > 0 ? `回填到自定义 (${counts.applyCount})` : "回填到自定义";
 		importButton.textContent = counts.importCount > 0 ? `批量入库 (${counts.importCount})` : "批量入库";
 		importHighButton.textContent = counts.importHighCount > 0 ? `高置信入库 (${counts.importHighCount})` : "高置信入库";
-		for (const quickButton of quickButtons) quickButton.disabled = busyState;
-		searchButton.classList.toggle("is-busy", busyState);
+		for (const quickButton of quickButtons) quickButton.disabled = interactionBlocked;
+		for (const button of groupFilterButtons.values()) button.disabled = interactionBlocked;
+		for (const button of metaFilterButtons.values()) button.disabled = interactionBlocked;
+		for (const card of resultCards.values()) card.disabled = interactionBlocked;
+		for (const chip of selectedPreview.querySelectorAll?.("button") ?? []) chip.disabled = interactionBlocked;
+		const blockedHint = runtimeBlocked ? "连续测试进行中，请先停止。" : "";
+		for (const button of [applyButton, importButton, importHighButton]) {
+			if (blockedHint) button.title = blockedHint;
+			else if (button.title === "连续测试进行中，请先停止。") button.title = "";
+		}
+		if (tagMode && blockedHint) searchButton.title = blockedHint;
+		else searchButton.title = tagMode ? "执行联网标签搜索" : "在内嵌网页中打开";
+		searchButton.classList.toggle("is-busy", tagMode && busyState);
 	};
 	const setBusy = (busy) => {
 		busyState = !!busy;
@@ -14029,13 +14792,17 @@ function openOnlinePromptSearchDialog(node, library) {
 		if (!options.includes(activeGroupFilter)) activeGroupFilter = "all";
 		for (const option of options) {
 			const button = document.createElement("button");
+			button.type = "button";
 			button.className = "qwen-te-modal__preset";
 			const count = option === "all"
 				? candidateItems.length
 				: candidateItems.filter((item) => String(item?.group ?? "").trim() === option).length;
-			button.textContent = `${option === "all" ? "全部" : option} (${count})`;
+			button.textContent = `${option === "all" ? "全部分组" : option} (${count})`;
 			setFilterButtonState(button, option === activeGroupFilter);
+			button.setAttribute("aria-pressed", option === activeGroupFilter ? "true" : "false");
+			button.disabled = isInteractionBlocked();
 			button.onclick = () => {
+				if (isInteractionBlocked()) return;
 				activeGroupFilter = option;
 				renderGroupFilters();
 				renderMetaFilters();
@@ -14049,17 +14816,21 @@ function openOnlinePromptSearchDialog(node, library) {
 		metaFilterBar.replaceChildren();
 		metaFilterButtons.clear();
 		const options = [
-			{ key: "all", label: "全部", count: candidateItems.length },
+			{ key: "all", label: "全部状态", count: candidateItems.length },
 			{ key: "high", label: "高置信", count: candidateItems.filter((item) => isHighConfidence(item)).length },
 			{ key: "new", label: "待新增", count: candidateItems.filter((item) => !item.exists).length },
 			{ key: "existing", label: "已在库", count: candidateItems.filter((item) => !!item.exists).length },
 		];
 		for (const option of options) {
 			const button = document.createElement("button");
+			button.type = "button";
 			button.className = "qwen-te-modal__preset";
 			button.textContent = `${option.label} (${option.count})`;
 			setFilterButtonState(button, option.key === activeMetaFilter);
+			button.setAttribute("aria-pressed", option.key === activeMetaFilter ? "true" : "false");
+			button.disabled = isInteractionBlocked();
 			button.onclick = () => {
+				if (isInteractionBlocked()) return;
 				activeMetaFilter = option.key;
 				renderMetaFilters();
 				renderResults();
@@ -14099,30 +14870,20 @@ function openOnlinePromptSearchDialog(node, library) {
 			button.type = "button";
 			button.className = "qwen-te-modal__mini-button";
 			button.textContent = tool.label;
-			button.disabled = busyState || !candidateItems.length;
-			button.onclick = tool.onclick;
+			button.disabled = isInteractionBlocked() || !candidateItems.length;
+			button.onclick = () => {
+				if (isInteractionBlocked()) return;
+				tool.onclick();
+			};
 			resultTools.appendChild(button);
 		}
 	};
 	const getEffectiveSelection = (options = {}) => {
-		const onlyHigh = !!options.onlyHighConfidence;
-		const selected = dedupeTags(
-			getSelectedItems()
-				.filter((item) => !onlyHigh || isHighConfidence(item))
-				.map((item) => item.tag)
-		);
-		if (selected.length) return selected;
-		const filteredItems = getFilteredItems();
-		const fallback = dedupeTags(
-			filteredItems
-			.filter((item) => !onlyHigh || isHighConfidence(item))
-			.slice(0, 12)
-			.map((item) => item.tag)
-		);
-		return fallback;
+		return resolveOnlineSearchSelectedTags(candidateItems, selectedTags, options);
 	};
 	const renderResults = () => {
 		resultList.replaceChildren();
+		resultCards.clear();
 		const filteredItems = getFilteredItems();
 		for (const item of filteredItems) {
 			const tag = item.tag;
@@ -14133,6 +14894,13 @@ function openOnlinePromptSearchDialog(node, library) {
 			card.classList.toggle("is-selected", selectedTags.has(tag));
 			card.classList.toggle("is-high", isHighConfidence(item));
 			card.classList.toggle("is-existing", !!item.exists);
+			card.setAttribute("aria-pressed", selectedTags.has(tag) ? "true" : "false");
+			card.setAttribute("aria-label", `${selectedTags.has(tag) ? "取消选择" : "选择"} ${tag}`);
+			card.disabled = isInteractionBlocked();
+			const route = document.createElement("div");
+			route.className = "qwen-te-online-search__result-route";
+			route.textContent = [String(item.group ?? "").trim(), String(item.section ?? "").trim()].filter(Boolean).join(" / ") || "未分类候选";
+			card.appendChild(route);
 
 			const head = document.createElement("div");
 			head.className = "qwen-te-online-search__card-head";
@@ -14144,7 +14912,7 @@ function openOnlinePromptSearchDialog(node, library) {
 			head.appendChild(name);
 
 			const pillBar = document.createElement("div");
-			pillBar.className = "qwen-te-modal__content-pills";
+			pillBar.className = "qwen-te-modal__content-pills qwen-te-online-search__result-badges";
 			head.appendChild(pillBar);
 
 			const highPill = document.createElement("div");
@@ -14158,13 +14926,11 @@ function openOnlinePromptSearchDialog(node, library) {
 			pillBar.appendChild(statusPill);
 
 			const summaryLines = [];
-			if (String(item.group ?? "").trim()) summaryLines.push(`推荐分组：${String(item.group ?? "").trim()}`);
-			if (String(item.section ?? "").trim()) summaryLines.push(`推荐小节：${String(item.section ?? "").trim()}`);
-			if (String(item.source ?? "").trim()) summaryLines.push(`来源：${String(item.source ?? "").trim()}`);
-			if (Number(item.count ?? 0) > 0) summaryLines.push(`命中强度：${Number(item.count ?? 0)}`);
+			if (String(item.source ?? "").trim()) summaryLines.push(`来源 ${String(item.source ?? "").trim()}`);
+			if (Number(item.count ?? 0) > 0) summaryLines.push(`独立样本支持 ${Number(item.count ?? 0)}`);
 			const summary = document.createElement("div");
 			summary.className = "qwen-te-online-search__card-summary";
-			summary.textContent = summaryLines.join("\n") || "这个候选标签还没有更多可展示的分类信息。";
+			summary.textContent = summaryLines.join(" · ") || "该候选来自当前搜索结果。";
 			card.appendChild(summary);
 
 			const foot = document.createElement("div");
@@ -14177,13 +14943,20 @@ function openOnlinePromptSearchDialog(node, library) {
 			foot.appendChild(actionHint);
 
 			card.onclick = () => {
+				if (isInteractionBlocked()) return;
 				if (selectedTags.has(tag)) selectedTags.delete(tag);
 				else selectedTags.add(tag);
-				renderResults();
+				const selected = selectedTags.has(tag);
+				card.classList.toggle("is-selected", selected);
+				card.setAttribute("aria-pressed", selected ? "true" : "false");
+				card.setAttribute("aria-label", `${selected ? "取消选择" : "选择"} ${tag}`);
+				actionHint.textContent = selected ? "已纳入本次操作" : "点击加入本次操作";
+				renderSummaryBar();
 				renderSelectionBadge();
 				syncActionButtons();
 			};
 			resultList.appendChild(card);
+			resultCards.set(tag, card);
 		}
 		if (!filteredItems.length) {
 			const empty = document.createElement("div");
@@ -14222,22 +14995,31 @@ function openOnlinePromptSearchDialog(node, library) {
 		renderSelectionTools();
 		syncActionButtons();
 	};
-	const runSearch = async () => {
-		if (busyState) return;
+	const runSearch = async (options = {}) => {
+		if (busyState || rejectDuringContinuousRun()) return;
 		const query = String(searchInput.value ?? "").trim();
 		if (!query) {
 			statusEl.textContent = "请输入关键词后再搜索。";
 			return;
 		}
-		const compacted = buildOnlineSearchQuery(query, 6);
+		const compacted = options.queryIsEffective
+			? { query, dropped: 0, normalized: false }
+			: buildOnlineSearchQuery(query, 6);
 		const effectiveQuery = String(compacted.query ?? "").trim();
 		if (!effectiveQuery) {
 			statusEl.textContent = "未提取到有效搜索词，请检查输入。";
 			return;
 		}
+		if (options.recordHistory !== false) {
+			const historyState = pushOnlineSearchBrowserHistory(queryHistory, queryHistoryIndex, effectiveQuery, 20);
+			queryHistory = historyState.items;
+			queryHistoryIndex = historyState.index;
+		}
 		const currentRequestId = ++requestId;
 		setBusy(true);
 		if (compacted.normalized) searchInput.value = effectiveQuery;
+		tagAddressBadgeText = "正在搜索";
+		if (activeBrowserMode === "tags") addressBadge.textContent = tagAddressBadgeText;
 		statusEl.textContent = `联网搜索中：${effectiveQuery}${compacted.normalized ? "（已提炼关键词）" : ""}`;
 		try {
 			const result = await searchOnlinePromptTags(effectiveQuery, 30, { owner: overlay, key: "online-search" });
@@ -14251,15 +15033,14 @@ function openOnlinePromptSearchDialog(node, library) {
 			activeMetaFilter = "all";
 			selectedTags.clear();
 			for (const item of candidateItems.filter((entry) => isHighConfidence(entry)).slice(0, 8)) selectedTags.add(item.tag);
-			if (!selectedTags.size) for (const tag of candidateTags.slice(0, 8)) selectedTags.add(tag);
+			if (!selectedTags.size) for (const item of candidateItems.slice(0, 8)) selectedTags.add(item.tag);
 			renderGroupFilters();
 			renderMetaFilters();
 			renderResults();
 			const sourceMap = {
+				searxng: "SearXNG",
 				civitai: "Civitai",
-				prompthero: "PromptHero",
 				lexica: "Lexica",
-				duckduckgo_text: "DuckDuckGo",
 				local_fallback: "本地回退",
 				network_error: "网络异常回退",
 			};
@@ -14268,7 +15049,9 @@ function openOnlinePromptSearchDialog(node, library) {
 				.map((item) => sourceMap[item] ?? item)
 				.filter(Boolean)
 				.join("+") || "联网";
-			const warning = result.warning ? `（回退原因：${result.warning}）` : "";
+			const warningText = formatOnlineSearchWarning(result.warning);
+			const warning = warningText ? `（来源状态：${warningText}）` : "";
+			const cacheHint = result.cached ? "（复用近期搜索结果）" : "";
 			const highCount = candidateItems.filter((item) => isHighConfidence(item)).length;
 			const existingCount = candidateItems.filter((item) => !!item.exists).length;
 			const newCount = candidateItems.length - existingCount;
@@ -14276,7 +15059,10 @@ function openOnlinePromptSearchDialog(node, library) {
 			const fallbackHint = String(result.source ?? "").includes("local_fallback")
 				? "（当前仅命中本地回退，可尝试英文词：adult / boudoir / half body）"
 				: "";
-			statusEl.textContent = `${source}返回 ${candidateItems.length} 个候选标签，高置信 ${highCount} 个，待新增 ${newCount} 个。${normalizeHint}${warning}${fallbackHint}`.trim();
+			statusEl.textContent = `${source}返回 ${candidateItems.length} 个候选标签，高置信 ${highCount} 个，待新增 ${newCount} 个。${cacheHint}${normalizeHint}${warning}${fallbackHint}`.trim();
+			statusEl.title = statusEl.textContent;
+			tagAddressBadgeText = result.cached ? "缓存" : source.split("+")[0] || "搜索";
+			if (activeBrowserMode === "tags") addressBadge.textContent = tagAddressBadgeText;
 		} catch (error) {
 			if (currentRequestId !== requestId) return;
 			candidateTags = [];
@@ -14287,22 +15073,27 @@ function openOnlinePromptSearchDialog(node, library) {
 			renderMetaFilters();
 			renderResults();
 			statusEl.textContent = `联网搜索失败：${error.message}`;
+			statusEl.title = statusEl.textContent;
+			tagAddressBadgeText = "失败";
+			if (activeBrowserMode === "tags") addressBadge.textContent = tagAddressBadgeText;
 		} finally {
 			if (currentRequestId === requestId) setBusy(false);
 		}
 	};
 	const applyToNode = async () => {
-		if (busyState) return;
+		if (busyState || rejectDuringContinuousRun()) return;
 		const tagsToApply = getEffectiveSelection({ onlyHighConfidence: false });
 		if (!tagsToApply.length) {
 			statusEl.textContent = "没有可回填的候选标签。";
 			return;
 		}
 		setBusy(true);
+		const currentRequestId = ++requestId;
+		const isDialogOperationCurrent = () => currentRequestId === requestId && !overlay.__qwenDisposed;
 		const mutationRevision = beginNodeStateMutation(node);
 		try {
-			const nextLibrary = await getFreshLibraryForUi(node, library, { mutationRevision });
-			if (!isNodeStateMutationCurrent(node, mutationRevision)) return;
+			const nextLibrary = await getFreshLibraryForUi(node, library, { mutationRevision, commitGuard: isDialogOperationCurrent });
+			if (!isDialogOperationCurrent() || !isNodeStateMutationCurrent(node, mutationRevision)) return;
 			const nextState = collectNodeState(node, nextLibrary);
 			const mergedCustom = [...nextState.customTags];
 			const beforeCount = mergedCustom.length;
@@ -14310,18 +15101,20 @@ function openOnlinePromptSearchDialog(node, library) {
 			const addedCount = Math.max(0, mergedCustom.length - beforeCount);
 			const skippedCount = Math.max(0, tagsToApply.length - addedCount);
 			nextState.customTags = mergedCustom;
+			if (!isDialogOperationCurrent() || rejectDuringContinuousRun()) return;
 			if (!applyNodeState(node, nextLibrary, nextState, { recordHistory: true, historySource: "manual-apply", mutationRevision })) return;
 			statusEl.textContent = skippedCount > 0
 				? `已处理 ${tagsToApply.length} 个标签：新增 ${addedCount}，已存在跳过 ${skippedCount}。`
 				: `已回填 ${addedCount} 个标签到“自定义补充标签”。`;
 		} catch (error) {
+			if (!isDialogOperationCurrent()) return;
 			statusEl.textContent = `回填失败：${error.message}`;
 		} finally {
-			setBusy(false);
+			if (isDialogOperationCurrent()) setBusy(false);
 		}
 	};
 	const importToLibrary = async (options = {}) => {
-		if (busyState) return;
+		if (busyState || rejectDuringContinuousRun()) return;
 		const onlyHigh = !!options.onlyHighConfidence;
 		const tagsToImport = getEffectiveSelection({ onlyHighConfidence: onlyHigh }).filter((tag) => {
 			const item = candidateItems.find((entry) => entry.tag === tag);
@@ -14332,66 +15125,194 @@ function openOnlinePromptSearchDialog(node, library) {
 			return;
 		}
 		setBusy(true);
+		const currentRequestId = ++requestId;
+		const isDialogOperationCurrent = () => currentRequestId === requestId && !overlay.__qwenDisposed;
+		let addedCount = 0;
 		try {
-			const suggest = await suggestCustomTagGrouping(tagsToImport.join(", "), { owner: overlay, key: "online-import-suggest" });
 			const grouped = new Map();
-			for (const item of suggest.tags ?? []) {
-				if (item?.exists) continue;
-				const group = String(item?.recommended_group ?? "").trim();
-				const section = String(item?.recommended_section ?? "").trim();
-				const tag = String(item?.tag ?? "").trim();
-				if (!group || !section || !tag) continue;
-				const key = `${group}::${section}`;
-				if (!grouped.has(key)) grouped.set(key, { group, section, tags: [] });
-				const bucket = grouped.get(key);
-				if (bucket && !bucket.tags.includes(tag)) bucket.tags.push(tag);
+			for (const batch of chunkOnlineImportTags(tagsToImport, 12)) {
+				if (rejectDuringContinuousRun()) return;
+				const suggest = await suggestCustomTagGrouping(batch.join(", "), { owner: overlay, key: "online-import-suggest" });
+				if (!isDialogOperationCurrent()) return;
+				for (const item of suggest.tags ?? []) {
+					if (item?.exists) continue;
+					const group = String(item?.recommended_group ?? "").trim();
+					const section = String(item?.recommended_section ?? "").trim();
+					const tag = String(item?.tag ?? "").trim();
+					if (!group || !section || !tag) continue;
+					const key = `${group}::${section}`;
+					if (!grouped.has(key)) grouped.set(key, { group, section, tags: [] });
+					const bucket = grouped.get(key);
+					if (bucket && !bucket.tags.includes(tag)) bucket.tags.push(tag);
+				}
 			}
-			let addedCount = 0;
 			for (const bucket of grouped.values()) {
+				if (rejectDuringContinuousRun()) return;
 				const response = await mutateTagLibrary("/qwen_te/tag_library/add_batch", {
 					category: bucket.group,
 					section: bucket.section,
 					tag: bucket.tags.join(", "),
 				}, { owner: overlay, key: "online-import-mutation" });
+				if (!isDialogOperationCurrent()) return;
 				addedCount += Number(response?.detail?.added?.length ?? 0);
 			}
-			await refreshLibraryOnNode(node);
-			statusEl.textContent = addedCount > 0
-				? `已批量入库 ${addedCount} 个${onlyHigh ? "高置信" : ""}标签。`
-				: "没有新的标签被入库（可能已存在）。";
+			const refreshedLibrary = await refreshLibraryOnNode(node, { commitGuard: isDialogOperationCurrent });
+			if (!isDialogOperationCurrent()) return;
+			const resolution = resolveOnlineSearchLibraryTags(tagsToImport, refreshedLibrary);
+			candidateItems = candidateItems.map((item) => ({
+				...item,
+				exists: !!item.exists || resolution.existingKeys.has(getOnlineSearchCanonicalKey(item.tag)),
+			}));
+			const unresolvedCount = resolution.unresolvedTags.length;
+			renderGroupFilters();
+			renderMetaFilters();
+			renderResults();
+			if (addedCount > 0) {
+				statusEl.textContent = `已批量入库 ${addedCount} 个${onlyHigh ? "高置信" : ""}标签${unresolvedCount > 0 ? `，${unresolvedCount} 个未能归类` : ""}。`;
+			} else if (unresolvedCount > 0) {
+				statusEl.textContent = `${unresolvedCount} 个标签未能归类，本次没有写入新标签。`;
+			} else {
+				statusEl.textContent = "所选标签已存在于标签库。";
+			}
 		} catch (error) {
-			statusEl.textContent = `批量入库失败：${error.message}`;
+			if (!isDialogOperationCurrent()) return;
+			let confirmedCount = addedCount;
+			let unresolvedCount = Math.max(0, tagsToImport.length - confirmedCount);
+			try {
+				const refreshedLibrary = await refreshLibraryOnNode(node, { commitGuard: isDialogOperationCurrent });
+				if (!isDialogOperationCurrent()) return;
+				const resolution = resolveOnlineSearchLibraryTags(tagsToImport, refreshedLibrary);
+				confirmedCount = resolution.resolvedTags.length;
+				unresolvedCount = resolution.unresolvedTags.length;
+				candidateItems = candidateItems.map((item) => ({
+					...item,
+					exists: !!item.exists || resolution.existingKeys.has(getOnlineSearchCanonicalKey(item.tag)),
+				}));
+				renderGroupFilters();
+				renderMetaFilters();
+				renderResults();
+			} catch (_refreshError) {}
+			statusEl.textContent = confirmedCount > 0
+				? `批量入库未完全完成：已确认 ${confirmedCount} 个标签在库，${unresolvedCount} 个未完成。${error.message}`
+				: `批量入库失败：${error.message}`;
 		} finally {
-			setBusy(false);
+			if (isDialogOperationCurrent()) setBusy(false);
 		}
 	};
 
-	searchButton.onclick = () => { void runSearch(); };
+	searchButton.onclick = () => {
+		if (activeBrowserMode === "web") void navigateWebsite(searchInput.value);
+		else void runSearch();
+	};
+	const navigateSearchHistory = (direction) => {
+		if (isInteractionBlocked()) return;
+		const next = stepOnlineSearchBrowserHistory(queryHistory, queryHistoryIndex, direction);
+		if (!next.query || next.index === queryHistoryIndex) return;
+		queryHistory = next.items;
+		queryHistoryIndex = next.index;
+		searchInput.value = next.query;
+		tagQueryDraft = next.query;
+		void runSearch({ recordHistory: false, queryIsEffective: true });
+	};
+	const navigateWebHistory = (direction) => {
+		const next = stepOnlineSearchBrowserHistory(webHistory, webHistoryIndex, direction);
+		if (!next.query || next.index === webHistoryIndex) return;
+		webHistory = next.items;
+		webHistoryIndex = next.index;
+		renderWebHistoryEntry(next.query);
+	};
+	backButton.onclick = () => {
+		if (activeBrowserMode === "web") navigateWebHistory(-1);
+		else navigateSearchHistory(-1);
+	};
+	forwardButton.onclick = () => {
+		if (activeBrowserMode === "web") navigateWebHistory(1);
+		else navigateSearchHistory(1);
+	};
+	reloadButton.onclick = () => {
+		if (activeBrowserMode === "web") {
+			if (currentWebUrl) void navigateWebsite(currentWebUrl, { recordHistory: false, resolved: true });
+			return;
+		}
+		if (isInteractionBlocked()) return;
+		const typedQuery = String(searchInput.value ?? "").trim();
+		if (!typedQuery) return;
+		const historyQuery = String(queryHistory[queryHistoryIndex] ?? "").trim();
+		const reusingHistoryQuery = !!historyQuery && typedQuery === historyQuery;
+		void runSearch({ recordHistory: !reusingHistoryQuery, queryIsEffective: reusingHistoryQuery });
+	};
+	homeButton.onclick = () => showWebHome();
+	openExternalButton.onclick = () => { void openCurrentWebExternally(); };
+	frameExternalButton.onclick = () => { void openCurrentWebExternally(currentWebUrl); };
+	for (const button of [...webBookmarkButtons, ...webHomeButtons]) {
+		button.onclick = () => {
+			const url = String(button.dataset.qwenBrowserUrl ?? "");
+			searchInput.value = url;
+			webAddressDraft = url;
+			void navigateWebsite(url);
+		};
+	}
+	webModeTab.button.onclick = () => { setBrowserMode("web"); searchInput.focus(); };
+	tagModeTab.button.onclick = () => { setBrowserMode("tags"); searchInput.focus(); };
+	browserTabs.addEventListener("keydown", (event) => {
+		if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+		event.preventDefault();
+		const nextMode = event.key === "ArrowRight"
+			? (activeBrowserMode === "web" ? "tags" : "web")
+			: (activeBrowserMode === "tags" ? "web" : "tags");
+		setBrowserMode(nextMode);
+		(nextMode === "web" ? webModeTab.button : tagModeTab.button).focus();
+	});
+	webFrame.addEventListener("load", () => {
+		if (overlay.__qwenDisposed || !currentWebUrl) return;
+		setWebStatus(`已导航到 ${currentWebUrl}。页面拒绝内嵌时请使用“外部打开”。`);
+	});
 	applyButton.onclick = () => { void applyToNode(); };
 	importButton.onclick = () => { void importToLibrary({ onlyHighConfidence: false }); };
 	importHighButton.onclick = () => { void importToLibrary({ onlyHighConfidence: true }); };
 	searchInput.addEventListener("keydown", (event) => {
-		if (event.key !== "Enter") return;
+		if (event.isComposing || event.key !== "Enter") return;
 		event.preventDefault();
-		void runSearch();
+		if (activeBrowserMode === "web") void navigateWebsite(searchInput.value);
+		else void runSearch();
+	});
+	searchInput.addEventListener("input", () => {
+		if (activeBrowserMode === "web") webAddressDraft = String(searchInput.value ?? "");
+		else tagQueryDraft = String(searchInput.value ?? "");
+		syncActionButtons();
 	});
 	const closeDialog = () => {
 		disposeModalOverlay(overlay);
 	};
-	overlay.__qwenDispose = () => { requestId += 1; };
-	doneButton.onclick = closeDialog;
+	dialog.addEventListener("keydown", (event) => {
+		if (event.key !== "Escape") return;
+		event.preventDefault();
+		closeDialog();
+	});
+	overlay.__qwenSyncRuntimeState = () => {
+		if (isContinuousRunActive() && !busyState) statusEl.textContent = "连续测试进行中，请先停止再搜索、回填或入库。";
+		syncActionButtons();
+		renderSelectionTools();
+	};
+	overlay.__qwenDispose = () => {
+		requestId += 1;
+		webFrame.src = "about:blank";
+		delete overlay.__qwenSyncRuntimeState;
+	};
 	closeButton.onclick = closeDialog;
 	overlay.addEventListener("click", (event) => { if (event.target === overlay) closeDialog(); });
 	document.body.appendChild(overlay);
 
 	const initialCustom = collectNodeState(node, library).customTags.join(", ");
-	searchInput.value = buildOnlineSearchQuery(initialCustom, 4).query;
+	tagQueryDraft = buildOnlineSearchQuery(initialCustom, 4).query;
 	renderGroupFilters();
 	renderMetaFilters();
 	renderSummaryBar();
 	renderSelectionBadge();
 	renderSelectionTools();
 	setBusy(false);
+	showWebHome({ recordHistory: false });
+	setBrowserMode("web");
 	searchInput.focus();
 }
 
@@ -15989,6 +16910,7 @@ function enhanceStagePromptNode(node, library) {
 	const displayTitle = document.createElement("div"); displayTitle.className="qwen-te-panel__display-title"; displayTitle.textContent="终端预览"; displayTop.appendChild(displayTitle);
 	const displayMeta = document.createElement("div"); displayMeta.className="qwen-te-panel__display-meta"; displayTop.appendChild(displayMeta);
 	const displaySource = document.createElement("div"); displaySource.className="qwen-te-panel__display-source"; displaySource.textContent="等待输出"; displayMeta.appendChild(displaySource);
+	const displaySearch = document.createElement("button"); displaySearch.type="button"; displaySearch.className="qwen-te-panel__display-expand qwen-te-panel__display-search"; displaySearch.textContent="浏览器"; displaySearch.dataset.qwenHint="打开网页浏览器与标签搜索。网页只在手动打开后访问。"; displaySearch.title=displaySearch.dataset.qwenHint; displaySearch.setAttribute("aria-label","打开网页浏览器"); displaySearch.addEventListener("pointerdown", (event) => { event.stopPropagation(); }); displaySearch.addEventListener("mousedown", (event) => { event.stopPropagation(); }); displaySearch.addEventListener("click", (event) => { event.stopPropagation(); if (displaySearch.disabled) return; openOnlinePromptSearchDialog(node, node?.[PANEL_KEY]?.library ?? library); }); displayMeta.appendChild(displaySearch);
 	const displayExpand = document.createElement("button"); displayExpand.type="button"; displayExpand.className="qwen-te-panel__display-expand"; displayExpand.textContent="弹出终端"; displayExpand.addEventListener("pointerdown", (event) => { event.stopPropagation(); }); displayExpand.addEventListener("mousedown", (event) => { event.stopPropagation(); }); displayExpand.addEventListener("click", (event) => { event.stopPropagation(); openStageOutputDialog(node); }); displayMeta.appendChild(displayExpand);
 	const displayTabs = document.createElement("div"); displayTabs.className="qwen-te-panel__display-tabs"; displayCard.appendChild(displayTabs);
 	const displayBody = document.createElement("div"); displayBody.className="qwen-te-panel__display-screen is-empty"; displayBody.textContent="运行一次后，这里会展示最近的提示词、负面词或 JSON 结果。"; displayCard.appendChild(displayBody);
@@ -16012,7 +16934,7 @@ function enhanceStagePromptNode(node, library) {
 	const slotPanel = buildSlotPanel(node, library); mainWorkspace.appendChild(slotPanel);
 	const advancedPanel = buildAdvancedPanel(node); mainWorkspace.appendChild(advancedPanel);
 	const quickbar = document.createElement("div"); quickbar.className="qwen-te-panel__quickbar"; mainWorkspace.appendChild(quickbar);
-	const panelButtons = {};
+	const panelButtons = { onlineSearch: displaySearch };
 	const registerPanelButton = (key, button) => {
 		if (key) panelButtons[key] = button;
 		return button;
