@@ -221,6 +221,12 @@ test("isStagePromptNode recognizes raw widget-only stage nodes", async () => {
 
 test("isStagePromptNode rejects generic single outputs and keeps legacy output signatures", async () => {
 	const exports = await loadMiniToolbarExports();
+	assert.equal(exports.isStagePromptNode({
+		type: "QwenTE_ModelLoader",
+		title: "Qwen TE 模型加载器",
+		widgets: [{ name: "模型系列" }, { name: "主模型" }],
+		outputs: [{ name: "qwen模型" }],
+	}), false);
 	assert.equal(exports.isStagePromptNode({ type: "OtherNode", outputs: [{ name: "JSON结果" }] }), false);
 	assert.equal(exports.isStagePromptNode({ type: "OtherNode", outputs: [{ name: "正向提示词合集" }] }), false);
 	assert.equal(exports.isStagePromptNode({ type: "OtherNode", outputs: [{ name: "JSON结果" }, { name: "JSON" }, { name: "JSON结果" }] }), false);

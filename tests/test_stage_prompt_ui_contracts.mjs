@@ -85,6 +85,71 @@ function makeElement(tagName = "div") {
 	return element;
 }
 
+function makeExternalModelLoaderFixture(options = {}) {
+	const specs = [
+		["模型系列", "Qwen3.6-VL", "combo", ["Qwen3-VL", "Qwen3.5-VL", "Qwen3.6-VL"]],
+		["主模型", "model.gguf", "combo", ["model.gguf"]],
+		["视觉投影mmproj", "无", "combo", ["无"]],
+		["启用思考", false, "toggle"],
+		["保留历史think", false, "toggle"],
+		["上下文长度", 8192, "number"],
+		["GPU层数", -1, "number"],
+		["KV缓存K类型", "f16", "combo", ["f16", "q8_0"]],
+		["KV缓存V类型", "f16", "combo", ["f16", "q8_0"]],
+		["MoE专家上CPU", false, "toggle"],
+		["前N层专家上CPU", 0, "number"],
+	];
+	let domCalls = 0;
+	const widgets = specs.map(([name, value, type, values]) => ({
+		name,
+		value,
+		type,
+		hidden: false,
+		options: values ? { values } : {},
+		computeSize() { return [180, 24]; },
+		inputEl: { style: {} },
+		element: { style: {} },
+	}));
+	const node = {
+		comfyClass: options.comfyClass ?? "QwenTE_ModelLoader",
+		type: options.type ?? "QwenTE_ModelLoader",
+		title: options.title ?? "Qwen TE 模型加载器",
+		widgets,
+		outputs: [{ name: "qwen模型", type: "QWENLLAMA" }],
+		size: [420, 320],
+		properties: {},
+		addDOMWidget() {
+			domCalls += 1;
+			return null;
+		},
+	};
+	const snapshot = widgets.map((widget) => ({
+		widget,
+		type: widget.type,
+		hidden: widget.hidden,
+		computeSize: widget.computeSize,
+		inputDisplay: widget.inputEl.style.display,
+		elementDisplay: widget.element.style.display,
+	}));
+	return {
+		node,
+		assertUntouched() {
+			assert.equal(domCalls, 0);
+			assert.deepEqual(node.widgets, widgets);
+			for (let index = 0; index < snapshot.length; index += 1) {
+				const before = snapshot[index];
+				const widget = node.widgets[index];
+				assert.equal(widget, before.widget);
+				assert.equal(widget.type, before.type);
+				assert.equal(widget.hidden, before.hidden);
+				assert.equal(widget.computeSize, before.computeSize);
+				assert.equal(widget.inputEl.style.display, before.inputDisplay);
+				assert.equal(widget.element.style.display, before.elementDisplay);
+			}
+		},
+	};
+}
+
 async function loadUiExports(href = "http://127.0.0.1:8188/", contextOverrides = {}) {
 	const source = await fs.readFile(UI_PATH, "utf8");
 	const patchedSource = source.replace(
@@ -304,6 +369,7 @@ test("renamed stage display name remains recognized alongside the legacy name", 
 
 test("stage node detection rejects generic single outputs and preserves legacy signatures", async () => {
 	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	assert.equal(exports.isStagePromptNode(makeExternalModelLoaderFixture().node), false);
 	assert.equal(exports.isStagePromptNode({ type: "OtherNode", outputs: [{ name: "JSON结果" }] }), false);
 	assert.equal(exports.isStagePromptNode({ type: "OtherNode", outputs: [{ name: "正向提示词合集" }] }), false);
 	assert.equal(exports.isStagePromptNode({ type: "OtherNode", outputs: [{ name: "JSON结果" }, { name: "JSON" }, { name: "JSON结果" }] }), false);
@@ -801,19 +867,19 @@ test("stage panel keeps daily generation settings in hidden native widgets", asy
 	assert.equal(source.includes("refreshControlSurface(node)"), true);
 });
 
-test("model loader exposes compact button deck and broader model families", async () => {
+test("stage model dialog exposes compact controls without taking over external loader nodes", async () => {
 	const source = await fs.readFile(UI_PATH, "utf8");
-	assert.equal(source.includes('const MODEL_LOADER_NODE_CLASSES = new Set(["QwenTE_ModelLoader"])'), true);
 	assert.equal(source.includes("TE MODEL DECK"), true);
 	for (const family of ["Qwen3.5-VL", "Qwen3-VL", "Gemma4", "Llama", "Mistral", "DeepSeek", "通用GGUF"]) {
 		assert.equal(source.includes(`value: "${family}"`), true, `${family} should be available from the model deck`);
 	}
-	assert.equal(source.includes("MODEL_LOADER_WIDGET_NAMES"), true);
-	assert.equal(source.includes("setWidgetGroupVisibility(node, MODEL_LOADER_WIDGET_NAMES, false"), true);
-	assert.equal(source.includes("enhanceExistingModelLoaderNodes()"), true);
-	assert.equal(source.includes("enhanceModelLoaderNode(node)"), true);
 	assert.equal(source.includes("function openStageModelDialog(stageNode)"), true);
-	assert.equal(source.includes("function ensureStageModelLoaderNode(stageNode)"), true);
+	assert.equal(source.includes("MODEL_LOADER_NODE_CLASSES"), false);
+	assert.equal(source.includes("MODEL_LOADER_WIDGET_NAMES"), false);
+	assert.equal(source.includes("enhanceExistingModelLoaderNodes"), false);
+	assert.equal(source.includes("enhanceModelLoaderNode"), false);
+	assert.equal(source.includes("qwen_te_model_panel"), false);
+	assert.equal(source.includes("ensureStageModelLoaderNode"), false);
 	assert.equal(source.includes('makeBtn(quickbar,"模型","MDL"'), true);
 	assert.equal(source.includes("STAGE_EMBEDDED_MODEL_WIDGET_NAMES"), true);
 	assert.equal(source.includes("STAGE_EMBEDDED_API_MODEL_WIDGET_NAMES"), true);
@@ -849,6 +915,97 @@ test("model loader exposes compact button deck and broader model families", asyn
 	assert.equal(source.includes("if (panelState.panel) refreshModelLoaderDeck(panelState, node);"), true);
 	assert.equal(source.includes("const connectedDecks = (panelState.modalDecks ?? []).filter((deck) => deck?.panel?.isConnected);"), true);
 	assert.equal(source.includes("for (const deck of connectedDecks) refreshModelLoaderDeck(deck, node);"), true);
+});
+
+test("beforeRegisterNodeDef leaves external model loader prototypes untouched", async () => {
+	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	for (const nodeData of [
+		{
+			name: "QwenTE_ModelLoader",
+			display_name: "Qwen TE 模型加载器",
+			python_module: "custom_nodes.comfyUI-llama-TE-main",
+		},
+		{
+			name: "Gemma4TE_ModelLoader",
+			display_name: "Gemma4 TE 模型加载器",
+			python_module: "custom_nodes.comfyUI-llama-TE-main",
+		},
+		{
+			name: "Foreign_ModelLoader",
+			display_name: "其他模型加载器",
+			python_module: "custom_nodes.foreign-model-plugin",
+		},
+	]) {
+		function ExternalLoader() {}
+		const created = function () { return "external"; };
+		const removed = function () { return "removed"; };
+		ExternalLoader.prototype.onNodeCreated = created;
+		ExternalLoader.prototype.onRemoved = removed;
+		const prototypeKeys = Reflect.ownKeys(ExternalLoader.prototype);
+
+		await exports.__extension.beforeRegisterNodeDef(ExternalLoader, nodeData);
+
+		assert.equal(ExternalLoader.prototype.onNodeCreated, created);
+		assert.equal(ExternalLoader.prototype.onRemoved, removed);
+		assert.deepEqual(Reflect.ownKeys(ExternalLoader.prototype), prototypeKeys);
+	}
+});
+
+test("setup and graph hooks leave existing external Qwen loader UI unchanged", async () => {
+	const queuedTimeouts = [];
+	const exports = await loadUiExports("http://127.0.0.1:8188/", {
+		setTimeout(callback) {
+			queuedTimeouts.push(callback);
+			return queuedTimeouts.length;
+		},
+		setInterval() {
+			return { unref() {} };
+		},
+		clearInterval() {},
+	});
+	const fixtures = [
+		makeExternalModelLoaderFixture(),
+		makeExternalModelLoaderFixture({
+			comfyClass: "Gemma4TE_ModelLoader",
+			type: "Gemma4TE_ModelLoader",
+			title: "Gemma4 TE 模型加载器",
+		}),
+	];
+	exports.__context.__testApp.graph._nodes = fixtures.map((fixture) => fixture.node);
+	assert.equal(exports.__context.__QWEN_TE_STAGE_COLLECT_NODE_STATE__(fixtures[0].node, { slot_config: [] }), null);
+	assert.equal(exports.__context.__QWEN_TE_STAGE_RECORD_HISTORY__(fixtures[0].node, {}, "test"), false);
+	assert.equal(exports.__context.__QWEN_TE_STAGE_GET_PROMPT_OUTPUT__(fixtures[0].node), "");
+
+	await exports.__extension.setup();
+	while (queuedTimeouts.length) queuedTimeouts.shift()?.();
+	for (const fixture of fixtures) fixture.assertUntouched();
+
+	for (const fixture of fixtures) exports.__context.__testApp.graph.onNodeAdded?.(fixture.node);
+	while (queuedTimeouts.length) queuedTimeouts.shift()?.();
+	for (const fixture of fixtures) fixture.assertUntouched();
+});
+
+test("nodeCreated leaves newly added external Qwen loader UI unchanged", async () => {
+	const queuedTimeouts = [];
+	const exports = await loadUiExports("http://127.0.0.1:8188/", {
+		setTimeout(callback) {
+			queuedTimeouts.push(callback);
+			return queuedTimeouts.length;
+		},
+	});
+	const fixtures = [
+		makeExternalModelLoaderFixture(),
+		makeExternalModelLoaderFixture({
+			comfyClass: "Gemma4TE_ModelLoader",
+			type: "Gemma4TE_ModelLoader",
+			title: "Gemma4 TE 模型加载器",
+		}),
+	];
+
+	for (const fixture of fixtures) await exports.__extension.nodeCreated(fixture.node);
+	while (queuedTimeouts.length) queuedTimeouts.shift()?.();
+
+	for (const fixture of fixtures) fixture.assertUntouched();
 });
 
 test("stage panel quickbar uses short text labels without noisy glyph icons", async () => {

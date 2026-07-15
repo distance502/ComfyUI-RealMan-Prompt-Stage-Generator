@@ -16,7 +16,6 @@ const STAGE_OUTPUT_SIGNATURE_GROUPS = new Map([
 	["正向提示词合集", "collection"], ["合集", "collection"],
 	["智能文本", "smart"], ["智能", "smart"],
 ]);
-const MODEL_LOADER_NODE_CLASSES = new Set(["QwenTE_ModelLoader"]);
 const PANEL_KEY = Symbol.for("qwen_te.stage_prompt.panel");
 const MODEL_LOADER_PANEL_KEY = Symbol.for("qwen_te.model_loader.panel");
 const HIDDEN_KEY = Symbol("qwen_te_hidden");
@@ -48,7 +47,6 @@ const SLOT_PANEL_LIBRARY_SIGNATURE_CACHE = new WeakMap();
 const NODE_REMOVED_KEY = Symbol.for("qwen_te.node.removed");
 const NODE_ENHANCE_RETRY_STATE_KEY = Symbol.for("qwen_te.stage_prompt.enhance_retry_state");
 const STAGE_NODE_LIFECYCLE_PATCH_KEY = Symbol.for("qwen_te.stage_prompt.lifecycle_patch");
-const MODEL_NODE_LIFECYCLE_PATCH_KEY = Symbol.for("qwen_te.model_loader.lifecycle_patch");
 const GRAPH_NODE_ADDED_PATCH_KEY = Symbol.for("qwen_te.graph.node_added_patch");
 const RANDOM_DEDUPE_CACHE_WIDGET_NAME = "随机补充避重缓存";
 const PROMPT_DEDUPE_CACHE_WIDGET_NAME = "连续生成避重缓存";
@@ -320,7 +318,6 @@ const RANDOM_COMBO_IDENTITY_GROUP_NAME = "主体";
 const RANDOM_COMBO_SCENE_GROUP_NAME = "场景背景";
 const RANDOM_COMBO_IDENTITY_SECTION_NAMES = ["特殊身份", "奇幻角色", "现代人物"];
 const RANDOM_COMBO_SCENE_EXCLUDE_TAGS = new Set(["白色背景", "纯色背景"]);
-const MODEL_LOADER_WIDGET_NAMES = ["模型系列", "主模型", "视觉投影mmproj", "启用思考", "上下文长度", "GPU层数", "KV缓存K类型", "KV缓存V类型"];
 const STAGE_EMBEDDED_LOCAL_MODEL_WIDGET_NAMES = ["内置模型系列", "内置主模型", "内置视觉投影mmproj", "内置启用思考", "内置上下文长度", "内置GPU层数", "内置KV缓存K类型", "内置KV缓存V类型"];
 const STAGE_EMBEDDED_API_MODEL_WIDGET_NAMES = ["API服务商", "API地址", "API密钥", "API模型", "API超时秒", "API额外请求头"];
 const STAGE_EMBEDDED_MODEL_WIDGET_NAMES = ["模型来源", ...STAGE_EMBEDDED_LOCAL_MODEL_WIDGET_NAMES, ...STAGE_EMBEDDED_API_MODEL_WIDGET_NAMES];
@@ -4275,13 +4272,6 @@ function setWidgetGroupVisibility(node, names, show, suffix = "") {
 	return changed;
 }
 
-function isModelLoaderNode(node) {
-	if (!node) return false;
-	if (MODEL_LOADER_NODE_CLASSES.has(node.comfyClass)) return true;
-	if (typeof node.title === "string" && node.title.includes("模型加载器") && getWidget(node, "模型系列") && getWidget(node, "主模型")) return true;
-	return false;
-}
-
 function resolveModelWidgetName(node, name) {
 	for (const candidate of MODEL_WIDGET_ALIASES[name] ?? [name]) {
 		if (getWidget(node, candidate)) return candidate;
@@ -4709,100 +4699,6 @@ function buildModelLoaderDeck(node, options = {}) {
 		apiSections: hasStageModelSource ? [apiProviderSection.section, apiTextSection.section, apiHeaderSection.section] : [],
 		localSections: [familySection.section, selectSection.section, runtimeSection.section, ctxSection.section, kvSection.section],
 	};
-}
-
-function enhanceModelLoaderNode(node) {
-	if (!isModelLoaderNode(node) || node?.[NODE_REMOVED_KEY] || node[MODEL_LOADER_PANEL_KEY]) return;
-	const deck = buildModelLoaderDeck(node);
-	const panel = deck.panel;
-
-	let panelWidget = null;
-	if (typeof node.addDOMWidget === "function") {
-		panelWidget = node.addDOMWidget("qwen_te_model_panel", "div", panel, { serialize: false, getValue() { return undefined; }, setValue() {} });
-		if (panelWidget) {
-			panelWidget.serialize = false;
-			panelWidget.computeSize = () => [Math.max(360, Math.min(node.size?.[0] ?? 420, 560)), measurePanelContentHeight(panel, 210)];
-		}
-	}
-	node[MODEL_LOADER_PANEL_KEY] = {
-		panel,
-		panelWidget,
-		statusEl: deck.statusEl,
-		sourceButtons: deck.sourceButtons,
-		providerButtons: deck.providerButtons,
-		familyButtons: deck.familyButtons,
-		ctxButtons: deck.ctxButtons,
-		gpuButtons: deck.gpuButtons,
-		kvButtons: deck.kvButtons,
-		thinkButton: deck.thinkButton,
-		selects: deck.selects,
-		inputs: deck.inputs,
-		apiSections: deck.apiSections,
-		localSections: deck.localSections,
-		rawVisible: false,
-	};
-	setWidgetGroupVisibility(node, MODEL_LOADER_WIDGET_NAMES, false, "Model");
-	refreshModelLoaderPanel(node);
-	scheduleNodeLayoutUpdate(node);
-}
-
-function enhanceExistingModelLoaderNodes() {
-	for (const node of app.graph?._nodes ?? []) {
-		if (isModelLoaderNode(node)) enhanceModelLoaderNode(node);
-	}
-}
-
-function findConnectedModelLoaderForStageNode(stageNode) {
-	if (!stageNode || !app.graph) return null;
-	const inputIndex = (stageNode.inputs ?? []).findIndex((input) => String(input?.name ?? "") === "qwen模型");
-	const input = inputIndex >= 0 ? stageNode.inputs?.[inputIndex] : null;
-	const linkId = input?.link;
-	if (linkId != null) {
-		const link = app.graph.links?.[linkId];
-		const originNode = link ? app.graph.getNodeById?.(link.origin_id) : null;
-		if (isModelLoaderNode(originNode)) return originNode;
-	}
-	return null;
-}
-
-function findExistingModelLoaderNode() {
-	return (app.graph?._nodes ?? []).find((node) => isModelLoaderNode(node)) ?? null;
-}
-
-function connectModelLoaderToStageNode(modelNode, stageNode) {
-	if (!modelNode || !stageNode) return false;
-	const inputIndex = (stageNode.inputs ?? []).findIndex((input) => String(input?.name ?? "") === "qwen模型");
-	if (inputIndex < 0 || typeof modelNode.connect !== "function") return false;
-	try {
-		modelNode.connect(0, stageNode, inputIndex);
-		return true;
-	} catch (_error) {
-		return false;
-	}
-}
-
-function createModelLoaderForStageNode(stageNode) {
-	const LiteGraphCtor = globalThis.LiteGraph ?? window.LiteGraph;
-	const createNode = LiteGraphCtor?.createNode;
-	if (typeof createNode !== "function" || !app.graph?.add) return null;
-	const modelNode = createNode("Qwen TE 模型加载器") || createNode("QwenTE_ModelLoader");
-	if (!modelNode) return null;
-	modelNode.pos = [
-		Math.max(20, Number(stageNode?.pos?.[0] ?? 280) - 300),
-		Math.max(20, Number(stageNode?.pos?.[1] ?? 200)),
-	];
-	app.graph.add(modelNode);
-	connectModelLoaderToStageNode(modelNode, stageNode);
-	setTimeout(() => enhanceModelLoaderNode(modelNode), 0);
-	return modelNode;
-}
-
-function ensureStageModelLoaderNode(stageNode) {
-	let modelNode = findConnectedModelLoaderForStageNode(stageNode) ?? findExistingModelLoaderNode();
-	if (!modelNode) modelNode = createModelLoaderForStageNode(stageNode);
-	if (modelNode && !findConnectedModelLoaderForStageNode(stageNode)) connectModelLoaderToStageNode(modelNode, stageNode);
-	if (modelNode) enhanceModelLoaderNode(modelNode);
-	return modelNode;
 }
 
 function openStageModelDialog(stageNode) {
@@ -15907,7 +15803,7 @@ function resolveStagePromptBridgeNode(nodeOrId) {
 	const targetNode = typeof nodeOrId === "object" && nodeOrId
 		? nodeOrId
 		: app.graph?._nodes?.find((candidate) => Number(candidate?.id ?? -1) === Number(nodeOrId ?? -2));
-	if (!targetNode || targetNode[NODE_REMOVED_KEY]) return null;
+	if (!targetNode || targetNode[NODE_REMOVED_KEY] || !isStagePromptNode(targetNode)) return null;
 	const graphNodes = app.graph?._nodes;
 	return Array.isArray(graphNodes) && !graphNodes.includes(targetNode) ? null : targetNode;
 }
@@ -15958,24 +15854,18 @@ window.__QWEN_TE_STAGE_APPLY_NODE_STATE__ = (nodeOrId, library, state, options =
 	return applyNodeState(targetNode, library, state, options);
 };
 window.__QWEN_TE_STAGE_COLLECT_NODE_STATE__ = (nodeOrId, library) => {
-	const targetNode = typeof nodeOrId === "object" && nodeOrId
-		? nodeOrId
-		: app.graph?._nodes?.find((candidate) => Number(candidate?.id ?? -1) === Number(nodeOrId ?? -2));
+	const targetNode = resolveStagePromptBridgeNode(nodeOrId);
 	if (!targetNode || !library) return null;
 	return collectNodeState(targetNode, library);
 };
 window.__QWEN_TE_STAGE_RECORD_HISTORY__ = (nodeOrId, state, source = "random") => {
-	const targetNode = typeof nodeOrId === "object" && nodeOrId
-		? nodeOrId
-		: app.graph?._nodes?.find((candidate) => Number(candidate?.id ?? -1) === Number(nodeOrId ?? -2));
+	const targetNode = resolveStagePromptBridgeNode(nodeOrId);
 	if (!targetNode || !state) return false;
 	recordNodeHistory(targetNode, state, source);
 	return true;
 };
 window.__QWEN_TE_STAGE_GET_PROMPT_OUTPUT__ = (nodeOrId) => {
-	const targetNode = typeof nodeOrId === "object" && nodeOrId
-		? nodeOrId
-		: app.graph?._nodes?.find((candidate) => Number(candidate?.id ?? -1) === Number(nodeOrId ?? -2));
+	const targetNode = resolveStagePromptBridgeNode(nodeOrId);
 	if (!targetNode) return "";
 	return String(getStagePromptOutputText(targetNode) ?? "");
 };
@@ -16289,18 +16179,6 @@ function cleanupStagePromptNodeRuntime(node) {
 	delete node[PANEL_KEY];
 }
 
-function cleanupModelLoaderNodeRuntime(node) {
-	if (!node) return;
-	node[NODE_REMOVED_KEY] = true;
-	disposeNodeOwnedModals(node);
-	const panelState = node[MODEL_LOADER_PANEL_KEY];
-	for (const deck of panelState?.modalDecks ?? []) {
-		const overlay = deck?.panel?.closest?.(".qwen-te-modal");
-		if (overlay instanceof HTMLElement) disposeModalOverlay(overlay);
-	}
-	delete node[MODEL_LOADER_PANEL_KEY];
-}
-
 function enhanceExistingStagePromptNodes() {
 	try {
 		disableFixUiRuntime();
@@ -16366,24 +16244,18 @@ function registerStagePromptMiniBridge() {
 		return applyNodeState(targetNode, library, state, options);
 	};
 	window.__QWEN_TE_STAGE_COLLECT_NODE_STATE__ = (nodeOrId, library) => {
-		const targetNode = typeof nodeOrId === "object" && nodeOrId
-			? nodeOrId
-			: app.graph?._nodes?.find((candidate) => Number(candidate?.id ?? -1) === Number(nodeOrId ?? -2));
+		const targetNode = resolveStagePromptBridgeNode(nodeOrId);
 		if (!targetNode || !library) return null;
 		return collectNodeState(targetNode, library);
 	};
 	window.__QWEN_TE_STAGE_RECORD_HISTORY__ = (nodeOrId, state, source = "random") => {
-		const targetNode = typeof nodeOrId === "object" && nodeOrId
-			? nodeOrId
-			: app.graph?._nodes?.find((candidate) => Number(candidate?.id ?? -1) === Number(nodeOrId ?? -2));
+		const targetNode = resolveStagePromptBridgeNode(nodeOrId);
 		if (!targetNode || !state) return false;
 		recordNodeHistory(targetNode, state, source);
 		return true;
 	};
 	window.__QWEN_TE_STAGE_GET_PROMPT_OUTPUT__ = (nodeOrId) => {
-		const targetNode = typeof nodeOrId === "object" && nodeOrId
-			? nodeOrId
-			: app.graph?._nodes?.find((candidate) => Number(candidate?.id ?? -1) === Number(nodeOrId ?? -2));
+		const targetNode = resolveStagePromptBridgeNode(nodeOrId);
 		if (!targetNode) return "";
 		return String(getStagePromptOutputText(targetNode) ?? "");
 	};
@@ -16396,27 +16268,6 @@ const registerStagePromptExtension = () => {
 	app.registerExtension({
 		name: EXTENSION_NAME,
 		async beforeRegisterNodeDef(nodeType, nodeData) {
-			const isModelLoaderNodeDef =
-				MODEL_LOADER_NODE_CLASSES.has(nodeData.name) ||
-				(typeof nodeData.display_name === "string" && nodeData.display_name.includes("模型加载器")) ||
-				(typeof nodeData.displayName === "string" && nodeData.displayName.includes("模型加载器"));
-			if (isModelLoaderNodeDef) {
-				if (nodeType.prototype[MODEL_NODE_LIFECYCLE_PATCH_KEY]) return;
-				nodeType.prototype[MODEL_NODE_LIFECYCLE_PATCH_KEY] = true;
-				const originalOnNodeCreated = nodeType.prototype.onNodeCreated;
-				nodeType.prototype.onNodeCreated = function () {
-					const result = originalOnNodeCreated?.apply(this, arguments);
-					delete this[NODE_REMOVED_KEY];
-					setTimeout(() => enhanceModelLoaderNode(this), 0);
-					return result;
-				};
-				const originalOnRemoved = nodeType.prototype.onRemoved;
-				nodeType.prototype.onRemoved = function () {
-					cleanupModelLoaderNodeRuntime(this);
-					return originalOnRemoved?.apply(this, arguments);
-				};
-				return;
-			}
 			const isTargetNodeDef =
 				TARGET_NODE_CLASSES.has(nodeData.name) ||
 				(typeof nodeData.display_name === "string" && hasStagePromptDisplayName(nodeData.display_name)) ||
@@ -16462,14 +16313,12 @@ const registerStagePromptExtension = () => {
 			injectStyles();
 			disableFixUiRuntime();
 			enhanceExistingStagePromptNodes();
-			enhanceExistingModelLoaderNodes();
 			installGlobalStagePromptQueueCapture();
 			if (window.__qwenTeStagePromptTimer != null) clearInterval(window.__qwenTeStagePromptTimer);
 			let maintenancePasses = 0;
 			const timer = setInterval(() => {
 				maintenancePasses += 1;
 				enhanceExistingStagePromptNodes();
-				enhanceExistingModelLoaderNodes();
 				installGlobalStagePromptQueueCapture();
 				if (maintenancePasses >= 30) {
 					clearInterval(timer);
@@ -16487,9 +16336,6 @@ const registerStagePromptExtension = () => {
 						ensureNodeCacheNamespace(node);
 						scheduleEnhanceStagePromptNode(node);
 					}
-					if (isModelLoaderNode(node)) {
-						setTimeout(() => enhanceModelLoaderNode(node), 0);
-					}
 					return result;
 				};
 			}
@@ -16501,7 +16347,6 @@ const registerStagePromptExtension = () => {
 				ensureNodeCacheNamespace(node);
 				scheduleEnhanceStagePromptNode(node);
 			}
-			if (isModelLoaderNode(node)) setTimeout(() => enhanceModelLoaderNode(node), 0);
 		},
 	});
 	return true;
