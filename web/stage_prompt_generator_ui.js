@@ -34,6 +34,7 @@ const NODE_RANDOM_COMBO_PREVIEW_KEY = "qwen_te_random_combo_preview_v1";
 const NODE_AUTO_NEGATIVE_SYNC_KEY = "qwen_te_auto_negative_sync_v1";
 const NODE_QUALITY_AUDIT_KEY = "qwen_te_quality_audit_v1";
 const NODE_WORKFLOW_OUTPUT_KEY = "qwen_te_workflow_output_v1";
+const NODE_MODEL_API_RUNTIME_SIGNATURE_KEY = "qwen_te_model_api_runtime_signature_v1";
 const NODE_NSFW_PROFILE_RESTORE_KEY = "qwen_te_nsfw_profile_restore_v1";
 const NODE_CHARACTER_SHEET_RESTORE_KEY = "qwen_te_character_sheet_restore_v1";
 const NODE_SMART_TEXT_AUTO_EXTRA_KEY = "qwen_te_smart_text_auto_extra_v1";
@@ -523,26 +524,26 @@ const MODEL_SOURCE_BUTTONS = [
 	{ value: "API接口", label: "API", hint: "API 模式：用下方服务商、Key 和模型名调用云端或本地兼容接口。" },
 ];
 const MODEL_API_PROVIDER_BUTTONS = [
-	{ value: "OpenAI兼容", label: "兼容", baseUrl: "", model: "", hint: "自定义 OpenAI 兼容接口：填写 Base URL、Key 和模型名。" },
-	{ value: "OpenAI", label: "OpenAI", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini" },
-	{ value: "OpenRouter", label: "Router", baseUrl: "https://openrouter.ai/api/v1", model: "openai/gpt-4o-mini" },
-	{ value: "DeepSeek", label: "DeepSeek", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-chat" },
-	{ value: "通义千问DashScope", label: "通义", baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", model: "qwen-plus" },
-	{ value: "Kimi", label: "Kimi", baseUrl: "https://api.moonshot.cn/v1", model: "moonshot-v1-8k" },
-	{ value: "SiliconFlow", label: "硅基", baseUrl: "https://api.siliconflow.cn/v1", model: "" },
-	{ value: "火山方舟", label: "方舟", baseUrl: "https://ark.cn-beijing.volces.com/api/v3", model: "" },
-	{ value: "智谱GLM", label: "智谱", baseUrl: "https://open.bigmodel.cn/api/paas/v4", model: "glm-4.5" },
-	{ value: "Groq", label: "Groq", baseUrl: "https://api.groq.com/openai/v1", model: "llama-3.1-8b-instant" },
-	{ value: "Together", label: "Together", baseUrl: "https://api.together.xyz/v1", model: "" },
-	{ value: "Fireworks", label: "Fireworks", baseUrl: "https://api.fireworks.ai/inference/v1", model: "" },
-	{ value: "Mistral", label: "Mistral", baseUrl: "https://api.mistral.ai/v1", model: "mistral-small-latest" },
-	{ value: "Perplexity", label: "PPLX", baseUrl: "https://api.perplexity.ai", model: "sonar" },
-	{ value: "Gemini OpenAI兼容", label: "Gemini兼容", baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", model: "gemini-2.5-flash" },
-	{ value: "Claude Anthropic", label: "Claude", baseUrl: "https://api.anthropic.com/v1/messages", model: "claude-3-5-haiku-latest" },
-	{ value: "Gemini 原生", label: "Gemini", baseUrl: "https://generativelanguage.googleapis.com/v1beta", model: "gemini-2.5-flash" },
-	{ value: "Ollama本地", label: "Ollama", baseUrl: "http://127.0.0.1:11434/v1", model: "qwen2.5" },
-	{ value: "LM Studio本地", label: "LMStudio", baseUrl: "http://127.0.0.1:1234/v1", model: "" },
-	{ value: "自定义", label: "自定义", baseUrl: "", model: "", hint: "完全自定义：手动填写兼容接口地址、Key、模型名和额外请求头。" },
+	{ value: "OpenAI兼容", label: "兼容", baseUrl: "", model: "", keyRef: "", hint: "自定义 OpenAI 兼容接口：填写 Base URL、Key 和模型名。" },
+	{ value: "OpenAI", label: "OpenAI", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini", keyRef: "env:OPENAI_API_KEY" },
+	{ value: "OpenRouter", label: "Router", baseUrl: "https://openrouter.ai/api/v1", model: "openai/gpt-4o-mini", keyRef: "env:OPENROUTER_API_KEY" },
+	{ value: "DeepSeek", label: "DeepSeek", baseUrl: "https://api.deepseek.com", model: "deepseek-v4-flash", keyRef: "env:DEEPSEEK_API_KEY" },
+	{ value: "通义千问DashScope", label: "通义", baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", model: "qwen-plus", keyRef: "env:DASHSCOPE_API_KEY" },
+	{ value: "Kimi", label: "Kimi", baseUrl: "https://api.moonshot.cn/v1", model: "moonshot-v1-8k", keyRef: "env:MOONSHOT_API_KEY" },
+	{ value: "SiliconFlow", label: "硅基", baseUrl: "https://api.siliconflow.cn/v1", model: "", keyRef: "env:SILICONFLOW_API_KEY" },
+	{ value: "火山方舟", label: "方舟", baseUrl: "https://ark.cn-beijing.volces.com/api/v3", model: "", keyRef: "env:ARK_API_KEY" },
+	{ value: "智谱GLM", label: "智谱", baseUrl: "https://open.bigmodel.cn/api/paas/v4", model: "glm-4.5", keyRef: "env:ZHIPUAI_API_KEY" },
+	{ value: "Groq", label: "Groq", baseUrl: "https://api.groq.com/openai/v1", model: "openai/gpt-oss-20b", keyRef: "env:GROQ_API_KEY" },
+	{ value: "Together", label: "Together", baseUrl: "https://api.together.xyz/v1", model: "", keyRef: "env:TOGETHER_API_KEY" },
+	{ value: "Fireworks", label: "Fireworks", baseUrl: "https://api.fireworks.ai/inference/v1", model: "", keyRef: "env:FIREWORKS_API_KEY" },
+	{ value: "Mistral", label: "Mistral", baseUrl: "https://api.mistral.ai/v1", model: "mistral-small-latest", keyRef: "env:MISTRAL_API_KEY" },
+	{ value: "Perplexity", label: "PPLX", baseUrl: "https://api.perplexity.ai", model: "sonar", keyRef: "env:PPLX_API_KEY" },
+	{ value: "Gemini OpenAI兼容", label: "Gemini兼容", baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", model: "gemini-2.5-flash", keyRef: "env:GEMINI_API_KEY" },
+	{ value: "Claude Anthropic", label: "Claude", baseUrl: "https://api.anthropic.com/v1/messages", model: "claude-haiku-4-5", keyRef: "env:ANTHROPIC_API_KEY" },
+	{ value: "Gemini 原生", label: "Gemini", baseUrl: "https://generativelanguage.googleapis.com/v1beta", model: "gemini-2.5-flash", keyRef: "env:GEMINI_API_KEY" },
+	{ value: "Ollama本地", label: "Ollama", baseUrl: "http://127.0.0.1:11434/v1", model: "qwen2.5", keyRef: "" },
+	{ value: "LM Studio本地", label: "LMStudio", baseUrl: "http://127.0.0.1:1234/v1", model: "", keyRef: "" },
+	{ value: "自定义", label: "自定义", baseUrl: "", model: "", keyRef: "", hint: "完全自定义：手动填写兼容接口地址、Key、模型名和额外请求头。" },
 ];
 const MODEL_API_PROVIDER_VALUES = new Set(MODEL_API_PROVIDER_BUTTONS.map((item) => item.value));
 const MODEL_API_PROVIDER_HOST_HINTS = [
@@ -1590,6 +1591,10 @@ function injectStyles() {
 	.qwen-te-model__head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
 	.qwen-te-model__title{font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#9fd4ff;font-family:Consolas,"Cascadia Code","SFMono-Regular",monospace}
 	.qwen-te-model__status{font-size:10px;line-height:1.35;color:#dce8f7;text-align:right;max-width:62%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+	.qwen-te-model__runtime-status{min-height:28px;display:flex;align-items:center;padding:6px 8px;border:1px solid #344250;border-radius:6px;background:#18212a;color:#c8d5e3;font-size:10px;line-height:1.45}
+	.qwen-te-model__runtime-status[data-tone="ready"],.qwen-te-model__runtime-status[data-tone="success"]{border-color:#39735a;background:#14271f;color:#bce8d0}
+	.qwen-te-model__runtime-status[data-tone="warn"]{border-color:#80642e;background:#2c2414;color:#f2d690}
+	.qwen-te-model__runtime-status[data-tone="error"]{border-color:#83454a;background:#2d191c;color:#f2b9bd}
 	.qwen-te-model__grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
 	.qwen-te-model__grid--wide{grid-template-columns:repeat(4,minmax(0,1fr))}
 	.qwen-te-model__button{border:1px solid rgba(92,114,142,.84);background:linear-gradient(180deg,rgba(47,61,77,.98),rgba(31,41,52,.99));color:#f4f7fb;border-radius:10px;padding:6px 6px;cursor:pointer;font-size:10px;line-height:1.15;font-weight:700;min-height:29px;text-align:center;transition:background .12s ease,border-color .12s ease,transform .08s ease,box-shadow .12s ease}
@@ -1792,7 +1797,7 @@ function injectStyles() {
 	.qwen-te-modal[data-qwen-modal="online-search"] .qwen-te-online-search__body{flex:1 1 auto;min-height:0;padding:0;overflow:hidden}
 	.qwen-te-online-search__stack{display:flex;flex-direction:column;min-height:0;height:100%;padding:0;background:#11151a}
 	.qwen-te-online-search__topbar{display:flex;flex-direction:column;gap:7px;flex:0 0 auto;padding:9px 12px 8px;background:#171b20;border-bottom:1px solid #30363f}
-	.qwen-te-online-search__browser-toolbar{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;align-items:center;gap:8px;padding:0}
+	.qwen-te-online-search__browser-toolbar{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto auto;align-items:center;gap:8px;padding:0}
 	.qwen-te-online-search__nav{display:flex;align-items:center;gap:3px}
 	.qwen-te-online-search__nav-button{width:34px;height:34px;display:inline-flex;align-items:center;justify-content:center;border:1px solid transparent;border-radius:50%;background:transparent;color:#d3d8df;font-size:18px;line-height:1;cursor:pointer}
 	.qwen-te-online-search__nav-button:hover:not(:disabled){background:#2a3037;border-color:#3d4651}
@@ -1805,6 +1810,9 @@ function injectStyles() {
 	.qwen-te-online-search__go-button:hover:not(:disabled){background:#8b6627;border-color:#c3984d}
 	.qwen-te-online-search__go-button:disabled{opacity:.48;cursor:not-allowed}
 	.qwen-te-online-search__external-button{border-radius:6px;border-color:#3b4652;background:#20262d;font-size:16px}
+	.qwen-te-online-search__companion-button{border-radius:6px;border-color:#7f6330;background:#4d3918;color:#ffe8b4;font-size:15px}
+	.qwen-te-online-search__companion-button:hover:not(:disabled){background:#674b1c;border-color:#b58a42}
+	.qwen-te-online-search__companion-button.is-busy{opacity:.62;cursor:wait}
 	.qwen-te-online-search__bookmarks{display:flex;flex-wrap:nowrap;gap:5px;min-width:0;overflow-x:auto;padding:0 0 1px 111px;scrollbar-width:none}
 	.qwen-te-online-search__bookmarks::-webkit-scrollbar{display:none}
 	.qwen-te-modal[data-qwen-modal="online-search"] .qwen-te-online-search__bookmarks .qwen-te-modal__preset{flex:0 0 auto;border:0;border-radius:5px;padding:4px 8px;background:transparent;color:#b9c1cb;font-size:10.5px}
@@ -1996,12 +2004,13 @@ function injectStyles() {
 		.qwen-te-modal[data-qwen-modal="online-search"] .qwen-te-online-search__tabstrip{min-height:40px;padding:5px 6px 0}
 		.qwen-te-online-search__tab{min-width:0;max-width:none;flex:1 1 auto;height:35px;padding-left:9px}
 		.qwen-te-online-search__topbar{gap:5px;padding:7px 8px}
-		.qwen-te-online-search__browser-toolbar{grid-template-columns:minmax(0,1fr) auto auto;gap:6px}
+		.qwen-te-online-search__browser-toolbar{grid-template-columns:minmax(0,1fr) auto auto auto;gap:6px}
 		.qwen-te-online-search__nav{grid-column:1/-1}
 		.qwen-te-online-search__addressbar{height:36px;padding:0 9px}
 		.qwen-te-online-search__address-badge{max-width:58px}
 		.qwen-te-online-search__go-button{height:34px;min-width:66px;padding:0 10px}
 		.qwen-te-online-search__external-button{width:34px;height:34px}
+		.qwen-te-online-search__companion-button{width:34px;height:34px}
 		.qwen-te-online-search__web-home{padding:24px 12px}
 		.qwen-te-online-search__web-home-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
 		.qwen-te-online-search__site-button{min-height:64px}
@@ -2494,6 +2503,48 @@ function openPromptBrowserExternal(rawTarget, options = {}) {
 		: { ...target, opened: false, reason: "popup_blocked", message: "新标签页被浏览器拦截。" };
 }
 
+async function launchPromptCompanionBrowser(rawTarget, options = {}) {
+	const target = resolvePromptBrowserTarget(rawTarget, options);
+	if (!target.ok) return { ...target, launched: false };
+	const requestJson = options.requestJson ?? fetchJsonWithTimeout;
+	try {
+		const { response, data } = await requestJson("/qwen_te/companion_browser/open", {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				"X-Qwen-TE-Companion-Browser": "1",
+			},
+			body: JSON.stringify({ url: target.url }),
+		}, {
+			owner: options.owner,
+			key: options.key ?? "companion-browser",
+			timeoutMs: options.timeoutMs ?? 15000,
+		});
+		if (!response?.ok || !data?.ok) {
+			return {
+				...target,
+				launched: false,
+				reason: `http_${Number(response?.status ?? 0) || 0}`,
+				message: String(data?.message ?? `完整浏览器启动失败：HTTP ${response?.status ?? 0}`),
+			};
+		}
+		return {
+			...target,
+			launched: true,
+			reason: "",
+			browser: String(data?.browser ?? "完整浏览器"),
+			message: String(data?.message ?? "完整浏览器已启动。"),
+		};
+	} catch (error) {
+		return {
+			...target,
+			launched: false,
+			reason: error?.name === "AbortError" ? "aborted" : "request_failed",
+			message: error?.name === "AbortError" ? "完整浏览器启动请求已取消。" : `完整浏览器启动失败：${error?.message ?? error}`,
+		};
+	}
+}
+
 const ONLINE_QUERY_LOW_VALUE_TERMS = new Set([
 	"8k",
 	"4k",
@@ -2740,6 +2791,17 @@ function ensureNodeCacheNamespace(node) {
 			.filter((value) => NODE_CACHE_NAMESPACE_PATTERN.test(value)));
 		do { namespace = createNodeCacheNamespace(); } while (occupied.has(namespace));
 		properties[NODE_CACHE_NAMESPACE_KEY] = namespace;
+		if (duplicate) {
+			delete properties[NODE_MODEL_API_RUNTIME_SIGNATURE_KEY];
+			delete properties[NODE_WORKFLOW_OUTPUT_KEY];
+			invalidateModelApiRuntimeStatus(node);
+			if (node?.[PANEL_KEY]) {
+				node[PANEL_KEY].lastExecutionOutputs = [];
+				node[PANEL_KEY].directStageOutputCache = null;
+				node[PANEL_KEY].hydratedExecutionOutputs = [];
+				node[PANEL_KEY].previewExecutionOutputs = [];
+			}
+		}
 	}
 	return namespace;
 }
@@ -3138,6 +3200,10 @@ function getNodeWorkflowHistorySearchAfter(node, fallbackWindowMs = 120000) {
 function markNodeWorkflowQueueRequested(node, at = Date.now()) {
 	if (!node?.[PANEL_KEY]) return;
 	node[PANEL_KEY].lastWorkflowQueueRequestedAt = Number(at ?? Date.now()) || Date.now();
+	const modelSource = String(getModelWidget(node, "模型来源")?.value ?? "仅Skill").trim() || "仅Skill";
+	const apiConfig = modelSource === "API接口" ? getModelApiEffectiveConfig(node) : null;
+	const apiReady = !!apiConfig?.baseUrl && !!apiConfig?.model && !getModelApiConfigValidationError(node);
+	node[PANEL_KEY].pendingModelApiConfigSignature = apiReady ? buildModelApiConfigSignature(node) : "";
 	node[PANEL_KEY].stageOutputPollIdleCount = 0;
 	node[PANEL_KEY].stageOutputPollActiveCount = 0;
 	ensureStageOutputPolling(node);
@@ -3181,7 +3247,10 @@ async function findLatestNodeWorkflowOutputFromHistory(node, options = {}) {
 async function syncNodeWorkflowOutputMetaFromHistory(node, options = {}) {
 	const meta = await findLatestNodeWorkflowOutputFromHistory(node, options);
 	if (typeof options.shouldCommit === "function" && !options.shouldCommit()) return null;
-	if (meta) setNodeWorkflowOutputMeta(node, meta);
+	if (meta) {
+		setNodeWorkflowOutputMeta(node, meta);
+		if (node?.[PANEL_KEY]?.pendingModelApiConfigSignature) rememberModelApiRuntimeSignature(node, meta.stageOutputs);
+	}
 	return meta;
 }
 
@@ -4711,18 +4780,187 @@ function getApiProviderDisplayName(provider, baseUrl = "") {
 	return rawProvider ? "自定义/未识别" : "未选择服务商";
 }
 
+function getModelApiProviderPreset(provider) {
+	const normalizedProvider = String(provider ?? "").trim();
+	return MODEL_API_PROVIDER_BUTTONS.find((item) => String(item.value ?? "").trim() === normalizedProvider) ?? null;
+}
+
+function normalizeModelApiBaseUrl(rawUrl) {
+	const text = String(rawUrl ?? "").trim();
+	if (!text) return "";
+	try {
+		const parsed = new URL(text);
+		const pathname = String(parsed.pathname ?? "").replace(/\/+$/u, "");
+		return `${String(parsed.protocol ?? "").toLowerCase()}//${String(parsed.host ?? "").toLowerCase()}${pathname && pathname !== "/" ? pathname : ""}`;
+	} catch (_error) {
+		return text.replace(/\/+$/u, "");
+	}
+}
+
+function getModelApiEffectiveConfig(node) {
+	const provider = String(getModelWidget(node, "API服务商")?.value ?? "OpenAI兼容").trim() || "OpenAI兼容";
+	const preset = getModelApiProviderPreset(provider);
+	const rawBaseUrl = String(getModelWidget(node, "API地址")?.value ?? "").trim();
+	const rawModel = String(getModelWidget(node, "API模型")?.value ?? "").trim();
+	return {
+		provider,
+		baseUrl: normalizeModelApiBaseUrl(rawBaseUrl || preset?.baseUrl || ""),
+		model: rawModel || String(preset?.model ?? "").trim(),
+		keyReference: String(getModelWidget(node, "API密钥")?.value ?? "").trim(),
+		extraHeaders: String(getModelWidget(node, "API额外请求头")?.value ?? "").trim().replace(/\r\n?/gu, "\n"),
+	};
+}
+
+function getModelApiConfigValidationError(node) {
+	const provider = String(getModelWidget(node, "API服务商")?.value ?? "OpenAI兼容").trim() || "OpenAI兼容";
+	const preset = getModelApiProviderPreset(provider);
+	const rawBaseUrl = String(getModelWidget(node, "API地址")?.value ?? "").trim() || String(preset?.baseUrl ?? "").trim();
+	if (!rawBaseUrl) return "API 地址为空。";
+	if (/\s/u.test(rawBaseUrl)) return "API 地址不能包含空白字符。";
+	if (/%(?:2e|5c)/iu.test(rawBaseUrl) || /\\/u.test(rawBaseUrl) || /\/(?:\.{1,2})(?:\/|$)/u.test(rawBaseUrl)) {
+		return "API 地址路径必须规范，不能包含转义点段、反斜杠或 . / .. 路径段。";
+	}
+	try {
+		const parsed = new URL(rawBaseUrl);
+		if (!/^https?:$/iu.test(String(parsed.protocol ?? ""))) return "API 地址只允许 http:// 或 https://。";
+		if (parsed.username || parsed.password) return "API 地址不能包含用户名或密码。";
+		if (parsed.search || parsed.hash) return "API 地址不能包含查询参数或片段。";
+		let decodedPath = String(parsed.pathname ?? "");
+		try { decodedPath = decodeURI(decodedPath); } catch (_error) {}
+		const decodedSegments = decodedPath.split("/").filter(Boolean);
+		if (
+			decodedPath.includes("\\")
+			|| decodedSegments.some((segment) => segment === "." || segment === "..")
+			|| [...decodedPath].some((char) => /\s/u.test(char) || char.codePointAt(0) < 32 || char.codePointAt(0) === 127 || char.codePointAt(0) > 127)
+		) {
+			return "API 地址路径只能使用规范 ASCII 字符，且不能包含点段、反斜杠或控制字符。";
+		}
+	} catch (_error) {
+		return "API 地址格式无效。";
+	}
+	return "";
+}
+
+
+function buildModelApiConfigSignatureFromValues(provider, baseUrl, model, keyReference = "", extraHeaders = "") {
+	const canonical = JSON.stringify([
+		"API接口",
+		String(provider ?? "").trim(),
+		normalizeModelApiBaseUrl(baseUrl),
+		String(model ?? "").trim(),
+		String(keyReference ?? "").trim(),
+		String(extraHeaders ?? "").trim().replace(/\r\n?/gu, "\n"),
+	]);
+	let hash = 0xcbf29ce484222325n;
+	const prime = 0x100000001b3n;
+	for (let index = 0; index < canonical.length; index += 1) {
+		const codeUnit = canonical.charCodeAt(index);
+		hash ^= BigInt(codeUnit & 0xff);
+		hash = BigInt.asUintN(64, hash * prime);
+		hash ^= BigInt((codeUnit >>> 8) & 0xff);
+		hash = BigInt.asUintN(64, hash * prime);
+	}
+	return `model-api-v1:${hash.toString(16).padStart(16, "0")}`;
+}
+
+function buildModelApiConfigSignature(node) {
+	const config = getModelApiEffectiveConfig(node);
+	return buildModelApiConfigSignatureFromValues(
+		config.provider,
+		config.baseUrl,
+		config.model,
+		config.keyReference,
+		config.extraHeaders,
+	);
+}
+
+function getStoredModelApiRuntimeSignature(node) {
+	const panelValue = String(node?.[PANEL_KEY]?.modelApiRuntimeSignature ?? "").trim();
+	if (panelValue) return panelValue;
+	return String(node?.properties?.[NODE_MODEL_API_RUNTIME_SIGNATURE_KEY] ?? "").trim();
+}
+
+function setStoredModelApiRuntimeSignature(node, signature) {
+	const normalized = String(signature ?? "").trim();
+	if (!normalized) return false;
+	ensureNodeProperties(node)[NODE_MODEL_API_RUNTIME_SIGNATURE_KEY] = normalized;
+	if (node?.[PANEL_KEY]) {
+		node[PANEL_KEY].modelApiRuntimeSignature = normalized;
+		node[PANEL_KEY].modelApiRuntimeInvalidated = false;
+	}
+	return true;
+}
+
+function invalidateModelApiRuntimeStatus(node) {
+	if (node?.properties) delete node.properties[NODE_MODEL_API_RUNTIME_SIGNATURE_KEY];
+	if (node?.[PANEL_KEY]) {
+		node[PANEL_KEY].modelApiRuntimeSignature = "";
+		node[PANEL_KEY].pendingModelApiConfigSignature = "";
+		node[PANEL_KEY].modelApiRuntimeInvalidated = true;
+	}
+}
+
+function clearPendingModelApiRun(node) {
+	if (!node?.[PANEL_KEY]) return false;
+	const hadPending = !!String(node[PANEL_KEY].pendingModelApiConfigSignature ?? "").trim();
+	node[PANEL_KEY].pendingModelApiConfigSignature = "";
+	if (hadPending) refreshModelLoaderPanel(node);
+	return hadPending;
+}
+
+function getModelRuntimePayloadSignature(payload) {
+	return String(payload?.model_config_signature ?? "").trim();
+}
+function parseModelRuntimePayloadFromSlots(slots) {
+	const jsonText = String(Array.isArray(slots) ? slots[3] ?? "" : "").trim();
+	if (!jsonText) return null;
+	try {
+		const payload = JSON.parse(jsonText);
+		return payload && typeof payload === "object" && !Array.isArray(payload) ? payload : null;
+	} catch (_error) {
+		return null;
+	}
+}
+
+function rememberModelApiRuntimeSignature(node, slots, _options = {}) {
+	const payload = parseModelRuntimePayloadFromSlots(slots);
+	if (!payload || String(payload.model_source ?? "") !== "API接口" || !String(payload.model_call_status ?? "").trim()) return false;
+	const pending = String(node?.[PANEL_KEY]?.pendingModelApiConfigSignature ?? "").trim();
+	const signature = getModelRuntimePayloadSignature(payload);
+	if (!signature) return false;
+	if (node?.[PANEL_KEY]?.modelApiRuntimeInvalidated && !pending) return false;
+	if (pending && pending !== signature) return false;
+	if (node?.[PANEL_KEY]) node[PANEL_KEY].pendingModelApiConfigSignature = "";
+	return setStoredModelApiRuntimeSignature(node, signature);
+}
+function getModelApiPresetKeyRequirement(provider, baseUrl) {
+	const preset = getModelApiProviderPreset(provider);
+	const presetBaseUrl = normalizeModelApiBaseUrl(preset?.baseUrl ?? "");
+	if (!presetBaseUrl || provider === "Ollama本地" || provider === "LM Studio本地") return false;
+	const effectiveBaseUrl = normalizeModelApiBaseUrl(baseUrl || presetBaseUrl);
+	try {
+		const hostname = String(new URL(effectiveBaseUrl).hostname ?? "").toLowerCase();
+		if (["127.0.0.1", "localhost", "::1", "0.0.0.0"].includes(hostname)) return false;
+		return new URL(effectiveBaseUrl).origin === new URL(presetBaseUrl).origin;
+	} catch (_error) {
+		return effectiveBaseUrl === presetBaseUrl;
+	}
+}
+
 function getModelLoaderSummary(node) {
 	const source = String(getModelWidget(node, "模型来源")?.value ?? "仅Skill").trim() || "仅Skill";
 	if (source === "仅Skill") return "Skill 离线 · 不调用模型";
 	if (source === "API接口") {
-		const provider = String(getModelWidget(node, "API服务商")?.value ?? "OpenAI兼容").trim() || "OpenAI兼容";
+		const config = getModelApiEffectiveConfig(node);
+		const provider = config.provider;
 		const rawModelName = String(getModelWidget(node, "API模型")?.value ?? "").trim();
-		const modelName = rawModelName || "未填写模型";
-		const baseUrl = String(getModelWidget(node, "API地址")?.value ?? "").trim();
+		const modelName = config.model || "未填写模型";
+		const rawBaseUrl = String(getModelWidget(node, "API地址")?.value ?? "").trim();
+		const baseUrl = config.baseUrl;
 		const displayProvider = getApiProviderDisplayName(provider, baseUrl);
 		const shortModel = modelName.length > 34 ? `${modelName.slice(0, 31)}...` : modelName;
-		const incomplete = !rawModelName || (provider === "自定义" && !baseUrl);
-		return `API · ${displayProvider} · ${shortModel}${baseUrl ? " · 自定义地址" : " · 预设地址"}${incomplete ? " · 未完整会回退Skill" : ""}`;
+		const incomplete = !config.model || !config.baseUrl;
+		return `API · ${displayProvider} · ${shortModel}${rawBaseUrl ? " · 自定义地址" : " · 预设地址"}${incomplete ? " · 未完整会回退Skill" : ""}`;
 	}
 	const family = String(getModelWidget(node, "模型系列")?.value ?? "未知").trim();
 	const model = String(getModelWidget(node, "主模型")?.value ?? "未选择").trim();
@@ -4733,6 +4971,70 @@ function getModelLoaderSummary(node) {
 	return `${family} · ${shortModel || "未选择模型"} · ctx ${ctx || "?"}${mmproj && mmproj !== "无" ? " · VL" : ""}${incomplete ? " · 未完整会回退Skill" : ""}`;
 }
 
+function getModelRuntimeStatusSummary(node) {
+	const source = String(getModelWidget(node, "模型来源")?.value ?? "仅Skill").trim() || "仅Skill";
+	if (source === "仅Skill") {
+		return { tone: "muted", text: "API 未启用：当前运行只使用 Skill，不会发送模型请求。" };
+	}
+	if (source === "API接口") {
+		const config = getModelApiEffectiveConfig(node);
+		const provider = config.provider;
+		const model = config.model;
+		const baseUrl = config.baseUrl;
+		const apiKey = String(getModelWidget(node, "API密钥")?.value ?? "").trim();
+		const configError = getModelApiConfigValidationError(node);
+		if (configError) return { tone: "error", text: `API 配置无效：${configError}` };
+		if (!model || !baseUrl) {
+			return { tone: "warn", text: "API 未就绪：请选择带默认值的服务商，或填写 API 地址和模型名。" };
+		}
+		const pending = String(node?.[PANEL_KEY]?.pendingModelApiConfigSignature ?? "").trim();
+		if (pending) {
+			return { tone: "ready", text: "API 请求已入队或正在运行，等待后端返回实际调用状态。" };
+		}
+		try {
+			const jsonText = String(getCurrentStageOutputText(node, STAGE_OUTPUT_INDEX.jsonResult) ?? "").trim();
+			const payload = jsonText ? JSON.parse(jsonText) : null;
+			if (payload && String(payload.model_source ?? "") === "API接口") {
+				const status = String(payload.model_call_status ?? "").trim();
+				const fallback = String(payload.model_fallback_note ?? "").trim();
+				if (status) {
+					const currentSignature = buildModelApiConfigSignature(node);
+					const runtimeSignature = getModelRuntimePayloadSignature(payload);
+					if (!runtimeSignature) {
+						return { tone: "warn", text: "旧运行结果没有配置签名，无法确认是否属于当前 API 配置。" };
+					}
+					if (node?.[PANEL_KEY]?.modelApiRuntimeInvalidated || runtimeSignature !== currentSignature) {
+						return { tone: "warn", text: "配置已变更，等待新运行确认 API 调用状态。" };
+					}
+					const failedCount = Number(payload.model_call_failure_count ?? 0);
+					const successCount = Number(payload.model_call_success_count ?? 0);
+					const activeFallback = Number(payload.model_active_fallback_count ?? 0);
+					const recovered = activeFallback <= 0 && /已恢复|无输出回退/u.test(status);
+					const failureSignal = activeFallback > 0 || !!fallback || (!recovered && (failedCount > 0 || /失败|回退|错误|未找到/u.test(status)));
+					return {
+						tone: failureSignal ? (successCount > 0 ? "warn" : "error") : (successCount > 0 ? "success" : "ready"),
+						text: `最近运行：${status}${fallback ? `；${fallback}` : ""}`,
+					};
+				}
+			}
+		} catch (_error) {}
+		const envReference = apiKey.toLowerCase().startsWith("env:") ? apiKey.slice(4).trim() : "";
+		if (apiKey.toLowerCase().startsWith("env:") && !envReference) {
+			return { tone: "warn", text: "API 未就绪：env: 后缺少环境变量名。" };
+		}
+		if (envReference) {
+			return { tone: "warn", text: `API 参数已填写；环境变量 ${envReference} 需后端验证，等待运行确认。` };
+		}
+		if (getModelApiPresetKeyRequirement(provider, baseUrl) && !apiKey) {
+			return { tone: "warn", text: `未填写 API Key；运行时将检查服务商“${provider}”的标准环境变量。` };
+		}
+		if (!apiKey) {
+			return { tone: "ready", text: "自定义/本地 API 地址允许无 Key，等待运行验证实际调用状态。" };
+		}
+		return { tone: "ready", text: "API 参数已填写，等待运行验证实际调用状态。" };
+	}
+	return { tone: "ready", text: "本地模型已选择，等待运行后确认实际调用状态。" };
+}
 function refreshModelLoaderDeck(deck, node) {
 	if (!deck?.panel) return;
 	const source = String(getModelWidget(node, "模型来源")?.value ?? "仅Skill").trim() || "仅Skill";
@@ -4752,6 +5054,12 @@ function refreshModelLoaderDeck(deck, node) {
 		const text = getModelLoaderSummary(node);
 		deck.statusEl.textContent = text;
 		deck.statusEl.title = text;
+	}
+	if (deck.runtimeStatusEl) {
+		const runtime = getModelRuntimeStatusSummary(node);
+		deck.runtimeStatusEl.textContent = runtime.text;
+		deck.runtimeStatusEl.title = runtime.text;
+		deck.runtimeStatusEl.dataset.tone = runtime.tone;
 	}
 	for (const button of deck.sourceButtons ?? []) {
 		button.classList.toggle("is-active", String(button.dataset.value) === source);
@@ -4844,10 +5152,32 @@ function refreshModelLoaderPanel(node) {
 }
 
 function setModelLoaderWidgetValue(node, name, value) {
+	const resolvedName = resolveModelWidgetName(node, name);
+	const previousValue = getWidget(node, resolvedName)?.value;
 	beginNodeStateMutation(node);
-	setWidgetValue(node, resolveModelWidgetName(node, name), value);
-	if (name === "模型来源" || STAGE_EMBEDDED_LOCAL_MODEL_WIDGET_NAMES.includes(resolveModelWidgetName(node, name))) {
+	setWidgetValue(node, resolvedName, value);
+	if (["模型来源", ...STAGE_EMBEDDED_API_MODEL_WIDGET_NAMES].includes(resolvedName) && String(previousValue ?? "") !== String(value ?? "")) {
+		invalidateModelApiRuntimeStatus(node);
+	}
+	if (name === "模型来源" || STAGE_EMBEDDED_LOCAL_MODEL_WIDGET_NAMES.includes(resolvedName)) {
 		try { sanitizeStagePromptNode(node, node[PANEL_KEY]?.library ?? { slot_config: [] }); } catch (_error) {}
+	}
+	refreshModelLoaderPanel(node);
+	scheduleNodeLayoutUpdate(node);
+}
+
+function applyModelApiProviderPreset(node, item = {}) {
+	const nextProvider = String(item.value ?? "OpenAI兼容");
+	const previousProvider = String(getModelWidget(node, "API服务商")?.value ?? "");
+	beginNodeStateMutation(node);
+	invalidateModelApiRuntimeStatus(node);
+	setWidgetValue(node, resolveModelWidgetName(node, "模型来源"), "API接口");
+	setWidgetValue(node, resolveModelWidgetName(node, "API服务商"), nextProvider);
+	setWidgetValue(node, resolveModelWidgetName(node, "API地址"), String(item.baseUrl ?? ""));
+	setWidgetValue(node, resolveModelWidgetName(node, "API模型"), String(item.model ?? ""));
+	if (previousProvider !== nextProvider) {
+		setWidgetValue(node, resolveModelWidgetName(node, "API密钥"), String(item.keyRef ?? ""));
+		setWidgetValue(node, resolveModelWidgetName(node, "API额外请求头"), "");
 	}
 	refreshModelLoaderPanel(node);
 	scheduleNodeLayoutUpdate(node);
@@ -4952,6 +5282,10 @@ function buildModelLoaderDeck(node, options = {}) {
 	const statusEl = document.createElement("div");
 	statusEl.className = "qwen-te-model__status";
 	head.appendChild(statusEl);
+	const runtimeStatusEl = document.createElement("div");
+	runtimeStatusEl.className = "qwen-te-model__runtime-status";
+	runtimeStatusEl.dataset.tone = "muted";
+	card.appendChild(runtimeStatusEl);
 
 	const sourceSection = createModelSection("模型来源", "Skill / 本地 / API");
 	sourceSection.section.hidden = !hasStageModelSource;
@@ -4973,16 +5307,7 @@ function buildModelLoaderDeck(node, options = {}) {
 	apiProviderGrid.className = "qwen-te-model__grid";
 	apiProviderSection.section.appendChild(apiProviderGrid);
 	const providerButtons = MODEL_API_PROVIDER_BUTTONS.map((item) => {
-		const button = createModelLoaderButton(node, item.label, item.value, () => {
-			beginNodeStateMutation(node);
-			setWidgetValue(node, resolveModelWidgetName(node, "模型来源"), "API接口");
-			setWidgetValue(node, resolveModelWidgetName(node, "API服务商"), item.value);
-			if (item.baseUrl) setWidgetValue(node, resolveModelWidgetName(node, "API地址"), item.baseUrl);
-			if (item.model) setWidgetValue(node, resolveModelWidgetName(node, "API模型"), item.model);
-			else if (isLikelyStaleApiModelValue(getModelWidget(node, "API模型")?.value)) setWidgetValue(node, resolveModelWidgetName(node, "API模型"), "");
-			refreshModelLoaderPanel(node);
-			scheduleNodeLayoutUpdate(node);
-		});
+		const button = createModelLoaderButton(node, item.label, item.value, () => applyModelApiProviderPreset(node, item));
 		button.title = item.hint ?? `${item.value} API`;
 		apiProviderGrid.appendChild(button);
 		return button;
@@ -5089,6 +5414,7 @@ function buildModelLoaderDeck(node, options = {}) {
 	return {
 		panel,
 		statusEl,
+		runtimeStatusEl,
 		sectionValues: {
 			source: sourceSection.value,
 			apiProvider: apiProviderSection.value,
@@ -5353,6 +5679,7 @@ function captureStageExecutionOutputsFromArgs(node, argsLike) {
 	const slots = extractStageOutputSlotsFromExecutedArgs(argsLike);
 	if (!scoreStageOutputSlots(slots)) return false;
 	panelState.lastExecutionOutputs = slots;
+	rememberModelApiRuntimeSignature(node, slots, { allowCurrent: true });
 	return true;
 }
 
@@ -5405,6 +5732,7 @@ async function syncNodeStageOutputCache(node, options = {}) {
 				const normalizedOutputs = extractStageOutputSlotsFromPayload(output);
 				if (!staleForCurrentRun && normalizedOutputs.some((value) => String(value ?? "").trim())) {
 					node[PANEL_KEY].lastExecutionOutputs = normalizedOutputs;
+					if (node[PANEL_KEY].pendingModelApiConfigSignature) rememberModelApiRuntimeSignature(node, normalizedOutputs);
 				}
 			}
 			return output;
@@ -5452,6 +5780,7 @@ function ensureStageOutputPolling(node, options = {}) {
 		}
 		panelState.stageOutputPollActiveCount = Math.max(0, Number(panelState.stageOutputPollActiveCount ?? 0) || 0) + 1;
 		if (panelState.stageOutputPollActiveCount > activeLimit) {
+			clearPendingModelApiRun(node);
 			stopStageOutputPolling(node);
 			return;
 		}
@@ -5466,7 +5795,10 @@ function ensureStageOutputPolling(node, options = {}) {
 			const outputIsFinal = !outputStatus || outputStatus === "done";
 			if (staleForCurrentRun) {
 				panelState.stageOutputPollIdleCount = Math.max(0, Number(panelState.stageOutputPollIdleCount ?? 0) || 0) + 1;
-				if (panelState.stageOutputPollIdleCount >= idleLimit) stopStageOutputPolling(node);
+				if (panelState.stageOutputPollIdleCount >= idleLimit) {
+					clearPendingModelApiRun(node);
+					stopStageOutputPolling(node);
+				}
 				return;
 			}
 			if (outputIsRunning) {
@@ -5475,6 +5807,7 @@ function ensureStageOutputPolling(node, options = {}) {
 				return;
 			}
 			if (output && outputIsFailed) {
+				clearPendingModelApiRun(node);
 				refreshStageDisplay(node);
 				stopStageOutputPolling(node);
 				return;
@@ -5495,7 +5828,10 @@ function ensureStageOutputPolling(node, options = {}) {
 				}
 			}
 			panelState.stageOutputPollIdleCount = Math.max(0, Number(panelState.stageOutputPollIdleCount ?? 0) || 0) + 1;
-			if (panelState.stageOutputPollIdleCount >= idleLimit) stopStageOutputPolling(node);
+			if (panelState.stageOutputPollIdleCount >= idleLimit) {
+				clearPendingModelApiRun(node);
+				stopStageOutputPolling(node);
+			}
 		} finally {
 			inFlight = false;
 		}
@@ -8719,6 +9055,7 @@ async function queueWorkflowFromNode(node = null) {
 			}
 		}
 	} catch (_error) {}
+	clearPendingModelApiRun(node);
 	return false;
 }
 async function runSmartTextMatch(node, explicitText = null) {
@@ -11344,6 +11681,7 @@ function installGlobalStagePromptQueueCapture() {
 			return result;
 		} catch (error) {
 			for (const node of nodes) {
+				clearPendingModelApiRun(node);
 				if (node?.[PANEL_KEY]) refreshStageDisplay(node);
 			}
 			throw error;
@@ -14244,6 +14582,13 @@ function openOnlinePromptSearchDialog(node, library) {
 	openExternalButton.title = "在新标签页打开当前网址";
 	openExternalButton.setAttribute("aria-label", "在新标签页打开当前网址");
 	toolbar.appendChild(openExternalButton);
+	const companionBrowserButton = document.createElement("button");
+	companionBrowserButton.type = "button";
+	companionBrowserButton.className = "qwen-te-online-search__nav-button qwen-te-online-search__companion-button";
+	companionBrowserButton.textContent = "▣";
+	companionBrowserButton.title = "在独立完整浏览器窗口打开当前网址";
+	companionBrowserButton.setAttribute("aria-label", "启动完整浏览器窗口");
+	toolbar.appendChild(companionBrowserButton);
 
 	const actionBar = document.createElement("div");
 	actionBar.className = "qwen-te-modal__toolbar qwen-te-modal__toolbar--online-actions qwen-te-online-search__actions";
@@ -14496,8 +14841,8 @@ function openOnlinePromptSearchDialog(node, library) {
 	const frameExternalButton = document.createElement("button");
 	frameExternalButton.type = "button";
 	frameExternalButton.className = "qwen-te-online-search__frame-external";
-	frameExternalButton.textContent = "↗ 外部打开";
-	frameExternalButton.title = "网站拒绝内嵌、登录或下载不可用时，在新标签页完整打开";
+	frameExternalButton.textContent = "▣ 完整浏览";
+	frameExternalButton.title = "网站拒绝内嵌时，在独立完整浏览器窗口打开";
 	frameExternalButton.disabled = true;
 	webFrameShell.appendChild(frameExternalButton);
 
@@ -14520,6 +14865,7 @@ function openOnlinePromptSearchDialog(node, library) {
 	let webHistory = [PROMPT_BROWSER_HOME_ENTRY];
 	let webHistoryIndex = 0;
 	let currentWebUrl = "";
+	let companionBrowserBusy = false;
 	let busyState = false;
 	const isContinuousRunActive = () => !!ensureNodeContinuousRuntime(node).running;
 	const isInteractionBlocked = () => busyState || isContinuousRunActive();
@@ -14693,6 +15039,32 @@ function openOnlinePromptSearchDialog(node, library) {
 		syncActionButtons();
 		return true;
 	};
+	const openCurrentWebCompanion = async (rawTarget = "") => {
+		if (companionBrowserBusy) return false;
+		const source = String(rawTarget || searchInput.value || currentWebUrl).trim();
+		companionBrowserBusy = true;
+		setWebStatus("正在启动独立完整浏览器...");
+		syncActionButtons();
+		try {
+			const result = await launchPromptCompanionBrowser(source, {
+				currentOrigin: getPromptBrowserCurrentOrigin(),
+				owner: overlay,
+				key: "companion-browser",
+			});
+			if (overlay.__qwenDisposed) return false;
+			if (!result.ok || !result.launched) {
+				setWebStatus(result.message || "完整浏览器启动失败，请使用新标签页打开。");
+				return false;
+			}
+			webAddressDraft = result.url;
+			if (activeBrowserMode === "web") searchInput.value = result.url;
+			setWebStatus(`${result.browser || "完整浏览器"} 已启动。内嵌预览保持不变。`);
+			return true;
+		} finally {
+			companionBrowserBusy = false;
+			if (!overlay.__qwenDisposed) syncActionButtons();
+		}
+	};
 	const setBrowserMode = (mode) => {
 		const nextMode = mode === "tags" ? "tags" : "web";
 		if (activeBrowserMode === "web") webAddressDraft = String(searchInput.value ?? "");
@@ -14713,6 +15085,7 @@ function openOnlinePromptSearchDialog(node, library) {
 		webStatusEl.classList.toggle("qwen-te-hidden", tagMode);
 		homeButton.classList.toggle("qwen-te-hidden", tagMode);
 		openExternalButton.classList.toggle("qwen-te-hidden", tagMode);
+		companionBrowserButton.classList.toggle("qwen-te-hidden", tagMode);
 		addressBadge.textContent = tagMode ? tagAddressBadgeText : "网页";
 		searchInput.maxLength = tagMode ? 256 : 2048;
 		searchInput.placeholder = tagMode
@@ -14750,7 +15123,8 @@ function openOnlinePromptSearchDialog(node, library) {
 			: !currentWebUrl;
 		homeButton.disabled = tagMode;
 		openExternalButton.disabled = tagMode || !externalTarget.ok;
-		frameExternalButton.disabled = !currentWebUrl;
+		companionBrowserButton.disabled = tagMode || companionBrowserBusy || !externalTarget.ok;
+		frameExternalButton.disabled = companionBrowserBusy || !currentWebUrl;
 		applyButton.disabled = interactionBlocked || counts.applyCount <= 0;
 		importButton.disabled = interactionBlocked || counts.importCount <= 0;
 		importHighButton.disabled = interactionBlocked || counts.importHighCount <= 0;
@@ -14770,6 +15144,7 @@ function openOnlinePromptSearchDialog(node, library) {
 		if (tagMode && blockedHint) searchButton.title = blockedHint;
 		else searchButton.title = tagMode ? "执行联网标签搜索" : "在内嵌网页中打开";
 		searchButton.classList.toggle("is-busy", tagMode && busyState);
+		companionBrowserButton.classList.toggle("is-busy", companionBrowserBusy);
 	};
 	const setBusy = (busy) => {
 		busyState = !!busy;
@@ -15243,7 +15618,8 @@ function openOnlinePromptSearchDialog(node, library) {
 	};
 	homeButton.onclick = () => showWebHome();
 	openExternalButton.onclick = () => { void openCurrentWebExternally(); };
-	frameExternalButton.onclick = () => { void openCurrentWebExternally(currentWebUrl); };
+	companionBrowserButton.onclick = () => { void openCurrentWebCompanion(); };
+	frameExternalButton.onclick = () => { void openCurrentWebCompanion(currentWebUrl); };
 	for (const button of [...webBookmarkButtons, ...webHomeButtons]) {
 		button.onclick = () => {
 			const url = String(button.dataset.qwenBrowserUrl ?? "");

@@ -186,6 +186,18 @@ globalThis.__stagePromptUiTestExports = {
 	stepOnlineSearchBrowserHistory,
 	resolvePromptBrowserTarget,
 	openPromptBrowserExternal,
+	launchPromptCompanionBrowser,
+	getModelRuntimeStatusSummary,
+	getModelApiConfigValidationError,
+	getModelApiEffectiveConfig,
+	getModelLoaderSummary,
+	clearPendingModelApiRun,
+	rememberModelApiRuntimeSignature,
+	invalidateModelApiRuntimeStatus,
+	buildModelApiConfigSignature,
+	buildModelApiConfigSignatureFromValues,
+	applyModelApiProviderPreset,
+	NODE_MODEL_API_RUNTIME_SIGNATURE_KEY,
 	searchOnlinePromptTags,
 	openOnlinePromptSearchDialog,
 	setWidgetGroupVisibility,
@@ -199,6 +211,7 @@ globalThis.__stagePromptUiTestExports = {
 	getStageOutputCacheLookupIds,
 	syncNodeStageOutputCache,
 	NODE_CACHE_NAMESPACE_KEY,
+	NODE_WORKFLOW_OUTPUT_KEY,
 	ensureNodeCacheNamespace,
 	normalizeSerializedNodePayload,
 	normalizeConfiguredWidgetValues,
@@ -587,15 +600,33 @@ test("owned JSON fetch keeps timeout and modal abort active while reading the re
 test("node cache namespace is stable and regenerated for copied nodes", async () => {
 	const exports = await loadUiExports("http://127.0.0.1:8188/");
 	const first = { id: 1, properties: {} };
-	const second = { id: 2, properties: {} };
+	const second = {
+		id: 2,
+		properties: { qwen_te_workflow_output_v1: { promptText: "copied output" } },
+		[exports.PANEL_KEY]: {
+			modelApiRuntimeSignature: "copied-panel-signature",
+			pendingModelApiConfigSignature: "copied-pending-signature",
+			lastExecutionOutputs: ["copied"],
+			directStageOutputCache: { promptText: "copied" },
+			hydratedExecutionOutputs: ["copied"],
+			previewExecutionOutputs: ["copied"],
+		},
+	};
 	exports.__context.__testApp.graph._nodes = [first, second];
 	const firstNamespace = exports.ensureNodeCacheNamespace(first);
 	assert.match(firstNamespace, /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/u);
 	assert.equal(exports.ensureNodeCacheNamespace(first), firstNamespace);
+	second.properties[exports.NODE_MODEL_API_RUNTIME_SIGNATURE_KEY] = "copied-runtime-signature";
 	second.properties[exports.NODE_CACHE_NAMESPACE_KEY] = firstNamespace;
 	const secondNamespace = exports.ensureNodeCacheNamespace(second);
 	assert.match(secondNamespace, /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/u);
 	assert.notEqual(secondNamespace, firstNamespace);
+	assert.equal(exports.NODE_MODEL_API_RUNTIME_SIGNATURE_KEY in second.properties, false);
+	assert.equal(exports.NODE_WORKFLOW_OUTPUT_KEY in second.properties, false);
+	assert.equal(second[exports.PANEL_KEY].modelApiRuntimeSignature, "");
+	assert.equal(second[exports.PANEL_KEY].pendingModelApiConfigSignature, "");
+	assert.deepEqual(Array.from(second[exports.PANEL_KEY].lastExecutionOutputs), []);
+	assert.equal(second[exports.PANEL_KEY].directStageOutputCache, null);
 });
 
 test("serialized node payload always carries its cache namespace", async () => {
@@ -1067,6 +1098,39 @@ test("prompt browser external open falls back to a secure anchor in browser page
 	assert.equal(removed, 1);
 });
 
+test("prompt companion browser sends one validated same-origin launch request", async () => {
+	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	let captured = null;
+	const result = await exports.launchPromptCompanionBrowser("example.com", {
+		currentOrigin: "http://127.0.0.1:8188/",
+		async requestJson(url, init, options) {
+			captured = { url, init, options };
+			return {
+				response: { ok: true, status: 200 },
+				data: { ok: true, browser: "Microsoft Edge", message: "opened" },
+			};
+		},
+	});
+
+	assert.equal(result.ok, true);
+	assert.equal(result.launched, true);
+	assert.equal(result.browser, "Microsoft Edge");
+	assert.equal(captured.url, "/qwen_te/companion_browser/open");
+	assert.equal(captured.init.method, "POST");
+	assert.equal(captured.init.headers["Content-Type"], "application/json");
+	assert.equal(captured.init.headers["X-Qwen-TE-Companion-Browser"], "1");
+	assert.deepEqual(JSON.parse(captured.init.body), { url: "https://example.com/" });
+	assert.equal(captured.options.key, "companion-browser");
+
+	let called = false;
+	const rejected = await exports.launchPromptCompanionBrowser("https://127.0.0.1/", {
+		async requestJson() { called = true; },
+	});
+	assert.equal(rejected.launched, false);
+	assert.equal(rejected.reason, "private_host");
+	assert.equal(called, false);
+});
+
 test("online prompt search keeps tag tools inside a real dual-mode web browser", async () => {
 	const source = await fs.readFile(UI_PATH, "utf8");
 	const start = source.indexOf("function openOnlinePromptSearchDialog");
@@ -1076,6 +1140,9 @@ test("online prompt search keeps tag tools inside a real dual-mode web browser",
 	const externalOpenStart = dialogSource.indexOf("const openCurrentWebExternally =");
 	const externalOpenEnd = dialogSource.indexOf("\n\tconst setBrowserMode =", externalOpenStart);
 	const externalOpenSource = dialogSource.slice(externalOpenStart, externalOpenEnd);
+	const companionOpenStart = dialogSource.indexOf("const openCurrentWebCompanion =");
+	const companionOpenEnd = dialogSource.indexOf("\n\tconst setBrowserMode =", companionOpenStart);
+	const companionOpenSource = dialogSource.slice(companionOpenStart, companionOpenEnd);
 
 	for (const marker of [
 		"qwen-te-online-search__browser",
@@ -1083,6 +1150,7 @@ test("online prompt search keeps tag tools inside a real dual-mode web browser",
 		"qwen-te-online-search__addressbar",
 		"qwen-te-online-search__web-workspace",
 		"qwen-te-online-search__web-frame",
+		"qwen-te-online-search__companion-button",
 		"qwen-te-online-search__filter-rail",
 		"qwen-te-online-search__result-route",
 		"qwen-te-online-search__selected-preview",
@@ -1090,6 +1158,8 @@ test("online prompt search keeps tag tools inside a real dual-mode web browser",
 		'createBrowserModeTab("web", "网页浏览器"',
 		'createBrowserModeTab("tags", "标签搜索"',
 		"const navigateWebHistory = (direction) =>",
+		"const openCurrentWebCompanion = async",
+		'frameExternalButton.onclick = () => { void openCurrentWebCompanion(currentWebUrl); };',
 		'if (activeBrowserMode === "web") navigateWebHistory(-1);',
 		'if (activeBrowserMode === "web") navigateWebHistory(1);',
 		"reloadButton.onclick = () =>",
@@ -1118,9 +1188,12 @@ test("online prompt search keeps tag tools inside a real dual-mode web browser",
 	assert.equal(dialogSource.includes('webFrame.src = "about:blank";'), true);
 	assert.equal(externalOpenSource.includes("pushOnlineSearchBrowserHistory"), false, "external tabs must not enter embedded browsing history");
 	assert.equal(externalOpenSource.includes("currentWebUrl = result.url"), false, "external tabs must not replace the embedded current page");
+	assert.equal(companionOpenSource.includes("pushOnlineSearchBrowserHistory"), false, "companion windows must not enter embedded browsing history");
+	assert.equal(companionOpenSource.includes("currentWebUrl = result.url"), false, "companion windows must not replace the embedded current page");
 	assert.equal(initialRender.includes('showWebHome({ recordHistory: false });'), true);
 	assert.equal(initialRender.includes('setBrowserMode("web");'), true);
 	assert.equal(initialRender.includes("navigateWebsite("), false, "opening the dialog must not automatically visit an external website");
+	assert.equal(initialRender.includes("launchPromptCompanionBrowser("), false, "opening the dialog must not automatically launch a native browser");
 	assert.equal(source.includes("grid-template-columns:210px minmax(400px,1fr) 320px"), true);
 	assert.equal(source.includes("qwen-te-online-search__web-frame-shell"), true);
 	assert.equal(source.includes("@media (max-width:1120px)"), true);
@@ -1238,7 +1311,8 @@ test("stage model dialog exposes compact controls without taking over external l
 	for (const hostHint of ["api.groq.com", "api.together.xyz", "api.fireworks.ai", "api.perplexity.ai", "v1beta/openai"]) {
 		assert.equal(source.includes(hostHint), true, `${hostHint} should be inferred in API summary`);
 	}
-	assert.equal(source.includes('if (item.model) setWidgetValue(node, resolveModelWidgetName(node, "API模型"), item.model);'), true);
+	assert.equal(source.includes('setWidgetValue(node, resolveModelWidgetName(node, "API地址"), String(item.baseUrl ?? ""));'), true);
+	assert.equal(source.includes('setWidgetValue(node, resolveModelWidgetName(node, "API模型"), String(item.model ?? ""));'), true);
 	assert.equal(source.includes("选择提示词增强方式：Skill 离线规则、本地 GGUF 或 API。配置不完整时会自动回退 Skill，不会中断节点。"), true);
 	assert.equal(source.includes("未完整会回退Skill"), true);
 	assert.equal(source.includes("若模型名或本地文件缺失，运行时会回退 Skill 并在标签摘要里提示原因。"), true);
@@ -1256,6 +1330,274 @@ test("stage model dialog exposes compact controls without taking over external l
 	assert.equal(source.includes("if (panelState.panel) refreshModelLoaderDeck(panelState, node);"), true);
 	assert.equal(source.includes("const connectedDecks = (panelState.modalDecks ?? []).filter((deck) => deck?.panel?.isConnected);"), true);
 	assert.equal(source.includes("for (const deck of connectedDecks) refreshModelLoaderDeck(deck, node);"), true);
+});
+
+test("model API provider switching clears stale address and model values", async () => {
+	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	const node = {
+		properties: { [exports.NODE_MODEL_API_RUNTIME_SIGNATURE_KEY]: "old-signature" },
+		widgets: [
+			{ name: "模型来源", value: "API接口" },
+			{ name: "API服务商", value: "OpenAI" },
+			{ name: "API地址", value: "https://api.openai.com/v1" },
+			{ name: "API模型", value: "gpt-4o-mini" },
+			{ name: "API密钥", value: "literal-old-provider-key" },
+			{ name: "API额外请求头", value: "Authorization: Bearer stale-header" },
+		],
+		[exports.PANEL_KEY]: { modelApiRuntimeSignature: "old-signature", modelApiRuntimeInvalidated: false },
+	};
+	exports.applyModelApiProviderPreset(node, { value: "OpenAI兼容", baseUrl: "", model: "" });
+	assert.equal(node.widgets[0].value, "API接口");
+	assert.equal(node.widgets[1].value, "OpenAI兼容");
+	assert.equal(node.widgets[2].value, "");
+	assert.equal(node.widgets[3].value, "");
+	assert.equal(node.widgets[4].value, "");
+	assert.equal(node.widgets[5].value, "");
+	assert.equal(exports.NODE_MODEL_API_RUNTIME_SIGNATURE_KEY in node.properties, false);
+	assert.equal(node[exports.PANEL_KEY].modelApiRuntimeInvalidated, true);
+});
+
+test("model runtime summary treats cloud env references as awaiting backend verification", async () => {
+	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	const node = {
+		properties: {},
+		widgets: [
+			{ name: "模型来源", value: "仅Skill" },
+			{ name: "API服务商", value: "OpenAI" },
+			{ name: "API地址", value: "https://api.openai.com/v1" },
+			{ name: "API密钥", value: "env:OPENAI_API_KEY" },
+			{ name: "API模型", value: "gpt-4o-mini" },
+		],
+		[exports.PANEL_KEY]: { lastExecutionOutputs: [], directStageOutputCache: null, workflowOutputMeta: {} },
+	};
+	assert.match(exports.getModelRuntimeStatusSummary(node).text, /API 未启用/u);
+	node.widgets[0].value = "API接口";
+	const envPending = exports.getModelRuntimeStatusSummary(node);
+	assert.equal(envPending.tone, "warn");
+	assert.match(envPending.text, /环境变量 OPENAI_API_KEY 需后端验证/u);
+	assert.doesNotMatch(envPending.text, /API 已配置/u);
+	node.widgets[3].value = "";
+	assert.match(exports.getModelRuntimeStatusSummary(node).text, /未填写 API Key.*标准环境变量/u);
+	node.widgets[1].value = "自定义";
+	node.widgets[2].value = "https://proxy.example.test/v1";
+	const customNoKey = exports.getModelRuntimeStatusSummary(node);
+	assert.equal(customNoKey.tone, "ready");
+	assert.match(customNoKey.text, /允许无 Key/u);
+});
+
+test("model runtime summary only reuses JSON status for the matching API config signature", async () => {
+	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	const node = {
+		properties: {},
+		widgets: [
+			{ name: "模型来源", value: "API接口" },
+			{ name: "API服务商", value: "OpenAI" },
+			{ name: "API地址", value: "https://api.openai.com/v1/" },
+			{ name: "API密钥", value: "env:OPENAI_API_KEY" },
+			{ name: "API模型", value: "gpt-4o-mini" },
+		],
+		[exports.PANEL_KEY]: { lastExecutionOutputs: [], directStageOutputCache: null, workflowOutputMeta: {} },
+	};
+	node[exports.PANEL_KEY].lastExecutionOutputs[exports.STAGE_OUTPUT_INDEX.jsonResult] = JSON.stringify({
+		model_source: "API接口",
+		model_call_status: "调用失败：1 次，已回退 Skill",
+		model_call_success_count: 0,
+		model_call_failure_count: 1,
+		model_fallback_note: "HTTP 401 Unauthorized",
+	});
+	assert.match(exports.getModelRuntimeStatusSummary(node).text, /旧运行结果没有配置签名/u);
+	const currentSignature = exports.buildModelApiConfigSignature(node);
+	node[exports.PANEL_KEY].lastExecutionOutputs[exports.STAGE_OUTPUT_INDEX.jsonResult] = JSON.stringify({
+		model_source: "API接口",
+		model_config_signature: currentSignature,
+		model_call_status: "调用失败：1 次，已回退 Skill",
+		model_call_success_count: 0,
+		model_call_failure_count: 1,
+		model_fallback_note: "HTTP 401 Unauthorized",
+	});
+	const failed = exports.getModelRuntimeStatusSummary(node);
+	assert.equal(failed.tone, "error");
+	assert.match(failed.text, /401 Unauthorized/u);
+	node.widgets[4].value = "gpt-4.1-mini";
+	assert.match(exports.getModelRuntimeStatusSummary(node).text, /配置已变更，等待新运行/u);
+	node.widgets[4].value = "gpt-4o-mini";
+	exports.applyModelApiProviderPreset(node, {
+		value: "OpenAI",
+		baseUrl: "https://api.openai.com/v1",
+		model: "gpt-4o-mini",
+	});
+	assert.match(exports.getModelRuntimeStatusSummary(node).text, /配置已变更，等待新运行/u);
+});
+
+test("model API effective config applies provider defaults when legacy fields are blank", async () => {
+	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	const node = {
+		properties: {},
+		widgets: [
+			{ name: "模型来源", value: "API接口" },
+			{ name: "API服务商", value: "OpenAI" },
+			{ name: "API地址", value: "" },
+			{ name: "API密钥", value: "env:OPENAI_API_KEY" },
+			{ name: "API模型", value: "" },
+			{ name: "API额外请求头", value: "" },
+		],
+		[exports.PANEL_KEY]: { lastExecutionOutputs: [], directStageOutputCache: null },
+	};
+	const config = exports.getModelApiEffectiveConfig(node);
+	assert.equal(config.baseUrl, "https://api.openai.com/v1");
+	assert.equal(config.model, "gpt-4o-mini");
+	assert.match(exports.getModelLoaderSummary(node), /gpt-4o-mini/u);
+	assert.doesNotMatch(exports.getModelLoaderSummary(node), /未完整会回退Skill/u);
+	assert.match(exports.buildModelApiConfigSignature(node), /^model-api-v1:[0-9a-f]{16}$/u);
+});
+
+test("model API config signatures track key and header revisions without exposing plaintext", async () => {
+	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	const makeNode = (apiKey, model = "deepseek-v4-flash", extraHeaders = "") => ({
+		properties: {},
+		widgets: [
+			{ name: "模型来源", value: "API接口" },
+			{ name: "API服务商", value: "DeepSeek" },
+			{ name: "API地址", value: "https://api.deepseek.com/" },
+			{ name: "API密钥", value: apiKey },
+			{ name: "API模型", value: model },
+			{ name: "API额外请求头", value: extraHeaders },
+		],
+	});
+	const first = exports.buildModelApiConfigSignature(makeNode("secret-alpha"));
+	const same = exports.buildModelApiConfigSignature(makeNode("secret-alpha"));
+	const changedKey = exports.buildModelApiConfigSignature(makeNode("secret-beta"));
+	const changedModel = exports.buildModelApiConfigSignature(makeNode("secret-alpha", "deepseek-reasoner"));
+	const changedHeaders = exports.buildModelApiConfigSignature(makeNode("secret-alpha", "deepseek-v4-flash", "X-Title: revised"));
+	const sharedVector = exports.buildModelApiConfigSignatureFromValues(
+		"OpenAI",
+		"https://api.openai.com/v1",
+		"gpt-4o-mini",
+		"env:OPENAI_API_KEY",
+		"X-Title: Demo",
+	);
+	assert.equal(sharedVector, "model-api-v1:53518f0821f655b6");
+	assert.equal(first, same);
+	assert.notEqual(first, changedKey);
+	assert.notEqual(first, changedModel);
+	assert.notEqual(first, changedHeaders);
+	assert.match(first, /^model-api-v1:[0-9a-f]{16}$/u);
+	for (const signature of [first, changedKey, changedHeaders]) {
+		assert.doesNotMatch(signature, /secret-alpha|secret-beta|revised/u);
+	}
+});
+
+test("model API validation rejects credential URLs query fragments and noncanonical paths", async () => {
+	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	const node = {
+		properties: {},
+		widgets: [
+			{ name: "模型来源", value: "API接口" },
+			{ name: "API服务商", value: "自定义" },
+			{ name: "API地址", value: "https://user:pass@proxy.example.test/v1" },
+			{ name: "API密钥", value: "" },
+			{ name: "API模型", value: "demo-model" },
+		],
+		[exports.PANEL_KEY]: { lastExecutionOutputs: [], directStageOutputCache: null },
+	};
+	assert.match(exports.getModelApiConfigValidationError(node), /用户名或密码/u);
+	assert.equal(exports.getModelRuntimeStatusSummary(node).tone, "error");
+	node.widgets[2].value = "https://proxy.example.test/v1?api_key=secret";
+	assert.match(exports.getModelApiConfigValidationError(node), /查询参数/u);
+	node.widgets[2].value = "https://proxy.example.test/a/../v1";
+	assert.match(exports.getModelApiConfigValidationError(node), /路径必须规范/u);
+	node.widgets[2].value = "https://proxy.example.test/a/%2e%2e/v1";
+	assert.match(exports.getModelApiConfigValidationError(node), /转义点段/u);
+	node.widgets[2].value = "https://proxy.example.test/a/%5c/v1";
+	assert.match(exports.getModelApiConfigValidationError(node), /转义点段/u);
+	node.widgets[2].value = "https://proxy.example.test/模型/v1";
+	assert.match(exports.getModelApiConfigValidationError(node), /ASCII/u);
+	node.widgets[2].value = "https://user:pass@proxy.example.test/v1";
+	node.widgets[4].value = "";
+	const invalidWithoutModel = exports.getModelRuntimeStatusSummary(node);
+	assert.equal(invalidWithoutModel.tone, "error");
+	assert.match(invalidWithoutModel.text, /用户名或密码/u);
+});
+
+test("model runtime summary renders configuration failures as errors even without call counts", async () => {
+	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	const node = {
+		properties: {},
+		widgets: [
+			{ name: "模型来源", value: "API接口" },
+			{ name: "API服务商", value: "OpenAI" },
+			{ name: "API地址", value: "https://api.openai.com/v1" },
+			{ name: "API密钥", value: "env:OPENAI_API_KEY" },
+			{ name: "API模型", value: "gpt-4o-mini" },
+		],
+		[exports.PANEL_KEY]: { lastExecutionOutputs: [], directStageOutputCache: null },
+	};
+	const signature = exports.buildModelApiConfigSignature(node);
+	node[exports.PANEL_KEY].lastExecutionOutputs[exports.STAGE_OUTPUT_INDEX.jsonResult] = JSON.stringify({
+		model_source: "API接口",
+		model_config_signature: signature,
+		model_call_status: "配置或加载失败，已回退 Skill",
+		model_call_success_count: 0,
+		model_call_failure_count: 0,
+		model_active_fallback_count: 1,
+		model_fallback_note: "未找到 API Key",
+	});
+	const status = exports.getModelRuntimeStatusSummary(node);
+	assert.equal(status.tone, "error");
+	assert.match(status.text, /未找到 API Key/u);
+});
+
+test("model runtime summary ignores history preview JSON", async () => {
+	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	const node = {
+		properties: {},
+		widgets: [
+			{ name: "模型来源", value: "API接口" },
+			{ name: "API服务商", value: "OpenAI" },
+			{ name: "API地址", value: "https://api.openai.com/v1" },
+			{ name: "API密钥", value: "env:OPENAI_API_KEY" },
+			{ name: "API模型", value: "gpt-4o-mini" },
+		],
+		[exports.PANEL_KEY]: { lastExecutionOutputs: [], previewExecutionOutputs: [], displayPreviewSource: "历史记录" },
+	};
+	node[exports.PANEL_KEY].previewExecutionOutputs[exports.STAGE_OUTPUT_INDEX.jsonResult] = JSON.stringify({
+		model_source: "API接口",
+		model_config_signature: exports.buildModelApiConfigSignature(node),
+		model_call_status: "调用失败：1 次",
+		model_call_failure_count: 1,
+		model_fallback_note: "HTTP 401 preview only",
+	});
+	const status = exports.getModelRuntimeStatusSummary(node);
+	assert.doesNotMatch(status.text, /401 preview only|最近运行/u);
+	assert.match(status.text, /环境变量 OPENAI_API_KEY 需后端验证/u);
+});
+
+test("model runtime signatures reject stale in-flight results after invalidation", async () => {
+	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	const node = {
+		properties: {},
+		widgets: [
+			{ name: "模型来源", value: "API接口" },
+			{ name: "API服务商", value: "OpenAI" },
+			{ name: "API地址", value: "https://api.openai.com/v1" },
+			{ name: "API密钥", value: "env:OPENAI_API_KEY" },
+			{ name: "API模型", value: "gpt-4o-mini" },
+		],
+		[exports.PANEL_KEY]: { modelApiRuntimeInvalidated: true, pendingModelApiConfigSignature: "" },
+	};
+	const signature = exports.buildModelApiConfigSignature(node);
+	const slots = [];
+	slots[exports.STAGE_OUTPUT_INDEX.jsonResult] = JSON.stringify({
+		model_source: "API接口",
+		model_config_signature: signature,
+		model_call_status: "调用成功：1 次，采纳 1 次",
+	});
+	assert.equal(exports.rememberModelApiRuntimeSignature(node, slots), false);
+	node[exports.PANEL_KEY].pendingModelApiConfigSignature = signature;
+	assert.equal(exports.rememberModelApiRuntimeSignature(node, slots), true);
+	node[exports.PANEL_KEY].pendingModelApiConfigSignature = signature;
+	exports.invalidateModelApiRuntimeStatus(node);
+	assert.equal(node[exports.PANEL_KEY].pendingModelApiConfigSignature, "");
 });
 
 test("beforeRegisterNodeDef leaves external model loader prototypes untouched", async () => {
@@ -2424,6 +2766,7 @@ test("stale stage cache counts toward the idle polling limit", async () => {
 			stageOutputPollIdleCount: 0,
 			stageOutputPollActiveCount: 0,
 			lastWorkflowQueueRequestedAt: queuedAt,
+			pendingModelApiConfigSignature: "pending-stale-run",
 			displayClearedAt: 0,
 			lastExecutionOutputs: [],
 			directStageOutputCache: null,
@@ -2436,6 +2779,61 @@ test("stale stage cache counts toward the idle polling limit", async () => {
 	for (let index = 0; index < 3; index += 1) await tick();
 	assert.equal(node[exports.PANEL_KEY].stageOutputPollTimer, null);
 	assert.equal(timers.has(timerId), false);
+	assert.equal(node[exports.PANEL_KEY].pendingModelApiConfigSignature, "");
+});
+
+test("failed and timed-out stage polling clear pending API runtime state", async () => {
+	let nextTimerId = 0;
+	const timers = new Map();
+	const responses = [
+		{ ok: true, output: { status: "failed", updated_at: Date.now() } },
+		{ ok: true, output: { status: "running", updated_at: Date.now() } },
+	];
+	const exports = await loadUiExports("http://127.0.0.1:8188/", {
+		setInterval: (callback) => {
+			const timerId = ++nextTimerId;
+			timers.set(timerId, callback);
+			return timerId;
+		},
+		clearInterval: (timerId) => { timers.delete(timerId); },
+		fetch: async () => ({
+			ok: true,
+			status: 200,
+			json: async () => responses.shift() ?? { ok: true, output: { status: "running" } },
+		}),
+	});
+	const makeNode = (id) => ({
+		id,
+		properties: {},
+		widgets: [],
+		outputs: [],
+		[exports.PANEL_KEY]: {
+			library: { slot_config: [], tag_library: {} },
+			pendingModelApiConfigSignature: "pending-api-run",
+			stageOutputPollTimer: null,
+			stageOutputPollIdleCount: 0,
+			stageOutputPollActiveCount: 0,
+			lastWorkflowQueueRequestedAt: Date.now(),
+			displayClearedAt: 0,
+			lastExecutionOutputs: [],
+			directStageOutputCache: null,
+		},
+	});
+	const failedNode = makeNode(194);
+	exports.__context.__testApp.graph._nodes = [failedNode];
+	exports.ensureStageOutputPolling(failedNode, { idleLimit: 1, activeLimit: 2 });
+	await timers.get(failedNode[exports.PANEL_KEY].stageOutputPollTimer)();
+	assert.equal(failedNode[exports.PANEL_KEY].pendingModelApiConfigSignature, "");
+	assert.equal(failedNode[exports.PANEL_KEY].stageOutputPollTimer, null);
+
+	const timeoutNode = makeNode(195);
+	exports.__context.__testApp.graph._nodes = [timeoutNode];
+	exports.ensureStageOutputPolling(timeoutNode, { idleLimit: 1, activeLimit: 1 });
+	const timeoutTick = timers.get(timeoutNode[exports.PANEL_KEY].stageOutputPollTimer);
+	await timeoutTick();
+	await timeoutTick();
+	assert.equal(timeoutNode[exports.PANEL_KEY].pendingModelApiConfigSignature, "");
+	assert.equal(timeoutNode[exports.PANEL_KEY].stageOutputPollTimer, null);
 });
 
 test("stopping stage polling invalidates an in-flight body before it can commit", async () => {
