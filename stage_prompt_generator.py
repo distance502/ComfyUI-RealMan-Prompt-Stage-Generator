@@ -133,8 +133,12 @@ from .stage_prompt.formatter import (
 )
 from .stage_prompt.model_refiner import (
     DEFAULT_STAGE_PROMPT_SYSTEM_TEMPLATE,
+    _record_model_call_result as _record_model_call_result_impl,
+    extract_text as _extract_model_response_text_impl,
     maybe_model_refine as _maybe_model_refine_impl,
     maybe_model_refine_batch as _maybe_model_refine_batch_impl,
+    reconcile_model_output_fallback as _reconcile_model_output_fallback_impl,
+    sanitize_model_error as _sanitize_model_error_impl,
     stabilize_prompt_output as _stabilize_prompt_output_impl,
 )
 from .stage_prompt.character_sheet_skill import (
@@ -456,10 +460,30 @@ _STAGE_OUTPUT_CACHE_PUBLIC_KEYS = (
     "smart_text_style_priority_resolved",
     "smart_text_style_resolved",
     "model_skill_pipeline",
+    "model_call_status",
+    "model_call_attempt_count",
+    "model_call_success_count",
+    "model_call_failure_count",
+    "model_call_adopted_count",
+    "model_active_fallback_count",
+    "image_reverse_status",
     "skill_dynamic_strategy",
     "recent_prompt_fingerprint_count",
     "normalization_notes",
     "outputs",
+)
+_MODEL_RUNTIME_STATE_KEYS = (
+    "模型来源实际",
+    "模型回退说明",
+    "模型调用状态",
+    "模型调用尝试次数",
+    "模型调用成功次数",
+    "模型调用失败次数",
+    "模型调用采纳次数",
+    "模型调用错误",
+    "模型活动回退数量",
+    "模型调用基础来源",
+    "推理纠偏说明",
 )
 _IMAGE_REVERSE_CACHE: OrderedDict[str, str] = OrderedDict()
 _IMAGE_REVERSE_CACHE_LOCK = threading.Lock()
@@ -704,19 +728,19 @@ API服务商预设 = {
     "OpenAI兼容": {"kind": "openai", "base_url": "", "env": ["QWEN_TE_API_KEY", "OPENAI_API_KEY"], "model": ""},
     "OpenAI": {"kind": "openai", "base_url": "https://api.openai.com/v1", "env": ["OPENAI_API_KEY", "QWEN_TE_API_KEY"], "model": "gpt-4o-mini"},
     "OpenRouter": {"kind": "openai", "base_url": "https://openrouter.ai/api/v1", "env": ["OPENROUTER_API_KEY", "QWEN_TE_API_KEY"], "model": "openai/gpt-4o-mini"},
-    "DeepSeek": {"kind": "openai", "base_url": "https://api.deepseek.com/v1", "env": ["DEEPSEEK_API_KEY", "QWEN_TE_API_KEY"], "model": "deepseek-chat"},
+    "DeepSeek": {"kind": "openai", "base_url": "https://api.deepseek.com", "env": ["DEEPSEEK_API_KEY", "QWEN_TE_API_KEY"], "model": "deepseek-v4-flash"},
     "通义千问DashScope": {"kind": "openai", "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "env": ["DASHSCOPE_API_KEY", "QWEN_TE_API_KEY"], "model": "qwen-plus"},
     "Kimi": {"kind": "openai", "base_url": "https://api.moonshot.cn/v1", "env": ["MOONSHOT_API_KEY", "KIMI_API_KEY", "QWEN_TE_API_KEY"], "model": "moonshot-v1-8k"},
     "SiliconFlow": {"kind": "openai", "base_url": "https://api.siliconflow.cn/v1", "env": ["SILICONFLOW_API_KEY", "QWEN_TE_API_KEY"], "model": ""},
     "火山方舟": {"kind": "openai", "base_url": "https://ark.cn-beijing.volces.com/api/v3", "env": ["ARK_API_KEY", "VOLCENGINE_API_KEY", "QWEN_TE_API_KEY"], "model": ""},
     "智谱GLM": {"kind": "openai", "base_url": "https://open.bigmodel.cn/api/paas/v4", "env": ["ZHIPUAI_API_KEY", "GLM_API_KEY", "QWEN_TE_API_KEY"], "model": "glm-4.5"},
-    "Groq": {"kind": "openai", "base_url": "https://api.groq.com/openai/v1", "env": ["GROQ_API_KEY", "QWEN_TE_API_KEY"], "model": "llama-3.1-8b-instant"},
+    "Groq": {"kind": "openai", "base_url": "https://api.groq.com/openai/v1", "env": ["GROQ_API_KEY", "QWEN_TE_API_KEY"], "model": "openai/gpt-oss-20b"},
     "Together": {"kind": "openai", "base_url": "https://api.together.xyz/v1", "env": ["TOGETHER_API_KEY", "QWEN_TE_API_KEY"], "model": ""},
     "Fireworks": {"kind": "openai", "base_url": "https://api.fireworks.ai/inference/v1", "env": ["FIREWORKS_API_KEY", "QWEN_TE_API_KEY"], "model": ""},
     "Mistral": {"kind": "openai", "base_url": "https://api.mistral.ai/v1", "env": ["MISTRAL_API_KEY", "QWEN_TE_API_KEY"], "model": "mistral-small-latest"},
     "Perplexity": {"kind": "openai", "base_url": "https://api.perplexity.ai", "env": ["PPLX_API_KEY", "PERPLEXITY_API_KEY", "QWEN_TE_API_KEY"], "model": "sonar"},
     "Gemini OpenAI兼容": {"kind": "openai", "base_url": "https://generativelanguage.googleapis.com/v1beta/openai", "env": ["GEMINI_API_KEY", "GOOGLE_API_KEY", "QWEN_TE_API_KEY"], "model": "gemini-2.5-flash"},
-    "Claude Anthropic": {"kind": "anthropic", "base_url": "https://api.anthropic.com/v1/messages", "env": ["ANTHROPIC_API_KEY", "CLAUDE_API_KEY", "QWEN_TE_API_KEY"], "model": "claude-3-5-haiku-latest"},
+    "Claude Anthropic": {"kind": "anthropic", "base_url": "https://api.anthropic.com/v1/messages", "env": ["ANTHROPIC_API_KEY", "CLAUDE_API_KEY", "QWEN_TE_API_KEY"], "model": "claude-haiku-4-5"},
     "Gemini 原生": {"kind": "gemini", "base_url": "https://generativelanguage.googleapis.com/v1beta", "env": ["GEMINI_API_KEY", "GOOGLE_API_KEY", "QWEN_TE_API_KEY"], "model": "gemini-2.5-flash"},
     "Ollama本地": {"kind": "openai", "base_url": "http://127.0.0.1:11434/v1", "env": [], "model": "qwen2.5"},
     "LM Studio本地": {"kind": "openai", "base_url": "http://127.0.0.1:1234/v1", "env": [], "model": ""},
@@ -756,6 +780,16 @@ SETTING_DEFAULTS = {
     "模型来源": "仅Skill",
     "模型来源实际": "仅Skill",
     "模型回退说明": "",
+    "模型调用状态": "未启用（仅Skill）",
+    "模型调用尝试次数": 0,
+    "模型调用成功次数": 0,
+    "模型调用失败次数": 0,
+    "模型调用采纳次数": 0,
+    "模型活动回退数量": 0,
+    "模型调用错误": [],
+    "模型调用基础来源": "仅Skill",
+    "图片反推状态": "未启用",
+    "图片反推错误": "",
     "内置模型系列": "Qwen3.5-VL",
     "内置主模型": "",
     "内置视觉投影mmproj": "无",
@@ -919,6 +953,16 @@ def _validate_api_http_url(raw_url: Any, *, label: str = "API地址") -> str:
         raise RuntimeError(f"{label}包含无效主机名。") from exc
     if port is not None and not (1 <= port <= 65535):
         raise RuntimeError(f"{label}端口必须在 1 到 65535 之间。")
+    decoded_path = urllib.parse.unquote(str(parsed.path or ""))
+    decoded_segments = [segment for segment in decoded_path.split("/") if segment]
+    if (
+        "\\" in decoded_path
+        or any(segment in {".", ".."} for segment in decoded_segments)
+        or any(char.isspace() or ord(char) < 32 or ord(char) == 127 or ord(char) > 127 for char in decoded_path)
+    ):
+        raise RuntimeError(
+            f"{label}路径必须使用规范 ASCII 路径，不得包含转义的点段、反斜杠、空白或非 ASCII 字符。"
+        )
     return url
 
 
@@ -999,7 +1043,10 @@ def _resolve_api_key(
         if not env_name:
             raise RuntimeError("API密钥使用 env:VAR 时必须填写环境变量名。")
         candidates.append(env_name)
-    candidates.extend(str(env_name or "").strip() for env_name in env_names)
+        if env_name == "QWEN_TE_API_KEY":
+            candidates.extend(str(item or "").strip() for item in env_names)
+    else:
+        candidates.extend(str(item or "").strip() for item in env_names)
     candidates = list(dict.fromkeys(env_name for env_name in candidates if env_name))
     if not candidates:
         return ""
@@ -1037,35 +1084,87 @@ def _normalize_api_base_url(base_url: Any, *, provider: str, kind: str) -> str:
     return _validate_api_http_url(base)
 
 
+def _normalize_api_config_base_url(base_url: Any) -> str:
+    base = _validate_api_http_url(base_url)
+    parsed = urllib.parse.urlsplit(base)
+    if parsed.query or parsed.fragment:
+        raise RuntimeError("API地址必须填写 Base URL，不得包含查询参数或片段。")
+    origin = _api_url_origin(base)
+    path = str(parsed.path or "").rstrip("/")
+    path_segments = [segment for segment in path.split("/") if segment]
+    if "\\" in path or any(segment in {".", ".."} for segment in path_segments) or any(ord(char) > 127 for char in path):
+        raise RuntimeError(
+            "API地址路径必须使用规范 ASCII 路径，不得包含反斜杠、中文路径或 . / .. 路径段。"
+        )
+    return f"{origin}{path if path and path != '/' else ''}"
+
+
+_API_EXTRA_HEADER_NAME_PATTERN = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
+_FORBIDDEN_API_EXTRA_HEADERS = {
+    "authorization",
+    "proxy-authorization",
+    "x-api-key",
+    "x-goog-api-key",
+    "content-type",
+    "accept-encoding",
+    "host",
+    "content-length",
+    "transfer-encoding",
+    "connection",
+    "cookie",
+    "set-cookie",
+}
+
+
+def _validate_api_extra_header(name: Any, value: Any) -> tuple[str, str]:
+    header_name = str(name or "").strip()
+    header_value = str(value or "").strip()
+    if not header_name or not _API_EXTRA_HEADER_NAME_PATTERN.fullmatch(header_name):
+        raise RuntimeError(f"API额外请求头名称无效：{header_name or '<空>'}。")
+    if header_name.casefold() in _FORBIDDEN_API_EXTRA_HEADERS:
+        raise RuntimeError(f"API额外请求头不允许覆盖受保护字段：{header_name}。请使用 API密钥 配置认证。")
+    if not header_value:
+        raise RuntimeError(f"API额外请求头 {header_name} 的值为空。")
+    if any(ord(char) < 32 or ord(char) == 127 for char in header_value):
+        raise RuntimeError(f"API额外请求头 {header_name} 不得包含控制字符。")
+    return header_name, header_value
+
+
 def _parse_api_extra_headers(raw_headers: Any) -> dict[str, str]:
     text = str(raw_headers or "").strip()
     if not text:
         return {}
-    if text.startswith("{"):
+    items: list[tuple[Any, Any]] = []
+    if text.startswith(("{", "[")):
         try:
             payload = json.loads(text)
-        except Exception:
-            payload = {}
-        if isinstance(payload, dict):
-            return {str(key).strip(): str(value).strip() for key, value in payload.items() if str(key).strip() and str(value).strip()}
+        except Exception as exc:
+            raise RuntimeError(f"API额外请求头 JSON 格式无效：{exc}") from exc
+        if not isinstance(payload, dict):
+            raise RuntimeError("API额外请求头 JSON 必须是对象，例如 {\"HTTP-Referer\": \"https://example.com\"}。")
+        items = list(payload.items())
+    else:
+        for line_number, raw_line in enumerate(re.split(r"[\n\r]+", text), start=1):
+            line = raw_line.strip()
+            if not line:
+                continue
+            if ":" in line:
+                key, value = line.split(":", 1)
+            elif "=" in line:
+                key, value = line.split("=", 1)
+            else:
+                raise RuntimeError(f"API额外请求头第 {line_number} 行缺少 : 或 = 分隔符。")
+            items.append((key, value))
     headers: dict[str, str] = {}
-    for raw_line in re.split(r"[\n\r]+", text):
-        line = raw_line.strip()
-        if not line:
-            continue
-        if ":" in line:
-            key, value = line.split(":", 1)
-        elif "=" in line:
-            key, value = line.split("=", 1)
-        else:
-            continue
-        key = key.strip()
-        value = value.strip()
-        if key and value:
-            headers[key] = value
+    seen_names: set[str] = set()
+    for raw_name, raw_value in items:
+        name, value = _validate_api_extra_header(raw_name, raw_value)
+        folded = name.casefold()
+        if folded in seen_names:
+            raise RuntimeError(f"API额外请求头重复：{name}。")
+        seen_names.add(folded)
+        headers[name] = value
     return headers
-
-
 def _split_system_user_messages(messages: list[dict[str, Any]]) -> tuple[str, list[dict[str, Any]]]:
     system_parts: list[str] = []
     user_messages: list[dict[str, Any]] = []
@@ -1224,6 +1323,10 @@ class _TEAPIChatModel:
         frequency_penalty = _safe_float(kwargs.get("frequency_penalty", 0.0), 0.0, -2.0, 2.0)
         presence_penalty = _safe_float(kwargs.get("presence_penalty", 0.0), 0.0, -2.0, 2.0)
         seed = _safe_int(kwargs.get("seed", 0), 0, 0, 0xFFFFFFFFFFFFFFFF)
+        top_k = _safe_int(kwargs.get("top_k", 0), 0, 0, 200)
+        raw_stop = kwargs.get("stop")
+        stop_sequences = [str(item) for item in (raw_stop if isinstance(raw_stop, (list, tuple)) else [raw_stop]) if str(item or "")]
+
         headers = {"Content-Type": "application/json", **dict(self.config.get("extra_headers") or {})}
         api_key = str(self.config.get("api_key") or "").strip()
 
@@ -1235,7 +1338,7 @@ class _TEAPIChatModel:
             payload: dict[str, Any] = {
                 "model": model,
                 "max_tokens": max_tokens,
-                "temperature": temperature,
+                "temperature": min(1.0, temperature),
                 "top_p": top_p,
                 "stream": False,
                 "messages": [
@@ -1243,10 +1346,19 @@ class _TEAPIChatModel:
                     for item in user_messages
                 ],
             }
+            if top_k > 0:
+                payload["top_k"] = top_k
+            if stop_sequences:
+                payload["stop_sequences"] = stop_sequences
             if system_text:
                 payload["system"] = system_text
             response = _http_post_json(str(self.config.get("url")), payload, headers, timeout)
+            if response.get("error"):
+                _extract_model_response_text_impl(response)
             text = "".join(str(part.get("text") or "") for part in response.get("content", []) if isinstance(part, dict))
+            if not text.strip():
+                stop_reason = str(response.get("stop_reason") or response.get("stop_sequence") or "empty_content")
+                raise RuntimeError(f"Claude API 未返回文本：stop_reason={stop_reason}")
             return {"choices": [{"message": {"content": text}}], "raw": response}
 
         if kind == "gemini":
@@ -1265,6 +1377,12 @@ class _TEAPIChatModel:
                 "contents": contents,
                 "generationConfig": {"maxOutputTokens": max_tokens, "temperature": temperature, "topP": top_p},
             }
+            if top_k > 0:
+                payload["generationConfig"]["topK"] = top_k
+            if seed > 0:
+                payload["generationConfig"]["seed"] = seed
+            if stop_sequences:
+                payload["generationConfig"]["stopSequences"] = stop_sequences
             if abs(frequency_penalty) > 1e-9:
                 payload["generationConfig"]["frequencyPenalty"] = frequency_penalty
             if abs(presence_penalty) > 1e-9:
@@ -1272,27 +1390,49 @@ class _TEAPIChatModel:
             if system_text:
                 payload["system_instruction"] = {"parts": [{"text": system_text}]}
             response = _http_post_json(url, payload, headers, timeout)
+            if response.get("error"):
+                _extract_model_response_text_impl(response)
             candidates = response.get("candidates") or []
-            parts = (((candidates[0] or {}).get("content") or {}).get("parts") or []) if candidates else []
+            if not candidates:
+                feedback = response.get("promptFeedback") if isinstance(response.get("promptFeedback"), dict) else {}
+                block_reason = str(feedback.get("blockReason") or "no_candidates")
+                raise RuntimeError(f"Gemini API 未返回候选：blockReason={block_reason}")
+            candidate = candidates[0] if isinstance(candidates[0], dict) else {}
+            parts = ((candidate.get("content") or {}).get("parts") or []) if isinstance(candidate.get("content"), dict) else []
             text = "".join(str(part.get("text") or "") for part in parts if isinstance(part, dict))
+            if not text.strip():
+                finish_reason = str(candidate.get("finishReason") or "empty_content")
+                raise RuntimeError(f"Gemini API 候选没有文本：finishReason={finish_reason}")
             return {"choices": [{"message": {"content": text}}], "raw": response}
 
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
+        openai_reasoning_model = provider == "OpenAI" and bool(re.match(r"(?i)^(?:o[134](?:-|$)|gpt-5(?:-|$))", model))
+        request_messages = [
+            {**message, "role": "developer" if openai_reasoning_model and str(message.get("role") or "") == "system" else message.get("role")}
+            if isinstance(message, dict)
+            else message
+            for message in messages
+        ]
         payload = {
             "model": model,
-            "messages": messages,
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-            "top_p": top_p,
+            "messages": request_messages,
             "stream": False,
         }
-        if abs(frequency_penalty) > 1e-9:
-            payload["frequency_penalty"] = frequency_penalty
-        if abs(presence_penalty) > 1e-9:
-            payload["presence_penalty"] = presence_penalty
-        if seed > 0:
-            payload["seed"] = seed
+        payload["max_completion_tokens" if provider == "OpenAI" else "max_tokens"] = max_tokens
+        if not openai_reasoning_model:
+            payload["temperature"] = temperature
+            payload["top_p"] = top_p
+            if abs(frequency_penalty) > 1e-9:
+                payload["frequency_penalty"] = frequency_penalty
+            if abs(presence_penalty) > 1e-9:
+                payload["presence_penalty"] = presence_penalty
+            if seed > 0:
+                payload["seed"] = seed
+            if stop_sequences:
+                payload["stop"] = stop_sequences
+        if provider == "DeepSeek" and model.startswith("deepseek-v4"):
+            payload["thinking"] = {"type": "disabled"}
         response = _http_post_json(str(self.config.get("url")), payload, headers, timeout)
         return response
 
@@ -1302,7 +1442,11 @@ def _解析API模型配置(kwargs: dict[str, Any]) -> dict[str, Any]:
     preset = _api_provider_preset(provider)
     kind = str(preset.get("kind") or "openai")
     model = str(kwargs.get("API模型", "") or "").strip() or str(preset.get("model") or "").strip()
+    configured_base_url = str(kwargs.get("API地址", "") or "").strip() or str(preset.get("base_url") or "").strip()
     url = _normalize_api_base_url(kwargs.get("API地址", ""), provider=provider, kind=kind)
+    kwargs["API服务商有效"] = provider
+    kwargs["API地址有效"] = _normalize_api_config_base_url(configured_base_url)
+    kwargs["API模型有效"] = model
     api_key = _resolve_api_key(
         kwargs.get("API密钥", ""),
         list(preset.get("env") or []),
@@ -1310,6 +1454,19 @@ def _解析API模型配置(kwargs: dict[str, Any]) -> dict[str, Any]:
         target_url=url,
         preset=preset,
     )
+    kwargs["_API密钥脱敏值"] = api_key
+    preset_base_url = str(preset.get("base_url") or "").strip()
+    preset_env_names = [str(name).strip() for name in preset.get("env", []) if str(name).strip()]
+    if (
+        not api_key
+        and preset_base_url
+        and preset_env_names
+        and _api_url_origin(url) == _api_url_origin(preset_base_url, label=f"服务商“{provider}”预设 API 地址")
+    ):
+        env_hint = "、".join(preset_env_names[:3])
+        raise RuntimeError(
+            f"服务商“{provider}”未找到 API Key。请直接填写 API密钥，或在启动 ComfyUI 前设置 {env_hint}。"
+        )
     return {
         "provider": provider,
         "kind": kind,
@@ -1381,23 +1538,44 @@ def _安全加载阶段模型(settings: dict[str, Any]) -> Any:
     source = _safe_stage_model_source_label(
         str(settings.get("模型来源", SETTING_DEFAULTS["模型来源"]) or SETTING_DEFAULTS["模型来源"]).strip()
     )
+    settings["模型调用基础来源"] = source
+    settings["模型调用尝试次数"] = 0
+    settings["模型调用成功次数"] = 0
+    settings["模型调用失败次数"] = 0
+    settings["模型活动回退数量"] = 0
+    settings["模型调用采纳次数"] = 0
+    settings["模型调用错误"] = []
     if source == "仅Skill":
         settings["模型来源实际"] = "仅Skill"
         settings["模型回退说明"] = ""
+        settings["模型调用状态"] = "未启用（仅Skill）"
         return None
     try:
         model = _加载阶段模型(settings)
     except Exception as exc:
-        reason = re.sub(r"\s+", " ", str(exc or "")).strip() or type(exc).__name__
-        if len(reason) > 240:
-            reason = f"{reason[:237]}..."
+        reason = _sanitize_model_error_impl(exc, settings)
         note = f"模型加载回退：{source} 加载失败，已改用仅Skill；原因：{reason}"
         settings["模型来源实际"] = "仅Skill回退"
         settings["模型回退说明"] = note
+        settings["模型调用状态"] = "配置或加载失败，已回退 Skill"
+        settings["模型调用尝试次数"] = 1
+        settings["模型调用失败次数"] = 1
+        requested_fallback_count = _safe_int(
+            settings.get("生成数量", SETTING_DEFAULTS["生成数量"]),
+            SETTING_DEFAULTS["生成数量"],
+            1,
+            20,
+        )
+        settings["模型活动回退数量"] = requested_fallback_count + int(
+            bool(settings.get("智能文本匹配", False))
+            and bool(str(settings.get("智能文本输入", "") or "").strip())
+        )
+        settings["模型调用错误"] = [reason]
         _append_runtime_note(settings, note)
         return None
     settings["模型来源实际"] = source
     settings["模型回退说明"] = ""
+    settings["模型调用状态"] = "已加载，等待调用"
     return model
 
 
@@ -3242,10 +3420,7 @@ def _merge_requirement_text(*parts: Any) -> str:
 
 
 def _extract_chat_text(out: Any) -> str:
-    try:
-        return str(out["choices"][0]["message"]["content"])
-    except Exception:
-        return str(out)
+    return _extract_model_response_text_impl(out)
 
 
 def _build_image_reverse_prompt(settings: dict[str, Any]) -> str:
@@ -3541,19 +3716,39 @@ def _reverse_reference_image(model: Any, image: Any, settings: dict[str, Any]) -
 
 def _apply_image_reverse_to_settings(model: Any, image: Any, settings: dict[str, Any]) -> str:
     settings["图片反推缓存命中"] = False
+    settings["图片反推状态"] = "未启用"
+    settings["图片反推错误"] = ""
     if not bool(settings.get("图片反推生成", False)) or image is None:
         return ""
+    settings["图片反推状态"] = "等待调用"
     try:
         reversed_text = _reverse_reference_image(model, image, settings).strip()
     except Exception as exc:
-        reason = re.sub(r"\s+", " ", str(exc or "")).strip() or type(exc).__name__
-        if len(reason) > 220:
-            reason = f"{reason[:217]}..."
-        _append_runtime_note(settings, f"图片反推回退：未执行参考图反推；原因：{reason}")
+        reason = _sanitize_model_error_impl(exc, settings)
+        settings["图片反推状态"] = "调用失败，已回退"
+        settings["图片反推错误"] = reason
+        _record_model_call_result_impl(settings, outcome="failure", reason=f"图片反推回退：{reason}")
         return ""
+    if bool(settings.get("图片反推缓存命中", False)):
+        settings["图片反推状态"] = "缓存命中"
+        return reversed_text
     if not reversed_text:
+        reason = "图片反推 API 返回空文本或清洗后没有有效描述。"
+        settings["图片反推状态"] = "调用失败，已回退"
+        settings["图片反推错误"] = reason
+        _record_model_call_result_impl(settings, outcome="failure", reason=reason)
         return ""
+    settings["图片反推状态"] = "调用成功"
+    _record_model_call_result_impl(settings, outcome="success", changed=True, adopted_outputs=1)
     return reversed_text
+
+
+def _merge_model_runtime_state(target: dict[str, Any], source: dict[str, Any]) -> None:
+    for key in _MODEL_RUNTIME_STATE_KEYS:
+        if key not in source:
+            continue
+        value = source[key]
+        target[key] = list(value) if isinstance(value, list) else value
 
 
 def _apply_character_sheet_to_settings(
@@ -3869,15 +4064,34 @@ def _run_stage_impl(
         )
     raw_prompt_list = list(prompt_list)
     settings["最近提示词指纹"] = _prompt_history_fingerprints(cache_key)
-    prompt_list = _maybe_model_refine_batch_impl(
+    model_prompt_list = _maybe_model_refine_batch_impl(
         model,
         prompt_list,
         settings,
         chat_completion=_调用chat_completion,
         clean_think_text=_清洗think块文本,
     )
-    prompt_list = _stabilize_prompt_list_outputs(prompt_list, raw_prompt_list, settings)
+    prompt_list = _stabilize_prompt_list_outputs(model_prompt_list, raw_prompt_list, settings)
+    stabilization_fallback_indices = {
+        int(index)
+        for index in settings.get("模型稳定化回退索引", [])
+        if isinstance(index, int) or str(index).isdigit()
+    }
     prompt_list = _strict_dedupe_prompt_list(cache_key, prompt_list, settings, channel="prompt")
+    postprocess_fallback_count = sum(
+        model_candidate != original and (index in stabilization_fallback_indices or final_prompt == original)
+        for index, (model_candidate, final_prompt, original) in enumerate(
+            zip(model_prompt_list, prompt_list, raw_prompt_list)
+        )
+    )
+    settings["模型主提示词后处理回退数量"] = postprocess_fallback_count
+    if postprocess_fallback_count:
+        _reconcile_model_output_fallback_impl(
+            settings,
+            fallback_outputs=postprocess_fallback_count,
+            output_count=len(raw_prompt_list),
+            reason="模型候选在最终稳定化、批内差异或连续生成避重校验中被恢复为 Skill 结果。",
+        )
     _update_prompt_history(cache_key, prompt_list)
     profile_markers = [
         *list(settings.get("随机主题池档案标记", []) or []),
@@ -3919,36 +4133,6 @@ def _run_stage_impl(
         negative_prompt=negative_prompt,
         format_grouped_summary=_format_grouped_summary_impl,
     )
-    json_payload = _build_json_payload_impl(
-        full_text=full_text,
-        prompt_only=prompt_only,
-        prompt_list=prompt_list,
-        selected_tags_text=selected_tags_text,
-        selected=selected,
-        tags=tags,
-        template_style=template_style,
-        subject_type=subject_type,
-        output_structure=output_structure,
-        runtime_random_enabled=runtime_random_enabled,
-        settings=settings,
-        generated=generated,
-        lock_tag_whitelist=lock_tag_whitelist,
-        random_exclude_tags=random_exclude_tags,
-        scene_group=scene_group,
-        identity=identity,
-        adult_subpool=adult_subpool,
-        style_track=style_track,
-        recent_tracks=recent_tracks,
-        negative_prompt=negative_prompt,
-        smart_text_prompt="",
-    )
-    json_payload["runtime_random_effective_seed"] = int(settings.get("运行时随机有效种子", settings.get("seed", 0)) or 0)
-    json_payload["runtime_random_preview_consumed"] = bool(settings.get("运行时随机预览已消费", False))
-    json_payload["runtime_random_preview_marker_present"] = bool(str(settings.get("运行时随机预览令牌", "") or "").strip())
-    if tag_block_enabled:
-        json_payload["tag_block_composer_enabled"] = True
-        json_payload["tag_block_composer"] = tag_block_payload
-        json_payload["tag_block_composer_summary"] = settings.get("标签块编排摘要", "")
     smart_text_prompt = ""
     if smart_text_enabled:
         smart_seed = _build_smart_text_seed_impl(
@@ -3958,15 +4142,29 @@ def _run_stage_impl(
             settings=settings,
             style_track=style_track,
         )
+        smart_text_settings = _build_smart_text_settings_impl(settings)
+        smart_success_count_before = max(0, int(smart_text_settings.get("模型调用成功次数", 0) or 0))
         smart_text_prompt = _maybe_model_refine_impl(
             model,
             smart_seed,
-            _build_smart_text_settings_impl(settings),
+            smart_text_settings,
             chat_completion=_调用chat_completion,
             clean_think_text=_清洗think块文本,
         )
+        smart_model_candidate = str(smart_text_prompt or "").strip()
+        smart_model_succeeded = (
+            max(0, int(smart_text_settings.get("模型调用成功次数", 0) or 0))
+            > smart_success_count_before
+        )
+        smart_model_adopted = smart_model_candidate != str(smart_seed or "").strip()
+        smart_model_fallback_used = smart_model_succeeded and not smart_model_adopted
+        _merge_model_runtime_state(settings, smart_text_settings)
         smart_text_prompt = (_stabilize_prompt_list_outputs([smart_text_prompt], [smart_seed], settings) or [smart_text_prompt])[0]
+        smart_stabilization_fallback = 0 in set(settings.get("模型稳定化回退索引", []))
+        if smart_stabilization_fallback and (smart_model_adopted or smart_model_succeeded):
+            smart_model_fallback_used = True
         if smart_text_prompt == smart_seed or "节点基础正向提示词" in str(smart_text_prompt):
+            smart_model_fallback_used = smart_model_adopted or smart_model_succeeded
             smart_text_prompt = ""
         smart_text_prompt = _sanitize_smart_text_prompt_impl(
             text=str(smart_text_prompt or "").strip(),
@@ -3977,6 +4175,8 @@ def _run_stage_impl(
             subject_type=subject_type,
             language=str(settings.get("提示词语言", "纯中文") or "纯中文"),
         )
+        if not smart_text_prompt and (smart_model_adopted or smart_model_succeeded):
+            smart_model_fallback_used = True
         smart_text_prompt = smart_text_prompt or _fallback_smart_text_impl(
             user_text=smart_text_input,
             primary_prompt=primary_prompt,
@@ -4001,8 +4201,64 @@ def _run_stage_impl(
                 or [smart_text_prompt]
             )[0]
             _update_prompt_history(cache_key, [smart_text_prompt])
+        if (smart_model_adopted or smart_model_succeeded) and smart_text_prompt == primary_prompt:
+            smart_model_fallback_used = True
+        if smart_model_fallback_used:
+            _reconcile_model_output_fallback_impl(
+                settings,
+                fallback_outputs=1,
+                output_count=1,
+                reason="智能文本模型候选未通过最终稳定化或安全清洗，已使用 Skill 智能文本回退。",
+                adopted_outputs_to_revert=1 if smart_model_adopted else 0,
+            )
     else:
         smart_text_prompt = primary_prompt
+    selected_tags_text = _build_selected_tags_text_impl(
+        template_style=template_style,
+        subject_type=subject_type,
+        output_structure=output_structure,
+        runtime_random_enabled=runtime_random_enabled,
+        settings=settings,
+        adult_subpool=adult_subpool,
+        scene_group=scene_group,
+        identity=identity,
+        style_track=style_track,
+        selected=selected,
+        custom_tags=custom_tags,
+        recent_tracks=recent_tracks,
+        negative_prompt=negative_prompt,
+        format_grouped_summary=_format_grouped_summary_impl,
+    )
+    json_payload = _build_json_payload_impl(
+        full_text=full_text,
+        prompt_only=prompt_only,
+        prompt_list=prompt_list,
+        selected_tags_text=selected_tags_text,
+        selected=selected,
+        tags=tags,
+        template_style=template_style,
+        subject_type=subject_type,
+        output_structure=output_structure,
+        runtime_random_enabled=runtime_random_enabled,
+        settings=settings,
+        generated=generated,
+        lock_tag_whitelist=lock_tag_whitelist,
+        random_exclude_tags=random_exclude_tags,
+        scene_group=scene_group,
+        identity=identity,
+        adult_subpool=adult_subpool,
+        style_track=style_track,
+        recent_tracks=recent_tracks,
+        negative_prompt=negative_prompt,
+        smart_text_prompt=smart_text_prompt,
+    )
+    json_payload["runtime_random_effective_seed"] = int(settings.get("运行时随机有效种子", settings.get("seed", 0)) or 0)
+    json_payload["runtime_random_preview_consumed"] = bool(settings.get("运行时随机预览已消费", False))
+    json_payload["runtime_random_preview_marker_present"] = bool(str(settings.get("运行时随机预览令牌", "") or "").strip())
+    if tag_block_enabled:
+        json_payload["tag_block_composer_enabled"] = True
+        json_payload["tag_block_composer"] = tag_block_payload
+        json_payload["tag_block_composer_summary"] = settings.get("标签块编排摘要", "")
     json_payload["smart_text_prompt"] = smart_text_prompt
     json_payload["smart_text_enabled"] = bool(smart_text_enabled)
     json_payload["smart_text_input"] = smart_text_input
@@ -4613,6 +4869,7 @@ def _stabilize_prompt_list_outputs(
         if str(signature).strip()
     }
     fallback_count = 0
+    fallback_indices: set[int] = set()
     recent_fallback_count = 0
     variation_cue_count = 0
     originals = [str(prompt or "").strip() for prompt in original_prompt_list]
@@ -4626,6 +4883,7 @@ def _stabilize_prompt_list_outputs(
                 cleaned = fallback
                 compare_signatures = fallback_signatures
                 fallback_count += 1
+                fallback_indices.add(index)
         if _prompt_too_close_to_recent(cleaned, recent_signatures) and index < len(originals):
             fallback = _stabilize_prompt_output_impl(originals[index], settings)
             fallback_signatures = set(_prompt_compare_signatures(fallback))
@@ -4633,6 +4891,7 @@ def _stabilize_prompt_list_outputs(
                 cleaned = fallback
                 compare_signatures = fallback_signatures
                 recent_fallback_count += 1
+                fallback_indices.add(index)
         if _prompt_too_close_to_recent(cleaned, recent_signatures):
             varied = _stabilize_prompt_output_impl(
                 _append_recent_prompt_variation_cue(cleaned, settings, index, len(recent_signatures)),
@@ -4663,6 +4922,7 @@ def _stabilize_prompt_list_outputs(
         if note not in notes:
             notes.append(note)
         settings["推理纠偏说明"] = notes
+    settings["模型稳定化回退索引"] = sorted(fallback_indices)
     return stabilized
 
 
@@ -4820,6 +5080,7 @@ def 构建运行时随机预览状态(payload: dict[str, Any]) -> dict[str, Any]
     public_settings = dict(settings)
     public_settings.pop("API密钥", None)
     public_settings.pop("API额外请求头", None)
+    public_settings.pop("_API密钥脱敏值", None)
     result = {
         "selected": {key: list(value) for key, value in selected.items()},
         "customTags": list(custom_tags),
@@ -4958,6 +5219,14 @@ class QwenTE阶段式提示词生成器:
         else:
             settings["模型来源实际"] = "外接模型输入"
             settings["模型回退说明"] = ""
+            settings["模型调用基础来源"] = "外接模型输入"
+            settings["模型调用状态"] = "已连接，等待调用"
+            settings["模型调用尝试次数"] = 0
+            settings["模型调用成功次数"] = 0
+            settings["模型调用失败次数"] = 0
+            settings["模型活动回退数量"] = 0
+            settings["模型调用采纳次数"] = 0
+            settings["模型调用错误"] = []
         return _run_stage(qwen模型, **settings)
 
 

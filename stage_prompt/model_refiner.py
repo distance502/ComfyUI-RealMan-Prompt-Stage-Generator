@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 from collections import Counter
+import json
+import os
 import re
 from typing import Any, Callable
 
@@ -187,24 +189,64 @@ _SEMANTIC_REPEAT_FAMILIES: tuple[tuple[str, int, tuple[str, ...]], ...] = (
 )
 
 
+def _extract_content_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, (list, tuple)):
+        return ""
+    parts: list[str] = []
+    for block in content:
+        if isinstance(block, str):
+            text = block.strip()
+        elif isinstance(block, dict) and isinstance(block.get("text"), str):
+            text = str(block.get("text") or "").strip()
+        else:
+            text = ""
+        if text:
+            parts.append(text)
+    return "\n".join(parts)
+
+
 def extract_text(response: Any) -> str:
     if response is None:
         return ""
     if isinstance(response, str):
         return response
     if isinstance(response, dict):
+        error = response.get("error")
+        if error:
+            if isinstance(error, dict):
+                reason = error.get("message") or error.get("type") or error.get("code") or "未知 API 错误"
+            else:
+                reason = error
+            raise RuntimeError(f"模型 API 返回错误：{reason}")
         for key in ("text", "output_text", "response"):
-            value = response.get(key)
-            if isinstance(value, str):
-                return value
-        try:
-            return str(response["choices"][0]["message"]["content"])
-        except Exception:
-            pass
-    try:
-        return str(getattr(response, "text"))
-    except Exception:
-        return str(response)
+            text = _extract_content_text(response.get(key))
+            if text:
+                return text
+        choices = response.get("choices")
+        if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+            choice = choices[0]
+            message = choice.get("message")
+            if isinstance(message, dict):
+                text = _extract_content_text(message.get("content"))
+                if text:
+                    return text
+            text = _extract_content_text(choice.get("text"))
+            if text:
+                return text
+        return ""
+    for attribute in ("text", "output_text", "content"):
+        text = _extract_content_text(getattr(response, attribute, None))
+        if text:
+            return text
+    choices = getattr(response, "choices", None)
+    if isinstance(choices, (list, tuple)) and choices:
+        message = getattr(choices[0], "message", None)
+        text = _extract_content_text(getattr(message, "content", None))
+        if text:
+            return text
+    return ""
 
 
 def _postprocess_prompt_text(text: str) -> str:
@@ -854,6 +896,287 @@ def _compose_batch_prompt(prompts: list[str], settings: dict[str, Any]) -> str:
     )
 
 
+_COMMON_MODEL_SECRET_PATTERNS = (
+    re.compile(r"(?i)\b(?:bearer|token|basic)\s+[A-Za-z0-9._~+/=-]{8,}"),
+    re.compile(r"\bsk-(?:proj-)?[A-Za-z0-9_-]{8,}"),
+    re.compile(r"\b(?:gh[pousr]_|github_pat_)[A-Za-z0-9_]{16,}"),
+    re.compile(r"\bhf_[A-Za-z0-9]{16,}"),
+    re.compile(r"\bAIza[0-9A-Za-z_-]{20,}"),
+    re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{12,}"),
+    re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"),
+)
+_MODEL_SECRET_LABEL_PATTERN = re.compile(
+    r"(?i)(\b(?:authorization|proxy-authorization|api[-_ ]?key|x-api-key|x-goog-api-key|"
+    r"access[-_ ]?token|auth[-_ ]?token)\b\s*[:=]\s*)([^,;\r\n}\]]+)"
+)
+_MODEL_SECRET_QUERY_PATTERN = re.compile(
+    r"(?i)([?&](?:key|api[-_]?key|token|access[-_]?token|auth[-_]?token)=)([^&#\s]+)"
+)
+
+
+def _nonempty_secret_scalars(raw: Any) -> list[str]:
+    if isinstance(raw, dict):
+        values: list[str] = []
+        for value in raw.values():
+            values.extend(_nonempty_secret_scalars(value))
+        return values
+    if isinstance(raw, (list, tuple, set)):
+        values = []
+        for value in raw:
+            values.extend(_nonempty_secret_scalars(value))
+        return values
+    text = str(raw or "").strip()
+    return [text] if text else []
+
+
+def _extra_header_secret_values(raw: Any) -> list[str]:
+    if isinstance(raw, (dict, list, tuple, set)):
+        return _nonempty_secret_scalars(raw)
+    text = str(raw or "").strip()
+    if not text:
+        return []
+    if text[:1] in {"{", "["}:
+        try:
+            parsed = json.loads(text)
+        except (TypeError, ValueError):
+            parsed = None
+        if isinstance(parsed, (dict, list)):
+            return _nonempty_secret_scalars(parsed)
+    values: list[str] = []
+    for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        if ":" not in line:
+            continue
+        value = line.split(":", 1)[1].strip()
+        if value:
+            values.append(value)
+    return values
+
+
+def _model_secret_candidates(settings: dict[str, Any] | None) -> list[str]:
+    if not isinstance(settings, dict):
+        return []
+    candidates: list[str] = []
+    for key in ("_API密钥脱敏值", "API密钥解析值", "API密钥已解析", "api_key"):
+        candidates.extend(_nonempty_secret_scalars(settings.get(key)))
+    raw_api_key = str(settings.get("API密钥", "") or "").strip()
+    if raw_api_key.lower().startswith("env:"):
+        env_name = raw_api_key[4:].strip()
+        if env_name:
+            candidates.extend(_nonempty_secret_scalars(os.getenv(env_name, "")))
+    elif raw_api_key:
+        candidates.append(raw_api_key)
+    for key in ("API额外请求头", "API额外请求头解析值", "extra_headers"):
+        candidates.extend(_extra_header_secret_values(settings.get(key)))
+
+    expanded: list[str] = []
+    for value in candidates:
+        secret = str(value or "").strip().strip('"\'')
+        if not secret:
+            continue
+        expanded.append(secret)
+        prefix_match = re.match(r"(?i)^(?:bearer|token|basic)\s+(.+)$", secret)
+        if prefix_match and prefix_match.group(1).strip():
+            expanded.append(prefix_match.group(1).strip())
+    return sorted(set(expanded), key=len, reverse=True)
+
+
+def sanitize_model_error(raw: Any, settings: dict[str, Any] | None = None) -> str:
+    """Return a bounded model error string with configured credentials removed."""
+
+    text = str(raw or "").strip() or "未知错误"
+    for secret in _model_secret_candidates(settings):
+        text = text.replace(secret, "[REDACTED]")
+    for pattern in _COMMON_MODEL_SECRET_PATTERNS:
+        text = pattern.sub("[REDACTED]", text)
+    text = _MODEL_SECRET_QUERY_PATTERN.sub(r"\1[REDACTED]", text)
+    text = _MODEL_SECRET_LABEL_PATTERN.sub(r"\1[REDACTED]", text)
+    text = re.sub(r"\s+", " ", text).strip() or "未知错误"
+    return text if len(text) <= 240 else f"{text[:237]}..."
+
+
+def _safe_model_call_reason(raw: Any, settings: dict[str, Any] | None = None) -> str:
+    return sanitize_model_error(raw, settings)
+
+
+def _append_model_runtime_note(settings: dict[str, Any], note: str) -> None:
+    text = str(note or "").strip()
+    if not text:
+        return
+    current = settings.get("推理纠偏说明", [])
+    if isinstance(current, (list, tuple, set)):
+        notes = [str(item).strip() for item in current if str(item).strip()]
+    else:
+        notes = [line.strip() for line in str(current or "").splitlines() if line.strip()]
+    if text not in notes:
+        notes.append(text)
+    settings["推理纠偏说明"] = notes
+
+
+def _runtime_base_source(settings: dict[str, Any]) -> str:
+    return str(
+        settings.get("模型调用基础来源")
+        or settings.get("模型来源")
+        or settings.get("模型来源实际")
+        or "仅Skill"
+    ).strip()
+
+
+def _refresh_model_runtime_status(settings: dict[str, Any]) -> None:
+    success_count = max(0, int(settings.get("模型调用成功次数", 0) or 0))
+    failure_count = max(0, int(settings.get("模型调用失败次数", 0) or 0))
+    adopted_count = max(0, int(settings.get("模型调用采纳次数", 0) or 0))
+    active_fallback_count = max(0, int(settings.get("模型活动回退数量", 0) or 0))
+    settings["模型调用尝试次数"] = success_count + failure_count
+    base_source = _runtime_base_source(settings)
+
+    if active_fallback_count:
+        if success_count:
+            settings["模型调用状态"] = (
+                f"部分采用：{success_count} 次成功，{failure_count} 次失败；"
+                f"最终仍有 {active_fallback_count} 条回退 Skill，采纳 {adopted_count} 次"
+            )
+        else:
+            settings["模型调用状态"] = (
+                f"调用失败：{failure_count} 次；最终仍有 {active_fallback_count} 条回退 Skill"
+            )
+        settings["模型来源实际"] = f"{base_source}（部分回退）" if adopted_count else "仅Skill回退"
+        return
+    settings["模型回退说明"] = ""
+    if success_count:
+        if failure_count:
+            settings["模型调用状态"] = (
+                f"调用已恢复：{success_count} 次成功，{failure_count} 次失败；"
+                f"最终无输出回退，采纳 {adopted_count} 次"
+            )
+        else:
+            settings["模型调用状态"] = (
+                f"调用成功：{success_count} 次，采纳 {adopted_count} 次"
+                if adopted_count
+                else f"调用成功：{success_count} 次，结果未产生有效变化"
+            )
+        settings["模型来源实际"] = base_source
+    else:
+        settings["模型调用状态"] = f"调用失败：{failure_count} 次，已回退 Skill"
+        settings["模型来源实际"] = "仅Skill回退"
+
+
+def _merge_fallback_note(settings: dict[str, Any], note: str) -> None:
+    text = str(note or "").strip()
+    if not text:
+        return
+    previous = str(settings.get("模型回退说明", "") or "").strip()
+    if previous:
+        text = previous if text in previous else f"{previous}；{text}"
+    settings["模型回退说明"] = text[-720:]
+    _append_model_runtime_note(settings, note)
+
+
+def _record_model_call_result(
+    settings: dict[str, Any],
+    *,
+    outcome: str,
+    changed: bool = False,
+    adopted_outputs: int | None = None,
+    fallback_outputs: int = 0,
+    output_count: int = 1,
+    reason: Any = "",
+    report_fallback: bool = True,
+) -> None:
+    result = str(outcome or "failure").strip().lower()
+    succeeded = result in {"success", "partial"}
+    success_count = max(0, int(settings.get("模型调用成功次数", 0) or 0))
+    failure_count = max(0, int(settings.get("模型调用失败次数", 0) or 0))
+    if succeeded:
+        success_count += 1
+    else:
+        failure_count += 1
+    settings["模型调用成功次数"] = success_count
+    settings["模型调用失败次数"] = failure_count
+
+    adopted_increment = max(0, int(adopted_outputs if adopted_outputs is not None else (1 if changed else 0)))
+    settings["模型调用采纳次数"] = max(0, int(settings.get("模型调用采纳次数", 0) or 0)) + adopted_increment
+    total_outputs = max(1, int(output_count or 1))
+    fallback_output_count = max(0, min(int(fallback_outputs or 0), total_outputs))
+    if not succeeded and fallback_output_count == 0:
+        fallback_output_count = 1
+
+    if not succeeded or fallback_output_count:
+        safe_reason = _safe_model_call_reason(reason, settings)
+        errors = [
+            _safe_model_call_reason(item, settings)
+            for item in settings.get("模型调用错误", [])
+            if str(item).strip()
+        ]
+        if safe_reason not in errors:
+            errors.append(safe_reason)
+        settings["模型调用错误"] = errors[-4:]
+        if report_fallback:
+            settings["模型活动回退数量"] = max(0, int(settings.get("模型活动回退数量", 0) or 0)) + fallback_output_count
+            configured_source = str(settings.get("模型来源", "仅Skill") or "仅Skill").strip()
+            if fallback_outputs:
+                fallback_note = (
+                    f"模型输出回退：{configured_source} 返回结果中有 {fallback_output_count}/{total_outputs} 条"
+                    f"未通过校验，已保留对应 Skill 结果；原因：{safe_reason}"
+                )
+            else:
+                fallback_note = (
+                    f"模型调用回退：{configured_source} 请求或响应处理失败，当前对应输出保留 Skill 结果；"
+                    f"原因：{safe_reason}"
+                )
+            _merge_fallback_note(settings, fallback_note)
+    _refresh_model_runtime_status(settings)
+
+
+def reconcile_model_output_fallback(
+    settings: dict[str, Any],
+    *,
+    fallback_outputs: int,
+    output_count: int,
+    reason: Any,
+    adopted_outputs_to_revert: int | None = None,
+) -> None:
+    total = max(1, int(output_count or 1))
+    fallback = max(0, min(int(fallback_outputs or 0), total))
+    if fallback <= 0:
+        return
+    adopted_revert = fallback if adopted_outputs_to_revert is None else max(
+        0,
+        min(int(adopted_outputs_to_revert or 0), fallback),
+    )
+    settings["模型调用采纳次数"] = max(
+        0,
+        int(settings.get("模型调用采纳次数", 0) or 0) - adopted_revert,
+    )
+    settings["模型活动回退数量"] = max(0, int(settings.get("模型活动回退数量", 0) or 0)) + fallback
+    safe_reason = _safe_model_call_reason(reason, settings)
+    note = f"模型最终结果回退：后处理有 {fallback}/{total} 条未采用模型候选，已恢复 Skill 结果；原因：{safe_reason}"
+    _merge_fallback_note(settings, note)
+    _refresh_model_runtime_status(settings)
+
+
+def _finalize_batch_retry_status(
+    settings: dict[str, Any],
+    *,
+    output_count: int,
+    adopted_outputs: int,
+    fallback_outputs: int,
+    reason: Any,
+    baseline_fallback_count: int = 0,
+    baseline_fallback_note: str = "",
+) -> None:
+    total = max(1, int(output_count or 1))
+    fallback = max(0, min(int(fallback_outputs or 0), total))
+    baseline = max(0, int(baseline_fallback_count or 0))
+    settings["模型活动回退数量"] = baseline + fallback
+    settings["模型回退说明"] = str(baseline_fallback_note or "").strip()
+    if fallback:
+        safe_reason = _safe_model_call_reason(reason, settings)
+        note = f"批量重试后仍有 {fallback}/{total} 条模型输出不可用，已保留对应 Skill 结果；原因：{safe_reason}"
+        _merge_fallback_note(settings, note)
+    elif baseline == 0:
+        settings["模型回退说明"] = ""
+        _append_model_runtime_note(settings, "批量响应格式异常，但逐条重试已恢复，最终无输出回退。")
+    _refresh_model_runtime_status(settings)
 def _call_model_text(
     llm: Any,
     prompt: str,
@@ -869,13 +1192,23 @@ def _call_model_text(
             messages=[{"role": "system", "content": _resolve_system_prompt(settings)}, {"role": "user", "content": _compose_model_user_prompt(prompt, settings)}],
             params=_refiner_sampling_params(settings, prompt_count=prompt_count),
         )
-        text = extract_text(response) or prompt
-        return clean_think_text(str(text).strip())
+        text = str(extract_text(response) or "").strip()
+        if not text:
+            raise RuntimeError("模型 API 返回空文本。")
+        return clean_think_text(text)
     if hasattr(llm, "invoke"):
-        return clean_think_text(str(llm.invoke(_compose_model_user_prompt(prompt, settings))).strip())
+        response = llm.invoke(_compose_model_user_prompt(prompt, settings))
+        text = str(extract_text(response) or "").strip()
+        if not text:
+            raise RuntimeError("模型返回空文本。")
+        return clean_think_text(text)
     if hasattr(llm, "generate_content"):
-        return clean_think_text(str(llm.generate_content(_compose_model_user_prompt(prompt, settings))).strip())
-    return prompt
+        response = llm.generate_content(_compose_model_user_prompt(prompt, settings))
+        text = str(extract_text(response) or "").strip()
+        if not text:
+            raise RuntimeError("模型返回空文本。")
+        return clean_think_text(text)
+    raise RuntimeError("当前模型对象不支持 create_chat_completion、invoke 或 generate_content。")
 
 
 def maybe_model_refine(
@@ -898,15 +1231,26 @@ def maybe_model_refine(
             clean_think_text=clean_think_text,
             prompt_count=1,
         )
-        if _looks_like_broken_prompt(raw_text):
-            return prompt
-        cleaned = _postprocess_prompt_text(raw_text)
-        cleaned = _restore_composition_anchors(prompt, cleaned)
-        cleaned = _restore_mode_literal_guards(prompt, cleaned)
-        return cleaned if cleaned and not _looks_like_broken_prompt(cleaned) and not _violates_language(cleaned, settings) and not _violates_subject_type(prompt, cleaned, settings) else prompt
-    except Exception:
+    except Exception as exc:
+        _record_model_call_result(settings, outcome="failure", reason=exc)
         return prompt
-    return prompt
+    if _looks_like_broken_prompt(raw_text):
+        _record_model_call_result(settings, outcome="failure", reason="模型响应包含分析、占位符或不可用正文。")
+        return prompt
+    cleaned = _postprocess_prompt_text(raw_text)
+    cleaned = _restore_composition_anchors(prompt, cleaned)
+    cleaned = _restore_mode_literal_guards(prompt, cleaned)
+    if not cleaned or _looks_like_broken_prompt(cleaned):
+        _record_model_call_result(settings, outcome="failure", reason="模型响应清洗后没有可用提示词正文。")
+        return prompt
+    if _violates_language(cleaned, settings):
+        _record_model_call_result(settings, outcome="failure", reason="模型响应未遵守当前提示词语言。")
+        return prompt
+    if _violates_subject_type(prompt, cleaned, settings):
+        _record_model_call_result(settings, outcome="failure", reason="模型响应改变了当前主体类型。")
+        return prompt
+    _record_model_call_result(settings, outcome="success", changed=cleaned != str(prompt or "").strip())
+    return cleaned
 
 
 def maybe_model_refine_batch(
@@ -937,28 +1281,107 @@ def maybe_model_refine_batch(
             clean_think_text=clean_think_text,
             prompt_count=len(clean_prompts),
         )
-    except Exception:
+    except Exception as exc:
+        _record_model_call_result(
+            settings,
+            outcome="failure",
+            fallback_outputs=len(clean_prompts),
+            output_count=len(clean_prompts),
+            reason=exc,
+        )
         return list(clean_prompts)
 
     parts = [part.strip() for part in str(raw_text).split(_BATCH_SEPARATOR)]
     if len(parts) != len(clean_prompts):
+        separator_reason = f"批量响应分隔数量不匹配：需要 {len(clean_prompts)} 条，实际解析到 {len(parts)} 条。"
+        baseline_fallback_count = max(0, int(settings.get("模型活动回退数量", 0) or 0))
+        baseline_fallback_note = str(settings.get("模型回退说明", "") or "").strip()
+        _record_model_call_result(
+            settings,
+            outcome="failure",
+            fallback_outputs=len(clean_prompts),
+            output_count=len(clean_prompts),
+            reason=separator_reason,
+            report_fallback=len(clean_prompts) > 8,
+        )
+        if len(clean_prompts) <= 8:
+            retry_results: list[str] = []
+            retry_fallback_count = 0
+            for prompt in clean_prompts:
+                failure_count_before = max(0, int(settings.get("模型调用失败次数", 0) or 0))
+                result = maybe_model_refine(
+                    model,
+                    prompt,
+                    settings,
+                    chat_completion=chat_completion,
+                    clean_think_text=clean_think_text,
+                )
+                retry_results.append(result)
+                failure_count_after = max(0, int(settings.get("模型调用失败次数", 0) or 0))
+                if failure_count_after > failure_count_before:
+                    retry_fallback_count += 1
+            adopted_count = sum(
+                candidate != original
+                for candidate, original in zip(retry_results, clean_prompts)
+            )
+            _finalize_batch_retry_status(
+                settings,
+                output_count=len(clean_prompts),
+                adopted_outputs=adopted_count,
+                fallback_outputs=retry_fallback_count,
+                reason=(
+                    separator_reason
+                    if retry_fallback_count == 0
+                    else f"批量响应分隔错误后逐条重试，仍有 {retry_fallback_count} 条未通过调用或输出校验。"
+                ),
+                baseline_fallback_count=baseline_fallback_count,
+                baseline_fallback_note=baseline_fallback_note,
+            )
+            return retry_results
         return list(clean_prompts)
 
     resolved: list[str] = []
     seen_keys: set[str] = set()
+    rejected_count = 0
     for original_prompt, part in zip(clean_prompts, parts):
         if _looks_like_broken_prompt(part):
             resolved.append(original_prompt)
             seen_keys.add(_normalize_for_compare(original_prompt))
+            rejected_count += 1
             continue
+        rejected = False
         cleaned = _postprocess_prompt_text(part)
         cleaned = _restore_composition_anchors(original_prompt, cleaned)
         cleaned = _restore_mode_literal_guards(original_prompt, cleaned)
         candidate = cleaned if cleaned and not _looks_like_broken_prompt(cleaned) and not _violates_language(cleaned, settings) and not _violates_subject_type(original_prompt, cleaned, settings) else original_prompt
+        if candidate == original_prompt:
+            rejected = True
         candidate_key = _normalize_for_compare(candidate)
         if candidate_key in seen_keys:
             candidate = original_prompt
             candidate_key = _normalize_for_compare(candidate)
+            rejected = True
         resolved.append(candidate)
         seen_keys.add(candidate_key)
+        if rejected:
+            rejected_count += 1
+    changed = any(candidate != original for candidate, original in zip(resolved, clean_prompts))
+    if rejected_count:
+        _record_model_call_result(
+            settings,
+            outcome="partial" if changed else "failure",
+            changed=changed,
+            adopted_outputs=len(clean_prompts) - rejected_count,
+            fallback_outputs=rejected_count,
+            output_count=len(clean_prompts),
+            reason=f"批量响应有 {rejected_count} 条未通过正文、语言、主体或重复校验。",
+        )
+    else:
+        _record_model_call_result(
+            settings,
+            outcome="success",
+            changed=changed,
+            adopted_outputs=len(clean_prompts),
+            output_count=len(clean_prompts),
+        )
     return resolved

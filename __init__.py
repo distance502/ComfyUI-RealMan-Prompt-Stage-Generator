@@ -12,7 +12,9 @@ import json
 import logging
 import os
 import re
+import shutil
 import ssl
+import subprocess
 import threading
 import time
 import unicodedata
@@ -527,6 +529,305 @@ def _get_prompt_server_class():
     except Exception:
         return None
     return getattr(server_module, "PromptServer", None)
+
+
+_COMPANION_BROWSER_URL_MAX_CHARS = 2048
+_COMPANION_BROWSER_REQUEST_MAX_BYTES = 4096
+_COMPANION_BROWSER_HEADER = "X-Qwen-TE-Companion-Browser"
+_COMPANION_BROWSER_ALLOWED_EXE_NAMES = frozenset({"msedge.exe", "chrome.exe", "chromium.exe"})
+_COMPANION_BROWSER_BLOCKED_SUFFIXES = (
+    ".localhost",
+    ".local",
+    ".lan",
+    ".internal",
+    ".home",
+    ".home.arpa",
+    ".test",
+    ".invalid",
+)
+_COMPANION_BROWSER_NUMERIC_HOST = re.compile(
+    r"^(?:0x[0-9a-f]+|0[0-7]+|\d+)"
+    r"(?:\.(?:0x[0-9a-f]+|0[0-7]+|\d+)){0,3}$",
+    flags=re.IGNORECASE,
+)
+_COMPANION_BROWSER_LAUNCH_LOCK = threading.RLock()
+_COMPANION_BROWSER_LAUNCH_TIMES: list[float] = []
+_COMPANION_BROWSER_MIN_INTERVAL_SECONDS = 2.0
+_COMPANION_BROWSER_MAX_LAUNCHES_PER_MINUTE = 5
+
+
+class _CompanionBrowserUnavailable(RuntimeError):
+    pass
+
+
+def _normalize_companion_browser_url(raw: Any) -> tuple[str, str]:
+    text = unicodedata.normalize("NFKC", str(raw or "")).strip()
+    if not text:
+        return "", "请输入要打开的网址。"
+    if len(text) > _COMPANION_BROWSER_URL_MAX_CHARS:
+        return "", f"网址不能超过 {_COMPANION_BROWSER_URL_MAX_CHARS} 个字符。"
+    if "\\" in text or any(
+        character.isspace() or unicodedata.category(character) in {"Cc", "Cf"}
+        for character in text
+    ):
+        return "", "网址包含不允许的空白、控制字符或反斜杠。"
+    if text.startswith("//"):
+        return "", "请输入包含 http:// 或 https:// 的完整网址。"
+
+    try:
+        parsed = urllib.parse.urlsplit(text)
+        port = parsed.port
+    except (TypeError, ValueError):
+        return "", "网址格式无效。"
+    scheme = str(parsed.scheme or "").casefold()
+    if scheme not in {"http", "https"}:
+        return "", "完整浏览器只允许打开 http 或 https 网站。"
+    if parsed.username or parsed.password:
+        return "", "网址不能包含用户名或密码。"
+    if port is not None and not 1 <= port <= 65535:
+        return "", "网址端口无效。"
+
+    raw_host = str(parsed.hostname or "").strip().rstrip(".")
+    if not raw_host or "%" in raw_host:
+        return "", "网址缺少有效主机名。"
+    host = _标准化在线主机(raw_host)
+    if not host:
+        return "", "网址主机名无效。"
+
+    address = None
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        if _COMPANION_BROWSER_NUMERIC_HOST.fullmatch(raw_host):
+            return "", "不能打开本机、局域网或非标准数字地址。"
+    if address is not None:
+        mapped = getattr(address, "ipv4_mapped", None)
+        effective_address = mapped or address
+        if not effective_address.is_global:
+            return "", "不能打开本机、局域网或保留地址。"
+    else:
+        lowered_host = host.casefold()
+        if lowered_host == "localhost" or "." not in lowered_host:
+            return "", "不能打开本机或单标签主机名。"
+        if any(lowered_host.endswith(suffix) for suffix in _COMPANION_BROWSER_BLOCKED_SUFFIXES):
+            return "", "不能打开本机、局域网或保留域名。"
+
+    host_for_url = f"[{host}]" if ":" in host else host
+    netloc = f"{host_for_url}:{port}" if port is not None else host_for_url
+    normalized = urllib.parse.urlunsplit(
+        (
+            scheme,
+            netloc,
+            parsed.path or "/",
+            parsed.query,
+            parsed.fragment,
+        )
+    )
+    if len(normalized) > _COMPANION_BROWSER_URL_MAX_CHARS:
+        return "", f"网址不能超过 {_COMPANION_BROWSER_URL_MAX_CHARS} 个字符。"
+    return normalized, ""
+
+
+def _validated_companion_browser_executable(raw_path: Any) -> Path | None:
+    text = str(raw_path or "").strip().strip('"')
+    if not text or text.startswith("\\\\"):
+        return None
+    candidate = Path(text).expanduser()
+    if not candidate.is_absolute() or candidate.name.casefold() not in _COMPANION_BROWSER_ALLOWED_EXE_NAMES:
+        return None
+    try:
+        resolved = candidate.resolve(strict=True)
+    except (OSError, RuntimeError):
+        return None
+    return resolved if resolved.is_file() else None
+
+
+def _find_companion_browser_executable() -> tuple[Path | None, str, str]:
+    if os.name != "nt":
+        return None, "", "完整浏览器当前仅支持 Windows。"
+
+    override = str(os.environ.get("QWEN_TE_BROWSER_EXE", "") or "").strip()
+    if override:
+        executable = _validated_companion_browser_executable(override)
+        if executable is None:
+            return None, "", "QWEN_TE_BROWSER_EXE 指向的浏览器不可用。"
+        family = "Microsoft Edge" if executable.name.casefold() == "msedge.exe" else "Chromium"
+        return executable, family, ""
+
+    program_files_x86 = os.environ.get("ProgramFiles(x86)") or os.environ.get("PROGRAMFILES(X86)")
+    program_files = os.environ.get("ProgramFiles") or os.environ.get("PROGRAMFILES")
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    candidates = [
+        Path(program_files_x86) / "Microsoft/Edge/Application/msedge.exe" if program_files_x86 else None,
+        Path(program_files) / "Microsoft/Edge/Application/msedge.exe" if program_files else None,
+        Path(local_app_data) / "Microsoft/Edge/Application/msedge.exe" if local_app_data else None,
+        Path(program_files) / "Google/Chrome/Application/chrome.exe" if program_files else None,
+        Path(program_files_x86) / "Google/Chrome/Application/chrome.exe" if program_files_x86 else None,
+        Path(local_app_data) / "Google/Chrome/Application/chrome.exe" if local_app_data else None,
+        Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"),
+        Path(r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"),
+    ]
+    for candidate in candidates:
+        executable = _validated_companion_browser_executable(candidate) if candidate is not None else None
+        if executable is None:
+            continue
+        family = "Microsoft Edge" if executable.name.casefold() == "msedge.exe" else "Google Chrome"
+        return executable, family, ""
+
+    for command in ("msedge", "chrome", "chromium"):
+        found = shutil.which(command)
+        executable = _validated_companion_browser_executable(found)
+        if executable is None:
+            continue
+        family = "Microsoft Edge" if executable.name.casefold() == "msedge.exe" else "Chromium"
+        return executable, family, ""
+    return None, "", "没有找到可用的 Microsoft Edge 或 Chromium 浏览器。"
+
+
+def _companion_browser_profile_directory() -> Path:
+    root = None
+    get_user_directory = getattr(folder_paths, "get_user_directory", None) if folder_paths is not None else None
+    if callable(get_user_directory):
+        try:
+            root = Path(str(get_user_directory())).expanduser()
+        except Exception:
+            root = None
+    if root is None:
+        local_app_data = str(os.environ.get("LOCALAPPDATA", "") or "").strip()
+        root = Path(local_app_data) / "QwenTE" if local_app_data else Path.home() / ".qwen_te"
+    profile = (root / "companion_browser" / "profile").resolve()
+    profile.mkdir(parents=True, exist_ok=True)
+    return profile
+
+
+def _launch_companion_browser(normalized_url: str) -> dict[str, Any]:
+    executable, family, discovery_error = _find_companion_browser_executable()
+    if executable is None:
+        raise _CompanionBrowserUnavailable(discovery_error or "没有找到可用浏览器。")
+    profile = _companion_browser_profile_directory()
+    arguments = [
+        str(executable),
+        f"--user-data-dir={profile}",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--new-window",
+        normalized_url,
+    ]
+    creation_flags = 0
+    if os.name == "nt":
+        creation_flags |= int(getattr(subprocess, "DETACHED_PROCESS", 0))
+        creation_flags |= int(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
+    try:
+        process = subprocess.Popen(
+            arguments,
+            shell=False,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+            creationflags=creation_flags,
+            cwd=str(executable.parent),
+        )
+    except OSError as exc:
+        raise _CompanionBrowserUnavailable("完整浏览器启动失败，请检查浏览器安装。") from exc
+    return {"browser": family, "pid": int(getattr(process, "pid", 0) or 0)}
+
+
+def _companion_browser_request_header(request: Any, name: str) -> str:
+    headers = getattr(request, "headers", {}) or {}
+    direct = headers.get(name) if hasattr(headers, "get") else None
+    if direct is not None:
+        return str(direct or "").strip()
+    target = name.casefold()
+    for key, value in getattr(headers, "items", lambda: [])():
+        if str(key).casefold() == target:
+            return str(value or "").strip()
+    return ""
+
+
+def _is_loopback_host(raw_host: Any) -> bool:
+    host = str(raw_host or "").strip().casefold().rstrip(".")
+    if host == "localhost":
+        return True
+    if host.startswith("[") and host.endswith("]"):
+        host = host[1:-1]
+    if "%" in host:
+        host = host.split("%", 1)[0]
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def _companion_browser_request_guard(request: Any) -> tuple[int, str] | None:
+    content_type = str(getattr(request, "content_type", "") or "").casefold()
+    if not content_type:
+        content_type = _companion_browser_request_header(request, "Content-Type").split(";", 1)[0].casefold()
+    if content_type != "application/json":
+        return 415, "完整浏览器启动请求必须使用 application/json。"
+    content_length = getattr(request, "content_length", None)
+    try:
+        if content_length is not None and int(content_length) > _COMPANION_BROWSER_REQUEST_MAX_BYTES:
+            return 413, "完整浏览器启动请求过大。"
+    except (TypeError, ValueError):
+        return 413, "完整浏览器启动请求长度无效。"
+    if _companion_browser_request_header(request, _COMPANION_BROWSER_HEADER) != "1":
+        return 403, "完整浏览器启动请求缺少本机确认头。"
+    if _companion_browser_request_header(request, "Sec-Fetch-Site").casefold() != "same-origin":
+        return 403, "只允许从当前 ComfyUI 页面启动完整浏览器。"
+
+    remote = str(getattr(request, "remote", "") or "").strip()
+    if not _is_loopback_host(remote):
+        return 403, "只允许本机回环连接启动完整浏览器。"
+    host_header = str(getattr(request, "host", "") or "").strip()
+    if not host_header:
+        host_header = _companion_browser_request_header(request, "Host")
+    try:
+        host_parts = urllib.parse.urlsplit(f"//{host_header}")
+    except ValueError:
+        return 403, "ComfyUI Host 无效。"
+    if not _is_loopback_host(host_parts.hostname):
+        return 403, "只允许通过本机 ComfyUI 地址启动完整浏览器。"
+
+    origin = _companion_browser_request_header(request, "Origin")
+    scheme = str(getattr(request, "scheme", "http") or "http").casefold()
+    try:
+        origin_parts = urllib.parse.urlsplit(origin)
+    except ValueError:
+        return 403, "完整浏览器启动来源无效。"
+    if (
+        origin_parts.scheme.casefold() != scheme
+        or origin_parts.netloc.casefold() != host_header.casefold()
+        or origin_parts.path not in {"", "/"}
+        or origin_parts.query
+        or origin_parts.fragment
+    ):
+        return 403, "完整浏览器只能由同源 ComfyUI 页面启动。"
+    return None
+
+
+def _reserve_companion_browser_launch(now: float | None = None) -> tuple[bool, float]:
+    current = time.monotonic() if now is None else float(now)
+    with _COMPANION_BROWSER_LAUNCH_LOCK:
+        _COMPANION_BROWSER_LAUNCH_TIMES[:] = [
+            timestamp
+            for timestamp in _COMPANION_BROWSER_LAUNCH_TIMES
+            if current - timestamp < 60.0
+        ]
+        if _COMPANION_BROWSER_LAUNCH_TIMES:
+            elapsed = current - _COMPANION_BROWSER_LAUNCH_TIMES[-1]
+            if elapsed < _COMPANION_BROWSER_MIN_INTERVAL_SECONDS:
+                return False, _COMPANION_BROWSER_MIN_INTERVAL_SECONDS - elapsed
+        if len(_COMPANION_BROWSER_LAUNCH_TIMES) >= _COMPANION_BROWSER_MAX_LAUNCHES_PER_MINUTE:
+            retry_after = 60.0 - (current - _COMPANION_BROWSER_LAUNCH_TIMES[0])
+            return False, max(1.0, retry_after)
+        _COMPANION_BROWSER_LAUNCH_TIMES.append(current)
+    return True, 0.0
+
+
+def _reset_companion_browser_launch_rate_limit_for_tests() -> None:
+    with _COMPANION_BROWSER_LAUNCH_LOCK:
+        _COMPANION_BROWSER_LAUNCH_TIMES.clear()
 
 
 _ONLINE_RESPONSE_MAX_BYTES = 8 * 1024 * 1024
@@ -1870,34 +2171,41 @@ _REQUEST_JSON_MAX_BYTES = 2 * 1024 * 1024
 _REQUEST_JSON_READ_CHUNK_BYTES = 64 * 1024
 
 
-def _raise_request_json_too_large(actual_size: int) -> None:
+def _raise_request_json_too_large(actual_size: int, max_size: int | None = None) -> None:
+    limit = _REQUEST_JSON_MAX_BYTES if max_size is None else max(1, int(max_size))
+    limit_label = (
+        f"{limit // (1024 * 1024)} MiB"
+        if limit >= 1024 * 1024 and limit % (1024 * 1024) == 0
+        else f"{limit} 字节"
+    )
     if web is not None:
         raise web.HTTPRequestEntityTooLarge(
-            max_size=_REQUEST_JSON_MAX_BYTES,
+            max_size=limit,
             actual_size=max(0, int(actual_size)),
             text=json.dumps(
                 {
                     "ok": False,
-                    "message": f"请求 JSON 超过 {_REQUEST_JSON_MAX_BYTES // (1024 * 1024)} MiB 上限。",
+                    "message": f"请求 JSON 超过 {limit_label} 上限。",
                 },
                 ensure_ascii=False,
             ),
             content_type="application/json",
         )
-    raise ValueError(f"请求 JSON 超过 {_REQUEST_JSON_MAX_BYTES} 字节上限。")
+    raise ValueError(f"请求 JSON 超过 {limit_label} 上限。")
 
 
-async def _read_request_json(request) -> dict[str, Any]:
+async def _read_request_json(request, *, max_bytes: int | None = None) -> dict[str, Any]:
+    limit = _REQUEST_JSON_MAX_BYTES if max_bytes is None else max(1, int(max_bytes))
     try:
         content_length = getattr(request, "content_length", None)
-        if content_length is not None and int(content_length) > _REQUEST_JSON_MAX_BYTES:
-            _raise_request_json_too_large(int(content_length))
+        if content_length is not None and int(content_length) > limit:
+            _raise_request_json_too_large(int(content_length), limit)
 
         cached_body = getattr(request, "_read_bytes", None)
         if isinstance(cached_body, (bytes, bytearray)):
             raw = bytes(cached_body)
-            if len(raw) > _REQUEST_JSON_MAX_BYTES:
-                _raise_request_json_too_large(len(raw))
+            if len(raw) > limit:
+                _raise_request_json_too_large(len(raw), limit)
         else:
             content = getattr(request, "content", None)
             iter_chunked = getattr(content, "iter_chunked", None)
@@ -1906,16 +2214,17 @@ async def _read_request_json(request) -> dict[str, Any]:
                 total = 0
                 async for chunk in iter_chunked(_REQUEST_JSON_READ_CHUNK_BYTES):
                     total += len(chunk)
-                    if total > _REQUEST_JSON_MAX_BYTES:
-                        _raise_request_json_too_large(total)
+                    if total > limit:
+                        _raise_request_json_too_large(total, limit)
                     chunks.append(bytes(chunk))
                 raw = b"".join(chunks)
             else:
                 data = await request.json()
                 if not isinstance(data, dict):
                     return {}
-                if len(json.dumps(data, ensure_ascii=False).encode("utf-8")) > _REQUEST_JSON_MAX_BYTES:
-                    _raise_request_json_too_large(_REQUEST_JSON_MAX_BYTES + 1)
+                encoded_size = len(json.dumps(data, ensure_ascii=False).encode("utf-8"))
+                if encoded_size > limit:
+                    _raise_request_json_too_large(encoded_size, limit)
                 return data
 
         charset = str(getattr(request, "charset", None) or "utf-8")
@@ -2262,6 +2571,63 @@ def _register_tag_routes() -> bool:
     async def _get_prompt_library(_request):
         payload = await _run_tag_library_transaction(_build_frontend_prompt_library_payload)
         return _json_response(payload)
+
+    @routes.post("/qwen_te/companion_browser/open")
+    async def _open_companion_browser(request):
+        denial = _companion_browser_request_guard(request)
+        if denial is not None:
+            status, message = denial
+            return _json_response({"ok": False, "message": message}, status=status)
+
+        try:
+            data = await _read_request_json(
+                request,
+                max_bytes=_COMPANION_BROWSER_REQUEST_MAX_BYTES,
+            )
+        except Exception as exc:
+            if web is not None and isinstance(exc, web.HTTPRequestEntityTooLarge):
+                return _json_response(
+                    {"ok": False, "message": "完整浏览器启动请求过大。"},
+                    status=413,
+                )
+            raise
+        if len(json.dumps(data, ensure_ascii=False).encode("utf-8")) > _COMPANION_BROWSER_REQUEST_MAX_BYTES:
+            return _json_response({"ok": False, "message": "完整浏览器启动请求过大。"}, status=413)
+        normalized_url, url_error = _normalize_companion_browser_url(data.get("url", ""))
+        if url_error:
+            return _json_response({"ok": False, "message": url_error}, status=400)
+
+        reserved, retry_after = _reserve_companion_browser_launch()
+        if not reserved:
+            response = _json_response(
+                {
+                    "ok": False,
+                    "message": "完整浏览器启动过于频繁，请稍后再试。",
+                    "retry_after": max(1, int(retry_after + 0.999)),
+                },
+                status=429,
+            )
+            response.headers["Retry-After"] = str(max(1, int(retry_after + 0.999)))
+            return response
+
+        try:
+            detail = await _run_thread_until_done(_launch_companion_browser, normalized_url)
+        except _CompanionBrowserUnavailable as exc:
+            return _json_response({"ok": False, "message": str(exc)}, status=503)
+        except Exception:
+            logging.exception("QwenTE 完整浏览器启动出现未预期错误")
+            return _json_response({"ok": False, "message": "完整浏览器启动失败。"}, status=500)
+
+        hostname = str(urllib.parse.urlsplit(normalized_url).hostname or "")
+        logging.info("QwenTE 完整浏览器已启动: browser=%s host=%s", detail.get("browser", "Chromium"), hostname)
+        return _json_response(
+            {
+                "ok": True,
+                "message": f"已在 {detail.get('browser', '完整浏览器')} 中打开。",
+                "browser": str(detail.get("browser", "Chromium")),
+            },
+            status=200,
+        )
 
     @routes.get("/extensions/comfyUI-qwen3_5-llama-TE/stage_prompt_generator_ui.js")
     @routes.get("/extensions/ComfyUI-RealMan-Prompt-Stage-Generator/stage_prompt_generator_ui.js")

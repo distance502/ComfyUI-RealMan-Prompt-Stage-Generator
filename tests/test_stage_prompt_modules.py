@@ -4879,6 +4879,12 @@ class TestStagePromptModules(unittest.TestCase):
                 "模型来源": "API接口",
                 "API服务商": "OpenAI兼容",
                 "API模型": "demo-model",
+                "模型来源实际": "API接口",
+                "模型调用状态": "调用成功：1 次，采纳 1 次",
+                "模型调用尝试次数": 1,
+                "模型调用成功次数": 1,
+                "模型调用失败次数": 0,
+                "模型调用采纳次数": 1,
                 "核心标签锁定数量": 10,
                 "优先柔和肤质": True,
                 "抑制文字伪影": False,
@@ -4907,6 +4913,11 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertEqual(payload["extra_requirement"], "固定单一主场景")
         self.assertEqual(payload["runtime_random_mode_resolved"], "")
         self.assertEqual(payload["model_source"], "API接口")
+        self.assertEqual(payload["model_call_status"], "调用成功：1 次，采纳 1 次")
+        self.assertEqual(payload["model_call_attempt_count"], 1)
+        self.assertEqual(payload["model_call_success_count"], 1)
+        self.assertEqual(payload["model_call_failure_count"], 0)
+        self.assertEqual(payload["model_call_adopted_count"], 1)
         self.assertIn("Skill前置 + API模型后置润色", payload["model_skill_pipeline"])
         self.assertIn("标签作为素材锚点而非固定模板", payload["skill_dynamic_strategy"])
         self.assertEqual(payload["recent_prompt_fingerprint_count"], 2)
@@ -4928,6 +4939,11 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertIsInstance(cache_payload["updated_at"], int)
         self.assertEqual(cache_payload["prompt_text"], "FIRST PROMPT")
         self.assertEqual(cache_payload["prompt_collection"], "FIRST PROMPT\n\nSECOND PROMPT")
+        self.assertEqual(cache_payload["model_call_status"], "调用成功：1 次，采纳 1 次")
+        self.assertEqual(cache_payload["model_call_attempt_count"], 1)
+        self.assertEqual(cache_payload["model_call_success_count"], 1)
+        self.assertEqual(cache_payload["model_call_failure_count"], 0)
+        self.assertEqual(cache_payload["model_call_adopted_count"], 1)
         self.assertIn("Skill前置 + API模型后置润色", cache_payload["model_skill_pipeline"])
         self.assertIn("标签作为素材锚点而非固定模板", cache_payload["skill_dynamic_strategy"])
         self.assertEqual(cache_payload["recent_prompt_fingerprint_count"], 2)
@@ -6993,6 +7009,618 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertEqual(captured["body"]["frequency_penalty"], 0.25)
         self.assertEqual(captured["body"]["presence_penalty"], 0.15)
         self.assertEqual(captured["body"]["seed"], 1234)
+
+    def test_model_response_extractor_is_strict_and_supports_content_blocks(self) -> None:
+        self.assertEqual(
+            model_refiner.extract_text(
+                {"choices": [{"message": {"content": [{"type": "text", "text": "first"}, {"text": "second"}]}}]}
+            ),
+            "first\nsecond",
+        )
+
+        class AiMessage:
+            content = [{"text": "object content"}]
+
+        self.assertEqual(model_refiner.extract_text(AiMessage()), "object content")
+        self.assertEqual(model_refiner.extract_text({"unexpected": {"value": "not prompt text"}}), "")
+        with self.assertRaisesRegex(RuntimeError, "token rejected"):
+            model_refiner.extract_text({"error": {"message": "token rejected"}})
+
+    def test_invoke_model_error_object_uses_skill_fallback(self) -> None:
+        class InvokeModel:
+            def invoke(self, _prompt):
+                return {"error": {"message": "invoke denied"}}
+
+        settings = {
+            "模型来源": "API接口",
+            "模型来源实际": "API接口",
+            "模型调用基础来源": "API接口",
+            "最大生成token": 256,
+            "温度": 0.5,
+            "top_p": 0.9,
+        }
+        original = "cinematic portrait, adult woman, studio light"
+        refined = model_refiner.maybe_model_refine(
+            InvokeModel(),
+            original,
+            settings,
+            chat_completion=lambda *_args, **_kwargs: None,
+            clean_think_text=lambda text: text,
+        )
+        self.assertEqual(refined, original)
+        self.assertEqual(settings["模型调用失败次数"], 1)
+        self.assertEqual(settings["模型活动回退数量"], 1)
+        self.assertIn("invoke denied", settings["模型回退说明"])
+
+    def test_repeated_fallback_note_keeps_earlier_reasons(self) -> None:
+        settings: dict[str, object] = {"模型回退说明": "", "推理纠偏说明": []}
+        model_refiner._merge_fallback_note(settings, "原因A")
+        model_refiner._merge_fallback_note(settings, "原因B")
+        model_refiner._merge_fallback_note(settings, "原因B")
+        self.assertIn("原因A", settings["模型回退说明"])
+        self.assertIn("原因B", settings["模型回退说明"])
+        self.assertEqual(str(settings["模型回退说明"]).count("原因B"), 1)
+
+    def test_stage_api_extra_headers_fail_closed(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        self.assertEqual(
+            module._parse_api_extra_headers('{"HTTP-Referer":"https://example.test","X-Title":"Prompt Node"}'),
+            {"HTTP-Referer": "https://example.test", "X-Title": "Prompt Node"},
+        )
+        invalid_cases = (
+            ('["not-an-object"]', "JSON 必须是对象"),
+            ("BrokenHeader", "缺少"),
+            ("Authorization: Bearer secret", "受保护"),
+            ("content-type: text/plain", "受保护"),
+            ("X-Test: one\nx-test: two", "重复"),
+            (json.dumps({"X-Test": "ok\u0000bad"}), "控制字符"),
+        )
+        for raw_headers, expected in invalid_cases:
+            with self.subTest(raw_headers=raw_headers):
+                with self.assertRaisesRegex(RuntimeError, expected):
+                    module._parse_api_extra_headers(raw_headers)
+
+    def test_stage_api_explicit_env_name_does_not_borrow_provider_key(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        common = {
+            "API服务商": "OpenAI",
+            "API地址": "https://api.openai.com/v1",
+            "API模型": "gpt-4o-mini",
+        }
+        with mock.patch.dict(module.os.environ, {"OPENAI_API_KEY": "provider-key"}, clear=True):
+            with self.assertRaisesRegex(RuntimeError, "未找到 API Key"):
+                module._解析API模型配置({**common, "API密钥": "env:DOES_NOT_EXIST"})
+            legacy = module._解析API模型配置({**common, "API密钥": "env:QWEN_TE_API_KEY"})
+        self.assertEqual(legacy["api_key"], "provider-key")
+
+    def test_stage_api_provider_payload_mappings(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        calls: list[dict[str, object]] = []
+
+        def fake_http(url, payload, headers, timeout):
+            calls.append({"url": url, "payload": payload, "headers": headers, "timeout": timeout})
+            if "anthropic" in url:
+                return {"content": [{"type": "text", "text": "anthropic prompt"}]}
+            if "generativelanguage" in url:
+                return {"candidates": [{"content": {"parts": [{"text": "gemini prompt"}]}}]}
+            return {"choices": [{"message": {"content": "compatible prompt"}}]}
+
+        messages = [{"role": "system", "content": "system rule"}, {"role": "user", "content": "hello"}]
+        with mock.patch.object(module, "_http_post_json", side_effect=fake_http):
+            anthropic = module._TEAPIChatModel(
+                {
+                    "provider": "Claude Anthropic",
+                    "kind": "anthropic",
+                    "url": "https://api.anthropic.com/v1/messages",
+                    "api_key": "anthropic-key",
+                    "model": "claude-haiku-4-5",
+                    "timeout": 30,
+                }
+            )
+            anthropic.create_chat_completion(
+                messages=messages,
+                max_tokens=64,
+                temperature=1.8,
+                top_p=0.8,
+                top_k=37,
+                stop=["END"],
+            )
+
+            gemini = module._TEAPIChatModel(
+                {
+                    "provider": "Gemini 原生",
+                    "kind": "gemini",
+                    "url": "https://generativelanguage.googleapis.com/v1beta",
+                    "api_key": "gemini-key",
+                    "model": "gemini-2.5-flash",
+                    "timeout": 31,
+                }
+            )
+            gemini.create_chat_completion(
+                messages=messages,
+                max_tokens=65,
+                temperature=0.7,
+                top_p=0.82,
+                top_k=29,
+                seed=17,
+                stop=["STOP"],
+            )
+
+            openai = module._TEAPIChatModel(
+                {
+                    "provider": "OpenAI",
+                    "kind": "openai",
+                    "url": "https://api.openai.com/v1/chat/completions",
+                    "api_key": "openai-key",
+                    "model": "gpt-5-mini",
+                    "timeout": 32,
+                }
+            )
+            openai.create_chat_completion(
+                messages=messages,
+                max_tokens=66,
+                temperature=1.2,
+                top_p=0.83,
+                seed=18,
+                stop=["HALT"],
+            )
+
+            deepseek = module._TEAPIChatModel(
+                {
+                    "provider": "DeepSeek",
+                    "kind": "openai",
+                    "url": "https://api.deepseek.com/chat/completions",
+                    "api_key": "deepseek-key",
+                    "model": "deepseek-v4-flash",
+                    "timeout": 33,
+                }
+            )
+            deepseek.create_chat_completion(messages=messages, max_tokens=67, temperature=0.6, top_p=0.84)
+
+        anthropic_call, gemini_call, openai_call, deepseek_call = calls
+        self.assertEqual(anthropic_call["payload"]["temperature"], 1.0)
+        self.assertEqual(anthropic_call["payload"]["top_k"], 37)
+        self.assertEqual(anthropic_call["payload"]["stop_sequences"], ["END"])
+        self.assertEqual(anthropic_call["headers"]["x-api-key"], "anthropic-key")
+
+        self.assertTrue(str(gemini_call["url"]).endswith("/models/gemini-2.5-flash:generateContent"))
+        self.assertEqual(gemini_call["headers"]["x-goog-api-key"], "gemini-key")
+        self.assertEqual(gemini_call["payload"]["generationConfig"]["topK"], 29)
+        self.assertEqual(gemini_call["payload"]["generationConfig"]["seed"], 17)
+        self.assertEqual(gemini_call["payload"]["generationConfig"]["stopSequences"], ["STOP"])
+
+        self.assertEqual(openai_call["payload"]["max_completion_tokens"], 66)
+        self.assertEqual(openai_call["payload"]["messages"][0]["role"], "developer")
+        for unsupported in ("max_tokens", "temperature", "top_p", "seed", "stop"):
+            self.assertNotIn(unsupported, openai_call["payload"])
+
+        self.assertEqual(deepseek_call["payload"]["max_tokens"], 67)
+        self.assertEqual(deepseek_call["payload"]["thinking"], {"type": "disabled"})
+
+    def test_native_provider_blocked_responses_surface_reason(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        messages = [{"role": "user", "content": "hello"}]
+
+        anthropic = module._TEAPIChatModel(
+            {
+                "provider": "Claude Anthropic",
+                "kind": "anthropic",
+                "url": "https://api.anthropic.com/v1/messages",
+                "api_key": "anthropic-key",
+                "model": "claude-haiku-4-5",
+                "timeout": 30,
+            }
+        )
+        with mock.patch.object(
+            module,
+            "_http_post_json",
+            return_value={"content": [], "stop_reason": "refusal"},
+        ):
+            with self.assertRaisesRegex(RuntimeError, "stop_reason=refusal"):
+                anthropic.create_chat_completion(messages=messages)
+
+        gemini = module._TEAPIChatModel(
+            {
+                "provider": "Gemini 原生",
+                "kind": "gemini",
+                "url": "https://generativelanguage.googleapis.com/v1beta",
+                "api_key": "gemini-key",
+                "model": "gemini-2.5-flash",
+                "timeout": 30,
+            }
+        )
+        with mock.patch.object(
+            module,
+            "_http_post_json",
+            return_value={"promptFeedback": {"blockReason": "SAFETY"}, "candidates": []},
+        ):
+            with self.assertRaisesRegex(RuntimeError, "blockReason=SAFETY"):
+                gemini.create_chat_completion(messages=messages)
+
+    def test_stage_api_config_failure_counts_all_requested_outputs(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        node = module.QwenTE阶段式提示词生成器()
+        result = node.run(
+            模型来源="API接口",
+            API服务商="自定义",
+            API地址="https://api.example.com/v1",
+            API密钥="",
+            API模型="",
+            主体标签1="成年女性",
+            场景背景标签1="简洁室内",
+            智能文本匹配=True,
+            智能文本输入="成年女性室内商业摄影",
+            运行时随机标签=False,
+            生成数量=3,
+            提示词语言="纯中文",
+            详细度="标准",
+            输出模式="完整结果",
+            最大生成token=256,
+        )
+        payload = json.loads(result[3])
+        self.assertEqual(len(payload["prompt_list"]), 3)
+        self.assertEqual(payload["model_call_attempt_count"], 1)
+        self.assertEqual(payload["model_call_failure_count"], 1)
+        self.assertEqual(payload["model_active_fallback_count"], 4)
+        self.assertEqual(payload["model_source_effective"], "仅Skill回退")
+
+    def test_smart_text_unchanged_model_output_keeps_main_adoption_count(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+
+        class DummyModel:
+            pass
+
+        original_build_prompt = module._build_prompt_list_impl
+        original_refine_batch = module._maybe_model_refine_batch_impl
+        original_refine_one = module._maybe_model_refine_impl
+        original_update_history = module._update_history
+
+        module._build_prompt_list_impl = lambda *args, **kwargs: [
+            "商业摄影，成年女性，雨夜站台，红色风衣，全景全身，高细节"
+        ]
+
+        def fake_batch(_model, prompt_list, settings, **_kwargs):
+            module._record_model_call_result_impl(
+                settings,
+                outcome="success",
+                changed=True,
+                adopted_outputs=1,
+            )
+            return ["电影感商业摄影，成年女性，雨夜站台，红色风衣，全景全身，轮廓光，高细节"]
+
+        def fake_one(_model, prompt, settings, **_kwargs):
+            module._record_model_call_result_impl(
+                settings,
+                outcome="success",
+                changed=False,
+                adopted_outputs=0,
+            )
+            return prompt
+
+        module._maybe_model_refine_batch_impl = fake_batch
+        module._maybe_model_refine_impl = fake_one
+        module._update_history = lambda *args, **kwargs: []
+        try:
+            result = module._run_stage(
+                DummyModel(),
+                **{
+                    "unique_id": "smart-unchanged-status",
+                    "主体标签1": "成年女性",
+                    "场景背景标签1": "雨夜站台",
+                    "智能文本匹配": True,
+                    "智能文本输入": "成年女性，雨夜站台，全身商业摄影",
+                    "模型来源": "API接口",
+                    "模型来源实际": "API接口",
+                    "模型调用基础来源": "API接口",
+                    "运行时随机标签": False,
+                    "生成数量": 1,
+                    "提示词语言": "纯中文",
+                    "详细度": "标准",
+                    "输出模式": "完整结果",
+                    "最大生成token": 512,
+                },
+            )
+        finally:
+            module._build_prompt_list_impl = original_build_prompt
+            module._maybe_model_refine_batch_impl = original_refine_batch
+            module._maybe_model_refine_impl = original_refine_one
+            module._update_history = original_update_history
+
+        payload = json.loads(result[3])
+        self.assertEqual(payload["model_call_success_count"], 2)
+        self.assertEqual(payload["model_call_adopted_count"], 1)
+        self.assertEqual(payload["model_active_fallback_count"], 1)
+        self.assertEqual(payload["model_source_effective"], "API接口（部分回退）")
+        self.assertIn("最终仍有 1 条回退 Skill", payload["model_call_status"])
+
+    def test_model_api_config_signature_matches_frontend_vector(self) -> None:
+        provider, base_url, model, signature = formatter._model_api_config_meta(
+            {
+                "模型来源": "API接口",
+                "API服务商有效": "OpenAI",
+                "API地址有效": "https://api.openai.com/v1",
+                "API模型有效": "gpt-4o-mini",
+                "API密钥": "env:OPENAI_API_KEY",
+                "API额外请求头": "X-Title: Demo",
+            }
+        )
+        self.assertEqual((provider, base_url, model), ("OpenAI", "https://api.openai.com/v1", "gpt-4o-mini"))
+        self.assertEqual(signature, "model-api-v1:53518f0821f655b6")
+        self.assertNotIn("OPENAI_API_KEY", signature)
+
+    def test_stage_api_preset_requires_a_resolved_key_before_first_request(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        with mock.patch.dict(module.os.environ, {}, clear=True):
+            with self.assertRaisesRegex(RuntimeError, "未找到 API Key"):
+                module._解析API模型配置(
+                    {
+                        "API服务商": "OpenAI",
+                        "API地址": "https://api.openai.com/v1",
+                        "API密钥": "env:OPENAI_API_KEY",
+                        "API模型": "gpt-4o-mini",
+                    }
+                )
+
+    def test_stage_api_runtime_failure_is_visible_in_final_output(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+
+        class FailingApiModel:
+            llm = None
+
+            def __init__(self) -> None:
+                self.llm = self
+
+            def create_chat_completion(self, **_kwargs):
+                raise RuntimeError("HTTP 401 Unauthorized")
+
+        with mock.patch.object(
+            module,
+            "_调用chat_completion",
+            side_effect=lambda llm, *, messages, params: llm.create_chat_completion(messages=messages, **params),
+        ):
+            result = module._run_stage(
+                FailingApiModel(),
+                **{
+                    "模型来源": "API接口",
+                    "模型来源实际": "API接口",
+                    "模型调用基础来源": "API接口",
+                    "API服务商": "OpenAI",
+                    "API模型": "gpt-4o-mini",
+                    "主体标签1": "成年女性",
+                    "场景背景标签1": "简洁室内",
+                    "运行时随机标签": False,
+                    "生成数量": 1,
+                    "提示词语言": "纯中文",
+                    "详细度": "标准",
+                    "输出模式": "完整结果",
+                    "最大生成token": 256,
+                },
+            )
+        payload = json.loads(result[3])
+        self.assertTrue(result[1].strip())
+        self.assertEqual(payload["model_source"], "API接口")
+        self.assertEqual(payload["model_source_effective"], "仅Skill回退")
+        self.assertEqual(payload["model_call_attempt_count"], 1)
+        self.assertEqual(payload["model_call_success_count"], 0)
+        self.assertEqual(payload["model_call_failure_count"], 1)
+        self.assertIn("调用失败", payload["model_call_status"])
+        self.assertIn("401 Unauthorized", payload["model_fallback_note"])
+        self.assertIn("401 Unauthorized", result[2])
+
+    def test_model_refiner_retries_small_batches_when_separator_is_missing(self) -> None:
+        class DummyApiModel:
+            def create_chat_completion(self, **_kwargs):
+                return None
+
+        responses = iter(
+            [
+                "cinematic portrait and rainy urban night combined into one response",
+                "cinematic editorial portrait, adult woman in a crimson silk dress, soft studio rim light, detailed fabric texture",
+                "cinematic rainy urban night, adult man in a cobalt coat, neon reflections, dynamic street composition",
+            ]
+        )
+        calls = []
+
+        def fake_chat_completion(*_args, **kwargs):
+            calls.append(kwargs)
+            return {"text": next(responses)}
+
+        settings = {
+            "模型来源": "API接口",
+            "模型来源实际": "API接口",
+            "模型调用基础来源": "API接口",
+            "提示词语言": "纯英文",
+            "详细度": "标准",
+            "输出模式": "完整结果",
+            "系统提示词覆盖": "",
+            "最大生成token": 512,
+            "温度": 0.6,
+            "top_p": 0.9,
+        }
+        prompts = [
+            "cinematic portrait, adult woman, red dress, studio light",
+            "rainy urban night, adult man, blue coat, neon reflections",
+        ]
+        refined = model_refiner.maybe_model_refine_batch(
+            DummyApiModel(),
+            prompts,
+            settings,
+            chat_completion=fake_chat_completion,
+            clean_think_text=lambda text: text,
+        )
+
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(len(refined), 2)
+        self.assertNotEqual(refined, prompts)
+        self.assertEqual(settings["模型调用尝试次数"], 3)
+        self.assertEqual(settings["模型调用成功次数"], 2)
+        self.assertEqual(settings["模型调用失败次数"], 1)
+        self.assertEqual(
+            settings["模型调用成功次数"] + settings["模型调用失败次数"],
+            settings["模型调用尝试次数"],
+        )
+        self.assertEqual(settings["模型调用采纳次数"], 2)
+        self.assertIn("无输出回退", settings["模型调用状态"])
+        self.assertNotIn("部分回退", settings["模型调用状态"])
+        self.assertEqual(settings["模型来源实际"], "API接口")
+        self.assertEqual(settings["模型回退说明"], "")
+
+    def test_model_refiner_small_batch_retry_reports_final_fallback_count(self) -> None:
+        class DummyApiModel:
+            def create_chat_completion(self, **_kwargs):
+                return None
+
+        responses = iter(
+            [
+                "combined response without the required separator",
+                "cinematic editorial portrait, adult woman in a crimson silk dress, detailed studio rim light",
+                RuntimeError("HTTP 503 temporary upstream failure"),
+            ]
+        )
+
+        def fake_chat_completion(*_args, **_kwargs):
+            response = next(responses)
+            if isinstance(response, Exception):
+                raise response
+            return {"text": response}
+
+        settings = {
+            "模型来源": "API接口",
+            "模型来源实际": "API接口",
+            "模型调用基础来源": "API接口",
+            "提示词语言": "纯英文",
+            "详细度": "标准",
+            "输出模式": "完整结果",
+            "系统提示词覆盖": "",
+            "最大生成token": 512,
+            "温度": 0.6,
+            "top_p": 0.9,
+        }
+        prompts = [
+            "cinematic portrait, adult woman, red dress, studio light",
+            "rainy urban night, adult man, blue coat, neon reflections",
+        ]
+        refined = model_refiner.maybe_model_refine_batch(
+            DummyApiModel(),
+            prompts,
+            settings,
+            chat_completion=fake_chat_completion,
+            clean_think_text=lambda text: text,
+        )
+
+        self.assertNotEqual(refined[0], prompts[0])
+        self.assertEqual(refined[1], prompts[1])
+        self.assertEqual(settings["模型调用尝试次数"], 3)
+        self.assertEqual(settings["模型调用成功次数"], 1)
+        self.assertEqual(settings["模型调用失败次数"], 2)
+        self.assertEqual(
+            settings["模型调用成功次数"] + settings["模型调用失败次数"],
+            settings["模型调用尝试次数"],
+        )
+        self.assertEqual(settings["模型调用采纳次数"], 1)
+        self.assertIn("最终仍有 1 条回退 Skill", settings["模型调用状态"])
+        self.assertIn("仍有 1/2 条", settings["模型回退说明"])
+        self.assertEqual(settings["模型来源实际"], "API接口（部分回退）")
+
+    def test_model_refiner_partial_batch_is_one_successful_attempt(self) -> None:
+        class DummyApiModel:
+            def create_chat_completion(self, **_kwargs):
+                return None
+
+        settings = {
+            "模型来源": "API接口",
+            "模型来源实际": "API接口",
+            "模型调用基础来源": "API接口",
+            "提示词语言": "纯英文",
+            "系统提示词覆盖": "",
+            "最大生成token": 512,
+            "温度": 0.6,
+            "top_p": 0.9,
+        }
+        prompts = [
+            "cinematic portrait, adult woman, red dress, studio light",
+            "rainy urban night, adult man, blue coat, neon reflections",
+        ]
+        refined = model_refiner.maybe_model_refine_batch(
+            DummyApiModel(),
+            prompts,
+            settings,
+            chat_completion=lambda *_args, **_kwargs: {
+                "text": (
+                    "cinematic editorial portrait, adult woman in a crimson silk dress, soft rim light"
+                    "<<<QWEN_TE_SPLIT>>>"
+                    "分析用户请求，解释雨夜城市画面的构图步骤"
+                )
+            },
+            clean_think_text=lambda text: text,
+        )
+
+        self.assertNotEqual(refined[0], prompts[0])
+        self.assertEqual(refined[1], prompts[1])
+        self.assertEqual(settings["模型调用尝试次数"], 1)
+        self.assertEqual(settings["模型调用成功次数"], 1)
+        self.assertEqual(settings["模型调用失败次数"], 0)
+        self.assertEqual(
+            settings["模型调用成功次数"] + settings["模型调用失败次数"],
+            settings["模型调用尝试次数"],
+        )
+        self.assertEqual(settings["模型调用采纳次数"], 1)
+        self.assertIn("最终仍有 1 条回退 Skill", settings["模型调用状态"])
+
+    def test_model_refiner_redacts_configured_and_common_tokens_from_errors(self) -> None:
+        class DummyApiModel:
+            def create_chat_completion(self, **_kwargs):
+                return None
+
+        resolved_key = "resolved-secret-123456789"
+        header_secret = "header-secret-987654321"
+        common_key = "sk-proj-ABCDEFGHIJKLMNOPQRSTUVWXYZ123456"
+        github_token = "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890"
+        settings = {
+            "模型来源": "API接口",
+            "模型来源实际": "API接口",
+            "模型调用基础来源": "API接口",
+            "API密钥解析值": resolved_key,
+            "API额外请求头": json.dumps(
+                {
+                    "Authorization": f"Bearer {header_secret}",
+                    "X-Custom-Secret": "custom-header-value-24680",
+                }
+            ),
+            "系统提示词覆盖": "",
+            "最大生成token": 256,
+            "温度": 0.6,
+            "top_p": 0.9,
+        }
+        raw_error = (
+            f"HTTP 401 api_key={resolved_key}; Authorization: Bearer {header_secret}; "
+            f"provider={common_key}; github={github_token}; custom=custom-header-value-24680"
+        )
+
+        refined = model_refiner.maybe_model_refine(
+            DummyApiModel(),
+            "cinematic portrait, adult woman, studio light",
+            settings,
+            chat_completion=lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError(raw_error)),
+            clean_think_text=lambda text: text,
+        )
+
+        self.assertEqual(refined, "cinematic portrait, adult woman, studio light")
+        serialized_errors = json.dumps(
+            {
+                "errors": settings["模型调用错误"],
+                "fallback": settings["模型回退说明"],
+                "notes": settings["推理纠偏说明"],
+            },
+            ensure_ascii=False,
+        )
+        for secret in (resolved_key, header_secret, common_key, github_token, "custom-header-value-24680"):
+            self.assertNotIn(secret, serialized_errors)
+        self.assertIn("[REDACTED]", serialized_errors)
+        self.assertEqual(
+            model_refiner.sanitize_model_error(raw_error, settings),
+            settings["模型调用错误"][0],
+        )
 
     def test_stage_api_env_key_is_limited_to_provider_preset_origin(self) -> None:
         module = load_stage_prompt_generator_for_integration_test()

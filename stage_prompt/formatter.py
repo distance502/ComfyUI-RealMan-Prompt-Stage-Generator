@@ -6,6 +6,7 @@ from __future__ import annotations
 from collections import OrderedDict
 import json
 import time
+import urllib.parse
 from typing import Any, Callable
 
 
@@ -66,17 +67,76 @@ def summarize_negative_prompt_for_display(negative_prompt: str) -> str:
 def _model_skill_pipeline_label(settings: dict[str, Any]) -> str:
     source = str(settings.get("模型来源", "仅Skill") or "仅Skill").strip()
     fallback_note = str(settings.get("模型回退说明", "") or "").strip()
+    call_status = str(settings.get("模型调用状态", "") or "").strip()
     if fallback_note:
-        return f"已回退仅Skill：{fallback_note}"
+        return f"{call_status or '已回退仅Skill'}：{fallback_note}"
     if source == "仅Skill":
         return "仅Skill：不调用模型，本地Skill直接输出"
     if source == "API接口":
-        provider = str(settings.get("API服务商", "") or "").strip()
-        model = str(settings.get("API模型", "") or "").strip()
+        provider = str(settings.get("API服务商有效", settings.get("API服务商", "")) or "").strip()
+        model = str(settings.get("API模型有效", settings.get("API模型", "")) or "").strip()
         api_label = " / ".join(part for part in (provider, model) if part)
         return f"Skill前置 + API模型后置润色{f'（{api_label}）' if api_label else ''}"
     model_name = str(settings.get("内置主模型", "") or "").strip()
     return f"Skill前置 + 本地模型后置润色{f'（{model_name}）' if model_name else ''}"
+
+
+def _safe_model_api_base_url(raw_url: Any) -> str:
+    text = str(raw_url or "").strip()
+    if not text or any(char.isspace() for char in text):
+        return ""
+    try:
+        parsed = urllib.parse.urlsplit(text)
+        port = parsed.port
+    except (TypeError, ValueError):
+        return ""
+    scheme = str(parsed.scheme or "").lower()
+    hostname = str(parsed.hostname or "").strip()
+    if scheme not in {"http", "https"} or not hostname:
+        return ""
+    if parsed.username is not None or parsed.password is not None or parsed.query or parsed.fragment:
+        return ""
+    path = str(parsed.path or "").rstrip("/")
+    decoded_path = urllib.parse.unquote(path)
+    path_segments = [segment for segment in decoded_path.split("/") if segment]
+    if (
+        "\\" in decoded_path
+        or any(segment in {".", ".."} for segment in path_segments)
+        or any(char.isspace() or ord(char) < 32 or ord(char) == 127 or ord(char) > 127 for char in decoded_path)
+    ):
+        return ""
+    try:
+        host = hostname.encode("idna").decode("ascii").lower()
+    except UnicodeError:
+        return ""
+    if (scheme == "https" and port == 443) or (scheme == "http" and port == 80):
+        port = None
+    host_text = f"[{host}]" if ":" in host else host
+    origin = f"{scheme}://{host_text}{f':{port}' if port is not None else ''}"
+    return f"{origin}{path if path and path != '/' else ''}"
+
+
+def _model_api_config_meta(settings: dict[str, Any]) -> tuple[str, str, str, str]:
+    source = str(settings.get("模型来源", "仅Skill") or "仅Skill").strip()
+    if source != "API接口":
+        return "", "", "", ""
+    provider = str(settings.get("API服务商有效", settings.get("API服务商", "")) or "").strip()
+    base_url = _safe_model_api_base_url(
+        settings.get("API地址有效", settings.get("API地址", ""))
+    )
+    model = str(settings.get("API模型有效", settings.get("API模型", "")) or "").strip()
+    key_reference = str(settings.get("API密钥", "") or "").strip()
+    extra_headers = str(settings.get("API额外请求头", "") or "").strip().replace("\r\n", "\n").replace("\r", "\n")
+    canonical = json.dumps(
+        [source, provider, base_url, model, key_reference, extra_headers],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    digest = 0xCBF29CE484222325
+    for byte in canonical.encode("utf-16le"):
+        digest ^= byte
+        digest = (digest * 0x100000001B3) & 0xFFFFFFFFFFFFFFFF
+    return provider, base_url, model, f"model-api-v1:{digest:016x}"
 
 
 def build_selected_tags_text(
@@ -113,6 +173,8 @@ def build_selected_tags_text(
             f"风格隔离策略：{settings.get('风格隔离策略', '平衡收敛')}",
             f"模型来源：{settings.get('模型来源', '仅Skill')}",
             f"模型实际来源：{settings.get('模型来源实际', settings.get('模型来源', '仅Skill'))}",
+            f"模型调用状态：{settings.get('模型调用状态', '未记录')}",
+            f"图片反推状态：{settings.get('图片反推状态', '未启用')}",
             f"模型与Skill链路：{_model_skill_pipeline_label(settings)}",
             f"NSFW Skill解析：{settings.get('NSFW策略解析结果', '') or '未触发'}",
             f"智能文本风格优先：{settings.get('智能文本风格优先', '自动判断')}",
@@ -151,6 +213,7 @@ def build_json_payload(
     smart_text_prompt: str = "",
 ) -> dict[str, Any]:
     display_negative_prompt = summarize_negative_prompt_for_display(negative_prompt)
+    model_api_provider, model_api_base_url, model_api_model, model_config_signature = _model_api_config_meta(settings)
     return {
         "full_text": full_text,
         "prompt_text": prompt_only,
@@ -172,7 +235,20 @@ def build_json_payload(
         "model_source": str(settings.get("模型来源", "仅Skill") or "仅Skill"),
         "model_source_effective": str(settings.get("模型来源实际", settings.get("模型来源", "仅Skill")) or "仅Skill"),
         "model_fallback_note": str(settings.get("模型回退说明", "") or ""),
+        "model_call_status": str(settings.get("模型调用状态", "") or ""),
+        "model_call_attempt_count": int(settings.get("模型调用尝试次数", 0) or 0),
+        "model_call_success_count": int(settings.get("模型调用成功次数", 0) or 0),
+        "model_call_failure_count": int(settings.get("模型调用失败次数", 0) or 0),
+        "model_call_adopted_count": int(settings.get("模型调用采纳次数", 0) or 0),
+        "model_active_fallback_count": int(settings.get("模型活动回退数量", 0) or 0),
+        "image_reverse_status": str(settings.get("图片反推状态", "未启用") or "未启用"),
+        "image_reverse_error": str(settings.get("图片反推错误", "") or ""),
+        "model_call_errors": [str(item) for item in settings.get("模型调用错误", []) if str(item).strip()],
         "model_skill_pipeline": _model_skill_pipeline_label(settings),
+        "model_api_provider": model_api_provider,
+        "model_api_base_url": model_api_base_url,
+        "model_api_model": model_api_model,
+        "model_config_signature": model_config_signature,
         "nsfw_skill_strategy": str(settings.get("NSFW策略解析结果", "") or ""),
         "skill_dynamic_strategy": str(settings.get("Skill动态变化策略", "") or ""),
         "recent_prompt_fingerprint_count": len([item for item in settings.get("最近提示词指纹", []) if str(item).strip()]),
@@ -260,7 +336,14 @@ def build_cache_payload(
         "smart_text_style_priority_resolved": str(json_meta.get("smart_text_style_priority_resolved", "") or ""),
         "smart_text_style_resolved": str(json_meta.get("smart_text_style_resolved", "") or ""),
         "model_skill_pipeline": str(json_meta.get("model_skill_pipeline", "") or ""),
+        "model_call_status": str(json_meta.get("model_call_status", "") or ""),
+        "model_call_attempt_count": int(json_meta.get("model_call_attempt_count", 0) or 0),
+        "model_call_success_count": int(json_meta.get("model_call_success_count", 0) or 0),
+        "model_call_failure_count": int(json_meta.get("model_call_failure_count", 0) or 0),
+        "model_call_adopted_count": int(json_meta.get("model_call_adopted_count", 0) or 0),
         "skill_dynamic_strategy": str(json_meta.get("skill_dynamic_strategy", "") or ""),
+        "model_active_fallback_count": int(json_meta.get("model_active_fallback_count", 0) or 0),
+        "image_reverse_status": str(json_meta.get("image_reverse_status", "") or ""),
         "recent_prompt_fingerprint_count": int(json_meta.get("recent_prompt_fingerprint_count", 0) or 0),
         "normalization_notes": list(json_meta.get("normalization_notes", [])) if isinstance(json_meta.get("normalization_notes"), list) else [],
         "outputs": outputs,
