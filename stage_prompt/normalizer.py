@@ -345,6 +345,47 @@ def normalize_inference_state(
     )
 
     tags = tag_set()
+    reference_sheet_tags = set(context.get("danbooru_reference_sheet_tags", set()))
+    reference_sheet_hits = [tag for tag in collect_all_tags(normalized_selected, normalized_custom) if tag in reference_sheet_tags]
+    if reference_sheet_hits:
+        allowed_backgrounds = set(context.get("danbooru_reference_sheet_background_tags", set()))
+        removed_scenes = [
+            tag
+            for tag in list(normalized_selected.get("场景背景", []))
+            if tag not in allowed_backgrounds
+        ]
+        for scene_tag in removed_scenes:
+            remove_tag_from_state(normalized_selected, normalized_custom, scene_tag)
+        if not (tag_set() & allowed_backgrounds):
+            append_tag_to_state(normalized_selected, normalized_custom, "简单背景")
+        dynamic_tags = set(context.get("danbooru_reference_sheet_dynamic_tags", set()))
+        removed_dynamic = [tag for tag in collect_all_tags(normalized_selected, normalized_custom) if tag in dynamic_tags]
+        for dynamic_tag in removed_dynamic:
+            remove_tag_from_state(normalized_selected, normalized_custom, dynamic_tag)
+        if removed_scenes or removed_dynamic:
+            notes.append(
+                "设定表收敛：保留多视角/参考表结构，移除具体场景或动态镜头 "
+                + "、".join(uniq([*removed_scenes, *removed_dynamic]))
+                + "，并使用简洁背景。"
+            )
+
+    for family in context.get("danbooru_visual_intent_families", ()):
+        if not isinstance(family, dict):
+            continue
+        family_tags = {str(tag).strip() for tag in family.get("tags", ()) if str(tag).strip()}
+        max_keep = max(1, int(family.get("max_keep", 1) or 1))
+        active = [tag for tag in collect_all_tags(normalized_selected, normalized_custom) if tag in family_tags]
+        if len(active) <= max_keep:
+            continue
+        removed_family = active[max_keep:]
+        for family_tag in removed_family:
+            remove_tag_from_state(normalized_selected, normalized_custom, family_tag)
+        family_name = str(family.get("name", "视觉意图") or "视觉意图").strip()
+        notes.append(
+            f"{family_name}收敛：保留 {'、'.join(active[:max_keep])}，移除互斥标签 {'、'.join(removed_family)}。"
+        )
+
+    tags = tag_set()
     removed_emotions: list[str] = []
     for trigger_tags, conflict_tags in context.get("emotion_cleanup_rules", []):
         trigger_set = set(trigger_tags)

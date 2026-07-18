@@ -18,6 +18,43 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+try:
+    from .danbooru_tag_config import (
+        DANBOORU_GENERAL_TAG_ALIASES,
+        DANBOORU_GENERAL_TAG_EXTENSIONS,
+        DANBOORU_REFERENCE_SHEET_BACKGROUND_TAGS,
+        DANBOORU_REFERENCE_SHEET_DYNAMIC_TAGS,
+        DANBOORU_REFERENCE_SHEET_TAGS,
+        DANBOORU_VISUAL_INTENT_FAMILIES,
+    )
+except ImportError:  # Direct module loading in focused tests.
+    try:
+        from danbooru_tag_config import (  # type: ignore
+            DANBOORU_GENERAL_TAG_ALIASES,
+            DANBOORU_GENERAL_TAG_EXTENSIONS,
+            DANBOORU_REFERENCE_SHEET_BACKGROUND_TAGS,
+            DANBOORU_REFERENCE_SHEET_DYNAMIC_TAGS,
+            DANBOORU_REFERENCE_SHEET_TAGS,
+            DANBOORU_VISUAL_INTENT_FAMILIES,
+        )
+    except ImportError:
+        import importlib.util
+
+        _danbooru_spec = importlib.util.spec_from_file_location(
+            "danbooru_tag_config",
+            Path(__file__).with_name("danbooru_tag_config.py"),
+        )
+        if _danbooru_spec is None or _danbooru_spec.loader is None:
+            raise RuntimeError("Unable to load danbooru_tag_config.py")
+        _danbooru_module = importlib.util.module_from_spec(_danbooru_spec)
+        _danbooru_spec.loader.exec_module(_danbooru_module)
+        DANBOORU_GENERAL_TAG_ALIASES = _danbooru_module.DANBOORU_GENERAL_TAG_ALIASES
+        DANBOORU_GENERAL_TAG_EXTENSIONS = _danbooru_module.DANBOORU_GENERAL_TAG_EXTENSIONS
+        DANBOORU_REFERENCE_SHEET_BACKGROUND_TAGS = _danbooru_module.DANBOORU_REFERENCE_SHEET_BACKGROUND_TAGS
+        DANBOORU_REFERENCE_SHEET_DYNAMIC_TAGS = _danbooru_module.DANBOORU_REFERENCE_SHEET_DYNAMIC_TAGS
+        DANBOORU_REFERENCE_SHEET_TAGS = _danbooru_module.DANBOORU_REFERENCE_SHEET_TAGS
+        DANBOORU_VISUAL_INTENT_FAMILIES = _danbooru_module.DANBOORU_VISUAL_INTENT_FAMILIES
+
 
 _快照文件路径 = Path(__file__).with_name("prompt_library_snapshot.json")
 _自定义标签库文件路径 = Path(__file__).with_name("prompt_tag_library_custom.json")
@@ -1373,6 +1410,15 @@ _四向扩展标签 = {
 for (_group, _section), _tags in _四向扩展标签.items():
     _extend_library_section(_group, _section, _tags)
 
+for (_group, _section), _tags in DANBOORU_GENERAL_TAG_EXTENSIONS.items():
+    _extend_library_section(_group, _section, _tags)
+
+模板推断关键词["插画感"].update({
+    "赛璐璐上色", "厚涂绘画", "水彩晕染", "铅笔素描", "黑白线稿", "单色插画",
+    "网点漫画", "复古画风", "90年代动画风", "动画截图感", "平涂上色", "粗线稿",
+})
+模板推断关键词["CG感"].update({"概念艺术", "角色设计稿", "参考设定表", "多视角展示"})
+
 模板推断关键词["真实感"].update({"中画幅", "Lookbook", "品牌大片", "生活方式广告", "影棚人像", "都市纪实", "街头纪实", "街拍摄影", "电影剧照感", "35mm胶片摄影", "大画幅棚拍", "大片级棚拍", "纪实电影摄影", "港式武侠胶片", "雾景实拍感", "写实真人质感", "复古颗粒", "日韩影像", "日系电影感", "韩系极简影像", "生活流写实", "港风恐怖电影调", "高端时尚编辑肖像", "时尚编辑商业广告"})
 模板推断关键词["插画感"].update({"单幅叙事角色插画", "叙事插画", "动画电影截图感", "单幅角色插画", "水粉插画", "墨洗留白", "木刻版画", "平面矢量", "浮世绘"})
 模板推断关键词["CG感"].update({"机能赛博", "义体美学", "反乌托邦", "数据机房", "赛博地铁", "全息界面", "能量刀", "电影感单幅画面", "单人角色渲染", "关卡空间单幅画面", "高完成度单人角色渲染", "东方赛博机甲", "东方赛博武侠朋克", "游戏CG质感"})
@@ -2439,6 +2485,11 @@ def 前端标签库数据() -> dict[str, Any]:
         "custom_tag_library": custom_library,
         "custom_tag_rules": deepcopy(自定义标签规则),
         "custom_tag_stats": _自定义标签统计(custom_library),
+        "danbooru_general_tags": {
+            "scope": "通用视觉标签白名单（不含画师、版权、角色、元数据、幼态与露骨性标签）",
+            "tag_count": len(DANBOORU_GENERAL_TAG_ALIASES),
+            "aliases": deepcopy(DANBOORU_GENERAL_TAG_ALIASES),
+        },
         "template_desc": deepcopy(模板说明),
         "template_outline": deepcopy(模板骨架说明),
         "template_reference": deepcopy(模板参考示例),

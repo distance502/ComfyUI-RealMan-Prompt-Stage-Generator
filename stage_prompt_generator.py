@@ -81,6 +81,11 @@ except Exception:  # pragma: no cover - focused tests may stub .nodes
     def _列出内置llm文件() -> list[str]:
         return []
 from .prompt_tag_library import (
+    DANBOORU_GENERAL_TAG_ALIASES,
+    DANBOORU_REFERENCE_SHEET_BACKGROUND_TAGS,
+    DANBOORU_REFERENCE_SHEET_DYNAMIC_TAGS,
+    DANBOORU_REFERENCE_SHEET_TAGS,
+    DANBOORU_VISUAL_INTENT_FAMILIES,
     分组配置,
     展平标签分类,
     模板推断关键词,
@@ -2185,6 +2190,10 @@ def _normalize_inference_state(
             "prompt_noise_tags": {"True", "False", "true", "false", "自动", "标准", "详细", "简洁", "低保真", "none", "null"},
             "style_positive_exclusion_terms": _STYLE_POSITIVE_EXCLUSION_TERMS,
             "runtime_style_isolation_families": _运行随机风格隔离标签族,
+            "danbooru_visual_intent_families": DANBOORU_VISUAL_INTENT_FAMILIES,
+            "danbooru_reference_sheet_tags": DANBOORU_REFERENCE_SHEET_TAGS,
+            "danbooru_reference_sheet_background_tags": DANBOORU_REFERENCE_SHEET_BACKGROUND_TAGS,
+            "danbooru_reference_sheet_dynamic_tags": DANBOORU_REFERENCE_SHEET_DYNAMIC_TAGS,
         },
     )
 
@@ -2446,6 +2455,7 @@ def _apply_random_theme_pool_bias(
             {"style": "CG感", "tags": [("CG感", "画面风格"), ("PBR渲染", "画面风格"), ("工业废墟", "场景背景"), ("硬光", "光影氛围")]},
             {"style": "CG感", "tags": [("CG感", "画面风格"), ("工业科幻", "画面风格"), ("机械维修舱", "场景背景"), ("警示灯", "光影氛围"), ("机械臂", "道具世界观")]},
             {"style": "CG感", "tags": [("CG感", "画面风格"), ("硬表面科幻", "画面风格"), ("轨道交通站", "场景背景"), ("冷白顶光", "光影氛围"), ("机能外套", "服装造型")]},
+            {"id": "fisheye-night", "style": "CG感", "tags": [("机能赛博", "画面风格"), ("城市街道", "场景背景"), ("霓虹光", "光影氛围"), ("鱼眼镜头", "构图视角"), ("广角畸变", "构图视角")]},
         ],
         "东方赛博": [
             {"style": "CG感", "tags": [("CG感", "画面风格"), ("东方赛博", "画面风格"), ("霓虹古街", "场景背景"), ("霓虹雨夜", "光影氛围"), ("全息灯笼", "道具世界观")]},
@@ -2460,6 +2470,7 @@ def _apply_random_theme_pool_bias(
             {"style": "CG感", "tags": [("CG感", "画面风格"), ("装甲角色", "画面风格"), ("战术整备间", "场景背景"), ("警示灯", "光影氛围"), ("机械外骨骼", "服装造型")]},
             {"style": "CG感", "tags": [("CG感", "画面风格"), ("太空歌剧", "画面风格"), ("飞船走廊", "场景背景"), ("轮廓光", "光影氛围"), ("透明头盔", "道具世界观")]},
             {"style": "CG感", "tags": [("CG感", "画面风格"), ("未来军工", "画面风格"), ("地下基地", "场景背景"), ("低角度", "构图视角"), ("装甲靴", "服装造型")]},
+            {"id": "turnaround-sheet", "style": "CG感", "tags": [("角色设计稿", "画面风格"), ("参考设定表", "构图视角"), ("多视角展示", "构图视角"), ("表情组", "构图视角"), ("简单背景", "场景背景"), ("高键光", "光影氛围")]},
         ],
         "废土荒原": [
             {"style": "CG感", "tags": [("CG感", "画面风格"), ("废土电影感", "画面风格"), ("荒漠公路", "场景背景"), ("晒褪色调", "光影氛围"), ("防风披风", "服装造型")]},
@@ -2475,6 +2486,7 @@ def _apply_random_theme_pool_bias(
             {"style": "插画感", "tags": [("插画感", "画面风格"), ("后印象派", "画面风格"), ("湖畔", "场景背景"), ("暖色调", "光影氛围")]},
             {"style": "插画感", "tags": [("插画感", "画面风格"), ("手绘海报", "画面风格"), ("复古电影院", "场景背景"), ("颗粒质感", "技术画质"), ("暖色灯光", "光影氛围")]},
             {"style": "插画感", "tags": [("插画感", "画面风格"), ("漫画封面感", "画面风格"), ("屋顶", "场景背景"), ("夕阳", "光影氛围"), ("夸张透视", "构图视角")]},
+            {"id": "anime-screencap", "style": "复古动画", "tags": [("90年代动画风", "画面风格"), ("动画截图感", "画面风格"), ("城市街道", "场景背景"), ("牛仔景别", "构图视角"), ("VHS噪点", "技术画质")]},
         ],
     }
 
@@ -2531,6 +2543,7 @@ def _apply_template_style_profile_bias(
             {"id": "documentary", "tags": [("真实感", "画面风格"), ("生活电影剧照", "画面风格"), ("自然光", "光影氛围"), ("纪实抓拍", "画面风格")]},
             {"id": "film", "tags": [("真实感", "画面风格"), ("35mm胶片摄影", "画面风格"), ("低饱和", "光影氛围"), ("胶片颗粒", "技术画质")]},
             {"id": "clean", "tags": [("真实感", "画面风格"), ("中画幅", "画面风格"), ("柔光", "光影氛围"), ("主体突出", "技术画质")]},
+            {"id": "cinematic-cowboy", "tags": [("真实感", "画面风格"), ("电影剧照感", "画面风格"), ("牛仔景别", "构图视角"), ("明暗对照", "光影氛围"), ("胶片颗粒", "技术画质")]},
         ],
         "商业摄影": [
             {"id": "white-studio", "tags": [("商业广告大片", "画面风格"), ("白棚", "场景背景"), ("硬光", "光影氛围"), ("清晰产品级质感", "技术画质")]},
@@ -2538,6 +2551,7 @@ def _apply_template_style_profile_bias(
             {"id": "lookbook", "tags": [("Lookbook", "画面风格"), ("纯色背景", "场景背景"), ("自然阴影", "光影氛围"), ("服装褶皱真实", "技术画质")]},
             {"id": "product", "tags": [("产品广告", "画面风格"), ("金属展台", "场景背景"), ("高对比", "光影氛围"), ("材质细节丰富", "技术画质")]},
             {"id": "window", "tags": [("中画幅", "画面风格"), ("玻璃橱窗", "场景背景"), ("柔光", "光影氛围"), ("景深层次自然", "技术画质")]},
+            {"id": "catalog", "tags": [("商业广告大片", "画面风格"), ("简单背景", "场景背景"), ("居中构图", "构图视角"), ("高键光", "光影氛围"), ("干净线条", "技术画质")]},
         ],
         "时尚编辑": [
             {"id": "cover", "tags": [("杂志编辑摄影", "画面风格"), ("封面肖像", "构图视角"), ("聚光灯", "光影氛围"), ("时尚成片感", "画面风格")]},
@@ -2562,18 +2576,21 @@ def _apply_template_style_profile_bias(
             {"id": "watercolor", "tags": [("插画感", "画面风格"), ("水彩线稿", "画面风格"), ("水彩", "画面风格"), ("柔和色彩", "光影氛围")]},
             {"id": "poster", "tags": [("插画感", "画面风格"), ("手绘海报", "画面风格"), ("颗粒质感", "技术画质"), ("暖色灯光", "光影氛围")]},
             {"id": "cover", "tags": [("插画感", "画面风格"), ("漫画封面感", "画面风格"), ("夸张透视", "构图视角"), ("高细节", "技术画质")]},
+            {"id": "cel-diagonal", "tags": [("插画感", "画面风格"), ("赛璐璐上色", "画面风格"), ("对角线构图", "构图视角"), ("双色调", "光影氛围"), ("干净线条", "技术画质")]},
         ],
         "复古动画": [
             {"id": "ova", "tags": [("插画感", "画面风格"), ("OVA风", "画面风格"), ("怀旧动画", "画面风格"), ("低保真", "技术画质")]},
             {"id": "cel", "tags": [("插画感", "画面风格"), ("复古动画", "画面风格"), ("赛璐璐", "画面风格"), ("复古色调", "光影氛围")]},
             {"id": "future", "tags": [("插画感", "画面风格"), ("90年代复古未来动漫", "画面风格"), ("复古未来主义", "画面风格"), ("霓虹夜色", "光影氛围")]},
             {"id": "print", "tags": [("插画感", "画面风格"), ("木刻版画", "画面风格"), ("印刷网点", "技术画质"), ("高对比", "光影氛围")]},
+            {"id": "screencap", "tags": [("复古动画", "画面风格"), ("动画截图感", "画面风格"), ("牛仔景别", "构图视角"), ("VHS噪点", "技术画质"), ("倾斜地平线", "构图视角")]},
         ],
         "CG感": [
             {"id": "pbr", "tags": [("CG感", "画面风格"), ("PBR渲染", "画面风格"), ("体积光", "光影氛围"), ("材质细节丰富", "技术画质")]},
             {"id": "concept", "tags": [("CG感", "画面风格"), ("概念设计稿", "画面风格"), ("游戏风", "画面风格"), ("轮廓设计清晰", "技术画质")]},
             {"id": "engine", "tags": [("CG感", "画面风格"), ("虚幻引擎", "画面风格"), ("3D渲染", "画面风格"), ("空间透视", "构图视角")]},
             {"id": "render", "tags": [("CG感", "画面风格"), ("Octane渲染", "画面风格"), ("高光材质", "技术画质"), ("电影感", "技术画质")]},
+            {"id": "concept-establishing", "tags": [("CG感", "画面风格"), ("概念艺术", "画面风格"), ("全景建立镜头", "构图视角"), ("鸟瞰视角", "构图视角"), ("漂浮尘埃", "技术画质")]},
         ],
         "东方赛博": [
             {"id": "wuxia", "tags": [("CG感", "画面风格"), ("东方赛博武侠朋克", "画面风格"), ("赛博街区", "场景背景"), ("能量刀", "道具世界观")]},
@@ -4011,6 +4028,10 @@ def _run_stage_impl(
         custom_tags=custom_tags,
     )
     settings["NSFW工作台标签摘要"] = nsfw_model_summary
+    danbooru_general_tags = [tag for tag in tags if tag in DANBOORU_GENERAL_TAG_ALIASES]
+    settings["Danbooru通用视觉标签摘要"] = "、".join(
+        f"{tag} ({DANBOORU_GENERAL_TAG_ALIASES[tag]})" for tag in danbooru_general_tags[:16]
+    )
     settings["模型后置素材摘要"] = _build_model_post_context_summary(
         selected,
         custom_tags,
@@ -4262,6 +4283,11 @@ def _run_stage_impl(
     json_payload["smart_text_prompt"] = smart_text_prompt
     json_payload["smart_text_enabled"] = bool(smart_text_enabled)
     json_payload["smart_text_input"] = smart_text_input
+    json_payload["danbooru_general_tags"] = list(danbooru_general_tags)
+    json_payload["danbooru_general_aliases"] = {
+        tag: DANBOORU_GENERAL_TAG_ALIASES[tag] for tag in danbooru_general_tags
+    }
+    json_payload["danbooru_general_scope"] = "general visual tags only"
     json_payload["prompt_dedupe_cache"] = str(settings.get("连续生成避重缓存输出", "") or "")
     json_payload["profile_rotation_markers"] = list(profile_markers)
     json_payload["strict_prompt_dedupe_enabled"] = True
@@ -4535,6 +4561,75 @@ _STRICT_VARIATION_ACTION_EN = (
     "move deeper into the setting and look back toward the camera with a readable motion path",
 )
 
+_STRICT_VARIATION_SPECIAL_CUES_ZH: dict[str, tuple[str, ...]] = {
+    "character_sheet": (
+        "保持同一角色身份与多视角设定图结构不变，改用另一组材质细节、配件展示和留白节奏组织版面",
+        "保留头像、正面、侧面与背面展示关系，只调整辅助细节格、色温和材质落点，避免改变角色设定",
+        "维持角色比例、服装和视图数量，在未锁定区域更换灯光方向、背景明度与道具陈列方式",
+    ),
+    "tag_block": (
+        "保持锁定块内容与用户块顺序不变，只在未锁定块中调整前中后景、光线落点和材质层次",
+        "不改写编排主线与锁定标签，通过未锁定道具位置、背景结构和色温关系形成新的成片方案",
+        "沿既定标签块顺序保留主体关系，仅变化未锁定的镜头距离、环境层次与次要细节",
+    ),
+    "non_person": (
+        "重新安排主体结构朝向、关键功能部件与场景尺度关系，避免引入人物、服装或肢体动作",
+        "改变物体或建筑的体块重心、表面材质和环境动线，让关键功能部件与空间层级形成新主线",
+        "保留非人物主体类别，只调整结构展示面、运动或工作状态、光照路径和背景参照尺度",
+    ),
+    "nsfw": (
+        "保留成年主体与工作台保护锚点，仅变化镜头距离、环境层次、色温和材质光泽",
+        "不新增冲突动作或未选择的成熟表达，改用不同光线落点、背景结构和主体朝向形成差异",
+        "维持已选服装、场景与成熟氛围，通过构图留白、轮廓光和道具位置生成新的成片关系",
+    ),
+}
+_STRICT_VARIATION_SPECIAL_CUES_EN: dict[str, tuple[str, ...]] = {
+    "character_sheet": (
+        "preserve the same character identity and multi-view sheet structure while varying material closeups, accessory presentation, and negative-space rhythm",
+        "keep the headshot, front, side, and back views intact; vary only the support detail panels, color temperature, and material emphasis",
+        "retain character proportions, clothing, and the multi-view count and arrangement while changing unlocked lighting, backdrop value, and prop presentation",
+    ),
+    "tag_block": (
+        "preserve locked blocks and the user-defined block order while varying only unlocked depth layers, light placement, and material emphasis",
+        "keep the arranged visual spine and locked tags intact; vary unlocked prop placement, background structure, and color-temperature relationships",
+        "follow the existing block order and subject relationships while changing only unlocked camera distance, environment depth, and secondary detail",
+    ),
+    "non_person": (
+        "reorganize structural orientation, key functional components, and scene scale without introducing people, clothing, or body gestures",
+        "vary the object or architecture massing, surface material, and environmental flow so function and spatial hierarchy form a new visual spine",
+        "preserve the non-human subject category while changing the displayed structure side, operating state, light path, and scale references",
+    ),
+    "nsfw": (
+        "preserve the adult subject and protected workspace anchors while varying camera distance, environment depth, color temperature, and material sheen",
+        "add no conflicting action or unselected mature detail; create variation through light placement, background structure, and subject orientation",
+        "keep the selected clothing, setting, and mature mood while changing negative space, rim light, and prop placement",
+    ),
+}
+
+
+def _strict_variation_mode(settings: dict[str, Any]) -> str:
+    if str(settings.get("角色设定图内部策略", "") or "").strip():
+        return "character_sheet"
+    if bool(settings.get("标签块编排启用", False)):
+        return "tag_block"
+    subject_type = str(settings.get("主体类型解析结果", "") or settings.get("主体类型", "") or "").strip()
+    if subject_type == "非人物主体":
+        return "non_person"
+    if (
+        bool(settings.get("NSFW工作台启用", False))
+        or bool(settings.get("NSFW策略启用", False))
+        or str(settings.get("标签反推模式", "") or "").strip() == "成人向成熟"
+    ):
+        return "nsfw"
+    return ""
+
+
+def _strict_special_variation_cues(settings: dict[str, Any], *, english: bool) -> tuple[str, ...]:
+    mode = _strict_variation_mode(settings)
+    catalog = _STRICT_VARIATION_SPECIAL_CUES_EN if english else _STRICT_VARIATION_SPECIAL_CUES_ZH
+    return catalog.get(mode, ())
+
+
 
 def _canonical_prompt_hash(text: str) -> str:
     raw_text = str(text or "")
@@ -4630,10 +4725,20 @@ def _strip_strict_variation_clause(text: str) -> str:
 def _append_strict_variation_clause(text: str, cursor: int, settings: dict[str, Any]) -> str:
     prompt = _strip_strict_variation_clause(text)
     english = str(settings.get("提示词语言", "纯中文") or "纯中文").strip() == "纯英文"
+    index = max(0, int(cursor))
+    special_cues = _strict_special_variation_cues(settings, english=english)
+    if special_cues:
+        cue = special_cues[index % len(special_cues)]
+        variation_pass = index // len(special_cues)
+        if english:
+            pass_note = f"; variation pass {variation_pass + 1}" if variation_pass else ""
+            return f"{prompt.rstrip(' ,.;')}, visual variation: {cue}{pass_note}"
+        pass_note = f"；第{variation_pass + 1}轮变化编排" if variation_pass else ""
+        return f"{prompt.rstrip('，。；,.;')}；画面变化方向：{cue}{pass_note}"
+
     spatial_pool = _STRICT_VARIATION_SPATIAL_EN if english else _STRICT_VARIATION_SPATIAL_ZH
     light_pool = _STRICT_VARIATION_LIGHT_EN if english else _STRICT_VARIATION_LIGHT_ZH
     action_pool = _STRICT_VARIATION_ACTION_EN if english else _STRICT_VARIATION_ACTION_ZH
-    index = max(0, int(cursor))
     spatial = spatial_pool[index % len(spatial_pool)]
     light = light_pool[(index // len(spatial_pool)) % len(light_pool)]
     action = action_pool[(index // (len(spatial_pool) * len(light_pool))) % len(action_pool)]
@@ -4838,7 +4943,10 @@ _RECENT_PROMPT_VARIATION_CUES_EN: tuple[str, ...] = (
 
 def _recent_prompt_variation_cue(settings: dict[str, Any], index: int, recent_count: int) -> str:
     language = str(settings.get("提示词语言", "纯中文") or "纯中文").strip()
-    cues = _RECENT_PROMPT_VARIATION_CUES_EN if language == "纯英文" else _RECENT_PROMPT_VARIATION_CUES_ZH
+    english = language == "纯英文"
+    cues = _strict_special_variation_cues(settings, english=english)
+    if not cues:
+        cues = _RECENT_PROMPT_VARIATION_CUES_EN if english else _RECENT_PROMPT_VARIATION_CUES_ZH
     if not cues:
         return ""
     seed = _safe_int(settings.get("seed", 0), 0, 0, _SEED_MAX)

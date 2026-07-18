@@ -785,11 +785,13 @@ def _skill_context_for_model(settings: dict[str, Any]) -> str:
     post_context = str(settings.get("模型后置素材摘要", "") or "").strip()
     nsfw_context = str(settings.get("NSFW工作台标签摘要", "") or "").strip()
     tag_block_context = str(settings.get("标签块编排摘要", "") or "").strip()
+    danbooru_context = str(settings.get("Danbooru通用视觉标签摘要", "") or "").strip()
     dynamic_strategy = str(settings.get("Skill动态变化策略", "") or "").strip()
     diversity_markers = [
         str(marker).strip()
         for marker in [
             *list(settings.get("随机主题池档案标记", []) or []),
+            *list(settings.get("模板风格档案标记", []) or []),
             *list(settings.get("运行时随机档案标记", []) or []),
         ]
         if str(marker).strip()
@@ -799,13 +801,42 @@ def _skill_context_for_model(settings: dict[str, Any]) -> str:
         for item in list(settings.get("最近提示词指纹", []) or [])
         if str(item).strip()
     ]
-    extra_lines = []
+    active_modes: list[str] = []
+    if bool(settings.get("运行时随机标签", False)):
+        active_modes.append("运行时随机")
+    if bool(settings.get("智能文本匹配", False)):
+        active_modes.append("智能文本")
+    if bool(settings.get("标签块编排启用", False)):
+        active_modes.append("标签块编排")
+    if str(settings.get("角色设定图内部策略", "") or "").strip():
+        active_modes.append("角色设定图")
+    image_reverse_status = str(settings.get("图片反推状态", "") or "").strip()
+    if bool(settings.get("图片反推生成", False)) or image_reverse_status not in {"", "未启用"}:
+        active_modes.append("图片反推")
+    if bool(settings.get("NSFW工作台启用", False)) or bool(settings.get("NSFW策略启用", False)):
+        active_modes.append("NSFW工作台")
+    if not active_modes:
+        active_modes.append("常规标签与模板")
+
+    extra_lines = [
+        f"当前激活模式：{'、'.join(dict.fromkeys(active_modes))}。",
+        (
+            "模式合并优先级：用户显式输入与锁定标签 > 角色设定图或图片反推的可见事实 > "
+            "标签块顺序与锁定块 > NSFW 保护锚点 > 运行时随机、主题池和模板档案 > 模型补充细节。"
+            "高优先级已经确定的内容不得被低优先级模式覆盖；未明确的维度才允许扩写。"
+        ),
+    ]
     if post_context:
         extra_lines.append(f"当前激活素材摘要：{post_context}")
     if nsfw_context:
         extra_lines.append(f"NSFW 工作台素材：{nsfw_context}")
     if tag_block_context:
         extra_lines.append(f"标签块编排顺序：{tag_block_context}")
+    if danbooru_context:
+        extra_lines.append(
+            "Danbooru通用视觉词：" + danbooru_context
+            + "。这些词只描述画面结构与视觉属性，润色时必须保留其具体镜头、构图、光影或媒介含义。"
+        )
     if dynamic_strategy:
         extra_lines.append(f"Skill动态变化策略：{dynamic_strategy}")
     extra_lines.append(
@@ -883,7 +914,9 @@ def _compose_batch_prompt(prompts: list[str], settings: dict[str, Any]) -> str:
             "输出时围绕本条锚点重组主体、场景、服装、动作、持物、光影和色彩，并至少保留两个维度与其他条不同，不要复制其他条的主线。"
         )
     return (
-        _batch_language_instruction(settings)
+        _skill_context_for_model(settings)
+        + "\\n\\n"
+        + _batch_language_instruction(settings)
         + f"请按原顺序整理以下 {len(prompts)} 组图像提示词。"
         f"每组输出一条单行成品提示词，必须使用 `{_BATCH_SEPARATOR}` 作为唯一分隔符。"
         "每组必须保留输入之间的差异，不要把多组内容合并或改写成几乎相同的句子。"

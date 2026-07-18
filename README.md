@@ -9,7 +9,7 @@
 - 本地 GGUF、API 接口和仅 Skill 三种生成路径。
 - 参考图片反推与角色设定图工作流。
 - 标签块编排、用户标签库和预设/历史管理。
-- 安全内嵌网页预览、独立完整浏览器与显式提示词联网搜索；候选标签可回填当前节点或加入标签库。
+- 本机 Edge/Chromium 实时内嵌网页浏览、备用完整浏览器与显式提示词联网搜索；候选标签可回填当前节点或加入标签库。
 - 可选 NSFW 工作台及负面提示词同步。
 - 连续生成避重、最终提示词严格去重和缓存隔离。
 - 主界面与紧凑工具栏两种前端交互模式。
@@ -56,19 +56,19 @@ ComfyUI/custom_nodes/ComfyUI-RealMan-Prompt-Stage-Generator
 
 模型面板会显示最近一次运行的 `未启用 / 待调用 / 调用成功 / 部分回退 / 调用已恢复 / 调用失败` 状态。JSON 中 `model_active_fallback_count` 表示最终仍使用 Skill 的输出条数；`model_call_failure_count` 记录历史失败次数，两者含义不同。配置签名同时覆盖服务商、地址、模型、Key 引用和额外 Header，但只输出不可逆摘要，不输出明文认证信息。
 
-当前主要预设包括 DeepSeek `deepseek-v4-flash`、Groq `openai/gpt-oss-20b`、Claude `claude-haiku-4-5`、Gemini `gemini-2.5-flash`。OpenAI o1/o3/o4/GPT-5 会自动使用兼容的消息角色和 token 参数；DeepSeek V4 默认关闭 thinking；Claude/Gemini 原生接口会映射各自的采样和停止序列字段。批量模型没有按分隔协议返回时，最多 8 条的小批量会自动逐条重试。
+当前主要预设包括 DeepSeek `deepseek-v4-flash`、Groq `openai/gpt-oss-20b`、Claude `claude-haiku-4-5`、Gemini `gemini-2.5-flash`。OpenAI o1/o3/o4/GPT-5 会自动使用兼容的消息角色和 token 参数；DeepSeek V4 默认关闭 thinking；Claude/Gemini 原生接口会映射各自的采样和停止序列字段。批量模型没有按分隔协议返回时，最多 8 条的小批量会自动逐条重试。单条与批量调用现在共用同一份 Skill、随机、智能文本、编排、设定图和 NSFW 模式合同，避免生成数量变化后逻辑漂移。
 
 ## 网页浏览器与提示词搜索
 
 点击终端预览标题栏中的 `浏览器`。弹窗默认打开 `网页浏览器` 页签，可输入 `example.com`、完整 HTTPS 地址或普通搜索词，再点击 `打开`。弹窗打开时只显示本地主页，不会自动访问外部网站。
 
-网页会先在受限 iframe 中尽力加载。部分网站会通过 `X-Frame-Options` 或 CSP 禁止内嵌，这不是插件能够在 iframe 内绕过的限制。遇到这类网站，点击金色方框按钮或页面右上角的 `完整浏览`，节点会启动一个独立的 Microsoft Edge/Chromium 完整浏览器窗口；地址栏右侧的箭头仍用于普通新标签页打开。
+主浏览区不是 iframe。后端会启动隔离的本机 Microsoft Edge/Chrome/Chromium 无头会话，把实时网页画面传回节点，并把鼠标点击、拖动、滚轮、常用按键、粘贴和中文输入发送到真实浏览器页面。因此 GitHub、Google、百度等拒绝 iframe 的网站也不再受 `X-Frame-Options` 或 CSP 嵌入限制，返回、前进和刷新读取的是真实浏览器历史。
 
-完整浏览器窗口拥有可见地址栏、证书信息、站内导航、登录、历史和下载能力，因此可以正常访问拒绝 iframe 的网站。它是由节点管理入口和独立配置目录的顶层浏览器窗口，不是强行塞进节点 DOM 的不安全网页容器；关闭搜索弹窗不会关闭已经启动的浏览器窗口。第一次使用会创建独立配置目录 `ComfyUI/user/companion_browser/profile`，与日常 Edge 配置隔离，网站可能需要重新登录。
+内嵌会话默认禁止下载，关闭弹窗或返回本地主页时会关闭对应浏览器进程并清理临时会话目录。登录、文件下载、证书检查、系统选择器或复杂弹窗仍建议点击 `备用窗口`，使用节点管理的独立可见 Edge/Chromium 窗口。地址栏右侧箭头仍用于普通新标签页打开当前网址。
 
-返回、前进和刷新只管理由地址栏或书签手动打开的内嵌网址。受浏览器同源限制，iframe 内点击链接后的真实 URL 无法同步到父页面。输入和启动端会共同拒绝危险协议、带账号密码的网址以及直接输入的本机/内网地址；这只是入口过滤，不是完整网络隔离，网站打开后仍可自行导航或发起网络请求。
+入口会拒绝危险协议、带账号密码的网址以及直接输入的本机/内网地址；请求接口还要求本机同源和专用请求头。这只是入口保护，不是完整网络隔离，网页打开后仍可自行跳转或发起网络请求。
 
-完整浏览器当前支持 Windows，并自动查找 Microsoft Edge、Google Chrome 或 Chromium。需要指定便携 Chromium 时，可在启动 ComfyUI 前设置 `QWEN_TE_BROWSER_EXE` 为可信浏览器可执行文件的绝对路径；只接受 `msedge.exe`、`chrome.exe` 或 `chromium.exe`。插件更新后新增的本机启动接口需要完整重启 ComfyUI 才会生效。
+Windows 会自动查找 Microsoft Edge、Google Chrome 或 Chromium。需要指定便携 Chromium 时，可在启动 ComfyUI 前设置 `QWEN_TE_BROWSER_EXE` 为可信浏览器可执行文件的绝对路径；只接受 `msedge.exe`、`chrome.exe` 或 `chromium.exe`。插件更新后新增的本机浏览器接口需要完整重启 ComfyUI 才会生效。
 
 切换到 `标签搜索` 页签，输入画面主题或风格关键词，再点击 `搜索`。节点会从公开提示词来源提取候选标签，并在在线来源不可用时回退到本地标签库。
 
@@ -101,3 +101,8 @@ node --test tests/test_mini_toolbar_contracts.mjs
 ## 文档
 
 完整中文说明参见 [使用说明书.md](./使用说明书.md)。
+
+
+## Danbooru 通用视觉标签
+
+内置安全的通用视觉标签白名单，覆盖镜头、构图、光影、场景、动作、服装和媒介风格，并在所有生成模式中统一执行冲突收敛与英文别名转换。

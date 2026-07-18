@@ -268,6 +268,7 @@ def load_plugin_init_for_integration_test(*, failing_imports: set[str] | None = 
             f"{package_prefix}.prompt_tag_library",
             f"{package_prefix}.stage_prompt_generator",
             f"{package_prefix}.quality_audit_ocr_skin",
+            f"{package_prefix}.embedded_browser",
         ]
     }
 
@@ -10574,7 +10575,7 @@ class TestStagePromptModules(unittest.TestCase):
                 prompt_list=[],
                 extra_markers=markers,
             )
-        self.assertEqual(cursors, [0, 1, 2, 3, 0, 1, 2, 3, 0, 1])
+        self.assertEqual(cursors, [0, 1, 2, 3, 4, 0, 1, 2, 3, 4])
 
     def test_profile_rotation_resumes_from_serialized_cursors(self) -> None:
         module = load_stage_prompt_generator_for_integration_test()
@@ -13054,6 +13055,185 @@ class TestStagePromptModules(unittest.TestCase):
         finally:
             with module._IMAGE_REVERSE_CACHE_LOCK:
                 module._IMAGE_REVERSE_CACHE.clear()
+
+
+    def test_batch_model_prompt_uses_the_same_active_mode_contract_as_single_prompt(self) -> None:
+        settings = {
+            "提示词语言": "纯中文",
+            "模型来源": "API接口",
+            "运行时随机标签": True,
+            "智能文本匹配": True,
+            "标签块编排启用": True,
+            "图片反推生成": True,
+            "图片反推状态": "调用成功",
+            "角色设定图内部策略": "保持同一角色的多视角一致性",
+            "NSFW工作台启用": True,
+            "NSFW策略启用": True,
+            "NSFW工作台标签摘要": "成年主体、柔光、豪华卧室",
+            "标签块编排摘要": "主体 -> 场景 -> 光影",
+            "模板风格档案标记": ["stylevariant:古风:film"],
+            "随机主题池档案标记": ["theme:雨夜"],
+            "运行时随机档案标记": ["visual:scene:雨夜"],
+        }
+        batch_prompt = model_refiner._compose_batch_prompt(
+            ["第一条基础提示词", "第二条基础提示词"],
+            settings,
+        )
+        self.assertIn("Skill前置上下文", batch_prompt)
+        self.assertIn("当前激活模式", batch_prompt)
+        for label in ("运行时随机", "智能文本", "标签块编排", "角色设定图", "图片反推", "NSFW工作台"):
+            self.assertIn(label, batch_prompt)
+        self.assertIn("模式合并优先级", batch_prompt)
+        self.assertIn("stylevariant:古风:film", batch_prompt)
+        self.assertIn("NSFW 工作台素材", batch_prompt)
+        self.assertIn("标签块编排顺序", batch_prompt)
+
+    def test_strict_dedupe_uses_non_person_variation_without_human_pollution(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        module._CACHE.clear()
+        base = "巨型轨道采矿机，工业废墟，硬表面金属，体积光，高细节"
+        settings = {
+            "提示词语言": "纯中文",
+            "主体类型解析结果": "非人物主体",
+            "连续生成避重缓存": "",
+        }
+        first = module._strict_dedupe_prompt_list("strict-non-person-mode", [base], settings)[0]
+        second = module._strict_dedupe_prompt_list("strict-non-person-mode", [base], settings)[0]
+        self.assertEqual(first, base)
+        self.assertIn("功能部件", second)
+        for forbidden in ("腿部", "手部动作", "发丝", "衣摆", "服装褶皱"):
+            self.assertNotIn(forbidden, second)
+
+    def test_strict_dedupe_respects_character_sheet_tag_block_and_nsfw_modes(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        character = module._append_strict_variation_clause(
+            "角色设定图，成年女性，正面视图，侧面视图，背面视图",
+            0,
+            {"提示词语言": "纯中文", "角色设定图内部策略": "保持多视角一致"},
+        )
+        blocks = module._append_strict_variation_clause(
+            "主体块，场景块，光影块",
+            0,
+            {"提示词语言": "纯中文", "标签块编排启用": True},
+        )
+        nsfw = module._append_strict_variation_clause(
+            "成年女性，豪华卧室，柔光，成熟写真",
+            0,
+            {"提示词语言": "纯中文", "NSFW工作台启用": True},
+        )
+        self.assertIn("多视角设定图结构", character)
+        self.assertIn("锁定块", blocks)
+        self.assertIn("成年主体", nsfw)
+        self.assertNotIn("整理衣领或发丝", nsfw)
+
+    def test_recent_variation_cue_uses_active_mode_profile(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        non_person = module._recent_prompt_variation_cue(
+            {"提示词语言": "纯中文", "主体类型解析结果": "非人物主体"},
+            0,
+            4,
+        )
+        character = module._recent_prompt_variation_cue(
+            {"提示词语言": "纯英文", "角色设定图内部策略": "multi-view"},
+            1,
+            4,
+        )
+        self.assertIn("功能部件", non_person)
+        self.assertNotIn("身体", non_person)
+        self.assertIn("multi-view", character)
+
+    def test_danbooru_general_visual_tags_are_registered_with_english_aliases(self) -> None:
+        frontend = tag_library.前端标签库数据()
+        metadata = frontend["danbooru_general_tags"]
+        flat_tags = {
+            tag
+            for sections in frontend["tag_library"].values()
+            for tags in sections.values()
+            for tag in tags
+        }
+        self.assertGreaterEqual(metadata["tag_count"], 130)
+        for tag in ("鱼眼镜头", "参考设定表", "赛璐璐上色", "VHS噪点", "简单背景"):
+            self.assertIn(tag, flat_tags)
+            self.assertIn(tag, metadata["aliases"])
+        self.assertEqual(prompt_builder._translate_prompt_fragment("鱼眼镜头"), "fisheye lens")
+        self.assertEqual(prompt_builder._translate_prompt_fragment("参考设定表"), "reference sheet")
+
+    def test_danbooru_visual_intents_converge_before_every_prompt_mode(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        selected = OrderedDict((name, []) for name, _slots, _options in module._all_tag_groups())
+        selected["场景背景"] = ["城市街道", "白色背景", "黑色背景"]
+        selected["构图视角"] = ["参考设定表", "多视角展示", "鱼眼镜头", "第一人称视角"]
+        selected["光影氛围"] = ["双色调", "互补色", "高键光", "低键光", "月光"]
+        normalized, custom_tags, notes = module._normalize_inference_state(
+            selected,
+            [],
+            {
+                "模板风格": "插画感",
+                "标签反推模式": "自动平衡",
+                "主体类型": "自动",
+                "随机主题池": "自动",
+            },
+        )
+        active = set(module._collect_all_tags(normalized, custom_tags))
+        self.assertIn("参考设定表", active)
+        self.assertIn("多视角展示", active)
+        self.assertEqual(len(active & {"简单背景", "白色背景", "黑色背景", "渐变背景", "网格背景", "透明背景"}), 1)
+        self.assertIn("白色背景", active)
+        self.assertNotIn("城市街道", active)
+        self.assertNotIn("鱼眼镜头", active)
+        self.assertNotIn("第一人称视角", active)
+        self.assertEqual(len(active & {"双色调", "互补色", "冷暖对比", "单色插画"}), 1)
+        self.assertLessEqual(len(active & {"顶光", "底光", "聚光灯", "伦勃朗光", "高键光", "低键光", "月光", "霓虹光"}), 2)
+        self.assertTrue(any("设定表收敛" in note for note in notes))
+
+    def test_advanced_theme_and_template_profiles_can_emit_danbooru_visual_tags(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        theme_seen: set[str] = set()
+        style_seen: set[str] = set()
+        for seed in range(24):
+            empty = OrderedDict((name, []) for name, _slots, _options in module._all_tag_groups())
+            _style, themed, themed_custom = module._apply_random_theme_pool_bias(
+                "CG感",
+                empty,
+                [],
+                {"随机主题池": "机甲科幻", "模板风格": "自动", "seed": seed},
+            )
+            theme_seen.update(module._collect_all_tags(themed, themed_custom))
+            styled, styled_custom = module._apply_template_style_profile_bias(
+                "插画感",
+                empty,
+                [],
+                {"模板风格": "插画感", "运行时随机标签": False, "seed": seed},
+            )
+            style_seen.update(module._collect_all_tags(styled, styled_custom))
+        self.assertTrue({"参考设定表", "多视角展示", "角色设计稿"} <= theme_seen)
+        self.assertTrue({"赛璐璐上色", "对角线构图", "双色调"} <= style_seen)
+
+    def test_pipeline_reports_danbooru_tags_for_skill_and_model_context(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        result = module._run_stage(
+            None,
+            **{
+                "unique_id": "danbooru-general-pipeline",
+                "主体标签1": "成年女性",
+                "画面风格标签1": "赛璐璐上色",
+                "构图视角标签1": "鱼眼镜头",
+                "场景背景标签1": "城市街道",
+                "光影氛围标签1": "霓虹光",
+                "模板风格": "插画感",
+                "随机主题池": "自动",
+                "生成数量": 1,
+                "提示词语言": "纯英文",
+                "运行时随机标签": False,
+                "模型来源": "仅Skill",
+                "seed": 0,
+            },
+        )
+        payload = json.loads(result[3])
+        self.assertIn("鱼眼镜头", payload["danbooru_general_tags"])
+        self.assertEqual(payload["danbooru_general_aliases"]["鱼眼镜头"], "fisheye lens")
+        self.assertIn("fisheye lens", result[1])
+        self.assertNotRegex(result[1], r"[\u4e00-\u9fff]")
 
 
 if __name__ == "__main__":

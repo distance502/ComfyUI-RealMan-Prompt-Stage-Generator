@@ -185,6 +185,9 @@ globalThis.__stagePromptUiTestExports = {
 	pushOnlineSearchBrowserHistory,
 	stepOnlineSearchBrowserHistory,
 	resolvePromptBrowserTarget,
+	requestEmbeddedPromptBrowser,
+	fetchEmbeddedPromptBrowserFrame,
+	mapEmbeddedBrowserPointerPoint,
 	openPromptBrowserExternal,
 	launchPromptCompanionBrowser,
 	getModelRuntimeStatusSummary,
@@ -1131,6 +1134,105 @@ test("prompt companion browser sends one validated same-origin launch request", 
 	assert.equal(called, false);
 });
 
+test("embedded prompt browser sends guarded session and frame requests", async () => {
+	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	let sessionRequest = null;
+	const session = await exports.requestEmbeddedPromptBrowser("start", {
+		url: "https://example.com/",
+		width: 1360,
+		height: 760,
+	}, {
+		owner: { id: "dialog" },
+		key: "embedded-start",
+		async requestJson(url, init, options) {
+			sessionRequest = { url, init, options };
+			return {
+				response: { ok: true, status: 200 },
+				data: { ok: true, session_id: "session-1", browser: "Microsoft Edge" },
+			};
+		},
+	});
+	assert.equal(session.session_id, "session-1");
+	assert.equal(sessionRequest.url, "/qwen_te/embedded_browser/start");
+	assert.equal(sessionRequest.init.method, "POST");
+	assert.equal(sessionRequest.init.headers["X-Qwen-TE-Companion-Browser"], "1");
+	assert.deepEqual(JSON.parse(sessionRequest.init.body), {
+		url: "https://example.com/",
+		width: 1360,
+		height: 760,
+	});
+	assert.equal(sessionRequest.options.key, "embedded-start");
+
+	let frameRequest = null;
+	const frame = await exports.fetchEmbeddedPromptBrowserFrame("session-1", {
+		owner: { id: "dialog" },
+		previousFrameId: "previous-frame",
+		async request(url, init, options) {
+			frameRequest = { url, init, options };
+			return {
+				ok: true,
+				status: 200,
+				headers: { get(name) { return name === "X-Qwen-TE-Frame-Id" ? "next-frame" : ""; } },
+				async blob() { return { type: "image/jpeg", size: 128 }; },
+			};
+		},
+	});
+	assert.equal(frame.changed, true);
+	assert.equal(frame.frameId, "next-frame");
+	assert.equal(frame.blob.type, "image/jpeg");
+	assert.equal(frameRequest.url, "/qwen_te/embedded_browser/frame");
+	assert.equal(frameRequest.init.cache, "no-store");
+	assert.deepEqual(JSON.parse(frameRequest.init.body), { session_id: "session-1", previous_frame_id: "previous-frame" });
+	assert.equal(frameRequest.options.key, "embedded-browser-frame");
+
+	const unchanged = await exports.fetchEmbeddedPromptBrowserFrame("session-1", {
+		previousFrameId: "next-frame",
+		async request() {
+			return {
+				ok: true,
+				status: 204,
+				headers: { get() { return "next-frame"; } },
+			};
+		},
+	});
+	assert.deepEqual(unchanged, { changed: false, frameId: "next-frame", blob: null });
+
+	await assert.rejects(
+		exports.requestEmbeddedPromptBrowser("status", { session_id: "missing" }, {
+			async requestJson() {
+				return { response: { ok: false, status: 404 }, data: { ok: false, message: "session missing" } };
+			},
+		}),
+		/session missing/u,
+	);
+	await assert.rejects(
+		exports.fetchEmbeddedPromptBrowserFrame("session-1", {
+			async request() {
+				return { ok: true, status: 200, async blob() { return { type: "text/html" }; } };
+			},
+		}),
+		/画面格式无效/u,
+	);
+});
+
+test("embedded prompt browser maps object-fit image coordinates to the CDP viewport", async () => {
+	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	const center = exports.mapEmbeddedBrowserPointerPoint(
+		400,
+		300,
+		{ left: 0, top: 0, width: 800, height: 600 },
+		1000,
+		500,
+		1360,
+		760,
+	);
+	assert.deepEqual(center, { x: 680, y: 380 });
+	assert.equal(
+		exports.mapEmbeddedBrowserPointerPoint(400, 50, { left: 0, top: 0, width: 800, height: 600 }, 1000, 500, 1360, 760),
+		null,
+	);
+});
+
 test("online prompt search keeps tag tools inside a real dual-mode web browser", async () => {
 	const source = await fs.readFile(UI_PATH, "utf8");
 	const start = source.indexOf("function openOnlinePromptSearchDialog");
@@ -1172,11 +1274,22 @@ test("online prompt search keeps tag tools inside a real dual-mode web browser",
 	assert.equal(dialogSource.includes('resultPanel.setAttribute("role", "region")'), true);
 	assert.equal(dialogSource.includes('samplePanel.setAttribute("role", "region")'), true);
 	assert.equal(dialogSource.includes('resultList.setAttribute("role", "group")'), true);
-	assert.equal(dialogSource.includes('webFrame.setAttribute("sandbox", "allow-forms allow-modals allow-scripts")'), true);
-	assert.equal(dialogSource.includes('webFrame.setAttribute("referrerpolicy", "no-referrer")'), true);
-	assert.equal(dialogSource.includes("allow-same-origin"), false);
-	assert.equal(dialogSource.includes("allow-top-navigation"), false);
-	assert.equal(dialogSource.includes("allow-downloads"), false);
+	assert.equal(dialogSource.includes('const webFrame = document.createElement("img");'), true);
+	assert.equal(dialogSource.includes('document.createElement("iframe")'), false);
+	assert.equal(dialogSource.includes('requestEmbeddedPromptBrowser("start"'), true);
+	assert.equal(dialogSource.includes('requestEmbeddedPromptBrowser("navigate"'), true);
+	assert.equal(dialogSource.includes('requestEmbeddedPromptBrowser("command"'), true);
+	assert.equal(dialogSource.includes('requestEmbeddedPromptBrowser("input"'), true);
+	assert.equal(dialogSource.includes("fetchEmbeddedPromptBrowserFrame"), true);
+	assert.equal(dialogSource.includes("getEmbeddedPointerPoint"), true);
+	assert.equal(dialogSource.includes("webFrame.naturalWidth"), true);
+	assert.equal(dialogSource.includes("embeddedLastFrameId"), true);
+	assert.equal(dialogSource.includes("embeddedUnchangedFrameCount >= 2"), true);
+	assert.equal(dialogSource.includes("markEmbeddedBrowserActivity"), true);
+	assert.equal(dialogSource.includes("replace: false"), true);
+	assert.equal(dialogSource.includes('webFrame.addEventListener("pointerdown"'), true);
+	assert.equal(dialogSource.includes('dialog.addEventListener(eventName, (event) => { event.stopPropagation(); })'), true);
+	assert.equal(dialogSource.includes('setWebStatus(`${data.browser || "内嵌浏览器"} 已启动，可直接点击和输入。`)'), true);
 	assert.equal(dialogSource.includes('let queryHistory = [];'), true);
 	assert.equal(dialogSource.includes('let webHistory = [PROMPT_BROWSER_HOME_ENTRY];'), true);
 	assert.equal(dialogSource.includes('let tagAddressBadgeText = "提示词";'), true);
@@ -1185,7 +1298,11 @@ test("online prompt search keeps tag tools inside a real dual-mode web browser",
 	assert.equal(dialogSource.includes('const compacted = options.queryIsEffective'), true);
 	assert.equal(dialogSource.includes('runSearch({ recordHistory: false, queryIsEffective: true })'), true);
 	assert.equal(dialogSource.includes('recordHistory: !reusingHistoryQuery, queryIsEffective: reusingHistoryQuery'), true);
-	assert.equal(dialogSource.includes('webFrame.src = "about:blank";'), true);
+	assert.equal(dialogSource.includes('webFrame.removeAttribute("src");'), true);
+	assert.equal(dialogSource.includes('webInputSink.addEventListener("beforeinput"'), true);
+	assert.equal(dialogSource.includes('webInputSink.addEventListener("compositionend"'), true);
+	assert.equal(dialogSource.includes('webFrame.addEventListener("wheel"'), true);
+	assert.equal(dialogSource.includes('void closeEmbeddedBrowserSession({ revokeFrame: true });'), true);
 	assert.equal(externalOpenSource.includes("pushOnlineSearchBrowserHistory"), false, "external tabs must not enter embedded browsing history");
 	assert.equal(externalOpenSource.includes("currentWebUrl = result.url"), false, "external tabs must not replace the embedded current page");
 	assert.equal(companionOpenSource.includes("pushOnlineSearchBrowserHistory"), false, "companion windows must not enter embedded browsing history");
