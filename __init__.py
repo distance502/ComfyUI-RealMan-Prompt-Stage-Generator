@@ -27,6 +27,14 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 
+from .embedded_browser import (
+    EmbeddedBrowserBusy,
+    EmbeddedBrowserError,
+    EmbeddedBrowserManager,
+    EmbeddedBrowserSessionNotFound,
+    EmbeddedBrowserUnavailable,
+)
+
 try:
     from aiohttp import web
 except Exception:
@@ -554,6 +562,7 @@ _COMPANION_BROWSER_LAUNCH_LOCK = threading.RLock()
 _COMPANION_BROWSER_LAUNCH_TIMES: list[float] = []
 _COMPANION_BROWSER_MIN_INTERVAL_SECONDS = 2.0
 _COMPANION_BROWSER_MAX_LAUNCHES_PER_MINUTE = 5
+_EMBEDDED_BROWSER_REQUEST_MAX_BYTES = 16 * 1024
 
 
 class _CompanionBrowserUnavailable(RuntimeError):
@@ -698,6 +707,13 @@ def _companion_browser_profile_directory() -> Path:
     profile = (root / "companion_browser" / "profile").resolve()
     profile.mkdir(parents=True, exist_ok=True)
     return profile
+
+
+def _embedded_browser_profile_root() -> Path:
+    user_root = _companion_browser_profile_directory().parent.parent
+    profile_root = (user_root / "embedded_browser").resolve()
+    profile_root.mkdir(parents=True, exist_ok=True)
+    return profile_root
 
 
 def _launch_companion_browser(normalized_url: str) -> dict[str, Any]:
@@ -2443,6 +2459,16 @@ def _register_tag_routes() -> bool:
     ] = {}
     quality_audit_semaphore = asyncio.Semaphore(1)
     preview_worker_semaphore = asyncio.Semaphore(4)
+    embedded_browser_manager: EmbeddedBrowserManager | None = None
+
+    def _get_embedded_browser_manager() -> EmbeddedBrowserManager:
+        nonlocal embedded_browser_manager
+        if embedded_browser_manager is None:
+            embedded_browser_manager = EmbeddedBrowserManager(
+                executable_finder=_find_companion_browser_executable,
+                profile_root=_embedded_browser_profile_root(),
+            )
+        return embedded_browser_manager
 
     async def _run_thread_until_done(function, *args, **kwargs):
         worker_task = asyncio.create_task(asyncio.to_thread(function, *args, **kwargs))
@@ -2628,6 +2654,142 @@ def _register_tag_routes() -> bool:
             },
             status=200,
         )
+
+    async def _read_embedded_browser_request(request):
+        denial = _companion_browser_request_guard(request)
+        if denial is not None:
+            status, message = denial
+            return None, _json_response({"ok": False, "message": message}, status=status)
+        try:
+            data = await _read_request_json(request, max_bytes=_EMBEDDED_BROWSER_REQUEST_MAX_BYTES)
+        except Exception as exc:
+            if web is not None and isinstance(exc, web.HTTPRequestEntityTooLarge):
+                return None, _json_response({"ok": False, "message": "内嵌浏览器请求过大。"}, status=413)
+            raise
+        if len(json.dumps(data, ensure_ascii=False).encode("utf-8")) > _EMBEDDED_BROWSER_REQUEST_MAX_BYTES:
+            return None, _json_response({"ok": False, "message": "内嵌浏览器请求过大。"}, status=413)
+        return data, None
+
+    def _embedded_browser_error_response(exc: Exception):
+        if isinstance(exc, EmbeddedBrowserSessionNotFound):
+            return _json_response({"ok": False, "message": str(exc)}, status=404)
+        if isinstance(exc, EmbeddedBrowserBusy):
+            retry_after = max(1, int(exc.retry_after + 0.999))
+            response = _json_response(
+                {"ok": False, "message": str(exc), "retry_after": retry_after},
+                status=429,
+            )
+            response.headers["Retry-After"] = str(retry_after)
+            return response
+        if isinstance(exc, EmbeddedBrowserUnavailable):
+            return _json_response({"ok": False, "message": str(exc)}, status=503)
+        if isinstance(exc, EmbeddedBrowserError):
+            return _json_response({"ok": False, "message": str(exc)}, status=502)
+        logging.exception("QwenTE 内嵌浏览器出现未预期错误")
+        return _json_response({"ok": False, "message": "内嵌浏览器操作失败。"}, status=500)
+
+    @routes.post("/qwen_te/embedded_browser/start")
+    async def _start_embedded_browser(request):
+        data, error_response = await _read_embedded_browser_request(request)
+        if error_response is not None:
+            return error_response
+        normalized_url, url_error = _normalize_companion_browser_url(data.get("url", ""))
+        if url_error:
+            return _json_response({"ok": False, "message": url_error}, status=400)
+        try:
+            detail = await _get_embedded_browser_manager().start(
+                normalized_url,
+                width=data.get("width"),
+                height=data.get("height"),
+            )
+        except Exception as exc:
+            return _embedded_browser_error_response(exc)
+        hostname = str(urllib.parse.urlsplit(normalized_url).hostname or "")
+        logging.info("QwenTE 内嵌浏览器已启动: browser=%s host=%s", detail.get("browser", "Chromium"), hostname)
+        return _json_response({"ok": True, **detail}, status=200)
+
+    @routes.post("/qwen_te/embedded_browser/navigate")
+    async def _navigate_embedded_browser(request):
+        data, error_response = await _read_embedded_browser_request(request)
+        if error_response is not None:
+            return error_response
+        normalized_url, url_error = _normalize_companion_browser_url(data.get("url", ""))
+        if url_error:
+            return _json_response({"ok": False, "message": url_error}, status=400)
+        try:
+            status_payload = await _get_embedded_browser_manager().navigate(data.get("session_id"), normalized_url)
+        except Exception as exc:
+            return _embedded_browser_error_response(exc)
+        return _json_response({"ok": True, **status_payload}, status=200)
+
+    @routes.post("/qwen_te/embedded_browser/status")
+    async def _embedded_browser_status(request):
+        data, error_response = await _read_embedded_browser_request(request)
+        if error_response is not None:
+            return error_response
+        try:
+            status_payload = await _get_embedded_browser_manager().status(data.get("session_id"))
+        except Exception as exc:
+            return _embedded_browser_error_response(exc)
+        return _json_response({"ok": True, **status_payload}, status=200)
+
+    @routes.post("/qwen_te/embedded_browser/command")
+    async def _command_embedded_browser(request):
+        data, error_response = await _read_embedded_browser_request(request)
+        if error_response is not None:
+            return error_response
+        try:
+            status_payload = await _get_embedded_browser_manager().command(
+                data.get("session_id"),
+                data.get("action"),
+            )
+        except Exception as exc:
+            return _embedded_browser_error_response(exc)
+        return _json_response({"ok": True, **status_payload}, status=200)
+
+    @routes.post("/qwen_te/embedded_browser/input")
+    async def _input_embedded_browser(request):
+        data, error_response = await _read_embedded_browser_request(request)
+        if error_response is not None:
+            return error_response
+        try:
+            await _get_embedded_browser_manager().dispatch_input(data.get("session_id"), data)
+        except Exception as exc:
+            return _embedded_browser_error_response(exc)
+        return _json_response({"ok": True}, status=200)
+
+    @routes.post("/qwen_te/embedded_browser/frame")
+    async def _frame_embedded_browser(request):
+        data, error_response = await _read_embedded_browser_request(request)
+        if error_response is not None:
+            return error_response
+        try:
+            frame, frame_id = await _get_embedded_browser_manager().capture_frame(
+                data.get("session_id"),
+                data.get("previous_frame_id", ""),
+            )
+        except Exception as exc:
+            return _embedded_browser_error_response(exc)
+        headers = {
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "X-Content-Type-Options": "nosniff",
+            "X-Qwen-TE-Frame-Id": frame_id,
+        }
+        if frame is None:
+            return web.Response(status=204, headers=headers)
+        return web.Response(body=frame, content_type="image/jpeg", headers=headers)
+
+    @routes.post("/qwen_te/embedded_browser/close")
+    async def _close_embedded_browser(request):
+        data, error_response = await _read_embedded_browser_request(request)
+        if error_response is not None:
+            return error_response
+        try:
+            closed = await _get_embedded_browser_manager().close(data.get("session_id"))
+        except Exception as exc:
+            return _embedded_browser_error_response(exc)
+        return _json_response({"ok": True, "closed": bool(closed)}, status=200)
 
     @routes.get("/extensions/comfyUI-qwen3_5-llama-TE/stage_prompt_generator_ui.js")
     @routes.get("/extensions/ComfyUI-RealMan-Prompt-Stage-Generator/stage_prompt_generator_ui.js")

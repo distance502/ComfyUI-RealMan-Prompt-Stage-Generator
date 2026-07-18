@@ -1875,9 +1875,13 @@ function injectStyles() {
 	.qwen-te-online-search__site-button:focus-visible{outline:2px solid #83a9d3;outline-offset:2px}
 	.qwen-te-online-search__site-icon{display:inline-flex;width:28px;height:28px;align-items:center;justify-content:center;border:1px solid #526478;border-radius:50%;background:#24303d;color:#dceafa;font-size:12px;font-weight:700}
 	.qwen-te-online-search__site-label{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10.5px}
-	.qwen-te-online-search__web-frame-shell{position:relative;display:flex;flex:1 1 auto;min-width:0;min-height:0;background:#fff;overflow:hidden}
-	.qwen-te-online-search__web-frame{width:100%;height:100%;flex:1 1 auto;min-width:0;min-height:0;border:0;background:#fff}
-	.qwen-te-online-search__frame-external{position:absolute;top:9px;right:10px;z-index:2;min-height:31px;border:1px solid #6f7f91;border-radius:6px;padding:5px 10px;background:rgba(19,25,32,.92);color:#eef4fb;font-size:10.5px;font-weight:700;box-shadow:0 3px 12px rgba(0,0,0,.28);cursor:pointer}
+	.qwen-te-online-search__web-frame-shell{position:relative;display:flex;align-items:center;justify-content:center;flex:1 1 auto;min-width:0;min-height:0;background:#fff;overflow:hidden;isolation:isolate}
+	.qwen-te-online-search__web-frame{position:relative;z-index:1;width:100%;height:100%;flex:1 1 auto;min-width:0;min-height:0;border:0;background:#fff;object-fit:contain;pointer-events:auto;touch-action:none;user-select:none;-webkit-user-drag:none;outline:none;cursor:default}
+	.qwen-te-online-search__web-frame:focus-visible{box-shadow:inset 0 0 0 2px #78a6df}
+	.qwen-te-online-search__frame-overlay{position:absolute;inset:0;z-index:2;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(15,19,24,.82);color:#dbe5f1;font-size:12px;line-height:1.5;text-align:center;pointer-events:none}
+	.qwen-te-online-search__frame-overlay.is-passive{background:rgba(15,19,24,.38);align-items:flex-end;justify-content:flex-start;text-align:left}
+	.qwen-te-online-search__input-sink{position:fixed!important;left:-10000px!important;top:-10000px!important;width:1px!important;height:1px!important;min-width:1px!important;min-height:1px!important;opacity:0!important;pointer-events:none!important;resize:none!important}
+	.qwen-te-online-search__frame-external{position:absolute;top:9px;right:10px;z-index:3;min-height:31px;border:1px solid #6f7f91;border-radius:6px;padding:5px 10px;background:rgba(19,25,32,.92);color:#eef4fb;font-size:10.5px;font-weight:700;box-shadow:0 3px 12px rgba(0,0,0,.28);cursor:pointer}
 	.qwen-te-online-search__frame-external:hover:not(:disabled){background:#283543;border-color:#95abc2}
 	.qwen-te-online-search__frame-external:disabled{opacity:.45;cursor:not-allowed}
 	.qwen-te-modal[data-qwen-modal="preset-manager"] .qwen-te-modal__dialog{width:min(980px,95vw);max-height:90vh}
@@ -2543,6 +2547,91 @@ async function launchPromptCompanionBrowser(rawTarget, options = {}) {
 			message: error?.name === "AbortError" ? "完整浏览器启动请求已取消。" : `完整浏览器启动失败：${error?.message ?? error}`,
 		};
 	}
+}
+
+function mapEmbeddedBrowserPointerPoint(clientX, clientY, rect, frameWidth, frameHeight, viewportWidth, viewportHeight) {
+	const box = rect ?? {};
+	const rectWidth = Number(box.width);
+	const rectHeight = Number(box.height);
+	const sourceWidth = Number(frameWidth);
+	const sourceHeight = Number(frameHeight);
+	const targetWidth = Number(viewportWidth);
+	const targetHeight = Number(viewportHeight);
+	if (![rectWidth, rectHeight, sourceWidth, sourceHeight, targetWidth, targetHeight].every((value) => Number.isFinite(value) && value > 0)) return null;
+	const scale = Math.min(rectWidth / sourceWidth, rectHeight / sourceHeight);
+	if (!(scale > 0)) return null;
+	const renderedWidth = sourceWidth * scale;
+	const renderedHeight = sourceHeight * scale;
+	const left = Number(box.left ?? box.x ?? 0) + (rectWidth - renderedWidth) / 2;
+	const top = Number(box.top ?? box.y ?? 0) + (rectHeight - renderedHeight) / 2;
+	const localX = Number(clientX) - left;
+	const localY = Number(clientY) - top;
+	if (![localX, localY].every(Number.isFinite)) return null;
+	if (localX < 0 || localY < 0 || localX > renderedWidth || localY > renderedHeight) return null;
+	return {
+		x: (localX / renderedWidth) * targetWidth,
+		y: (localY / renderedHeight) * targetHeight,
+	};
+}
+
+async function requestEmbeddedPromptBrowser(route, payload, options = {}) {
+	const requestJson = options.requestJson ?? fetchJsonWithTimeout;
+	const { response, data } = await requestJson(`/qwen_te/embedded_browser/${route}`, {
+		method: "POST",
+		headers: {
+			"Content-Type": "application/json",
+			"X-Qwen-TE-Companion-Browser": "1",
+		},
+		body: JSON.stringify(payload ?? {}),
+	}, {
+		owner: options.owner,
+		key: options.key ?? `embedded-browser-${route}`,
+		replace: options.replace,
+		timeoutMs: options.timeoutMs ?? 20000,
+	});
+	if (!response?.ok || !data?.ok) {
+		const error = new Error(String(data?.message ?? `内嵌浏览器请求失败：HTTP ${response?.status ?? 0}`));
+		error.status = Number(response?.status ?? 0) || 0;
+		throw error;
+	}
+	return data;
+}
+
+async function fetchEmbeddedPromptBrowserFrame(sessionId, options = {}) {
+	const request = options.request ?? fetchWithTimeout;
+	const previousFrameId = String(options.previousFrameId ?? "").trim();
+	const response = await request("/qwen_te/embedded_browser/frame", {
+		method: "POST",
+		headers: {
+			"Content-Type": "application/json",
+			"X-Qwen-TE-Companion-Browser": "1",
+		},
+		body: JSON.stringify({
+			session_id: String(sessionId ?? ""),
+			previous_frame_id: previousFrameId,
+		}),
+		cache: "no-store",
+	}, {
+		owner: options.owner,
+		key: options.key ?? "embedded-browser-frame",
+		replace: options.replace,
+		timeoutMs: options.timeoutMs ?? 20000,
+	});
+	const frameId = String(response?.headers?.get?.("X-Qwen-TE-Frame-Id") ?? "").trim();
+	if (Number(response?.status ?? 0) === 204) return { changed: false, frameId, blob: null };
+	if (!response?.ok) {
+		let message = `内嵌浏览器画面请求失败：HTTP ${response?.status ?? 0}`;
+		try {
+			const data = await response.clone().json();
+			if (data?.message) message = String(data.message);
+		} catch (_error) {}
+		const error = new Error(message);
+		error.status = Number(response?.status ?? 0) || 0;
+		throw error;
+	}
+	const blob = await response.blob();
+	if (!String(blob?.type ?? "").toLowerCase().startsWith("image/")) throw new Error("内嵌浏览器返回的画面格式无效。");
+	return { changed: true, frameId, blob };
 }
 
 const ONLINE_QUERY_LOW_VALUE_TERMS = new Set([
@@ -14830,19 +14919,28 @@ function openOnlinePromptSearchDialog(node, library) {
 	const webFrameShell = document.createElement("div");
 	webFrameShell.className = "qwen-te-online-search__web-frame-shell qwen-te-hidden";
 	webWorkspace.appendChild(webFrameShell);
-	const webFrame = document.createElement("iframe");
+	const webFrame = document.createElement("img");
 	webFrame.className = "qwen-te-online-search__web-frame";
-	webFrame.title = "网页浏览区域";
-	webFrame.src = "about:blank";
-	webFrame.setAttribute("sandbox", "allow-forms allow-modals allow-scripts");
-	webFrame.setAttribute("referrerpolicy", "no-referrer");
-	webFrame.referrerPolicy = "no-referrer";
+	webFrame.alt = "内嵌浏览器实时画面";
+	webFrame.title = "点击网页后可直接操作；键盘输入会发送到当前网页焦点。";
+	webFrame.draggable = false;
+	webFrame.tabIndex = 0;
 	webFrameShell.appendChild(webFrame);
+	const webFrameOverlay = document.createElement("div");
+	webFrameOverlay.className = "qwen-te-online-search__frame-overlay";
+	webFrameOverlay.textContent = "正在准备内嵌浏览器...";
+	webFrameShell.appendChild(webFrameOverlay);
+	const webInputSink = document.createElement("textarea");
+	webInputSink.className = "qwen-te-online-search__input-sink";
+	webInputSink.tabIndex = -1;
+	webInputSink.setAttribute("aria-hidden", "true");
+	webInputSink.setAttribute("autocomplete", "off");
+	dialog.appendChild(webInputSink);
 	const frameExternalButton = document.createElement("button");
 	frameExternalButton.type = "button";
 	frameExternalButton.className = "qwen-te-online-search__frame-external";
-	frameExternalButton.textContent = "▣ 完整浏览";
-	frameExternalButton.title = "网站拒绝内嵌时，在独立完整浏览器窗口打开";
+	frameExternalButton.textContent = "▣ 备用窗口";
+	frameExternalButton.title = "内嵌浏览器不可用时，在独立窗口打开";
 	frameExternalButton.disabled = true;
 	webFrameShell.appendChild(frameExternalButton);
 
@@ -14866,6 +14964,25 @@ function openOnlinePromptSearchDialog(node, library) {
 	let webHistoryIndex = 0;
 	let currentWebUrl = "";
 	let companionBrowserBusy = false;
+	let embeddedBrowserSessionId = "";
+	let embeddedBrowserWidth = 1360;
+	let embeddedBrowserHeight = 760;
+	let embeddedCanGoBack = false;
+	let embeddedCanGoForward = false;
+	let embeddedFrameTimer = null;
+	let embeddedStatusTimer = null;
+	let embeddedFrameBusy = false;
+	let embeddedStatusBusy = false;
+	let embeddedFrameObjectUrl = "";
+	let embeddedLastFrameId = "";
+	let embeddedUnchangedFrameCount = 0;
+	let embeddedFrameFastUntil = 0;
+	let embeddedPageReady = false;
+	let embeddedPointerDown = false;
+	let embeddedPointerButton = "left";
+	let embeddedPointerButtons = 0;
+	let embeddedLastPointerMoveAt = 0;
+	let embeddedInputQueue = Promise.resolve();
 	let busyState = false;
 	const isContinuousRunActive = () => !!ensureNodeContinuousRuntime(node).running;
 	const isInteractionBlocked = () => busyState || isContinuousRunActive();
@@ -14980,22 +15097,209 @@ function openOnlinePromptSearchDialog(node, library) {
 		webStatusEl.textContent = String(text ?? "");
 		webStatusEl.title = webStatusEl.textContent;
 	};
+	const setWebFrameOverlay = (text, options = {}) => {
+		const message = String(text ?? "").trim();
+		webFrameOverlay.textContent = message;
+		webFrameOverlay.classList.toggle("qwen-te-hidden", !message);
+		webFrameOverlay.classList.toggle("is-passive", !!options.passive && !!message);
+	};
+	const revokeEmbeddedFrameObjectUrl = () => {
+		if (!embeddedFrameObjectUrl) return;
+		try { URL.revokeObjectURL(embeddedFrameObjectUrl); } catch (_error) {}
+		embeddedFrameObjectUrl = "";
+	};
+	const stopEmbeddedBrowserPolling = (options = {}) => {
+		if (embeddedFrameTimer != null) clearTimeout(embeddedFrameTimer);
+		if (embeddedStatusTimer != null) clearTimeout(embeddedStatusTimer);
+		embeddedFrameTimer = null;
+		embeddedStatusTimer = null;
+		abortOwnedRequest(overlay, "embedded-browser-frame");
+		abortOwnedRequest(overlay, "embedded-browser-status");
+		if (options.revokeFrame) {
+			revokeEmbeddedFrameObjectUrl();
+			webFrame.removeAttribute("src");
+		}
+	};
+	const applyEmbeddedBrowserStatus = (payload, options = {}) => {
+		if (!payload || typeof payload !== "object") return;
+		embeddedBrowserWidth = Math.max(1, Number(payload.width ?? embeddedBrowserWidth) || embeddedBrowserWidth);
+		embeddedBrowserHeight = Math.max(1, Number(payload.height ?? embeddedBrowserHeight) || embeddedBrowserHeight);
+		embeddedCanGoBack = !!payload.can_go_back;
+		embeddedCanGoForward = !!payload.can_go_forward;
+		const reportedUrl = String(payload.url ?? "").trim();
+		if (/^https?:\/\//iu.test(reportedUrl)) {
+			currentWebUrl = reportedUrl;
+			webAddressDraft = reportedUrl;
+			if (activeBrowserMode === "web" && document.activeElement !== searchInput) searchInput.value = reportedUrl;
+		}
+		embeddedPageReady = String(payload.ready_state ?? "") === "complete";
+		if (options.updateMessage !== false) {
+			setWebStatus(`${payload.browser || "内嵌浏览器"} · ${embeddedPageReady ? "页面已就绪" : "页面加载中"}${reportedUrl ? ` · ${reportedUrl}` : ""}`);
+		}
+		syncActionButtons();
+	};
+	const getEmbeddedFramePollDelay = () => {
+		if (Date.now() < embeddedFrameFastUntil) return 180;
+		if (!embeddedPageReady) return 320;
+		if (embeddedUnchangedFrameCount >= 2) return 1200;
+		return 700;
+	};
+	const scheduleEmbeddedFramePoll = (delay = null) => {
+		if (overlay.__qwenDisposed || !embeddedBrowserSessionId || activeBrowserMode !== "web") return;
+		if (embeddedFrameTimer != null) clearTimeout(embeddedFrameTimer);
+		const resolvedDelay = delay == null ? getEmbeddedFramePollDelay() : Number(delay);
+		embeddedFrameTimer = setTimeout(() => { embeddedFrameTimer = null; void pollEmbeddedBrowserFrame(); }, Math.max(80, resolvedDelay || 180));
+		embeddedFrameTimer?.unref?.();
+	};
+	const markEmbeddedBrowserActivity = (durationMs = 1800) => {
+		embeddedFrameFastUntil = Math.max(embeddedFrameFastUntil, Date.now() + Math.max(400, Number(durationMs) || 1800));
+		embeddedUnchangedFrameCount = 0;
+		scheduleEmbeddedFramePoll(80);
+	};
+	const scheduleEmbeddedStatusPoll = (delay = 800) => {
+		if (overlay.__qwenDisposed || !embeddedBrowserSessionId || activeBrowserMode !== "web") return;
+		if (embeddedStatusTimer != null) clearTimeout(embeddedStatusTimer);
+		embeddedStatusTimer = setTimeout(() => { embeddedStatusTimer = null; void pollEmbeddedBrowserStatus(); }, Math.max(300, Number(delay) || 800));
+		embeddedStatusTimer?.unref?.();
+	};
+	const pollEmbeddedBrowserFrame = async () => {
+		if (embeddedFrameBusy || overlay.__qwenDisposed || !embeddedBrowserSessionId || activeBrowserMode !== "web") return;
+		embeddedFrameBusy = true;
+		const sessionId = embeddedBrowserSessionId;
+		try {
+			const frameResult = await fetchEmbeddedPromptBrowserFrame(sessionId, {
+				owner: overlay,
+				key: "embedded-browser-frame",
+				previousFrameId: embeddedLastFrameId,
+				timeoutMs: 20000,
+			});
+			if (overlay.__qwenDisposed || sessionId !== embeddedBrowserSessionId) return;
+			if (!frameResult.changed || !frameResult.blob) {
+				embeddedUnchangedFrameCount += 1;
+				if (frameResult.frameId) embeddedLastFrameId = frameResult.frameId;
+				return;
+			}
+			embeddedUnchangedFrameCount = 0;
+			if (frameResult.frameId) embeddedLastFrameId = frameResult.frameId;
+			const nextUrl = URL.createObjectURL(frameResult.blob);
+			const previousUrl = embeddedFrameObjectUrl;
+			embeddedFrameObjectUrl = nextUrl;
+			if (previousUrl) {
+				let revoked = false;
+				const revokePrevious = () => {
+					if (revoked) return;
+					revoked = true;
+					try { URL.revokeObjectURL(previousUrl); } catch (_error) {}
+				};
+				webFrame.addEventListener("load", revokePrevious, { once: true });
+				setTimeout(revokePrevious, 5000)?.unref?.();
+			}
+			webFrame.src = nextUrl;
+			setWebFrameOverlay("");
+		} catch (error) {
+			if (error?.name === "AbortError" || overlay.__qwenDisposed || sessionId !== embeddedBrowserSessionId) return;
+			setWebFrameOverlay(`画面更新失败：${error?.message ?? error}`, { passive: !!embeddedFrameObjectUrl });
+			if ([404, 503].includes(Number(error?.status ?? 0))) embeddedBrowserSessionId = "";
+		} finally {
+			embeddedFrameBusy = false;
+			if (embeddedBrowserSessionId) scheduleEmbeddedFramePoll();
+		}
+	};
+	const pollEmbeddedBrowserStatus = async () => {
+		if (embeddedStatusBusy || overlay.__qwenDisposed || !embeddedBrowserSessionId || activeBrowserMode !== "web") return;
+		embeddedStatusBusy = true;
+		const sessionId = embeddedBrowserSessionId;
+		try {
+			const data = await requestEmbeddedPromptBrowser("status", { session_id: sessionId }, {
+				owner: overlay,
+				key: "embedded-browser-status",
+				timeoutMs: 10000,
+			});
+			if (!overlay.__qwenDisposed && sessionId === embeddedBrowserSessionId) applyEmbeddedBrowserStatus(data);
+		} catch (error) {
+			if (error?.name !== "AbortError" && !overlay.__qwenDisposed) {
+				setWebStatus(`内嵌浏览器状态读取失败：${error?.message ?? error}`);
+				if ([404, 503].includes(Number(error?.status ?? 0))) embeddedBrowserSessionId = "";
+			}
+		} finally {
+			embeddedStatusBusy = false;
+			scheduleEmbeddedStatusPoll(embeddedBrowserSessionId ? 800 : 1500);
+		}
+	};
+	const startEmbeddedBrowserPolling = () => {
+		scheduleEmbeddedFramePoll(0);
+		scheduleEmbeddedStatusPoll(300);
+	};
+	const closeEmbeddedBrowserSession = async (options = {}) => {
+		const sessionId = embeddedBrowserSessionId;
+		embeddedBrowserSessionId = "";
+		embeddedCanGoBack = false;
+		embeddedCanGoForward = false;
+		embeddedLastFrameId = "";
+		embeddedUnchangedFrameCount = 0;
+		embeddedFrameFastUntil = 0;
+		embeddedPageReady = false;
+		embeddedPointerDown = false;
+		embeddedPointerButtons = 0;
+		stopEmbeddedBrowserPolling({ revokeFrame: options.revokeFrame !== false });
+		if (!sessionId) return false;
+		try {
+			await requestEmbeddedPromptBrowser("close", { session_id: sessionId }, {
+				key: `embedded-browser-close-${sessionId}`,
+				timeoutMs: 6000,
+			});
+			return true;
+		} catch (_error) {
+			return false;
+		}
+	};
+	const sendEmbeddedBrowserInput = (payload) => {
+		if (!embeddedBrowserSessionId || overlay.__qwenDisposed) return Promise.resolve(false);
+		const sessionId = embeddedBrowserSessionId;
+		markEmbeddedBrowserActivity();
+		embeddedInputQueue = embeddedInputQueue.catch(() => false).then(async () => {
+			if (!sessionId || sessionId !== embeddedBrowserSessionId || overlay.__qwenDisposed) return false;
+			await requestEmbeddedPromptBrowser("input", { session_id: sessionId, ...payload }, {
+				owner: overlay,
+				key: "embedded-browser-input",
+				replace: false,
+				timeoutMs: 10000,
+			});
+			if (payload?.type === "mouseUp") scheduleEmbeddedStatusPoll(160);
+			return true;
+		});
+		return embeddedInputQueue;
+	};
+	const runEmbeddedBrowserCommand = async (action) => {
+		if (!embeddedBrowserSessionId) return false;
+		try {
+			const data = await requestEmbeddedPromptBrowser("command", {
+				session_id: embeddedBrowserSessionId,
+				action,
+			}, { owner: overlay, key: `embedded-browser-command-${action}`, timeoutMs: 15000 });
+			if (!overlay.__qwenDisposed) applyEmbeddedBrowserStatus(data);
+			return true;
+		} catch (error) {
+			if (!overlay.__qwenDisposed) setWebStatus(`浏览器命令失败：${error?.message ?? error}`);
+			return false;
+		}
+	};
 	const showWebHome = (options = {}) => {
 		if (options.recordHistory !== false) {
 			const next = pushOnlineSearchBrowserHistory(webHistory, webHistoryIndex, PROMPT_BROWSER_HOME_ENTRY, 30);
 			webHistory = next.items;
 			webHistoryIndex = next.index;
 		}
+		void closeEmbeddedBrowserSession({ revokeFrame: true });
 		currentWebUrl = "";
 		webAddressDraft = "";
 		if (activeBrowserMode === "web") searchInput.value = "";
-		webFrame.src = "about:blank";
 		webFrameShell.classList.add("qwen-te-hidden");
 		webHome.classList.remove("qwen-te-hidden");
 		setWebStatus("主页");
 		syncActionButtons();
 	};
-	const navigateWebsite = (rawTarget, options = {}) => {
+	const navigateWebsite = async (rawTarget, options = {}) => {
 		const target = options.resolved
 			? { ok: true, kind: "url", url: String(rawTarget ?? "").trim(), display: String(rawTarget ?? "").trim() }
 			: resolvePromptBrowserTarget(rawTarget, { currentOrigin: getPromptBrowserCurrentOrigin() });
@@ -15014,10 +15318,38 @@ function openOnlinePromptSearchDialog(node, library) {
 		if (activeBrowserMode === "web") searchInput.value = target.url;
 		webHome.classList.add("qwen-te-hidden");
 		webFrameShell.classList.remove("qwen-te-hidden");
-		setWebStatus(`正在导航到 ${target.url}`);
-		webFrame.src = target.url;
-		syncActionButtons();
-		return true;
+		setWebFrameOverlay(embeddedBrowserSessionId ? "正在导航..." : "正在启动本机内嵌浏览器...");
+		setWebStatus(`正在内嵌浏览器中打开 ${target.url}`);
+		try {
+			let data;
+			if (embeddedBrowserSessionId) {
+				data = await requestEmbeddedPromptBrowser("navigate", {
+					session_id: embeddedBrowserSessionId,
+					url: target.url,
+				}, { owner: overlay, key: "embedded-browser-navigate", timeoutMs: 20000 });
+			} else {
+				data = await requestEmbeddedPromptBrowser("start", {
+					url: target.url,
+					width: embeddedBrowserWidth,
+					height: embeddedBrowserHeight,
+				}, { owner: overlay, key: "embedded-browser-start", timeoutMs: 25000 });
+				embeddedBrowserSessionId = String(data.session_id ?? "");
+				embeddedLastFrameId = "";
+				embeddedUnchangedFrameCount = 0;
+			}
+			if (!embeddedBrowserSessionId) throw new Error("后端没有返回内嵌浏览器会话。");
+			applyEmbeddedBrowserStatus(data, { updateMessage: false });
+			markEmbeddedBrowserActivity(2400);
+			setWebStatus(`${data.browser || "内嵌浏览器"} 已启动，可直接点击和输入。`);
+			startEmbeddedBrowserPolling();
+			return true;
+		} catch (error) {
+			setWebFrameOverlay(`内嵌浏览器不可用：${error?.message ?? error}`);
+			setWebStatus(`内嵌浏览器打开失败：${error?.message ?? error}`);
+			if ([404, 503].includes(Number(error?.status ?? 0))) embeddedBrowserSessionId = "";
+			syncActionButtons();
+			return false;
+		}
 	};
 	const renderWebHistoryEntry = (entry) => {
 		if (entry === PROMPT_BROWSER_HOME_ENTRY) {
@@ -15097,6 +15429,8 @@ function openOnlinePromptSearchDialog(node, library) {
 		searchButton.title = tagMode ? "执行联网标签搜索" : "在内嵌网页中打开";
 		browserNav.setAttribute("aria-label", tagMode ? "标签搜索历史导航" : "网页导航");
 		dialog.setAttribute("aria-labelledby", tagMode ? tagModeTab.title.id : webModeTab.title.id);
+		if (tagMode) stopEmbeddedBrowserPolling();
+		else if (embeddedBrowserSessionId) startEmbeddedBrowserPolling();
 		syncActionButtons();
 	};
 	const syncActionButtons = () => {
@@ -15114,13 +15448,13 @@ function openOnlinePromptSearchDialog(node, library) {
 		searchButton.disabled = tagMode ? interactionBlocked : !webTarget.ok;
 		backButton.disabled = tagMode
 			? interactionBlocked || queryHistoryIndex <= 0
-			: webHistoryIndex <= 0;
+			: !embeddedBrowserSessionId || !embeddedCanGoBack;
 		forwardButton.disabled = tagMode
 			? interactionBlocked || queryHistoryIndex < 0 || queryHistoryIndex >= queryHistory.length - 1
-			: webHistoryIndex < 0 || webHistoryIndex >= webHistory.length - 1;
+			: !embeddedBrowserSessionId || !embeddedCanGoForward;
 		reloadButton.disabled = tagMode
 			? interactionBlocked || !String(searchInput.value ?? "").trim()
-			: !currentWebUrl;
+			: !embeddedBrowserSessionId;
 		homeButton.disabled = tagMode;
 		openExternalButton.disabled = tagMode || !externalTarget.ok;
 		companionBrowserButton.disabled = tagMode || companionBrowserBusy || !externalTarget.ok;
@@ -15590,11 +15924,8 @@ function openOnlinePromptSearchDialog(node, library) {
 		void runSearch({ recordHistory: false, queryIsEffective: true });
 	};
 	const navigateWebHistory = (direction) => {
-		const next = stepOnlineSearchBrowserHistory(webHistory, webHistoryIndex, direction);
-		if (!next.query || next.index === webHistoryIndex) return;
-		webHistory = next.items;
-		webHistoryIndex = next.index;
-		renderWebHistoryEntry(next.query);
+		if (!embeddedBrowserSessionId) return;
+		void runEmbeddedBrowserCommand(Number(direction) < 0 ? "back" : "forward");
 	};
 	backButton.onclick = () => {
 		if (activeBrowserMode === "web") navigateWebHistory(-1);
@@ -15606,7 +15937,7 @@ function openOnlinePromptSearchDialog(node, library) {
 	};
 	reloadButton.onclick = () => {
 		if (activeBrowserMode === "web") {
-			if (currentWebUrl) void navigateWebsite(currentWebUrl, { recordHistory: false, resolved: true });
+			if (embeddedBrowserSessionId) void runEmbeddedBrowserCommand("reload");
 			return;
 		}
 		if (isInteractionBlocked()) return;
@@ -15639,9 +15970,85 @@ function openOnlinePromptSearchDialog(node, library) {
 		setBrowserMode(nextMode);
 		(nextMode === "web" ? webModeTab.button : tagModeTab.button).focus();
 	});
-	webFrame.addEventListener("load", () => {
-		if (overlay.__qwenDisposed || !currentWebUrl) return;
-		setWebStatus(`已导航到 ${currentWebUrl}。页面拒绝内嵌时请使用“外部打开”。`);
+	const getEmbeddedInputModifiers = (event) => {
+		return (event.altKey ? 1 : 0) | (event.ctrlKey ? 2 : 0) | (event.metaKey ? 4 : 0) | (event.shiftKey ? 8 : 0);
+	};
+	const getEmbeddedPointerPoint = (event) => {
+		if (!embeddedBrowserSessionId) return null;
+		return mapEmbeddedBrowserPointerPoint(
+			Number(event.clientX),
+			Number(event.clientY),
+			webFrame.getBoundingClientRect(),
+			Number(webFrame.naturalWidth) || embeddedBrowserWidth,
+			Number(webFrame.naturalHeight) || embeddedBrowserHeight,
+			embeddedBrowserWidth,
+			embeddedBrowserHeight,
+		);
+	};
+	const focusEmbeddedKeyboard = () => {
+		webInputSink.value = "";
+		try { webInputSink.focus({ preventScroll: true }); } catch (_error) { webInputSink.focus(); }
+	};
+	const pointerButtonName = (button) => (["left", "middle", "right", "back", "forward"][Number(button)] ?? "left");
+	webFrame.addEventListener("dragstart", (event) => { event.preventDefault(); });
+	webFrame.addEventListener("pointerdown", (event) => {
+		const point = getEmbeddedPointerPoint(event);
+		if (!point) return;
+		event.preventDefault();
+		focusEmbeddedKeyboard();
+		embeddedPointerDown = true;
+		embeddedPointerButton = pointerButtonName(event.button);
+		embeddedPointerButtons = Number(event.buttons) || 1;
+		try { webFrame.setPointerCapture(event.pointerId); } catch (_error) {}
+		void sendEmbeddedBrowserInput({ type: "mouseDown", ...point, button: embeddedPointerButton, buttons: embeddedPointerButtons, modifiers: getEmbeddedInputModifiers(event) });
+	});
+	webFrame.addEventListener("pointermove", (event) => {
+		if (!embeddedPointerDown) return;
+		const now = performance.now();
+		if (now - embeddedLastPointerMoveAt < 24) return;
+		const point = getEmbeddedPointerPoint(event);
+		if (!point) return;
+		embeddedLastPointerMoveAt = now;
+		void sendEmbeddedBrowserInput({ type: "mouseMove", ...point, button: embeddedPointerButton, buttons: Number(event.buttons) || embeddedPointerButtons, modifiers: getEmbeddedInputModifiers(event) });
+	});
+	const releaseEmbeddedPointer = (event) => {
+		if (!embeddedPointerDown) return;
+		const point = getEmbeddedPointerPoint(event);
+		embeddedPointerDown = false;
+		embeddedPointerButtons = 0;
+		try { webFrame.releasePointerCapture(event.pointerId); } catch (_error) {}
+		if (point) void sendEmbeddedBrowserInput({ type: "mouseUp", ...point, button: embeddedPointerButton, buttons: 0, modifiers: getEmbeddedInputModifiers(event) });
+	};
+	webFrame.addEventListener("pointerup", releaseEmbeddedPointer);
+	webFrame.addEventListener("pointercancel", releaseEmbeddedPointer);
+	webFrame.addEventListener("contextmenu", (event) => { event.preventDefault(); });
+	webFrame.addEventListener("wheel", (event) => {
+		const point = getEmbeddedPointerPoint(event);
+		if (!point) return;
+		event.preventDefault();
+		void sendEmbeddedBrowserInput({ type: "mouseWheel", ...point, delta_x: event.deltaX, delta_y: event.deltaY, modifiers: getEmbeddedInputModifiers(event) });
+	}, { passive: false });
+	const forwardedControlKeys = new Set(["Backspace", "Tab", "Enter", "Escape", "PageUp", "PageDown", "End", "Home", "ArrowLeft", "ArrowUp", "ArrowRight", "ArrowDown", "Insert", "Delete"]);
+	webInputSink.addEventListener("keydown", (event) => {
+		if (event.isComposing) return;
+		if (!forwardedControlKeys.has(event.key) && !event.ctrlKey && !event.metaKey && !event.altKey) return;
+		event.preventDefault();
+		void sendEmbeddedBrowserInput({ type: "key", key: event.key, code: event.code, modifiers: getEmbeddedInputModifiers(event) });
+	});
+	webInputSink.addEventListener("beforeinput", (event) => {
+		if (event.isComposing || !event.data) return;
+		event.preventDefault();
+		void sendEmbeddedBrowserInput({ type: "text", text: event.data });
+	});
+	webInputSink.addEventListener("compositionend", (event) => {
+		if (event.data) void sendEmbeddedBrowserInput({ type: "text", text: event.data });
+		webInputSink.value = "";
+	});
+	webInputSink.addEventListener("paste", (event) => {
+		const text = String(event.clipboardData?.getData?.("text") ?? "");
+		if (!text) return;
+		event.preventDefault();
+		void sendEmbeddedBrowserInput({ type: "text", text });
 	});
 	applyButton.onclick = () => { void applyToNode(); };
 	importButton.onclick = () => { void importToLibrary({ onlyHighConfidence: false }); };
@@ -15660,7 +16067,12 @@ function openOnlinePromptSearchDialog(node, library) {
 	const closeDialog = () => {
 		disposeModalOverlay(overlay);
 	};
+	for (const eventName of ["pointerdown", "pointerup", "mousedown", "mouseup", "click", "dblclick", "contextmenu", "wheel", "touchstart", "touchmove", "touchend"]) {
+		dialog.addEventListener(eventName, (event) => { event.stopPropagation(); });
+	}
+	dialog.addEventListener("keyup", (event) => { event.stopPropagation(); });
 	dialog.addEventListener("keydown", (event) => {
+		event.stopPropagation();
 		if (event.key !== "Escape") return;
 		event.preventDefault();
 		closeDialog();
@@ -15672,7 +16084,8 @@ function openOnlinePromptSearchDialog(node, library) {
 	};
 	overlay.__qwenDispose = () => {
 		requestId += 1;
-		webFrame.src = "about:blank";
+		void closeEmbeddedBrowserSession({ revokeFrame: true });
+		webInputSink.value = "";
 		delete overlay.__qwenSyncRuntimeState;
 	};
 	closeButton.onclick = closeDialog;

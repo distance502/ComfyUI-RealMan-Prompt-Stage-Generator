@@ -11,6 +11,25 @@ try:  # Keep direct file loading in tests working when the package context is ab
 except Exception:  # pragma: no cover - exercised by direct import tests
     from stage_prompt_skills_test import resolve_base_template_style  # type: ignore
 
+try:
+    from ..danbooru_tag_config import DANBOORU_GENERAL_TAG_ALIASES
+except Exception:  # pragma: no cover - direct file loading in focused tests
+    try:
+        from danbooru_tag_config import DANBOORU_GENERAL_TAG_ALIASES  # type: ignore
+    except ImportError:
+        import importlib.util
+        from pathlib import Path
+
+        _danbooru_spec = importlib.util.spec_from_file_location(
+            "danbooru_tag_config",
+            Path(__file__).resolve().parents[1] / "danbooru_tag_config.py",
+        )
+        if _danbooru_spec is None or _danbooru_spec.loader is None:
+            raise RuntimeError("Unable to load danbooru_tag_config.py")
+        _danbooru_module = importlib.util.module_from_spec(_danbooru_spec)
+        _danbooru_spec.loader.exec_module(_danbooru_module)
+        DANBOORU_GENERAL_TAG_ALIASES = _danbooru_module.DANBOORU_GENERAL_TAG_ALIASES
+
 
 class _PersonPromptVariantProfile(TypedDict):
     label: str
@@ -1024,6 +1043,8 @@ _PROMPT_FRAGMENT_TRANSLATION_MAP.update(
         "身体结构完整": "complete body structure",
     }
 )
+_PROMPT_FRAGMENT_TRANSLATION_MAP.update(DANBOORU_GENERAL_TAG_ALIASES)
+
 _RUNTIME_RANDOM_INTENSITY_STRONG_BASELINE = "强"
 _RUNTIME_RANDOM_INTENSITY_STRONG_EXTREME = "强 / 极限拉开"
 _STRONG_DIVERSITY_SCENE_BUCKET_ORDER = ["indoor", "outdoor", "special"]
