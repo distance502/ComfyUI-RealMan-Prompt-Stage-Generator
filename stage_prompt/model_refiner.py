@@ -97,6 +97,41 @@ _MODE_LITERAL_GUARD_RULES: tuple[tuple[tuple[str, ...], tuple[str, ...], tuple[s
     (("古风", "古风人像", "古风电影剧照", "工笔重彩", "玄幻古风", "水墨写意"), ("古风",), ("成年女性",)),
     (("神话感", "神话史诗感", "神圣史诗", "魔幻现实主义", "暗黑奇幻", "冰雪奇幻"), ("神话感",), ("成年女性",)),
 )
+_FANTASY_STYLE_LITERAL_GUARDS = (
+    "奇幻风格",
+    "西方奇幻",
+    "高等奇幻",
+    "剑与魔法",
+    "哥特奇幻",
+    "黑暗童话",
+    "精灵幻想",
+    "梦幻奇境",
+    "日式奇幻动画",
+    "漆原智志画风",
+    "结城信辉画风",
+    "童话绘本",
+    "魔幻油画",
+    "奇幻概念设计",
+    "史诗奇幻海报",
+    "highly finished fantasy key visual",
+    "western fantasy epic illustration",
+    "high fantasy epic key visual",
+    "sword-and-sorcery adventure illustration",
+    "gothic fantasy narrative illustration",
+    "dark fairy-tale storybook key visual",
+    "elven fantasy character illustration",
+    "dreamlike fantasy wonderland illustration",
+    "Japanese fantasy anime key frame",
+    "Satoshi Urushihara-inspired ornate fantasy anime illustration",
+    "Nobuteru Yuki-inspired elegant fantasy character illustration",
+    "fantasy fairy-tale storybook illustration",
+    "magical narrative oil painting",
+    "highly finished fantasy concept design",
+    "epic fantasy cinematic poster",
+)
+_MODE_LITERAL_GUARD_RULES += tuple(
+    ((anchor,), (anchor,), ()) for anchor in _FANTASY_STYLE_LITERAL_GUARDS
+)
 _STYLE_ONLY_PROMPT_TERMS = frozenset({
     "自动",
     "真实感",
@@ -249,6 +284,100 @@ def extract_text(response: Any) -> str:
     return ""
 
 
+
+_NATURAL_PROSE_MARKERS = (
+    "画面以", "主体处于", "主体位于", "整体遵循", "镜头采用", "最终画面",
+    "塑造主光", "叙事锚点", "自然融入", "保持主题", "避免标签堆叠",
+    " centered on ", " situated in ", " unified through ", " the camera uses ",
+    " the final image ", " narrative anchors", "visual direction", "without tag-chain phrasing",
+)
+_NATURAL_SENTENCE_PATTERN = re.compile(r".+?(?:[。！？.!?]+|$)", re.DOTALL)
+
+
+def _looks_like_natural_prose_prompt(text: str) -> bool:
+    body = str(text or "").split("中文说明：", 1)[0].strip()
+    if not body:
+        return False
+    lowered = f" {body.casefold()} "
+    marker_hits = sum(1 for marker in _NATURAL_PROSE_MARKERS if marker in lowered)
+    terminator_count = len(re.findall(r"[。！？.!?]", body))
+    if re.search(r"[\u4e00-\u9fff]", body):
+        return marker_hits >= 2 or (terminator_count >= 2 and len(body) >= 60)
+    return marker_hits >= 2 or (terminator_count >= 2 and len(body.split()) >= 18)
+
+
+def _dedupe_natural_prompt_units(text: str) -> str:
+    source = str(text or "").strip()
+    if not source:
+        return ""
+    has_cjk = bool(re.search(r"[\u4e00-\u9fff]", source))
+    seen_sentences: set[str] = set()
+    output_units: list[str] = []
+    for match in _NATURAL_SENTENCE_PATTERN.finditer(source):
+        unit = match.group(0).strip()
+        if not unit:
+            continue
+        terminal_match = re.search(r"([。！？.!?]+)$", unit)
+        terminal = terminal_match.group(1) if terminal_match else ""
+        body = unit[: -len(terminal)].strip() if terminal else unit
+        clauses = [clause.strip(" ，,；;。.!?！？") for clause in re.split(r"\s*[；;]\s*", body)]
+        clauses = [clause for clause in clauses if clause]
+        seen_clauses: set[str] = set()
+        deduped_clauses: list[str] = []
+        for clause in clauses:
+            key = _normalize_for_compare(clause)
+            if not key or key in seen_clauses:
+                continue
+            seen_clauses.add(key)
+            deduped_clauses.append(clause)
+        if not deduped_clauses:
+            continue
+        rebuilt = ("；" if has_cjk else "; ").join(deduped_clauses)
+        sentence_key = _normalize_for_compare(rebuilt)
+        if not sentence_key or sentence_key in seen_sentences:
+            continue
+        seen_sentences.add(sentence_key)
+        output_units.append(f"{rebuilt}{terminal}")
+    result = ("" if has_cjk else " ").join(output_units).strip()
+    if not result:
+        return ""
+    if not re.search(r"[。！？.!?]$", result):
+        result += "。" if has_cjk else "."
+    return result
+
+
+def _postprocess_natural_prompt_text(text: str) -> str:
+    normalized = str(text or "").strip().replace("\r\n", "\n").replace("\r", "\n")
+    normalized = re.sub(r"^\s*```[a-zA-Z0-9_-]*\s*", "", normalized)
+    normalized = re.sub(r"\s*```\s*$", "", normalized)
+    lines: list[str] = []
+    for raw_line in normalized.split("\n"):
+        line = raw_line.strip()
+        if not line:
+            continue
+        line = line.lstrip("-*#> \t")
+        line = _PROMPT_LABEL_PATTERN.sub("", line).strip()
+        if not line or _META_LINE_PATTERN.match(line):
+            continue
+        wrapper_match = _LEADING_SCENE_WRAPPER_PATTERN.match(line)
+        if wrapper_match:
+            lead = wrapper_match.group(1).strip()
+            tail = wrapper_match.group(2).strip()
+            line = f"{lead}，{tail}" if tail else lead
+        for pattern in _NARRATIVE_FILLER_PATTERNS:
+            line = pattern.sub("", line)
+        line = re.sub(r"(?:\[\s*\]|【\s*】|\(\s*\)|（\s*）)", "", line)
+        line = re.sub(r"\s+", " ", line).strip("“”\"'` ")
+        if line:
+            lines.append(line)
+    collapsed = " ".join(lines) if lines else normalized
+    collapsed = re.sub(r"\s+", " ", collapsed)
+    collapsed = re.sub(r"\s*([，。；！？])\s*", r"\1", collapsed)
+    collapsed = re.sub(r"\s*([,;.!?])\s*", lambda match: f"{match.group(1)} ", collapsed).strip()
+    collapsed = re.sub(r"([。！？])\1+", r"\1", collapsed)
+    collapsed = re.sub(r"([,;])\1+", r"\1", collapsed)
+    return _dedupe_natural_prompt_units(collapsed)
+
 def _postprocess_prompt_text(text: str) -> str:
     normalized = str(text or "").strip()
     if not normalized:
@@ -256,6 +385,8 @@ def _postprocess_prompt_text(text: str) -> str:
     normalized = normalized.replace("\r\n", "\n").replace("\r", "\n")
     normalized = re.sub(r"^\s*```[a-zA-Z0-9_-]*\s*", "", normalized)
     normalized = re.sub(r"\s*```\s*$", "", normalized)
+    if _looks_like_natural_prose_prompt(normalized):
+        return _postprocess_natural_prompt_text(normalized)
     lines: list[str] = []
     for raw_line in normalized.split("\n"):
         line = raw_line.strip()
@@ -342,6 +473,31 @@ def _dedupe_prompt_fragments(text: str) -> str:
     return body_text
 
 
+
+def _looks_like_tag_chain_prompt(text: str) -> bool:
+    """Detect unique but list-like model output so the natural Skill prompt can be retained."""
+
+    body = str(text or "").split("中文说明：", 1)[0].strip()
+    if not body:
+        return False
+    fragments = [item.strip() for item in re.split(r"[，,、；;]+", body) if item.strip()]
+    if len(fragments) < 6:
+        return False
+    lowered = body.casefold()
+    natural_markers = (
+        "画面以", "主体", "场景", "镜头", "光影", "呈现", "采用", "位于", "处于", "保持", "强调", "塑造", "让", "融入",
+        " centered on ", " in a ", " within ", " while ", " where ", " with ", " the scene ", " the camera ", " lighting ", " remains ", " creates ",
+    )
+    if sum(1 for marker in natural_markers if marker in lowered) >= 2:
+        return False
+    has_cjk = bool(re.search(r"[\u4e00-\u9fff]", body))
+    if has_cjk:
+        average_length = sum(len(re.sub(r"\s+", "", item)) for item in fragments) / len(fragments)
+        return average_length <= 10 and body.count("。") <= 1
+    average_words = sum(len(item.split()) for item in fragments) / len(fragments)
+    return average_words <= 4 and body.count(".") <= 1
+
+
 def _looks_like_broken_prompt(text: str) -> bool:
     normalized = str(text or "").strip()
     if not normalized:
@@ -356,6 +512,8 @@ def _looks_like_broken_prompt(text: str) -> bool:
     if normalized.count("**") >= 2:
         return True
     if _CONSECUTIVE_REPEAT_PATTERN.search(normalized):
+        return True
+    if _looks_like_tag_chain_prompt(normalized):
         return True
 
     fragments = [fragment.strip() for fragment in _FRAGMENT_SPLIT_PATTERN.split(normalized) if fragment.strip()]
@@ -556,6 +714,18 @@ def _violates_language(text: str, settings: dict[str, Any]) -> bool:
             or not _CJK_PATTERN.search(chinese_note)
         )
     return False
+
+
+def is_natural_language_prompt(text: str, settings: dict[str, Any] | None = None) -> bool:
+    """Validate the final natural-language contract shared by every positive-output mode."""
+
+    prompt = str(text or "").strip()
+    if not prompt or _looks_like_tag_chain_prompt(prompt):
+        return False
+    active_settings = settings or {}
+    if active_settings and _violates_language(prompt, active_settings):
+        return False
+    return _looks_like_natural_prose_prompt(prompt)
 
 
 _NON_PERSON_HUMAN_INTRUSION_TERMS = (

@@ -6,6 +6,7 @@ ComfyUI Qwen3/Qwen3.5 llama TE 插件入口。
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import ipaddress
 import importlib
 import json
@@ -1719,6 +1720,48 @@ def _在线候选标签可用(tag: str) -> bool:
     return True
 
 
+def _构建在线提示词条目(
+    query: str,
+    samples: list[str],
+    *,
+    source: str,
+    limit: int,
+) -> list[dict[str, object]]:
+    items: list[dict[str, object]] = []
+    seen: set[str] = set()
+    source_text = str(source or "unknown").strip() or "unknown"
+    source_label = "本地回退" if "local_fallback" in source_text else source_text
+    max_items = max(1, min(16, int(limit or 12)))
+    for index, raw_sample in enumerate(samples):
+        prompt = _规范化在线样本文本(str(raw_sample or ""))[:1200]
+        key = _在线文本规范键(prompt)
+        if not key or key in seen or len(prompt) < 8:
+            continue
+        if _在线噪声关键词模式.search(prompt.casefold()):
+            continue
+        seen.add(key)
+        relevance = max(0, int(_在线样本相关度(query, prompt)))
+        confidence = min(0.98, 0.56 + min(0.36, relevance * 0.04))
+        if "local_fallback" in source_text:
+            confidence = min(confidence, 0.72)
+        segment_count = len([part for part in _在线提示词片段分隔模式.split(prompt) if part.strip()])
+        items.append(
+            {
+                "id": hashlib.blake2s(key.encode("utf-8"), digest_size=8).hexdigest(),
+                "prompt": prompt,
+                "source": source_text,
+                "source_label": source_label,
+                "confidence": round(confidence, 3),
+                "length": len(prompt),
+                "segment_count": max(1, segment_count),
+                "rank": index + 1,
+            }
+        )
+        if len(items) >= max_items:
+            break
+    return items
+
+
 def _从在线提示词提取标签(samples: list[str], *, query: str, limit: int) -> tuple[list[dict[str, object]], list[str]]:
     counter: Counter[str] = Counter()
     display_tags: dict[str, str] = {}
@@ -2767,6 +2810,9 @@ def _register_tag_routes() -> bool:
             frame, frame_id = await _get_embedded_browser_manager().capture_frame(
                 data.get("session_id"),
                 data.get("previous_frame_id", ""),
+                data.get("max_width"),
+                data.get("max_height"),
+                data.get("quality"),
             )
         except Exception as exc:
             return _embedded_browser_error_response(exc)
@@ -2900,6 +2946,8 @@ def _register_tag_routes() -> bool:
                     "message": query_error,
                     "query": "",
                     "source": "none",
+                    "prompts": [],
+                    "prompt_items": [],
                     "tags": [],
                     "tag_items": [],
                     "samples": [],
@@ -2926,20 +2974,30 @@ def _register_tag_routes() -> bool:
                 warning=warning,
             )
 
+        prompt_items = _构建在线提示词条目(
+            query,
+            samples,
+            source=source,
+            limit=limit,
+        )
+        prompts = [str(item.get("prompt", "")).strip() for item in prompt_items if str(item.get("prompt", "")).strip()]
         return _json_response(
             {
-                "ok": bool(tag_items),
+                "ok": bool(prompt_items or tag_items),
                 "message": (
-                    f"已从 {source} 获取 {len(tag_items)} 个候选标签。"
-                    if tag_items
-                    else "未找到可用候选标签，请尝试更具体的关键词。"
+                    f"已从 {source} 获取 {len(prompt_items)} 条提示词。"
+                    if prompt_items
+                    else "未找到可用提示词，请尝试更具体的主题、风格或场景描述。"
                 ),
                 "query": query,
                 "source": source,
+                "prompts": prompts,
+                "prompt_items": prompt_items,
                 "tags": tags,
                 "tag_items": tag_items,
                 "samples": samples,
-                "count": len(tag_items),
+                "count": len(prompt_items),
+                "tag_count": len(tag_items),
                 "warning": warning,
                 "cached": cached,
             },

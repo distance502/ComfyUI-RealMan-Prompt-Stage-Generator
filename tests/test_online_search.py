@@ -330,6 +330,10 @@ class TestOnlineSearchRoute(unittest.TestCase):
         self.assertEqual(response.status, 200)
         self.assertEqual(payload["source"], "searxng+local_fallback")
         self.assertEqual(payload["tags"], ["电影人像"])
+        self.assertTrue(payload["prompt_items"])
+        self.assertEqual(payload["prompts"], [item["prompt"] for item in payload["prompt_items"]])
+        self.assertEqual(payload["count"], len(payload["prompt_items"]))
+        self.assertEqual(payload["tag_count"], 1)
 
     def test_repeated_route_query_reuses_raw_samples_but_rebuilds_tag_items(self) -> None:
         class Request:
@@ -380,6 +384,8 @@ class TestOnlineSearchRoute(unittest.TestCase):
         self.assertTrue(second_payload["cached"])
         self.assertFalse(first_payload["tag_items"][0]["exists"])
         self.assertTrue(second_payload["tag_items"][0]["exists"])
+        self.assertEqual(first_payload["prompts"], ["cache portrait, dramatic lighting"])
+        self.assertEqual(second_payload["prompt_items"][0]["prompt"], "cache portrait, dramatic lighting")
 
     def test_concurrent_identical_queries_share_one_network_worker(self) -> None:
         class Request:

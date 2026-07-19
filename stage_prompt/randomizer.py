@@ -8,9 +8,17 @@ from typing import Any, Callable
 
 _AUTO_POOL_SUBJECT_GROUPS = {"主体"}
 _AUTO_POOL_SCENE_GROUPS = {"场景背景"}
-_REWRITE_SUBJECT_SCENE_GROUPS = _AUTO_POOL_SUBJECT_GROUPS | _AUTO_POOL_SCENE_GROUPS
+_REWRITE_MAINLINE_PERSON_GROUPS = {"主体", "场景背景", "服装造型", "动作姿态", "道具世界观"}
+_REWRITE_MAINLINE_NON_PERSON_GROUPS = {"主体", "场景背景", "道具世界观"}
 _RUNTIME_RANDOM_MODE_AUTO = "自动判断"
 _RUNTIME_RANDOM_MODE_REWRITE_SUBJECT_SCENE = "重写主体与场景"
+
+
+def _rewrite_mainline_groups(settings: dict[str, Any]) -> set[str]:
+    subject_type = str(settings.get("主体类型解析结果") or settings.get("主体类型") or "自动").strip()
+    if subject_type == "非人物主体":
+        return set(_REWRITE_MAINLINE_NON_PERSON_GROUPS)
+    return set(_REWRITE_MAINLINE_PERSON_GROUPS)
 
 
 def _count_setting_tags(raw: Any) -> int:
@@ -115,19 +123,34 @@ def _allowed_random_additions_for_group(
     mode: str,
 ) -> int:
     additions = _allowed_random_additions(current_count, slot_count, intensity)
-    return additions
+    if mode != _RUNTIME_RANDOM_MODE_REWRITE_SUBJECT_SCENE:
+        return additions
+    if str(theme_pool or "").strip() not in {"", "自动"}:
+        return min(additions, 1)
+    caps = {
+        "主体": {"弱": 1, "中": 2, "强": 3},
+        "场景背景": {"弱": 1, "中": 2, "强": 3},
+        "服装造型": {"弱": 1, "中": 2, "强": 3},
+        "动作姿态": {"弱": 1, "中": 1, "强": 2},
+        "道具世界观": {"弱": 1, "中": 1, "强": 2},
+    }
+    group_caps = caps.get(group_name)
+    if not group_caps:
+        return 0
+    return min(additions, group_caps.get(str(intensity), group_caps["强"]))
 
 
 def _preserve_rewrite_subject_scene_state(
     selected: OrderedDict[str, list[str]],
     *,
     groups: list[tuple[str, int, list[str]]],
+    rewrite_groups: set[str],
     exclude: set[str],
     uniq: Callable[[list[str]], list[str]],
 ) -> OrderedDict[str, list[str]]:
     preserved = OrderedDict((group_name, []) for group_name, _, _ in groups)
     for group_name, slot_count, _ in groups:
-        if group_name in _REWRITE_SUBJECT_SCENE_GROUPS:
+        if group_name in rewrite_groups:
             continue
         tags = [
             str(tag).strip()
@@ -143,6 +166,7 @@ def _preserve_rewrite_subject_scene_state(
 def _preserve_rewrite_custom_tags(
     custom_tags: list[str],
     *,
+    rewrite_groups: set[str],
     exclude: set[str],
     resolved_tag_group_index: dict[str, str],
     uniq: Callable[[list[str]], list[str]],
@@ -153,7 +177,7 @@ def _preserve_rewrite_custom_tags(
             for raw_tag in custom_tags
             if (tag := str(raw_tag).strip())
             and tag not in exclude
-            and resolved_tag_group_index.get(tag) not in _REWRITE_SUBJECT_SCENE_GROUPS
+            and resolved_tag_group_index.get(tag) not in rewrite_groups
         ]
     )
 
@@ -235,12 +259,16 @@ def build_runtime_tags(
     generated: list[str] = []
     group_slots = {group_name: slots for group_name, slots, _ in groups}
     rewrite_subject_scene_mode = mode == _RUNTIME_RANDOM_MODE_REWRITE_SUBJECT_SCENE
+    rewrite_groups = _rewrite_mainline_groups(settings) if rewrite_subject_scene_mode else set()
     rewrite_group_excludes: dict[str, set[str]] = {}
     if rewrite_subject_scene_mode:
         rewrite_group_excludes = {
-            "主体": {str(tag).strip() for tag in selected.get("主体", []) if str(tag).strip()},
-            "场景背景": {str(tag).strip() for tag in selected.get("场景背景", []) if str(tag).strip()},
+            group_name: {str(tag).strip() for tag in selected.get(group_name, []) if str(tag).strip()}
+            for group_name in rewrite_groups
         }
+        settings["运行时随机主线重写组"] = "、".join(
+            group_name for group_name, _, _ in groups if group_name in rewrite_groups
+        )
 
     if mode == "保留已选核心标签":
         out_selected, out_custom = _clone_core_state_with_limit(
@@ -260,12 +288,14 @@ def build_runtime_tags(
             preserved_selected = _preserve_rewrite_subject_scene_state(
                 selected,
                 groups=groups,
+                rewrite_groups=rewrite_groups,
                 exclude=exclude,
                 uniq=uniq,
             )
             out_selected = OrderedDict((group_name, list(tags)) for group_name, tags in preserved_selected.items())
             out_custom = _preserve_rewrite_custom_tags(
                 custom_tags,
+                rewrite_groups=rewrite_groups,
                 exclude=exclude,
                 resolved_tag_group_index=resolved_tag_group_index,
                 uniq=uniq,
@@ -273,7 +303,7 @@ def build_runtime_tags(
         _apply_whitelist(out_selected, out_custom, whitelist, resolved_tag_group_index, group_slots)
 
     for name, slot_count, options in groups:
-        if rewrite_subject_scene_mode and name not in _REWRITE_SUBJECT_SCENE_GROUPS:
+        if rewrite_subject_scene_mode and name not in rewrite_groups:
             continue
         pool = [
             tag

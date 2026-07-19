@@ -15,6 +15,7 @@ from embedded_browser import (
     embedded_browser_history_index,
     embedded_browser_virtual_key_code,
     normalize_embedded_browser_coordinate,
+    normalize_embedded_browser_frame_size,
     normalize_embedded_browser_viewport,
 )
 
@@ -38,6 +39,18 @@ class EmbeddedBrowserHelperTests(unittest.TestCase):
     def test_viewport_and_coordinates_are_bounded(self):
         self.assertEqual(normalize_embedded_browser_viewport(1, 99999), (640, 1000))
         self.assertEqual(normalize_embedded_browser_viewport("bad", None), (1360, 760))
+        self.assertEqual(
+            normalize_embedded_browser_frame_size(1120, 630, viewport_width=1360, viewport_height=760),
+            (1120, 630),
+        )
+        self.assertEqual(
+            normalize_embedded_browser_frame_size(1, 9999, viewport_width=1360, viewport_height=760),
+            (480, 760),
+        )
+        self.assertEqual(
+            normalize_embedded_browser_frame_size(1600, 900, viewport_width=1600, viewport_height=900),
+            (1600, 900),
+        )
         self.assertEqual(normalize_embedded_browser_coordinate(-2, 1360), 0.0)
         self.assertEqual(normalize_embedded_browser_coordinate(2000, 1360), 1360.0)
         with self.assertRaises(EmbeddedBrowserError):
@@ -110,6 +123,7 @@ class EmbeddedBrowserInputTests(unittest.IsolatedAsyncioTestCase):
             last_frame=b"",
             last_frame_id="",
             last_frame_captured_at=0.0,
+            last_frame_size=(0, 0, 0),
         )
 
     async def test_mouse_events_are_mapped_to_cdp_names(self):
@@ -136,13 +150,16 @@ class EmbeddedBrowserInputTests(unittest.IsolatedAsyncioTestCase):
         self.connection.responses["Page.captureScreenshot"] = {
             "data": base64.b64encode(frame).decode("ascii"),
         }
-        first, frame_id = await self.manager.capture_frame("session")
-        second, second_id = await self.manager.capture_frame("session", frame_id)
+        first, frame_id = await self.manager.capture_frame("session", max_width=1120, max_height=630, quality=58)
+        second, second_id = await self.manager.capture_frame("session", frame_id, 1120, 630, 58)
         captures = [method for method, _params in self.connection.calls if method == "Page.captureScreenshot"]
         self.assertEqual(first, frame)
         self.assertIsNone(second)
         self.assertEqual(second_id, frame_id)
         self.assertEqual(len(captures), 1)
+        capture_params = next(params for method, params in self.connection.calls if method == "Page.captureScreenshot")
+        self.assertEqual(capture_params["quality"], 58)
+        self.assertAlmostEqual(capture_params["clip"]["scale"], 1120 / 1360)
 
     async def test_mouse_input_invalidates_frame_throttle(self):
         session = self.manager._sessions["session"]

@@ -179,6 +179,7 @@ globalThis.__stagePromptUiTestExports = {
 	chunkOnlineImportTags,
 	normalizeOnlineSearchTagItems,
 	normalizeOnlineSearchSamples,
+	normalizeOnlinePromptItems,
 	formatOnlineSearchWarning,
 	resolveOnlineSearchLibraryTags,
 	resolveOnlineSearchSelectedTags,
@@ -188,6 +189,8 @@ globalThis.__stagePromptUiTestExports = {
 	requestEmbeddedPromptBrowser,
 	fetchEmbeddedPromptBrowserFrame,
 	mapEmbeddedBrowserPointerPoint,
+	resolveEmbeddedBrowserViewport,
+	getEmbeddedBrowserFrameCaptureProfile,
 	openPromptBrowserExternal,
 	launchPromptCompanionBrowser,
 	getModelRuntimeStatusSummary,
@@ -202,6 +205,7 @@ globalThis.__stagePromptUiTestExports = {
 	applyModelApiProviderPreset,
 	NODE_MODEL_API_RUNTIME_SIGNATURE_KEY,
 	searchOnlinePromptTags,
+	searchOnlinePrompts,
 	openOnlinePromptSearchDialog,
 	setWidgetGroupVisibility,
 	toggleWidget,
@@ -231,6 +235,10 @@ globalThis.__stagePromptUiTestExports = {
 	buildNodeSummaryText,
 	setPanelActionButtonState,
 	setControlWidgetValue,
+	getAdvancedWidgetOptions,
+	createAdvancedSelect,
+	ADVANCED_WIDGET_NAMES,
+	CONTROL_WIDGET_OPTIONS,
 	bindSummaryRefresh,
 	getSlotPanelGroupValues,
 	getSlotPanelLibrarySignature,
@@ -598,6 +606,16 @@ test("owned JSON fetch keeps timeout and modal abort active while reading the re
 	const timed = exports.fetchJsonWithTimeout("/timed-body", {}, { owner: {}, key: "timed-body", timeoutMs: 250 });
 	await timeoutBodyStarted;
 	await assert.rejects(timed, /body timeout/u);
+
+	exports.__context.fetch = async (_url, options) => await new Promise((_resolve, reject) => {
+		options.signal.addEventListener("abort", () => {
+			const error = new Error("signal is aborted without reason");
+			error.name = "AbortError";
+			reject(error);
+		}, { once: true });
+	});
+	const rawAbort = exports.fetchWithTimeout("/raw-abort", {}, { owner: {}, key: "raw-abort", timeoutMs: 250 });
+	await assert.rejects(rawAbort, (error) => String(error?.name) === "TimeoutError");
 });
 
 test("node cache namespace is stable and regenerated for copied nodes", async () => {
@@ -909,6 +927,8 @@ test("online prompt search calls only the fixed backend route and filters transp
 	assert.equal(captured.url, "/qwen_te/tag_library/online_search");
 	assert.deepEqual(captured.payload, { query: "cinematic portrait", limit: 12 });
 	assert.deepEqual(Array.from(result.tags), ["cinematic portrait"]);
+	assert.equal(result.promptItems.length, 1);
+	assert.equal(result.promptItems[0].prompt, "cinematic portrait, soft rim lighting");
 	assert.equal(result.source, "searxng");
 });
 
@@ -932,6 +952,13 @@ test("online prompt search defensively deduplicates tag and sample variants", as
 	assert.equal(items[0].group, "风格");
 	assert.equal(items[0].exists, true);
 	assert.deepEqual(Array.from(samples), ["Cinematic portrait, rim light", "Second sample"]);
+	const prompts = exports.normalizeOnlinePromptItems([
+		{ id: "one", prompt: "Cinematic portrait, rim light", confidence: 0.8, source: "searxng" },
+		{ id: "two", prompt: " cinematic   portrait, rim light ", confidence: 0.6, source: "lexica" },
+	], [], 8);
+	assert.equal(prompts.length, 1);
+	assert.equal(prompts[0].tag, "Cinematic portrait, rim light");
+	assert.equal(prompts[0].group, "searxng");
 });
 
 test("online prompt search renders sanitized diagnostics as readable status", async () => {
@@ -957,7 +984,7 @@ test("online prompt search import resolution is canonical and reports partial co
 	assert.deepEqual(Array.from(resolution.resolvedTags), ["glitch   art", "电影感"]);
 	assert.deepEqual(Array.from(resolution.unresolvedTags), ["film grain"]);
 	const source = await fs.readFile(UI_PATH, "utf8");
-	assert.equal(source.includes("批量入库未完全完成：已确认"), true);
+	assert.equal(source.includes("拆分入库未完全完成：已确认"), true);
 	assert.equal(source.includes("const resolution = resolveOnlineSearchLibraryTags(tagsToImport, refreshedLibrary);"), true);
 });
 
@@ -1182,7 +1209,7 @@ test("embedded prompt browser sends guarded session and frame requests", async (
 	assert.equal(frame.blob.type, "image/jpeg");
 	assert.equal(frameRequest.url, "/qwen_te/embedded_browser/frame");
 	assert.equal(frameRequest.init.cache, "no-store");
-	assert.deepEqual(JSON.parse(frameRequest.init.body), { session_id: "session-1", previous_frame_id: "previous-frame" });
+	assert.deepEqual(JSON.parse(frameRequest.init.body), { session_id: "session-1", previous_frame_id: "previous-frame", max_width: 1120, max_height: 630, quality: 58 });
 	assert.equal(frameRequest.options.key, "embedded-browser-frame");
 
 	const unchanged = await exports.fetchEmbeddedPromptBrowserFrame("session-1", {
@@ -1195,7 +1222,9 @@ test("embedded prompt browser sends guarded session and frame requests", async (
 			};
 		},
 	});
-	assert.deepEqual(unchanged, { changed: false, frameId: "next-frame", blob: null });
+	assert.equal(unchanged.changed, false);
+	assert.equal(unchanged.frameId, "next-frame");
+	assert.equal(unchanged.blob, null);
 
 	await assert.rejects(
 		exports.requestEmbeddedPromptBrowser("status", { session_id: "missing" }, {
@@ -1215,6 +1244,26 @@ test("embedded prompt browser sends guarded session and frame requests", async (
 	);
 });
 
+test("embedded browser frame profile switches from responsive preview to sharp settled frame", async () => {
+	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	const rect = { width: 1600, height: 900 };
+	const fast = exports.getEmbeddedBrowserFrameCaptureProfile(rect, { fast: true, hasFrame: true, pageReady: true });
+	assert.equal(fast.maxWidth, 1120);
+	assert.equal(fast.maxHeight, 630);
+	assert.equal(fast.quality, 62);
+	assert.equal(fast.profile, "fast");
+	const sharp = exports.getEmbeddedBrowserFrameCaptureProfile(rect, { fast: false, hasFrame: true, pageReady: true });
+	assert.equal(sharp.maxWidth, 1600);
+	assert.equal(sharp.maxHeight, 900);
+	assert.equal(sharp.quality, 78);
+	assert.equal(sharp.profile, "sharp");
+	const loading = exports.getEmbeddedBrowserFrameCaptureProfile(rect, { fast: false, hasFrame: false, pageReady: false });
+	assert.equal(loading.maxWidth, 1120);
+	assert.equal(loading.maxHeight, 630);
+	assert.equal(loading.quality, 66);
+	assert.equal(loading.profile, "fast");
+});
+
 test("embedded prompt browser maps object-fit image coordinates to the CDP viewport", async () => {
 	const exports = await loadUiExports("http://127.0.0.1:8188/");
 	const center = exports.mapEmbeddedBrowserPointerPoint(
@@ -1226,14 +1275,30 @@ test("embedded prompt browser maps object-fit image coordinates to the CDP viewp
 		1360,
 		760,
 	);
-	assert.deepEqual(center, { x: 680, y: 380 });
+	assert.equal(center.x, 680);
+	assert.equal(center.y, 380);
 	assert.equal(
 		exports.mapEmbeddedBrowserPointerPoint(400, 50, { left: 0, top: 0, width: 800, height: 600 }, 1000, 500, 1360, 760),
 		null,
 	);
 });
 
-test("online prompt search keeps tag tools inside a real dual-mode web browser", async () => {
+test("embedded prompt browser matches its viewport to the visible frame", async () => {
+    const exports = await loadUiExports("http://127.0.0.1:8188/");
+    const viewport = exports.resolveEmbeddedBrowserViewport(
+        { width: 1640, height: 636 },
+        { minWidth: 640, minHeight: 360, maxWidth: 1600, maxHeight: 900 },
+    );
+    assert.equal(viewport.width, 1600);
+    assert.equal(viewport.height, 620);
+    const capture = exports.resolveEmbeddedBrowserViewport(
+        { width: 1640, height: 636 },
+        { minWidth: 480, minHeight: 270, maxWidth: 960, maxHeight: 540 },
+    );
+    assert.equal(capture.width, 960);
+    assert.equal(capture.height, 372);
+});
+test("online prompt search keeps prompt tools inside a real dual-mode web browser", async () => {
 	const source = await fs.readFile(UI_PATH, "utf8");
 	const start = source.indexOf("function openOnlinePromptSearchDialog");
 	const end = source.indexOf("\nfunction openCharacterSheetDialog", start + 1);
@@ -1258,7 +1323,7 @@ test("online prompt search keeps tag tools inside a real dual-mode web browser",
 		"qwen-te-online-search__selected-preview",
 		'let activeBrowserMode = "web";',
 		'createBrowserModeTab("web", "网页浏览器"',
-		'createBrowserModeTab("tags", "标签搜索"',
+		'createBrowserModeTab("tags", "提示词搜索"',
 		"const navigateWebHistory = (direction) =>",
 		"const openCurrentWebCompanion = async",
 		'frameExternalButton.onclick = () => { void openCurrentWebCompanion(currentWebUrl); };',
@@ -1269,7 +1334,7 @@ test("online prompt search keeps tag tools inside a real dual-mode web browser",
 	assert.equal(dialogSource.includes("doneButton"), false);
 	assert.equal(dialogSource.includes('footer.className = "qwen-te-modal__footer"'), false);
 	assert.equal(dialogSource.includes('statusEl.setAttribute("aria-live", "polite")'), true);
-	assert.equal(dialogSource.includes('dialog.setAttribute("aria-busy", tagMode && busyState ? "true" : "false")'), true);
+	assert.equal(dialogSource.includes('dialog.setAttribute("aria-busy", (tagMode && busyState) || (!tagMode && embeddedNavigationBusy) ? "true" : "false")'), true);
 	assert.equal(dialogSource.includes('if (event.key !== "Escape") return;'), true);
 	assert.equal(dialogSource.includes('resultPanel.setAttribute("role", "region")'), true);
 	assert.equal(dialogSource.includes('samplePanel.setAttribute("role", "region")'), true);
@@ -1284,7 +1349,15 @@ test("online prompt search keeps tag tools inside a real dual-mode web browser",
 	assert.equal(dialogSource.includes("getEmbeddedPointerPoint"), true);
 	assert.equal(dialogSource.includes("webFrame.naturalWidth"), true);
 	assert.equal(dialogSource.includes("embeddedLastFrameId"), true);
-	assert.equal(dialogSource.includes("embeddedUnchangedFrameCount >= 2"), true);
+	assert.equal(dialogSource.includes("embeddedUnchangedFrameCount >= 3"), true);
+	assert.equal(dialogSource.includes("document.hidden"), true);
+	assert.equal(dialogSource.includes("getEmbeddedFrameCaptureOptions"), true);
+	assert.equal(dialogSource.includes("maxWidth: frameCapture.maxWidth"), true);
+	assert.equal(dialogSource.includes("copySelectedPrompts"), true);
+	assert.equal(dialogSource.includes("const startViewport = resolveEmbeddedBrowserViewport"), true);
+	assert.equal(dialogSource.includes("queueEmbeddedBrowserWheel"), true);
+	assert.equal(dialogSource.includes("queueEmbeddedBrowserText"), true);
+	assert.equal(dialogSource.includes("scheduleEmbeddedFramePoll(0)"), true);
 	assert.equal(dialogSource.includes("markEmbeddedBrowserActivity"), true);
 	assert.equal(dialogSource.includes("replace: false"), true);
 	assert.equal(dialogSource.includes('webFrame.addEventListener("pointerdown"'), true);
@@ -1347,8 +1420,10 @@ test("online prompt search keeps modal mutations blocked during continuous runs"
 
 test("online prompt search locks interactive state and ignores IME commit enter", async () => {
 	const source = await fs.readFile(UI_PATH, "utf8");
-	assert.equal(source.includes("searchInput.disabled = tagMode && interactionBlocked;"), true);
-	assert.equal(source.includes("searchButton.disabled = tagMode ? interactionBlocked : !webTarget.ok;"), true);
+	assert.equal(source.includes("searchInput.disabled = tagMode ? interactionBlocked : embeddedNavigationBusy;"), true);
+	assert.equal(source.includes("searchButton.disabled = tagMode ? interactionBlocked : embeddedNavigationBusy || !webTarget.ok;"), true);
+	assert.equal(source.includes("embeddedNavigationBusy = true;"), true);
+	assert.equal(source.includes("timeoutMs: 60000"), true);
 	assert.equal(source.includes("card.disabled = isInteractionBlocked();"), true);
 	assert.equal(source.includes('card.setAttribute("aria-pressed", selectedTags.has(tag) ? "true" : "false");'), true);
 	assert.equal(source.includes('if (event.isComposing || event.key !== "Enter") return;'), true);
@@ -4090,6 +4165,13 @@ test("slot panel groups raw tag widgets into compact cards", async () => {
 	assert.equal(source.includes("refreshSlotPanel(node)"), true);
 });
 
+test("model and slot native selects force dark dropdown menus", async () => {
+	const source = await fs.readFile(UI_PATH, "utf8");
+	assert.equal(source.includes(".qwen-te-panel__slot-select,.qwen-te-model__select{color-scheme:dark}"), true);
+	assert.equal(source.includes(".qwen-te-panel__slot-select option,.qwen-te-panel__slot-select optgroup,.qwen-te-model__select option,.qwen-te-model__select optgroup{background-color:#101923!important;color:#e6f0ff!important}"), true);
+	assert.equal(source.includes(".qwen-te-panel__slot-select option:checked,.qwen-te-model__select option:checked{background-color:#493819!important;color:#fff0ca!important}"), true);
+});
+
 test("slot panel library signatures and options track tag additions and deletions", async () => {
 	const exports = await loadUiExports("http://127.0.0.1:8188/");
 	const initial = { slot_config: [{ name: "光影氛围", slots: 1 }], tag_library: { 光影氛围: ["柔光"] } };
@@ -4154,6 +4236,35 @@ test("advanced panel groups expert controls into compact cards", async () => {
 	assert.equal(source.includes("qwen-te-panel__advanced-card--wide"), true);
 	assert.equal(source.includes("qwen-te-panel__advanced-input"), true);
 	assert.equal(source.includes("refreshAdvancedPanel(node)"), true);
+});
+
+test("advanced panel merges full backend catalogs and renders long enums as selects", async () => {
+	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	const backendStyles = [
+		"自动",
+		...Array.from({ length: 90 }, (_value, index) => `扩展风格${index + 1}`),
+		"宇宙神话",
+	];
+	const node = {
+		widgets: [{ name: "模板风格", value: "宇宙神话", options: { values: backendStyles } }],
+	};
+	const options = exports.getAdvancedWidgetOptions(node, "模板风格");
+	assert.equal(options.some((option) => option.value === "商业摄影"), true);
+	assert.equal(options.some((option) => option.value === "宇宙神话"), true);
+	assert.ok(options.length >= 90);
+
+	const select = exports.createAdvancedSelect(node, "模板风格", options);
+	assert.equal(select.tagName, "SELECT");
+	assert.equal(select.className, "qwen-te-panel__advanced-select");
+	assert.equal(select.value, "宇宙神话");
+	assert.ok(select.children.length >= 90);
+	assert.equal(exports.ADVANCED_WIDGET_NAMES.includes("风格隔离策略"), true);
+	assert.equal(exports.ADVANCED_WIDGET_NAMES.includes("智能文本风格优先"), true);
+	assert.deepEqual(Array.from(exports.CONTROL_WIDGET_OPTIONS["输出模式"]), ["完整结果", "仅提示词优先"]);
+	assert.equal(
+		exports.CONTROL_WIDGET_OPTIONS["运行时随机强度"].some((option) => option.value === "强 / 极限拉开"),
+		true,
+	);
 });
 
 test("advanced panel stays readable in narrow node width", async () => {
@@ -5119,6 +5230,7 @@ test("buildNsfwWorkspaceMappedState applies nsfw preset and quality catalog term
 	assert.equal(mapped.custom_tags.includes("masterpiece"), true);
 	assert.equal(mapped.custom_tags.includes("professional photography"), true);
 	assert.equal(mapped.custom_tags.includes("男女深吻"), true);
+	assert.ok(mapped.custom_tags.indexOf("男女深吻") < mapped.custom_tags.indexOf("masterpiece"));
 	assert.equal(mapped.custom_tags.includes("捕捉明暗动作"), true);
 	assert.equal(mapped.generated_terms.includes("用户保留词"), false);
 	assert.equal(mapped.generated_terms.includes("masterpiece"), true);

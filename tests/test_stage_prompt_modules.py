@@ -3301,19 +3301,13 @@ class TestStagePromptModules(unittest.TestCase):
             {"街道", "咖啡厅"},
             {"酒吧", "夜店"},
         ]
+        all_scene_additions = set().union(*expected_scene_additions)
         self.assertEqual(len(prompts), 3)
         self.assertEqual(len(set(prompts)), 3)
         for prompt, expected_scene_options in zip(prompts, expected_scene_additions):
-            fragments = [fragment.strip() for fragment in prompt.split("，") if fragment.strip()]
-            scene_fragments = [fragment for fragment in fragments if fragment in {"校园", "图书馆", *expected_scene_options}]
-            self.assertEqual(scene_fragments[0], "校园")
-            self.assertNotIn("图书馆", scene_fragments)
-            self.assertEqual(len([fragment for fragment in scene_fragments if fragment == "校园"]), 1)
-            self.assertEqual(len([fragment for fragment in scene_fragments if fragment in expected_scene_options]), len(expected_scene_options))
-            self.assertEqual(set(scene_fragments[1:]), expected_scene_options)
-            self.assertTrue(
-                all(fragment not in {"摄影棚", "影棚纯色背景", "街道", "咖啡厅", "酒吧", "夜店"} or fragment in scene_fragments for fragment in fragments)
-            )
+            self.assertIn("校园", prompt)
+            self.assertNotIn("图书馆", prompt)
+            self.assertEqual({scene for scene in all_scene_additions if scene in prompt}, expected_scene_options)
         self.assertEqual(len({prompt.split("，", 1)[0] for prompt in prompts}), 3)
 
     def test_prompt_builder_runtime_random_full_random_strong_intensity_spreads_scene_buckets(self) -> None:
@@ -6677,7 +6671,9 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertIn("wrapped bath towel", prompt)
         self.assertIn("bathroom", prompt)
         self.assertIn("hot spring steam", prompt)
-        self.assertIsNone(re.search(r"[\u4e00-\u9fff]", prompt))
+        english_body, chinese_note = prompt.split("中文说明：", 1)
+        self.assertIsNone(re.search(r"[\u4e00-\u9fff]", english_body))
+        self.assertIsNotNone(re.search(r"[\u4e00-\u9fff]", chinese_note))
 
     def test_prompt_builder_format_sections_uses_english_labels_for_pure_english(self) -> None:
         prompt_list = ["realistic photography, adult woman, bedroom, soft light"]
@@ -10410,6 +10406,8 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertIn("masterpiece", result["custom_tags"])
         self.assertIn("professional photography", result["custom_tags"])
         self.assertTrue(any("男女深吻" in tag for tag in result["custom_tags"]))
+        action_index = next(index for index, tag in enumerate(result["custom_tags"]) if "男女深吻" in tag)
+        self.assertLess(action_index, result["custom_tags"].index("masterpiece"))
 
     def test_nsfw_mapper_keeps_custom_prefix_and_suffix_out_of_group_slots(self) -> None:
         workspace = {
@@ -13235,6 +13233,498 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertIn("fisheye lens", result[1])
         self.assertNotRegex(result[1], r"[\u4e00-\u9fff]")
 
+
+    def test_fantasy_template_and_theme_options_are_profile_backed(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        expected_styles = {
+            "奇幻风格", "西方奇幻", "高等奇幻", "剑与魔法", "哥特奇幻",
+            "黑暗童话", "精灵幻想", "梦幻奇境", "日式奇幻动画",
+            "漆原智志画风", "结城信辉画风", "童话绘本", "魔幻油画",
+            "奇幻概念设计", "史诗奇幻海报",
+        }
+        expected_pools = {
+            "奇幻风格", "高等奇幻", "剑与魔法", "精灵秘境", "龙骑士史诗",
+            "魔法学院", "地下城冒险", "黑暗童话", "哥特奇幻", "天使与恶魔",
+            "魔女秘仪", "浮空城邦", "幻想宫廷", "冰雪王国", "沙漠神话",
+            "海洋奇幻", "森林精灵", "蒸汽魔法", "异世界冒险", "日式奇幻OVA",
+            "漆原智志幻想", "结城信辉幻想", "史诗群像", "远古遗迹", "龙与宝藏",
+        }
+        self.assertTrue(expected_styles <= set(module.模板选项))
+        self.assertTrue(expected_pools <= set(module.随机主题池选项))
+        self.assertTrue(expected_styles <= set(module.模板风格基础映射))
+        self.assertEqual(expected_styles, set(module.FANTASY_TEMPLATE_STYLE_VARIANTS))
+        self.assertEqual(expected_pools, set(module.FANTASY_THEME_VARIANTS))
+        self.assertTrue(all(len(variants) >= 2 for variants in module.FANTASY_TEMPLATE_STYLE_VARIANTS.values()))
+        self.assertTrue(all(len(variants) >= 2 for variants in module.FANTASY_THEME_VARIANTS.values()))
+        for pool in ("奇幻风格", "漆原智志幻想", "结城信辉幻想"):
+            selected = OrderedDict((name, []) for name, _slots, _options in module._all_tag_groups())
+            settings = {"随机主题池": pool, "模板风格": "自动", "seed": 3}
+            resolved_style, themed, themed_custom = module._apply_random_theme_pool_bias(
+                "真实感", selected, [], settings
+            )
+            self.assertNotEqual(resolved_style, "真实感")
+            self.assertTrue(module._collect_all_tags(themed, themed_custom))
+            self.assertTrue(settings["随机主题池档案标记"])
+
+    def test_fantasy_tag_library_exposes_artist_scene_and_worldbuilding_controls(self) -> None:
+        library = tag_library.当前标签库()
+        flat = {tag for sections in library.values() for tags in sections.values() for tag in tags}
+        for tag in (
+            "漆原智志画风", "结城信辉画风", "奇幻概念设计", "精灵游侠",
+            "龙骑士", "浮空城", "魔法学院", "地下城遗迹", "水晶法杖",
+            "魔法阵", "精细赛璐璐", "优雅奇幻线稿", "英雄海报构图",
+        ):
+            self.assertIn(tag, flat)
+
+    def test_fantasy_artist_style_reaches_every_model_source_before_refinement(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        captured: list[tuple[str, str]] = []
+
+        def capture_refinement(_model, prompts, settings, **_kwargs):
+            captured.append((str(settings.get("模型来源", "")), str(prompts[0])))
+            return list(prompts)
+
+        with mock.patch.object(module, "_maybe_model_refine_batch_impl", side_effect=capture_refinement):
+            for source in ("仅Skill", "本地GGUF", "API接口"):
+                result = module._run_stage(
+                    None,
+                    **{
+                        "unique_id": f"fantasy-all-models-{source}",
+                        "主体标签1": "成年女性",
+                        "模板风格": "漆原智志画风",
+                        "随机主题池": "自动",
+                        "生成数量": 1,
+                        "提示词语言": "纯中文",
+                        "运行时随机标签": False,
+                        "模型来源": source,
+                        "seed": 1,
+                    },
+                )
+                self.assertIn("漆原智志", result[1])
+        self.assertEqual([source for source, _prompt in captured], ["仅Skill", "本地GGUF", "API接口"])
+        self.assertTrue(all("漆原智志" in prompt for _source, prompt in captured))
+
+    def test_fantasy_styles_survive_runtime_smart_text_tag_blocks_and_model_guards(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        runtime_profiles = prompt_builder._resolve_runtime_style_profiles(
+            "漆原智志画风", "漆原智志画风", ""
+        )
+        self.assertTrue(runtime_profiles)
+        self.assertTrue(all(profile["style_lead"] == "漆原智志式华丽奇幻动画插画" for profile in runtime_profiles))
+        self.assertTrue(all("漆原智志画风" in profile["style_tags"] for profile in runtime_profiles))
+
+        smart = module._run_stage(
+            None,
+            **{
+                "unique_id": "fantasy-smart-text-english",
+                "主体标签1": "成年女性",
+                "智能文本匹配": True,
+                "智能文本输入": "银发精灵，远古森林，柔和月光，奇幻冒险",
+                "模板风格": "结城信辉画风",
+                "随机主题池": "精灵秘境",
+                "生成数量": 1,
+                "提示词语言": "纯英文",
+                "运行时随机标签": False,
+                "模型来源": "仅Skill",
+                "seed": 2,
+            },
+        )
+        self.assertIn("Nobuteru Yuki", smart[1])
+        self.assertFalse(any("\u4e00" <= char <= "\u9fff" for char in smart[1]), smart[1])
+
+        block_payload = {
+            "enabled": True,
+            "blocks": [
+                {"type": "tag_group", "group": "主体", "tags": ["成年女性"]},
+                {"type": "tag_group", "group": "画面风格", "tags": ["漆原智志画风"]},
+                {"type": "tag_group", "group": "场景背景", "tags": ["水晶宫殿"]},
+            ],
+        }
+        blocked = module._run_stage(
+            None,
+            **{
+                "unique_id": "fantasy-tag-block-english",
+                "主体标签1": "成年女性",
+                "画面风格标签1": "漆原智志画风",
+                "场景背景标签1": "水晶宫殿",
+                "标签块编排启用": True,
+                "标签块编排JSON": json.dumps(block_payload, ensure_ascii=False),
+                "模板风格": "漆原智志画风",
+                "生成数量": 1,
+                "提示词语言": "纯英文",
+                "运行时随机标签": False,
+                "模型来源": "仅Skill",
+                "seed": 4,
+            },
+        )
+        self.assertIn("Satoshi Urushihara", blocked[1])
+        self.assertFalse(any("\u4e00" <= char <= "\u9fff" for char in blocked[1]), blocked[1])
+
+        character_sheet = module._run_stage(
+            None,
+            **{
+                "unique_id": "fantasy-character-sheet-english",
+                "主体标签1": "成年女性",
+                "图片反推生成": True,
+                "图片反推模式": "角色设定图",
+                "模板风格": "漆原智志画风",
+                "随机主题池": "自动",
+                "生成数量": 1,
+                "提示词语言": "纯英文",
+                "运行时随机标签": False,
+                "模型来源": "仅Skill",
+                "seed": 5,
+            },
+        )
+        self.assertIn("Satoshi Urushihara", character_sheet[1])
+        self.assertIn("character sheet", character_sheet[1])
+        self.assertFalse(any("\u4e00" <= char <= "\u9fff" for char in character_sheet[1]), character_sheet[1])
+
+        nsfw_workspace = {
+            "enabled": True,
+            "preset": "——",
+            "quality_tier": "高质量",
+            "random_mode": "关闭",
+            "trigger_words": ["女仆"],
+            "scene": "豪华卧室",
+            "negative_preset": "标准负面提示词",
+        }
+        nsfw = module._run_stage(
+            None,
+            **{
+                "unique_id": "fantasy-nsfw-style-anchor",
+                "主体标签1": "成年女性",
+                "模板风格": "结城信辉画风",
+                "随机主题池": "精灵秘境",
+                "nsfw_workspace": nsfw_workspace,
+                "生成数量": 1,
+                "提示词语言": "纯中文",
+                "运行时随机标签": False,
+                "模型来源": "仅Skill",
+                "seed": 6,
+            },
+        )
+        self.assertIn("结城信辉", nsfw[1])
+        self.assertIn(
+            "漆原智志画风",
+            model_refiner._restore_mode_literal_guards(
+                "漆原智志画风，成年女性，水晶宫殿",
+                "成年女性，水晶宫殿",
+            ),
+        )
+
+
+    def test_expanded_template_and_theme_catalogs_are_large_and_profile_backed(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        self.assertGreaterEqual(len(module.EXPANDED_TEMPLATE_OPTIONS), 60)
+        self.assertGreaterEqual(len(module.EXPANDED_THEME_POOL_OPTIONS), 67)
+        self.assertGreaterEqual(len(module.模板选项), 90)
+        self.assertGreaterEqual(len(module.随机主题池选项), 110)
+        self.assertEqual(set(module.EXPANDED_TEMPLATE_OPTIONS), set(module.EXPANDED_TEMPLATE_STYLE_VARIANTS))
+        self.assertEqual(set(module.EXPANDED_THEME_POOL_OPTIONS), set(module.EXPANDED_THEME_VARIANTS))
+        self.assertTrue(all(len(items) >= 2 for items in module.EXPANDED_TEMPLATE_STYLE_VARIANTS.values()))
+        self.assertTrue(all(len(items) >= 2 for items in module.EXPANDED_THEME_VARIANTS.values()))
+        for style in ("纪实摄影", "水彩插画", "赛博朋克", "宋韵工笔", "宇宙神话"):
+            self.assertIn(style, module.模板选项)
+            self.assertIn(style, skills.TEMPLATE_STYLE_BASE_MAP)
+        for pool in ("雨夜都市", "江南烟雨", "星际远征", "梦核空间", "量子神殿"):
+            self.assertIn(pool, module.随机主题池选项)
+
+    def test_expanded_profile_tags_are_registered_in_the_builtin_library(self) -> None:
+        library = tag_library.当前标签库()
+        flat = {tag for sections in library.values() for tags in sections.values() for tag in tags}
+        for tag in ("纪实摄影", "赛博朋克", "宋韵工笔", "宇宙神话", "雨后街头", "环形空间站", "量子神殿"):
+            self.assertIn(tag, flat)
+
+    def test_concise_prompt_mode_is_natural_language_for_all_model_sources(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        for source in ("仅Skill", "本地GGUF", "API接口"):
+            with self.subTest(source=source):
+                result = module._run_stage(
+                    None,
+                    **{
+                        "unique_id": f"natural-concise-{source}",
+                        "模板风格": "赛博朋克",
+                        "随机主题池": "赛博雨城",
+                        "详细度": "简洁",
+                        "生成数量": 1,
+                        "提示词语言": "纯中文",
+                        "运行时随机标签": source == "仅Skill",
+                        "模型来源": source,
+                        "seed": 17,
+                    },
+                )
+                prompt = result[1]
+                self.assertIn("画面以", prompt)
+                self.assertIn("最终画面", prompt)
+                self.assertIn("。", prompt)
+                self.assertFalse(model_refiner._looks_like_tag_chain_prompt(prompt))
+
+    def test_expanded_style_and_theme_keep_natural_english_output(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        result = module._run_stage(
+            None,
+            **{
+                "unique_id": "expanded-natural-english",
+                "模板风格": "宇宙神话",
+                "随机主题池": "量子神殿",
+                "详细度": "简洁",
+                "生成数量": 1,
+                "提示词语言": "纯英文",
+                "运行时随机标签": False,
+                "模型来源": "仅Skill",
+                "seed": 21,
+            },
+        )
+        self.assertIn("centered on", result[1])
+        self.assertIn("The final image", result[1])
+        self.assertFalse(any("\u4e00" <= char <= "\u9fff" for char in result[1]), result[1])
+
+    def test_model_tag_chain_falls_back_to_natural_skill_prompt(self) -> None:
+        class FakeModel:
+            def create_chat_completion(self, **_kwargs):
+                return None
+
+        original = "电影感影像，画面以成年女性为核心，主体处于霓虹街区中；镜头保持稳定，最终画面层次清楚。"
+        tag_chain = "成年女性, 赛博朋克, 霓虹街区, 蓝洋红对撞, 能量刀, 机能外套, 全景全身, 高细节, 清晰对焦"
+        settings = {"提示词语言": "纯中文", "模型来源": "API接口"}
+        refined = model_refiner.maybe_model_refine(
+            FakeModel(),
+            original,
+            settings,
+            chat_completion=lambda *_args, **_kwargs: {"choices": [{"message": {"content": tag_chain}}]},
+            clean_think_text=lambda text: text,
+        )
+        self.assertEqual(refined, original)
+        self.assertTrue(model_refiner._looks_like_tag_chain_prompt(tag_chain))
+
+    def test_nsfw_catalog_exposes_enriched_adult_controls_and_presets(self) -> None:
+        catalog = nsfw_workspace.build_nsfw_workspace_catalog()
+        options = catalog["options"]
+        self.assertGreaterEqual(sum(len(values) for values in options.values()), 560)
+        self.assertGreaterEqual(len(catalog["presets"]), 16)
+        self.assertGreaterEqual(len(nsfw_presets.NSFW_WORKSPACE_SIGNAL_TERMS), 475)
+        self.assertIn("成年情侣", options["selector_character"])
+        self.assertIn("真丝睡袍", options["selector_outfit"])
+        self.assertIn("从后拥抱", options["selector_action"])
+        self.assertIn("雨夜车厢", options["selector_scene"])
+        self.assertIn("自信凝视", options["selector_expression"])
+        self.assertIn("红酒杯", options["selector_prop"])
+        self.assertIn("星海舱室", catalog["presets"])
+        self.assertIn("成人写实负面提示词", catalog["negative_presets"])
+        self.assertIn("视频电影感", catalog["quality_tags"])
+        self.assertNotIn("anatomy_terms", nsfw_mapper._RANDOM_ALL_FIELDS)
+        self.assertNotIn("explicit_terms", nsfw_mapper._RANDOM_ALL_FIELDS)
+
+    def test_concise_nsfw_prompt_keeps_adult_and_runtime_profile_details_as_prose(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["成年情侣"],
+                "画面风格": ["电影写实"],
+                "成人向表达": ["高级性感"],
+                "服装造型": [],
+                "场景背景": ["酒店套房"],
+                "道具世界观": [],
+                "光影氛围": [],
+                "构图视角": ["全景全身"],
+                "动作姿态": [],
+                "技术画质": [],
+            }
+        )
+        fragments = [
+            "电影写实影像",
+            "成年情侣",
+            "电影写实",
+            "高级性感",
+            "酒店套房",
+            "全景全身",
+            "从背后轻拥，双手位置清楚，人物关系稳定",
+            "酒红色蕾丝连体衣，花纹边缘清晰，身体比例自然",
+            "暖色台灯，局部照亮面部",
+            "masterpiece",
+            "best quality",
+        ]
+        custom_tags = [
+            "masterpiece",
+            "best quality",
+            "成年主体明确",
+            "丝绸床单",
+            "红酒杯",
+            "亲密关系稳定",
+        ]
+        prompt = prompt_builder._build_concise_chinese_prompt(
+            fragments,
+            selected,
+            custom_tags,
+            {"主体类型": "人物角色", "详细度": "简洁", "提示词语言": "纯中文"},
+            {"scene_group": "酒店套房", "identity": "成年情侣", "style_track": "电影写实", "recent_tracks": []},
+        )
+        self.assertIn("成人氛围通过高级性感", prompt)
+        self.assertIn("从背后轻拥", prompt)
+        self.assertIn("酒红色蕾丝连体衣", prompt)
+        self.assertIn("成年主体明确", prompt)
+        self.assertIn("红酒杯", prompt)
+        self.assertIn("最终画面", prompt)
+        self.assertFalse(model_refiner._looks_like_tag_chain_prompt(prompt))
+
+    def test_nsfw_preset_replaces_empty_scaffold_and_prioritizes_user_choices(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        result = module._run_stage(
+            None,
+            **{
+                "unique_id": "enriched-nsfw-natural-preset",
+                "nsfw_workspace": {
+                    "enabled": True,
+                    "preset": "镜前蕾丝",
+                    "quality_tier": "成人氛围增强",
+                    "random_mode": "关闭",
+                    "selector_character": "成年女性",
+                    "selector_prop": "红酒杯",
+                    "negative_preset": "成人写实负面提示词",
+                },
+                "模板风格": "电影写实",
+                "随机主题池": "自动",
+                "详细度": "简洁",
+                "生成数量": 1,
+                "提示词语言": "纯中文",
+                "运行时随机标签": False,
+                "模型来源": "仅Skill",
+                "seed": 19,
+            },
+        )
+        prompt = result[1]
+        self.assertIn("成年女性", prompt)
+        self.assertIn("成熟私密氛围", prompt)
+        self.assertIn("红酒杯", prompt)
+        self.assertIn("复古化妆间", prompt)
+        self.assertIn("酒红色蕾丝连体衣", prompt)
+        self.assertNotIn("简洁室内", prompt)
+        self.assertNotIn("站姿挺拔", prompt)
+        self.assertNotIn("other", prompt)
+        self.assertFalse(model_refiner._looks_like_tag_chain_prompt(prompt))
+
+    def test_natural_language_validator_rejects_tag_chains(self) -> None:
+        natural = (
+            "电影感影像，画面以成年女性为核心，主体位于雨夜街头并自然走动。"
+            "镜头采用全景构图，以霓虹逆光塑造空间层次，最终画面保持材质可信和视觉流动。"
+        )
+        tag_chain = "成年女性, 电影写实, 雨夜街头, 霓虹逆光, 全景全身, 自然行走, 高细节, 清晰对焦"
+        self.assertTrue(model_refiner.is_natural_language_prompt(natural, {"提示词语言": "纯中文"}))
+        self.assertFalse(model_refiner.is_natural_language_prompt(tag_chain, {"提示词语言": "纯中文"}))
+
+    def test_all_generation_modes_emit_natural_language_prompts(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        module._CACHE.clear()
+        tag_block_payload = {
+            "enabled": True,
+            "blocks": [
+                {"type": "tag_group", "group": "主体", "label": "主体", "tags": ["成年女性"]},
+                {"type": "tag_group", "group": "画面风格", "label": "风格", "tags": ["电影写实"]},
+                {"type": "tag_group", "group": "场景背景", "label": "场景", "tags": ["雨夜街头"]},
+                {"type": "tag_group", "group": "光影氛围", "label": "光影", "tags": ["霓虹逆光"]},
+            ],
+        }
+        cases = {
+            "standard": {"详细度": "标准"},
+            "concise": {"详细度": "简洁"},
+            "detailed": {"详细度": "详细"},
+            "english": {"提示词语言": "纯英文"},
+            "mixed": {"提示词语言": "英文提示词+中文说明"},
+            "runtime_random": {"运行时随机标签": True, "运行时随机强度": "强 / 极限拉开"},
+            "smart_text": {
+                "智能文本匹配": True,
+                "智能文本输入": "成年女性在雨夜街头自然行走，霓虹逆光，电影写实，全景全身",
+            },
+            "tag_block": {
+                "标签块编排启用": True,
+                "标签块编排JSON": json.dumps(tag_block_payload, ensure_ascii=False),
+            },
+            "character_sheet": {"图片反推生成": True, "图片反推模式": "角色设定图"},
+            "nsfw": {
+                "nsfw_workspace": {
+                    "enabled": True,
+                    "preset": "镜前蕾丝",
+                    "quality_tier": "成人氛围增强",
+                    "random_mode": "关闭",
+                    "selector_character": "成年女性",
+                    "negative_preset": "成人写实负面提示词",
+                },
+            },
+            "non_person": {"主体类型": "非人物主体", "主体标签1": "机械巨龙"},
+            "prompt_only": {"输出模式": "仅提示词优先"},
+        }
+        for index, (mode, overrides) in enumerate(cases.items()):
+            with self.subTest(mode=mode):
+                settings = {
+                    "unique_id": f"natural-contract-{mode}",
+                    "主体标签1": "成年女性",
+                    "画面风格标签1": "电影写实",
+                    "场景背景标签1": "雨夜街头",
+                    "光影氛围标签1": "霓虹逆光",
+                    "模板风格": "电影写实",
+                    "随机主题池": "自动",
+                    "详细度": "标准",
+                    "生成数量": 1,
+                    "提示词语言": "纯中文",
+                    "运行时随机标签": False,
+                    "模型来源": "仅Skill",
+                    "seed": 3100 + index,
+                }
+                settings.update(overrides)
+                result = module._run_stage(None, **settings)
+                prompt = result[1]
+                language_settings = {"提示词语言": settings["提示词语言"]}
+                self.assertTrue(
+                    model_refiner.is_natural_language_prompt(prompt, language_settings),
+                    prompt,
+                )
+                self.assertFalse(model_refiner._looks_like_tag_chain_prompt(prompt), prompt)
+                smart_prompt = result[6]
+                if mode == "smart_text":
+                    self.assertTrue(smart_prompt)
+                if smart_prompt:
+                    self.assertTrue(
+                        model_refiner.is_natural_language_prompt(smart_prompt, language_settings),
+                        smart_prompt,
+                    )
+                    self.assertFalse(model_refiner._looks_like_tag_chain_prompt(smart_prompt), smart_prompt)
+
+    def test_tag_block_tag_chain_is_replaced_by_natural_fallback(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        tag_chain = "成年女性, 电影写实, 雨夜街头, 霓虹逆光, 全景全身, 自然行走, 高细节, 清晰对焦"
+        payload = {
+            "enabled": True,
+            "blocks": [{"type": "text", "label": "画面", "text": "成年女性在雨夜街头自然行走"}],
+        }
+        with (
+            mock.patch.object(module, "_build_tag_block_prompt_list_impl", return_value=[tag_chain]),
+            mock.patch.object(
+                module,
+                "_maybe_model_refine_batch_impl",
+                side_effect=lambda _model, prompt_list, _settings, **_kwargs: list(prompt_list),
+            ),
+        ):
+            result = module._run_stage(
+                None,
+                **{
+                    "unique_id": "natural-contract-tag-block-fallback",
+                    "主体标签1": "成年女性",
+                    "画面风格标签1": "电影写实",
+                    "场景背景标签1": "雨夜街头",
+                    "标签块编排启用": True,
+                    "标签块编排JSON": json.dumps(payload, ensure_ascii=False),
+                    "生成数量": 1,
+                    "提示词语言": "纯中文",
+                    "运行时随机标签": False,
+                    "模型来源": "仅Skill",
+                    "seed": 3200,
+                },
+            )
+        self.assertNotEqual(result[1], tag_chain)
+        self.assertTrue(
+            model_refiner.is_natural_language_prompt(result[1], {"提示词语言": "纯中文"}),
+            result[1],
+        )
 
 if __name__ == "__main__":
     unittest.main()

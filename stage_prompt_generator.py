@@ -140,6 +140,7 @@ from .stage_prompt.model_refiner import (
     DEFAULT_STAGE_PROMPT_SYSTEM_TEMPLATE,
     _record_model_call_result as _record_model_call_result_impl,
     extract_text as _extract_model_response_text_impl,
+    is_natural_language_prompt as _is_natural_language_prompt_impl,
     maybe_model_refine as _maybe_model_refine_impl,
     maybe_model_refine_batch as _maybe_model_refine_batch_impl,
     reconcile_model_output_fallback as _reconcile_model_output_fallback_impl,
@@ -166,6 +167,18 @@ from .stage_prompt.smart_text import (
     sanitize_smart_text_prompt as _sanitize_smart_text_prompt_impl,
 )
 from .stage_prompt.state_builder import build_state_from_kwargs as _build_state_from_kwargs_impl
+from .stage_prompt.fantasy_profiles import (
+    FANTASY_TEMPLATE_OPTIONS,
+    FANTASY_TEMPLATE_STYLE_VARIANTS,
+    FANTASY_THEME_POOL_OPTIONS,
+    FANTASY_THEME_VARIANTS,
+)
+from .stage_prompt.expanded_profiles import (
+    EXPANDED_TEMPLATE_OPTIONS,
+    EXPANDED_TEMPLATE_STYLE_VARIANTS,
+    EXPANDED_THEME_POOL_OPTIONS,
+    EXPANDED_THEME_VARIANTS,
+)
 from .stage_prompt.skills import TEMPLATE_STYLE_BASE_MAP, resolve_base_template_style
 from .stage_prompt.tag_block_composer import (
     build_tag_block_prompt_list as _build_tag_block_prompt_list_impl,
@@ -669,6 +682,8 @@ _RUNTIME_RANDOM_HISTORY_GENERIC_SUBJECTS = {
     "武侠电影",
     "神话感",
     "暗黑奇幻",
+    *FANTASY_TEMPLATE_OPTIONS,
+    *EXPANDED_TEMPLATE_OPTIONS,
 ]
 模板风格基础映射 = dict(TEMPLATE_STYLE_BASE_MAP)
 随机主题池选项 = [
@@ -694,6 +709,8 @@ _RUNTIME_RANDOM_HISTORY_GENERIC_SUBJECTS = {
     "机甲科幻",
     "废土荒原",
     "复古插画",
+    *FANTASY_THEME_POOL_OPTIONS,
+    *EXPANDED_THEME_POOL_OPTIONS,
 ]
 提示词语言选项 = ["纯中文", "英文提示词+中文说明", "纯英文"]
 详细度选项 = ["简洁", "标准", "详细"]
@@ -1674,6 +1691,9 @@ _运行随机风格隔离标签族 = {
     "古风": {"古风", "古风电影剧照", "玄幻古风", "国风美学", "古装定格", "工笔重彩", "水墨", "水墨写意", "宋韵美学", "武侠定格", "江湖传奇", "侠客定格", "工笔武行"},
     "神话感": {"神话感", "神圣史诗", "魔幻现实主义", "暗黑奇幻", "冰雪奇幻", "神圣", "神性幻境", "神话史诗感", "神话叙事"},
 }
+_运行随机风格隔离标签族["插画感"].update({"日式奇幻动画", "漆原智志画风", "结城信辉画风", "童话绘本", "魔幻油画", "精细赛璐璐", "柔和赛璐璐", "90年代奇幻OVA质感"})
+_运行随机风格隔离标签族["CG感"].update({"奇幻概念设计", "史诗奇幻海报", "史诗概念艺术完成度", "奇幻角色设定"})
+_运行随机风格隔离标签族["神话感"].update({"奇幻风格", "西方奇幻", "高等奇幻", "剑与魔法", "哥特奇幻", "黑暗童话", "精灵幻想", "梦幻奇境"})
 _古风场景冲突标签集合 = {
     "办公室",
     "教室",
@@ -2489,6 +2509,8 @@ def _apply_random_theme_pool_bias(
             {"id": "anime-screencap", "style": "复古动画", "tags": [("90年代动画风", "画面风格"), ("动画截图感", "画面风格"), ("城市街道", "场景背景"), ("牛仔景别", "构图视角"), ("VHS噪点", "技术画质")]},
         ],
     }
+    theme_variants.update(FANTASY_THEME_VARIANTS)
+    theme_variants.update(EXPANDED_THEME_VARIANTS)
 
     variants = theme_variants.get(pool, [])
     if variants:
@@ -2635,6 +2657,8 @@ def _apply_template_style_profile_bias(
             {"id": "frost", "tags": [("神话感", "画面风格"), ("冰雪奇幻", "画面风格"), ("冷冽神性", "光影氛围"), ("神性皮肤光泽", "技术画质")]},
         ],
     }
+    style_variants.update(FANTASY_TEMPLATE_STYLE_VARIANTS)
+    style_variants.update(EXPANDED_TEMPLATE_STYLE_VARIANTS)
 
     variants = style_variants.get(style) or style_variants.get(base_style, [])
     if not variants:
@@ -3407,6 +3431,23 @@ def _apply_nsfw_generation_profile(settings: dict[str, Any]) -> None:
     settings["抑制文字伪影"] = True
 
 
+def _remove_empty_skill_scaffold_for_nsfw(
+    selected: OrderedDict[str, list[str]],
+    custom_tags: list[str],
+    settings: dict[str, Any],
+) -> None:
+    notes = [str(note).strip() for note in settings.get("推理纠偏说明", []) if str(note).strip()]
+    scaffold_notes = [note for note in notes if note.startswith("Skill空输入脚手架：")]
+    if not scaffold_notes:
+        return
+    for tag in ("成年人物主体", "真实感", "简洁室内", "自然光", "站姿挺拔"):
+        _remove_tag_from_state(selected, custom_tags, tag)
+    settings["推理纠偏说明"] = [
+        *(note for note in notes if note not in scaffold_notes),
+        "NSFW工作台主线：已移除空输入脚手架占位标签，改由工作台的成年主体、场景、服装、动作和光影建立画面。",
+    ]
+
+
 def _apply_adult_reverse_profile(settings: dict[str, Any]) -> None:
     if str(settings.get("标签反推模式", "") or "").strip() != "成人向成熟":
         settings["NSFW策略启用"] = False
@@ -3903,6 +3944,7 @@ def _run_stage_impl(
     settings["运行时随机保护标签"] = ""
     if nsfw_enabled:
         _apply_nsfw_generation_profile(settings)
+        _remove_empty_skill_scaffold_for_nsfw(selected, custom_tags, settings)
     node_id = settings["unique_id"]
     extra_pnginfo = kwargs.get("extra_pnginfo") or settings.get("extra_pnginfo")
     raw_cache_namespace = kwargs.get("cache_namespace") or kwargs.get("cacheNamespace")
@@ -4068,6 +4110,19 @@ def _run_stage_impl(
             template_style=template_style,
             generation_count=int(settings.get("生成数量", 1) or 1),
         )
+        natural_contract_fallback_list = _build_prompt_list_impl(
+            selected,
+            custom_tags,
+            settings,
+            scene_group=scene_group,
+            identity=identity,
+            style_track=style_track,
+            recent_tracks=prompt_recent_tracks,
+            uniq=_uniq,
+            infer_template_style=_infer_template_style,
+            infer_subject_type=_infer_subject_type,
+            infer_output_structure=_infer_output_structure,
+        )
     else:
         settings["标签块编排摘要"] = ""
         prompt_list = _build_prompt_list_impl(
@@ -4083,6 +4138,7 @@ def _run_stage_impl(
             infer_subject_type=_infer_subject_type,
             infer_output_structure=_infer_output_structure,
         )
+        natural_contract_fallback_list = list(prompt_list)
     raw_prompt_list = list(prompt_list)
     settings["最近提示词指纹"] = _prompt_history_fingerprints(cache_key)
     model_prompt_list = _maybe_model_refine_batch_impl(
@@ -4093,12 +4149,27 @@ def _run_stage_impl(
         clean_think_text=_清洗think块文本,
     )
     prompt_list = _stabilize_prompt_list_outputs(model_prompt_list, raw_prompt_list, settings)
+    prompt_list = _enforce_natural_prompt_list_outputs(
+        prompt_list,
+        raw_prompt_list,
+        natural_contract_fallback_list,
+        settings,
+        channel="prompt",
+    )
     stabilization_fallback_indices = {
         int(index)
         for index in settings.get("模型稳定化回退索引", [])
         if isinstance(index, int) or str(index).isdigit()
     }
+    pre_dedupe_prompt_list = list(prompt_list)
     prompt_list = _strict_dedupe_prompt_list(cache_key, prompt_list, settings, channel="prompt")
+    prompt_list = _enforce_natural_prompt_list_outputs(
+        prompt_list,
+        pre_dedupe_prompt_list,
+        natural_contract_fallback_list,
+        settings,
+        channel="prompt",
+    )
     postprocess_fallback_count = sum(
         model_candidate != original and (index in stabilization_fallback_indices or final_prompt == original)
         for index, (model_candidate, final_prompt, original) in enumerate(
@@ -4216,10 +4287,25 @@ def _run_stage_impl(
             language=str(settings.get("提示词语言", "纯中文") or "纯中文"),
         ) or primary_prompt
         smart_text_prompt = _stabilize_prompt_output_impl(smart_text_prompt, settings) or primary_prompt
+        smart_text_prompt = _enforce_natural_prompt_list_outputs(
+            [smart_text_prompt],
+            [primary_prompt],
+            [primary_prompt],
+            settings,
+            channel="smart",
+        )[0]
         if smart_text_prompt and smart_text_prompt != primary_prompt:
+            pre_dedupe_smart_text_prompt = smart_text_prompt
             smart_text_prompt = (
                 _strict_dedupe_prompt_list(cache_key, [smart_text_prompt], settings, channel="smart")
                 or [smart_text_prompt]
+            )[0]
+            smart_text_prompt = _enforce_natural_prompt_list_outputs(
+                [smart_text_prompt],
+                [pre_dedupe_smart_text_prompt],
+                [primary_prompt],
+                settings,
+                channel="smart",
             )[0]
             _update_prompt_history(cache_key, [smart_text_prompt])
         if (smart_model_adopted or smart_model_succeeded) and smart_text_prompt == primary_prompt:
@@ -5034,6 +5120,51 @@ def _stabilize_prompt_list_outputs(
     return stabilized
 
 
+def _enforce_natural_prompt_list_outputs(
+    prompt_list: list[str],
+    primary_fallbacks: list[str],
+    secondary_fallbacks: list[str],
+    settings: dict[str, Any],
+    *,
+    channel: str,
+) -> list[str]:
+    """Keep every final positive-output path inside the natural-language contract."""
+
+    prompts = [str(prompt or "").strip() for prompt in prompt_list]
+    primary = [str(prompt or "").strip() for prompt in primary_fallbacks]
+    secondary = [str(prompt or "").strip() for prompt in secondary_fallbacks]
+    result: list[str] = []
+    fallback_indices: list[int] = []
+    for index, candidate in enumerate(prompts):
+        options = (
+            candidate,
+            primary[index] if index < len(primary) else "",
+            secondary[index] if index < len(secondary) else "",
+        )
+        accepted = next(
+            (option for option in options if _is_natural_language_prompt_impl(option, settings)),
+            next((option for option in options if option), ""),
+        )
+        if accepted != candidate:
+            fallback_indices.append(index)
+        result.append(accepted)
+
+    channel_name = "智能文本" if channel == "smart" else "主提示词"
+    settings["自然语言输出合同"] = "所有模式的正向输出必须为完整自然语言画面描述"
+    settings[f"{channel_name}自然语言回退索引"] = fallback_indices
+    if fallback_indices:
+        fallback_count = len(fallback_indices)
+        settings["自然语言输出回退数量"] = max(
+            0,
+            int(settings.get("自然语言输出回退数量", 0) or 0),
+        ) + fallback_count
+        _merge_inference_notes(
+            settings,
+            [f"{channel_name}自然语言合同：{fallback_count} 条标签链或非完整句输出已回退为自然语言结果。"],
+        )
+    return result
+
+
 def 构建运行时随机预览状态(payload: dict[str, Any]) -> dict[str, Any]:
     state = payload if isinstance(payload, dict) else {}
     raw_settings = state.get("settings") if isinstance(state.get("settings"), dict) else {}
@@ -5042,7 +5173,7 @@ def 构建运行时随机预览状态(payload: dict[str, Any]) -> dict[str, Any]
     settings["运行时随机模式"] = str(settings.get("运行时随机模式", SETTING_DEFAULTS["运行时随机模式"]))
     settings["运行时随机强度"] = str(settings.get("运行时随机强度", SETTING_DEFAULTS["运行时随机强度"]))
     settings["随机主题池"] = str(settings.get("随机主题池", SETTING_DEFAULTS["随机主题池"]))
-    settings["核心标签锁定数量"] = _safe_int(settings.get("核心标签锁定数量"), 10, 0, 100)
+    settings["核心标签锁定数量"] = _safe_int(settings.get("核心标签锁定数量"), 10, 0, 500)
     settings["锁定标签白名单"] = str(settings.get("锁定标签白名单", ""))
     settings["随机排除标签"] = str(settings.get("随机排除标签", ""))
     settings["seed"] = _safe_int(settings.get("seed"), 0, 0, _SEED_MAX)
@@ -5262,7 +5393,7 @@ class QwenTE阶段式提示词生成器:
         required["案例输出结构"] = (案例输出结构选项, {"default": "自动"})
         required["运行时随机标签"] = ("BOOLEAN", {"default": False})
         required["运行时随机模式"] = (运行时随机模式选项, {"default": "全随机"})
-        required["核心标签锁定数量"] = ("INT", {"default": 10, "min": 0, "max": 100, "step": 1})
+        required["核心标签锁定数量"] = ("INT", {"default": 10, "min": 0, "max": 500, "step": 1, "tooltip": "保留核心模式最多锁定 500 个槽位与自定义标签；显式白名单和 NSFW 保护标签不受该数量截断。"})
         required["运行时随机强度"] = (运行时随机强度选项, {"default": "中"})
         required["随机主题池"] = (随机主题池选项, {"default": "自动"})
         required["锁定标签白名单"] = ("STRING", {"default": "", "multiline": False})

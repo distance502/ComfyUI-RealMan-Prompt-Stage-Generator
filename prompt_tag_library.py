@@ -1328,8 +1328,10 @@ def _推断快速推荐目录元数据(name: str, tags: list[str], use_cases: li
 
 def _extend_library_section(group: str, section: str, additions: list[str]) -> None:
     for library in (内置标签库,):
-        if group not in library or section not in library[group]:
-            continue
+        if group not in library:
+            library[group] = OrderedDict()
+        if section not in library[group]:
+            library[group][section] = []
         library[group][section] = _extend_unique_list(library[group][section], additions)
 
 
@@ -1413,6 +1415,22 @@ for (_group, _section), _tags in _四向扩展标签.items():
 for (_group, _section), _tags in DANBOORU_GENERAL_TAG_EXTENSIONS.items():
     _extend_library_section(_group, _section, _tags)
 
+_奇幻扩展标签 = {
+    ("主体", "特殊身份"): ["精灵游侠", "龙骑士", "魔法学院学生", "宫廷魔法师", "圣骑士", "魔剑士", "龙语者", "遗迹探险家", "黑暗女巫", "黑暗女王", "沙漠祭司", "海洋祭司", "潮汐法师", "精灵吟游诗人", "机械魔导师", "幻想女战士"],
+    ("画面风格", "艺术风格"): ["日式奇幻动画", "漆原智志画风", "结城信辉画风", "童话绘本", "魔幻油画", "奇幻概念设计", "史诗奇幻海报", "浪漫主义油画"],
+    ("画面风格", "美学风格"): ["奇幻风格", "西方奇幻", "高等奇幻", "剑与魔法", "哥特奇幻", "黑暗童话", "精灵幻想", "梦幻奇境", "幻想宫廷", "地下城冒险", "龙骑士史诗", "沙漠神话", "海洋奇幻", "蒸汽魔法", "史诗群像"],
+    ("光影氛围", "光线类型"): ["魔法辉光", "翡翠森林光", "龙焰逆光", "星辉月光", "彩窗圣光", "水下焦散", "水晶折射光", "金色晨辉", "火炬暖光", "火炬光", "锐利高光", "暮色天光"],
+    ("服装造型", "特殊元素"): ["精灵轻甲", "龙鳞铠甲", "魔法学院制服", "星纹法袍", "哥特礼服", "羽翼圣甲", "冒险者披风", "黑色羽翼"],
+    ("场景背景", "特殊场景"): ["浮空城", "精灵王都", "魔法学院", "地下城遗迹", "荆棘城堡", "水晶宫殿", "冰雪王宫", "沙漠神庙", "海底王国", "蒸汽魔法都市", "龙巢宝库", "远古遗迹", "奇幻集市", "天空堡垒", "云海战场", "奥术图书馆", "水晶洞窟", "乌鸦古堡", "天穹遗迹", "秘仪大厅", "天空宫殿", "幻想宴会厅", "冰封要塞", "海市蜃楼神殿", "风暴海岸", "精灵圣树", "飞空艇港", "异世界城镇", "边境村庄", "森林遗迹", "水晶湖", "浮空花园", "边境要塞", "森林神殿", "遗忘神殿"],
+    ("道具世界观", "武器法器"): ["水晶法杖", "星辉权杖", "精灵长弓", "龙枪", "魔剑", "魔法书", "冰晶权杖"],
+    ("道具世界观", "世界观元素"): ["魔法阵", "浮空水晶", "飞空艇", "星图仪", "魔导机械", "冒险地图", "传送门", "黑玫瑰", "龙蛋", "旗帜"],
+    ("构图视角", "构图方式"): ["英雄海报构图", "冒险队群像", "巨龙俯瞰"],
+    ("技术画质", "画质描述"): ["华丽奇幻角色设计", "优雅奇幻线稿", "宝石色调上色", "精细赛璐璐", "柔和赛璐璐", "90年代奇幻OVA质感", "史诗概念艺术完成度", "奇幻角色设定"],
+    ("技术画质", "特效"): ["魔法粒子", "星尘辉光", "赛璐璐高光", "龙焰火星", "水晶折射", "手绘光效"],
+}
+for (_group, _section), _tags in _奇幻扩展标签.items():
+    _extend_library_section(_group, _section, _tags)
+
 模板推断关键词["插画感"].update({
     "赛璐璐上色", "厚涂绘画", "水彩晕染", "铅笔素描", "黑白线稿", "单色插画",
     "网点漫画", "复古画风", "90年代动画风", "动画截图感", "平涂上色", "粗线稿",
@@ -1424,6 +1442,9 @@ for (_group, _section), _tags in DANBOORU_GENERAL_TAG_EXTENSIONS.items():
 模板推断关键词["CG感"].update({"机能赛博", "义体美学", "反乌托邦", "数据机房", "赛博地铁", "全息界面", "能量刀", "电影感单幅画面", "单人角色渲染", "关卡空间单幅画面", "高完成度单人角色渲染", "东方赛博机甲", "东方赛博武侠朋克", "游戏CG质感"})
 模板推断关键词["古风"].update({"宋韵美学", "志怪古风", "园林仕女", "褙子", "诃子裙", "比甲", "鹤氅", "月洞门", "水榭", "古琴", "国风人像", "古装剧照感", "园林人像", "工笔插画感", "武侠剧照感", "墨洗留白", "港式武侠", "古风电影氛围", "东方古风武侠", "港风惊悚志怪"})
 模板推断关键词["神话感"].update({"东方神话史诗", "敦煌神性", "神庙壁画感", "圣像画神性", "云上神国", "天穹祭坛", "星海神殿", "悬空神庙", "日轮", "月轮", "圣火", "神谕石碑", "史诗感单幅画面", "神性肖像", "祭仪场景", "宏大单幅神话场景", "都市电影人文", "西方奇幻史诗"})
+模板推断关键词["插画感"].update({"日式奇幻动画", "漆原智志画风", "结城信辉画风", "童话绘本", "魔幻油画", "精细赛璐璐", "柔和赛璐璐", "90年代奇幻OVA质感"})
+模板推断关键词["CG感"].update({"奇幻概念设计", "史诗奇幻海报", "史诗概念艺术完成度", "奇幻角色设定"})
+模板推断关键词["神话感"].update({"奇幻风格", "西方奇幻", "高等奇幻", "剑与魔法", "哥特奇幻", "黑暗童话", "精灵幻想", "梦幻奇境", "幻想宫廷", "地下城冒险", "龙骑士史诗", "沙漠神话", "海洋奇幻", "蒸汽魔法", "史诗群像"})
 
 快速推荐强风格标签集合.update({"机能赛博", "宋韵美学", "志怪古风", "东方神话史诗", "敦煌神性", "神庙壁画感", "东方古风武侠", "东方赛博武侠朋克", "日韩影像", "西方奇幻史诗"})
 快速推荐高完成度标签集合.update({"品牌大片", "广告成片质感", "云上神国", "天穹祭坛", "星海神殿", "日系影像质感", "韩系广告质感", "游戏CG质感"})
@@ -2661,3 +2682,35 @@ def 推荐自定义标签归类(tag: str, *, max_items: int = 12) -> dict[str, A
         },
         "tags": results,
     }
+
+
+# Register data-driven advanced template/theme tags after all library helpers are available.
+try:
+    from .stage_prompt.expanded_profiles import (
+        EXPANDED_PROFILE_TAGS_BY_SECTION,
+        EXPANDED_STYLE_KEYWORDS_BY_BASE,
+        EXPANDED_TEMPLATE_OPTIONS,
+    )
+except Exception:  # Direct module loading in focused tests.
+    import importlib.util as _expanded_importlib_util
+
+    _expanded_profile_spec = _expanded_importlib_util.spec_from_file_location(
+        "prompt_tag_library_expanded_profiles",
+        Path(__file__).resolve().parent / "stage_prompt" / "expanded_profiles.py",
+    )
+    if _expanded_profile_spec is None or _expanded_profile_spec.loader is None:
+        raise RuntimeError("Unable to load expanded_profiles.py")
+    _expanded_profile_module = _expanded_importlib_util.module_from_spec(_expanded_profile_spec)
+    _expanded_profile_spec.loader.exec_module(_expanded_profile_module)
+    EXPANDED_PROFILE_TAGS_BY_SECTION = _expanded_profile_module.EXPANDED_PROFILE_TAGS_BY_SECTION
+    EXPANDED_STYLE_KEYWORDS_BY_BASE = _expanded_profile_module.EXPANDED_STYLE_KEYWORDS_BY_BASE
+    EXPANDED_TEMPLATE_OPTIONS = _expanded_profile_module.EXPANDED_TEMPLATE_OPTIONS
+
+for (_expanded_group, _expanded_section), _expanded_tags in EXPANDED_PROFILE_TAGS_BY_SECTION.items():
+    _extend_library_section(_expanded_group, _expanded_section, _expanded_tags)
+for _expanded_base, _expanded_keywords in EXPANDED_STYLE_KEYWORDS_BY_BASE.items():
+    if _expanded_base in 模板推断关键词:
+        模板推断关键词[_expanded_base].update(_expanded_keywords)
+快速推荐强风格标签集合.update(EXPANDED_TEMPLATE_OPTIONS)
+自定义标签归类关键词 = deepcopy(内置标签库)
+_清空标签库缓存()

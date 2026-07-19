@@ -300,7 +300,7 @@ def build_state_from_kwargs(
     )
     settings["运行时随机模式"] = str(kwargs.get("运行时随机模式", setting_defaults["运行时随机模式"]))
     settings["运行时随机强度"] = str(kwargs.get("运行时随机强度", setting_defaults["运行时随机强度"]))
-    settings["核心标签锁定数量"] = safe_int(kwargs.get("核心标签锁定数量", 10), 10, 0, 100)
+    settings["核心标签锁定数量"] = safe_int(kwargs.get("核心标签锁定数量", 10), 10, 0, 500)
     settings["标签反推模式"] = _normalize_reverse_mode(
         kwargs.get("标签反推模式", setting_defaults["标签反推模式"]),
         setting_defaults["标签反推模式"],

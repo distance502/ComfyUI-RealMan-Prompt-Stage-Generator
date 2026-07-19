@@ -12,6 +12,50 @@ except Exception:  # pragma: no cover - exercised by direct import tests
     from stage_prompt_skills_test import resolve_base_template_style  # type: ignore
 
 try:
+    from .fantasy_profiles import (
+        FANTASY_STYLE_LEAD_EN,
+        FANTASY_STYLE_LEAD_ZH,
+        FANTASY_STYLE_TRANSLATIONS,
+    )
+except Exception:  # pragma: no cover - direct file loading in focused tests
+    import importlib.util as _fantasy_importlib_util
+    from pathlib import Path as _FantasyPath
+
+    _fantasy_spec = _fantasy_importlib_util.spec_from_file_location(
+        "stage_prompt_fantasy_profiles_test",
+        _FantasyPath(__file__).with_name("fantasy_profiles.py"),
+    )
+    if _fantasy_spec is None or _fantasy_spec.loader is None:
+        raise RuntimeError("Unable to load fantasy_profiles.py")
+    _fantasy_module = _fantasy_importlib_util.module_from_spec(_fantasy_spec)
+    _fantasy_spec.loader.exec_module(_fantasy_module)
+    FANTASY_STYLE_LEAD_EN = _fantasy_module.FANTASY_STYLE_LEAD_EN
+    FANTASY_STYLE_LEAD_ZH = _fantasy_module.FANTASY_STYLE_LEAD_ZH
+    FANTASY_STYLE_TRANSLATIONS = _fantasy_module.FANTASY_STYLE_TRANSLATIONS
+
+try:
+    from .expanded_profiles import (
+        EXPANDED_STYLE_LEAD_EN,
+        EXPANDED_STYLE_LEAD_ZH,
+        EXPANDED_STYLE_TRANSLATIONS,
+    )
+except Exception:  # pragma: no cover - direct file loading in focused tests
+    import importlib.util as _expanded_importlib_util
+    from pathlib import Path as _ExpandedPath
+
+    _expanded_spec = _expanded_importlib_util.spec_from_file_location(
+        "stage_prompt_expanded_profiles_builder_test",
+        _ExpandedPath(__file__).with_name("expanded_profiles.py"),
+    )
+    if _expanded_spec is None or _expanded_spec.loader is None:
+        raise RuntimeError("Unable to load expanded_profiles.py")
+    _expanded_module = _expanded_importlib_util.module_from_spec(_expanded_spec)
+    _expanded_spec.loader.exec_module(_expanded_module)
+    EXPANDED_STYLE_LEAD_EN = _expanded_module.EXPANDED_STYLE_LEAD_EN
+    EXPANDED_STYLE_LEAD_ZH = _expanded_module.EXPANDED_STYLE_LEAD_ZH
+    EXPANDED_STYLE_TRANSLATIONS = _expanded_module.EXPANDED_STYLE_TRANSLATIONS
+
+try:
     from ..danbooru_tag_config import DANBOORU_GENERAL_TAG_ALIASES
 except Exception:  # pragma: no cover - direct file loading in focused tests
     try:
@@ -132,6 +176,10 @@ _STYLE_LEAD_MAP_EN = {
     "神话感": "mythic epic fantasy",
     "暗黑奇幻": "dark fantasy epic",
 }
+_STYLE_LEAD_MAP.update(FANTASY_STYLE_LEAD_ZH)
+_STYLE_LEAD_MAP.update(EXPANDED_STYLE_LEAD_ZH)
+_STYLE_LEAD_MAP_EN.update(FANTASY_STYLE_LEAD_EN)
+_STYLE_LEAD_MAP_EN.update(EXPANDED_STYLE_LEAD_EN)
 
 
 def _has_auto_style_signal(
@@ -1044,6 +1092,8 @@ _PROMPT_FRAGMENT_TRANSLATION_MAP.update(
     }
 )
 _PROMPT_FRAGMENT_TRANSLATION_MAP.update(DANBOORU_GENERAL_TAG_ALIASES)
+_PROMPT_FRAGMENT_TRANSLATION_MAP.update(FANTASY_STYLE_TRANSLATIONS)
+_PROMPT_FRAGMENT_TRANSLATION_MAP.update(EXPANDED_STYLE_TRANSLATIONS)
 
 _RUNTIME_RANDOM_INTENSITY_STRONG_BASELINE = "强"
 _RUNTIME_RANDOM_INTENSITY_STRONG_EXTREME = "强 / 极限拉开"
@@ -4050,6 +4100,39 @@ def _is_non_person_subject(settings: dict[str, Any]) -> bool:
     return resolved == "非人物主体" or explicit == "非人物主体"
 
 
+_SCENE_GROUP_DISPLAY_ZH = {
+    "indoor": "室内空间",
+    "city": "城市环境",
+    "nature": "自然户外",
+    "industrial": "工业科技空间",
+    "ancient": "古典东方空间",
+    "sacred": "神圣仪式空间",
+    "minimal": "简洁布景",
+    "other": "",
+}
+_SCENE_GROUP_DISPLAY_EN = {
+    "indoor": "an interior setting",
+    "city": "an urban setting",
+    "nature": "a natural outdoor setting",
+    "industrial": "an industrial or technological setting",
+    "ancient": "an East Asian historical setting",
+    "sacred": "a sacred ceremonial setting",
+    "minimal": "a minimal set",
+    "other": "",
+}
+
+
+def _display_scene_group(value: Any, *, english: bool) -> str:
+    text = _clean_fragment(value)
+    if not text:
+        return ""
+    mapping = _SCENE_GROUP_DISPLAY_EN if english else _SCENE_GROUP_DISPLAY_ZH
+    lowered = text.casefold()
+    if lowered in mapping:
+        return mapping[lowered]
+    return _translate_prompt_fragment(text) if english else text
+
+
 def _expand_english_prompt_locally(
     fragments: list[str],
     selected: OrderedDict[str, list[str]],
@@ -4066,7 +4149,7 @@ def _expand_english_prompt_locally(
     subject_values = _nonempty_group_values_from_fragments(selected, "主体", fragments, english=True)
     adult_prompt = _prompt_tags_look_adult(fragments, custom_tags, subject_values)
     translated_identity = _translate_prompt_fragment(identity)
-    translated_scene_group = _translate_prompt_fragment(scene_group)
+    translated_scene_group = _display_scene_group(scene_group, english=True)
     subject = _join_limited(subject_values, limit=5, english=True) or translated_identity or ("selected non-human subject" if non_person else ("adult woman" if adult_prompt else "selected subject"))
     style_values = _nonempty_group_values_from_fragments(selected, "画面风格", fragments, english=True)
     style = _join_coherent_values(style_values, limit=3, english=True, clusters=_STYLE_CLUSTER_PRIORITY_EN)
@@ -4183,7 +4266,7 @@ def _expand_chinese_prompt_locally(
     style_bridge_hint = _build_style_bridge_hint(style_values, style_isolation_mode=style_mode)
     adult = _join_coherent_values(_nonempty_group_values_from_fragments(selected, "成人向表达", fragments), limit=2)
     outfit = _join_coherent_values(_nonempty_group_values_from_fragments(selected, "服装造型", fragments), limit=3)
-    scene = _join_coherent_values(_nonempty_group_values_from_fragments(selected, "场景背景", fragments), limit=2, clusters=_SCENE_CLUSTER_PRIORITY_ZH) or _clean_fragment(scene_group)
+    scene = _join_coherent_values(_nonempty_group_values_from_fragments(selected, "场景背景", fragments), limit=2, clusters=_SCENE_CLUSTER_PRIORITY_ZH) or _display_scene_group(scene_group, english=False)
     composition = _join_coherent_values(_nonempty_group_values_from_fragments(selected, "构图视角", fragments), limit=3)
     action = _join_coherent_values(_nonempty_group_values_from_fragments(selected, "动作姿态", fragments), limit=2)
     lighting = _join_coherent_values(_nonempty_group_values_from_fragments(selected, "光影氛围", fragments), limit=3)
@@ -4256,6 +4339,370 @@ def _expand_chinese_prompt_locally(
     return f"{anchor_text}；{detail_text}" if detail_text else anchor_text
 
 
+
+_CONCISE_GENERIC_QUALITY_KEYS = {
+    "masterpiece",
+    "bestquality",
+    "ultradetailed",
+    "extremelydetailed",
+    "highdetail",
+    "highquality",
+    "highresolution",
+    "sharpfocus",
+    "cleancomposition",
+    "cleanfocushierarchy",
+    "photorealistic",
+    "professionalphotography",
+    "studiolighting",
+    "perfectanatomy",
+    "8k",
+    "4k",
+    "高细节",
+    "高质量",
+    "超高质量",
+    "广告成片质感",
+    "人物完成度高",
+}
+_CONCISE_RESIDUAL_SKIP_KEYS = {
+    *_CONCISE_GENERIC_QUALITY_KEYS,
+    "高完成度图像",
+    "highlyfinishedimage",
+}
+
+
+def _prioritize_custom_prompt_values(values: list[str]) -> list[str]:
+    specific: list[str] = []
+    generic_quality: list[str] = []
+    seen: set[str] = set()
+    for raw_value in values:
+        value = _clean_fragment(raw_value)
+        key = _fragment_key(value)
+        if not value or not key or key in seen:
+            continue
+        seen.add(key)
+        target = generic_quality if key in _CONCISE_GENERIC_QUALITY_KEYS else specific
+        target.append(value)
+    return [*specific, *generic_quality]
+
+
+def _residual_prompt_fragments(
+    fragments: list[str],
+    context: _PromptBuildContext,
+    displayed_values: list[str],
+    *,
+    english: bool,
+    excluded_values: list[str] | None = None,
+) -> list[str]:
+    consumed: set[str] = set()
+
+    def consume(value: Any) -> None:
+        text = _translate_prompt_fragment(value) if english else _clean_fragment(value)
+        key = _fragment_key(text)
+        if key:
+            consumed.add(key)
+
+    if fragments:
+        consume(fragments[0])
+    for value in displayed_values:
+        consume(value)
+    consume(context.get("identity", ""))
+    consume(context.get("scene_group", ""))
+    consumed_blob = _fragment_key(" ".join(displayed_values))
+    excluded = {_fragment_key(value) for value in (excluded_values or []) if _fragment_key(value)}
+
+    result: list[str] = []
+    seen: set[str] = set()
+    for raw_fragment in fragments[1:]:
+        fragment = _clean_fragment(raw_fragment)
+        key = _fragment_key(fragment)
+        if (
+            not fragment
+            or not key
+            or key in consumed
+            or (consumed_blob and key in consumed_blob)
+            or key in excluded
+            or key in seen
+            or key in _CONCISE_RESIDUAL_SKIP_KEYS
+        ):
+            continue
+        result.append(fragment)
+        seen.add(key)
+    return result
+
+
+def _undisplayed_prompt_values(values: list[str], displayed_text: str) -> list[str]:
+    displayed_key = _fragment_key(displayed_text)
+    return [value for value in values if _fragment_key(value) and _fragment_key(value) not in displayed_key]
+
+
+def _build_concise_chinese_prompt(
+    fragments: list[str],
+    selected: OrderedDict[str, list[str]],
+    custom_tags: list[str],
+    settings: dict[str, Any],
+    context: _PromptBuildContext,
+) -> str:
+    lead = _clean_fragment(fragments[0] if fragments else "高完成度图像")
+    non_person = _is_non_person_subject(settings)
+    adult_mode = bool(settings.get("NSFW工作台启用", False)) or str(settings.get("标签反推模式", "")).strip() == "成人向成熟"
+    fragment_keys = {_fragment_key(fragment) for fragment in fragments}
+    subject_values = _nonempty_group_values_from_fragments(selected, "主体", fragments)
+    context_identity = _clean_fragment(context.get("identity"))
+    if context_identity and _fragment_key(context_identity) in fragment_keys:
+        subject_values.append(context_identity)
+    subject = _join_limited(subject_values, limit=5) or context_identity or ("非人物主体" if non_person else "人物主体")
+    style_values = _nonempty_group_values_from_fragments(selected, "画面风格", fragments)
+    style = _join_coherent_values(style_values, limit=2, clusters=_STYLE_CLUSTER_PRIORITY_ZH)
+    style_bridge_hint = _build_style_bridge_hint(
+        style_values,
+        style_isolation_mode=_style_isolation_mode(settings),
+    )
+    scene_values = _nonempty_group_values_from_fragments(selected, "场景背景", fragments)
+    scene = _join_coherent_values(scene_values, limit=2, clusters=_SCENE_CLUSTER_PRIORITY_ZH) or _display_scene_group(context.get("scene_group"), english=False)
+    composition = _join_coherent_values(_nonempty_group_values_from_fragments(selected, "构图视角", fragments), limit=2)
+    action_values = _nonempty_group_values_from_fragments(selected, "动作姿态", fragments)
+    action = _join_coherent_values(action_values, limit=2)
+    adult_values = _nonempty_group_values_from_fragments(selected, "成人向表达", fragments)
+    adult = _join_coherent_values(adult_values, limit=2)
+    outfit = _join_coherent_values(_nonempty_group_values_from_fragments(selected, "服装造型", fragments), limit=2)
+    lighting = _join_coherent_values(_nonempty_group_values_from_fragments(selected, "光影氛围", fragments), limit=2)
+    props = _join_coherent_values(_nonempty_group_values_from_fragments(selected, "道具世界观", fragments), limit=2)
+    quality = _join_limited(_nonempty_group_values_from_fragments(selected, "技术画质", fragments), limit=4)
+    prioritized_custom = _prioritize_custom_prompt_values(custom_tags)
+    displayed_custom = prioritized_custom[:4]
+    custom = _join_limited(displayed_custom, limit=4)
+    dense_conflict = _has_dense_conflicting_tracks(
+        selected,
+        fragments,
+        style_isolation_mode=_style_isolation_mode(settings),
+    )
+    excluded_residual_values = []
+    if dense_conflict:
+        excluded_residual_values = [
+            *_undisplayed_prompt_values(style_values, f"{style} {style_bridge_hint}"),
+            *_undisplayed_prompt_values(scene_values, scene),
+            *_undisplayed_prompt_values(action_values, action),
+            *_undisplayed_prompt_values(adult_values, adult),
+        ]
+    residual = _join_limited(
+        _residual_prompt_fragments(
+            fragments,
+            context,
+            [lead, subject, style, scene, composition, action, adult, outfit, lighting, props, quality, custom],
+            english=False,
+            excluded_values=excluded_residual_values,
+        ),
+        limit=24,
+    )
+
+    first = f"{lead}，这是一段自然连贯的正向画面说明，画面以{subject}为{'非人物主题核心' if non_person else '核心'}"
+    if style:
+        first += f"，整体遵循{style}的统一媒介语言"
+    if style_bridge_hint:
+        first += f"，同时保留{style_bridge_hint}的媒介质感"
+    if scene:
+        first += f"，主体处于{scene}中"
+    if action:
+        first += f"并呈现{action}的自然状态"
+    if adult:
+        first += f"，成人氛围通过{adult}克制而明确地呈现"
+    elif adult_mode and not non_person:
+        first += "，画面保持明确成年主体和成熟私密氛围"
+    first += "。"
+
+    second_parts: list[str] = []
+    if outfit:
+        second_parts.append(("外观结构" if non_person else "服装造型") + f"围绕{outfit}展开")
+    if lighting:
+        second_parts.append(f"以{lighting}塑造主光、阴影和轮廓层次")
+    if props:
+        second_parts.append(f"让{props}作为克制的叙事锚点")
+    if composition:
+        second_parts.append(f"镜头采用{composition}并保持主体结构与空间透视完整")
+    if custom:
+        second_parts.append(f"将{custom}自然融入同一条画面主线")
+    if residual:
+        second_parts.append(f"其余细节围绕{residual}展开，并服从同一主体、空间和风格逻辑")
+    second = "；".join(second_parts)
+    if second:
+        second += "。"
+
+    detail_level = str(settings.get("详细度", "标准") or "标准").strip()
+    detail_sentences: list[str] = []
+    if detail_level not in {"简洁", "短"}:
+        if non_person:
+            detail_sentences.append(
+                "主体的轮廓、结构比例、功能部件与表面分区保持清楚，材质接缝、边缘磨损、反射变化和尺度参照共同建立可信的存在感。"
+            )
+        else:
+            detail_sentences.append(
+                "人物的主体身份与成年属性、面部朝向、肩颈关系、手部位置和身体重心保持清楚，服装褶皱与材质高光顺着动作自然变化。"
+            )
+        if scene or lighting or composition:
+            detail_sentences.append(
+                "前景、中景和背景围绕同一空间主线展开，主光、辅光与轮廓光具有明确方向，镜头距离和透视关系稳定，不让环境细节遮挡主体。"
+            )
+    if detail_level == "详细":
+        detail_sentences.append(
+            "可见细节通过真实的表面纹理、接触阴影、细微反射、空气层次与焦点过渡逐级展开，使画面丰富但不过度堆砌。"
+        )
+
+    finish = f"最终画面保持主题明确、层次清楚、材质可信"
+    if quality:
+        finish += f"，并体现{quality}"
+    finish += "，避免标签堆叠、互斥场景、文字水印、低清伪影和结构错误。"
+    return f"{first}{second}{''.join(detail_sentences)}{finish}"
+
+
+def _build_concise_english_prompt(
+    fragments: list[str],
+    selected: OrderedDict[str, list[str]],
+    custom_tags: list[str],
+    settings: dict[str, Any],
+    context: _PromptBuildContext,
+) -> str:
+    lead = _clean_fragment(fragments[0] if fragments else "highly finished image")
+    non_person = _is_non_person_subject(settings)
+    adult_mode = bool(settings.get("NSFW工作台启用", False)) or str(settings.get("标签反推模式", "")).strip() == "成人向成熟"
+    fragment_keys = {_fragment_key(fragment) for fragment in fragments}
+    subject_values = _nonempty_group_values_from_fragments(selected, "主体", fragments, english=True)
+    context_identity = _translate_prompt_fragment(context.get("identity"))
+    if context_identity and _fragment_key(context_identity) in fragment_keys:
+        subject_values.append(context_identity)
+    subject = _join_limited(subject_values, limit=5, english=True) or context_identity or ("the main non-human subject" if non_person else "selected subject")
+    style_values = _nonempty_group_values_from_fragments(selected, "画面风格", fragments, english=True)
+    style = _join_coherent_values(style_values, limit=2, english=True, clusters=_STYLE_CLUSTER_PRIORITY_EN)
+    style_bridge_hint = _build_style_bridge_hint(
+        style_values,
+        english=True,
+        style_isolation_mode=_style_isolation_mode(settings),
+    )
+    scene_values = _nonempty_group_values_from_fragments(selected, "场景背景", fragments, english=True)
+    scene = _join_coherent_values(scene_values, limit=2, english=True, clusters=_SCENE_CLUSTER_PRIORITY_EN) or _display_scene_group(context.get("scene_group"), english=True)
+    composition = _join_coherent_values(_nonempty_group_values_from_fragments(selected, "构图视角", fragments, english=True), limit=2, english=True)
+    action_values = _nonempty_group_values_from_fragments(selected, "动作姿态", fragments, english=True)
+    action = _join_coherent_values(action_values, limit=2, english=True)
+    adult_values = _nonempty_group_values_from_fragments(selected, "成人向表达", fragments, english=True)
+    adult = _join_coherent_values(adult_values, limit=2, english=True)
+    outfit = _join_coherent_values(_nonempty_group_values_from_fragments(selected, "服装造型", fragments, english=True), limit=2, english=True)
+    lighting = _join_coherent_values(_nonempty_group_values_from_fragments(selected, "光影氛围", fragments, english=True), limit=2, english=True)
+    props = _join_coherent_values(_nonempty_group_values_from_fragments(selected, "道具世界观", fragments, english=True), limit=2, english=True)
+    quality = _join_limited(_nonempty_group_values_from_fragments(selected, "技术画质", fragments, english=True), limit=4, english=True)
+    prioritized_custom = _prioritize_custom_prompt_values(custom_tags)
+    displayed_custom = prioritized_custom[:4]
+    custom = _join_limited([_translate_prompt_fragment(tag) for tag in displayed_custom], limit=4, english=True)
+    dense_conflict = _has_dense_conflicting_tracks(
+        selected,
+        fragments,
+        english=True,
+        style_isolation_mode=_style_isolation_mode(settings),
+    )
+    excluded_residual_values = []
+    if dense_conflict:
+        excluded_residual_values = [
+            *_undisplayed_prompt_values(style_values, f"{style} {style_bridge_hint}"),
+            *_undisplayed_prompt_values(scene_values, scene),
+            *_undisplayed_prompt_values(action_values, action),
+            *_undisplayed_prompt_values(adult_values, adult),
+        ]
+    residual = _join_limited(
+        _residual_prompt_fragments(
+            fragments,
+            context,
+            [lead, subject, style, scene, composition, action, adult, outfit, lighting, props, quality, custom],
+            english=True,
+            excluded_values=excluded_residual_values,
+        ),
+        limit=24,
+        english=True,
+    )
+
+    first = f"{lead} presents one coherent positive scene description centered on {_english_subject_phrase(subject)}"
+    if style:
+        first += f", unified through {style}"
+    if style_bridge_hint:
+        first += f", while retaining the media texture of {style_bridge_hint}"
+    if scene:
+        first += f", situated in {scene}"
+    if action:
+        first += f", with {action} expressed as one believable moment"
+    if adult:
+        first += f", while {adult} establishes a clearly adult yet visually coherent intimate direction"
+    elif adult_mode and not non_person:
+        first += ", with clearly adult subjects and a mature intimate atmosphere"
+    first += "."
+
+    details: list[str] = []
+    if outfit:
+        details.append(f"The {'surface design' if non_person else 'wardrobe'} follows {outfit}")
+    if lighting:
+        details.append(f"Lighting built from {lighting} shapes the key light, shadow depth, and rim separation")
+    if props:
+        details.append(f"Story elements such as {props} remain restrained narrative anchors")
+    if composition:
+        details.append(f"The camera uses {composition} while preserving complete structure and stable perspective")
+    if custom:
+        details.append(f"User details such as {custom} are integrated into the same visual direction")
+    if residual:
+        details.append(f"Additional visual cues such as {residual} follow the same subject, spatial, and stylistic logic")
+    second = ". ".join(details)
+    if second:
+        second += "."
+
+    detail_level = str(settings.get("详细度", "标准") or "标准").strip()
+    detail_sentences: list[str] = []
+    if detail_level not in {"简洁", "短"}:
+        if non_person:
+            detail_sentences.append(
+                "The silhouette, structural proportions, functional components, and surface divisions remain readable, while seams, edge wear, reflections, and scale references establish a believable physical presence."
+            )
+        else:
+            detail_sentences.append(
+                "Adult identity, facial direction, shoulder and neck relationships, hand placement, and body weight remain readable, with fabric folds and material highlights responding naturally to the pose."
+            )
+        if scene or lighting or composition:
+            detail_sentences.append(
+                "Foreground, middle ground, and background follow one spatial direction; key, fill, and rim light have clear origins, and camera distance and perspective remain stable without letting the environment obscure the subject."
+            )
+    if detail_level == "详细":
+        detail_sentences.append(
+            "Visible information develops through surface texture, contact shadows, subtle reflections, atmospheric depth, and controlled focus transitions, producing richness without keyword accumulation."
+        )
+
+    finish = "The final image keeps a clear subject hierarchy, believable materials, coherent space, and natural visual flow"
+    if quality:
+        finish += f", supported by {quality}"
+    finish += ", without tag-chain phrasing, conflicting settings, text, watermark, low-resolution artifacts, or structural errors."
+    return " ".join(part for part in (first, second, *detail_sentences, finish) if part)
+
+
+def _build_mixed_language_companion(
+    selected: OrderedDict[str, list[str]],
+    custom_tags: list[str],
+    settings: dict[str, Any],
+    context: _PromptBuildContext,
+) -> str:
+    non_person = _is_non_person_subject(settings)
+    subject = _join_limited(_nonempty_group_values(selected, "主体"), limit=3) or _clean_fragment(context.get("identity")) or ("非人物主体" if non_person else "人物主体")
+    style = _join_coherent_values(_nonempty_group_values(selected, "画面风格"), limit=2, clusters=_STYLE_CLUSTER_PRIORITY_ZH)
+    scene = _join_coherent_values(_nonempty_group_values(selected, "场景背景"), limit=2, clusters=_SCENE_CLUSTER_PRIORITY_ZH) or _display_scene_group(context.get("scene_group"), english=False)
+    action = _join_coherent_values(_nonempty_group_values(selected, "动作姿态"), limit=2)
+    lighting = _join_coherent_values(_nonempty_group_values(selected, "光影氛围"), limit=2)
+    custom = _join_limited(_prioritize_custom_prompt_values(custom_tags), limit=3)
+    sentence = f"中文说明：画面以{subject}为核心"
+    if style:
+        sentence += f"，遵循{style}的统一视觉方向"
+    if scene:
+        sentence += f"，主体位于{scene}"
+    if action:
+        sentence += f"并呈现{action}"
+    if lighting:
+        sentence += f"，由{lighting}建立空间层次"
+    if custom:
+        sentence += f"，同时自然融入{custom}"
+    return sentence + "，最终保持主体明确、透视稳定、材质可信。"
+
+
 def _expand_prompt_fragments_locally(
     fragments: list[str],
     selected: OrderedDict[str, list[str]],
@@ -4266,27 +4713,12 @@ def _expand_prompt_fragments_locally(
     clean_fragments = [_clean_fragment(fragment) for fragment in fragments if _clean_fragment(fragment)]
     if not clean_fragments:
         return ""
-    if not _detail_level_wants_expanded_prompt(settings):
-        return (", " if _use_english_prompt(settings) else "，").join(clean_fragments)
     if _use_english_prompt(settings):
-        return _expand_english_prompt_locally(
-            clean_fragments,
-            selected,
-            custom_tags,
-            settings,
-            scene_group=str(context.get("scene_group", "")),
-            identity=str(context.get("identity", "")),
-            style_track=str(context.get("style_track", "")),
-        )
-    return _expand_chinese_prompt_locally(
-        clean_fragments,
-        selected,
-        custom_tags,
-        settings,
-        scene_group=str(context.get("scene_group", "")),
-        identity=str(context.get("identity", "")),
-        style_track=str(context.get("style_track", "")),
-    )
+        prompt = _build_concise_english_prompt(clean_fragments, selected, custom_tags, settings, context)
+        if _prompt_language_mode(settings) == "英文提示词+中文说明":
+            return f"{prompt}\n{_build_mixed_language_companion(selected, custom_tags, settings, context)}"
+        return prompt
+    return _build_concise_chinese_prompt(clean_fragments, selected, custom_tags, settings, context)
 
 
 def _contains_any_term(fragment: str, terms: tuple[str, ...]) -> bool:
@@ -4922,7 +5354,22 @@ def _resolve_runtime_style_profiles(
     track_profiles = _RUNTIME_STYLE_TRACK_OVERRIDES.get((style, style_track), [])
     if track_profiles:
         return track_profiles
-    return _RUNTIME_STYLE_VARIANT_PROFILES.get(style, [])
+    exact_profiles = _RUNTIME_STYLE_VARIANT_PROFILES.get(style, [])
+    if exact_profiles:
+        return exact_profiles
+    base_style = resolve_base_template_style(style)
+    base_profiles = _RUNTIME_STYLE_VARIANT_PROFILES.get(base_style, [])
+    if not base_profiles or not style or style == base_style:
+        return base_profiles
+    explicit_lead = _STYLE_LEAD_MAP.get(style, "")
+    return [
+        {
+            "style_lead": explicit_lead or str(profile.get("style_lead", "")).strip(),
+            "style_tags": list(dict.fromkeys([style, *profile.get("style_tags", [])])),
+            "extra_fragments": [f"保持{style}的核心线条、色彩与世界观锚点", *profile.get("extra_fragments", [])],
+        }
+        for profile in base_profiles
+    ]
 
 
 def _runtime_style_scene_fragments(style: str, scene_group: str) -> list[str]:

@@ -8,6 +8,22 @@ from dataclasses import dataclass
 import re
 from typing import Any, Callable
 
+try:
+    from .expanded_profiles import EXPANDED_TEMPLATE_BASE_MAP
+except Exception:  # pragma: no cover - direct file loading in focused tests
+    import importlib.util as _expanded_importlib_util
+    from pathlib import Path as _ExpandedPath
+
+    _expanded_spec = _expanded_importlib_util.spec_from_file_location(
+        "stage_prompt_expanded_profiles_skills_test",
+        _ExpandedPath(__file__).with_name("expanded_profiles.py"),
+    )
+    if _expanded_spec is None or _expanded_spec.loader is None:
+        raise RuntimeError("Unable to load expanded_profiles.py")
+    _expanded_module = _expanded_importlib_util.module_from_spec(_expanded_spec)
+    _expanded_spec.loader.exec_module(_expanded_module)
+    EXPANDED_TEMPLATE_BASE_MAP = _expanded_module.EXPANDED_TEMPLATE_BASE_MAP
+
 
 SelectedTags = OrderedDict[str, list[str]]
 TagListFn = Callable[[SelectedTags, list[str]], list[str]]
@@ -32,7 +48,23 @@ TEMPLATE_STYLE_BASE_MAP = {
     "武侠电影": "古风",
     "神话感": "神话感",
     "暗黑奇幻": "神话感",
+    "奇幻风格": "神话感",
+    "西方奇幻": "神话感",
+    "高等奇幻": "神话感",
+    "剑与魔法": "神话感",
+    "哥特奇幻": "神话感",
+    "黑暗童话": "神话感",
+    "精灵幻想": "神话感",
+    "梦幻奇境": "神话感",
+    "日式奇幻动画": "插画感",
+    "漆原智志画风": "插画感",
+    "结城信辉画风": "插画感",
+    "童话绘本": "插画感",
+    "魔幻油画": "插画感",
+    "奇幻概念设计": "CG感",
+    "史诗奇幻海报": "CG感",
 }
+TEMPLATE_STYLE_BASE_MAP.update(EXPANDED_TEMPLATE_BASE_MAP)
 BASE_TEMPLATE_STYLES = frozenset(TEMPLATE_STYLE_BASE_MAP.values())
 
 _AUTO_NON_PERSON_SUBJECT_TAGS = {
