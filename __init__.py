@@ -727,6 +727,7 @@ def _launch_companion_browser(normalized_url: str) -> dict[str, Any]:
         f"--user-data-dir={profile}",
         "--no-first-run",
         "--no-default-browser-check",
+        "--start-maximized",
         "--new-window",
         normalized_url,
     ]
@@ -2728,8 +2729,20 @@ def _register_tag_routes() -> bool:
             return _json_response({"ok": False, "message": str(exc)}, status=503)
         if isinstance(exc, EmbeddedBrowserError):
             return _json_response({"ok": False, "message": str(exc)}, status=502)
+        if isinstance(exc, (asyncio.TimeoutError, TimeoutError)):
+            return _json_response(
+                {
+                    "ok": False,
+                    "message": "内嵌浏览器调试连接超时，请使用独立浏览器窗口。",
+                },
+                status=503,
+            )
         logging.exception("QwenTE 内嵌浏览器出现未预期错误")
-        return _json_response({"ok": False, "message": "内嵌浏览器操作失败。"}, status=500)
+        detail = str(exc).strip().replace("\r", " ").replace("\n", " ")[:800]
+        message = "内嵌浏览器操作失败。"
+        if detail:
+            message = f"{message} {type(exc).__name__}: {detail}"
+        return _json_response({"ok": False, "message": message}, status=500)
 
     @routes.post("/qwen_te/embedded_browser/start")
     async def _start_embedded_browser(request):
