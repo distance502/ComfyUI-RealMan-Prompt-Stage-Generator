@@ -37,6 +37,8 @@ _TEXT_SPLIT_PATTERN = re.compile(r"[,\n\r\t;；，、]+")
 _ASCII_TOKEN_PATTERN = re.compile(r"\s+[A-Za-z0-9][A-Za-z0-9_\- ]*$")
 _EMPTY_SENTINEL = "——"
 _VALUE_FIELDS = (
+    "workspace_custom_tags",
+    *NSFW_SELECTOR_FIELDS,
     "scene",
     "action",
     "outfit",
@@ -44,8 +46,6 @@ _VALUE_FIELDS = (
     "anatomy_terms",
     "explicit_terms",
     "adult_action_style",
-    "workspace_custom_tags",
-    *NSFW_SELECTOR_FIELDS,
     "camera_movement",
     "camera_angle",
     "light_source",
@@ -431,9 +431,6 @@ def map_nsfw_workspace_to_stage_state(
         custom_tags.append(text)
         custom_tag_chars += len(text) + separator_chars
 
-    for tag in _resolve_quality_tags(effective_workspace):
-        append_custom_tag(tag)
-
     for tag in _iter_workspace_terms(effective_workspace):
         group_name = tag_group_index.get(tag)
         if group_name is None:
@@ -451,6 +448,11 @@ def map_nsfw_workspace_to_stage_state(
 
     for field in ("custom_prefix", "custom_suffix"):
         append_custom_tag(workspace.get(field, ""))
+
+    # Content choices define the scene; generic finish tags should never crowd
+    # them out of compact prompt summaries.
+    for tag in _resolve_quality_tags(effective_workspace):
+        append_custom_tag(tag)
 
     return {
         "selected": selected,

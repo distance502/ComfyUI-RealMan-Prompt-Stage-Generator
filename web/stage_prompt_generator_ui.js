@@ -375,10 +375,12 @@ const CONTROL_WIDGET_NAMES = [
 const ADVANCED_WIDGET_NAMES = [
 	"主体类型",
 	"案例输出结构",
+	"风格隔离策略",
 	"输出模式",
 	"额外要求",
 	"智能文本匹配",
 	"智能文本输入",
+	"智能文本风格优先",
 	"图片反推生成",
 	"图片反推模式",
 	"图片反推最大边长",
@@ -429,6 +431,7 @@ const CONTROL_WIDGET_OPTIONS = {
 		{ value: "弱", label: "弱" },
 		{ value: "中", label: "中" },
 		{ value: "强", label: "强" },
+		{ value: "强 / 极限拉开", label: "极限拉开", hint: "批量输出时扩大主体、场景、服装、动作和光影差异。" },
 	],
 	"随机主题池": ["自动", "写实生活", "商业摄影", "时尚大片", "糖水写真", "旅行街拍", "海岸假日", "森林自然", "都市职场", "夜场电影感", "私房写实", "运动机能", "古风园林", "武侠江湖", "洛可可宫廷", "神话史诗", "暗黑哥特", "赛博工业", "东方赛博", "机甲科幻", "废土荒原", "复古插画"],
 	"生成数量": [1, 2, 3, 4, 5, 8, 12],
@@ -438,12 +441,12 @@ const CONTROL_WIDGET_OPTIONS = {
 		{ value: "纯英文", label: "英文" },
 	],
 	"详细度": ["简洁", "标准", "详细"],
-	"输出模式": ["完整结果", "仅提示词"],
+	"输出模式": ["完整结果", "仅提示词优先"],
 	"标签反推模式": [
 		{ value: "自动平衡", label: "平衡", hint: "普通标签收敛：按当前风格和主题自动整理，不主动进入 NSFW 策略。" },
 		{ value: "成人向成熟", label: "成人策略", hint: "开启成人向策略：联动 NSFW 标签识别、成熟主体锚点、负面词与模型上下文。" },
 	],
-	"核心标签锁定数量": [0, 5, 10, 15, 20, 30],
+	"核心标签锁定数量": [0, 5, 10, 20, 30, 50, 75, 100, 150, 200, 300, 500],
 	"优先柔和肤质": [
 		{ value: false, label: "柔肤关" },
 		{ value: true, label: "柔肤开" },
@@ -460,6 +463,11 @@ const CONTROL_WIDGET_OPTIONS = {
 		{ value: "自动判断", label: "自动判断" },
 		{ value: "节点优先", label: "节点优先" },
 		{ value: "文本优先", label: "文本优先" },
+	],
+	"风格隔离策略": [
+		{ value: "平衡收敛", label: "平衡收敛", hint: "保留当前风格主线，同时清理明显冲突的媒介标签。" },
+		{ value: "严格风格隔离", label: "严格隔离", hint: "优先清除跨媒介、跨时代和跨风格污染。" },
+		{ value: "允许风格漂移", label: "允许漂移", hint: "保留更多混合风格素材，适合实验性输出。" },
 	],
 	"图片反推生成": [
 		{ value: false, label: "关闭" },
@@ -481,7 +489,7 @@ const ADVANCED_PANEL_SECTIONS = [
 	{
 		title: "生成策略",
 		desc: "决定输出风格、语言和反推方式。",
-		rows: ["模板风格", "主体类型", "案例输出结构", "提示词语言", "详细度", "输出模式", "标签反推模式", "生成数量", "优先柔和肤质", "抑制文字伪影"],
+		rows: ["模板风格", "主体类型", "案例输出结构", "风格隔离策略", "提示词语言", "详细度", "输出模式", "标签反推模式", "生成数量", "优先柔和肤质", "抑制文字伪影"],
 	},
 	{
 		title: "随机控制",
@@ -1265,6 +1273,12 @@ const PROMPT_LIBRARY_MUTATION_ROUTES = new Set([
 const OWNED_FETCH_REQUESTS = new WeakMap();
 const BOUNDED_NODE_HISTORY_ARRAYS = new WeakSet();
 
+function isAbortLikeError(error) {
+	const name = String(error?.name ?? "");
+	const message = String(error?.message ?? error ?? "");
+	return name === "AbortError" || /(?:signal is aborted|aborted without reason)/iu.test(message);
+}
+
 function utf8ByteLength(value) {
 	const text = typeof value === "string" ? value : JSON.stringify(value ?? null);
 	if (typeof TextEncoder === "function") return new TextEncoder().encode(text).byteLength;
@@ -1316,11 +1330,22 @@ async function runOwnedFetch(input, init = {}, options = {}, consume = async (re
 		}
 		requests.set(key, controller);
 	}
-	const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+	let timedOut = false;
+	const timeoutId = setTimeout(() => {
+		timedOut = true;
+		controller.abort();
+	}, timeoutMs);
 	timeoutId?.unref?.();
 	try {
 		const response = await fetch(input, { ...init, signal: controller.signal });
 		return await consume(response);
+	} catch (error) {
+		if (timedOut && isAbortLikeError(error)) {
+			const timeoutError = new Error(`请求超时（${Math.max(1, Math.round(timeoutMs / 1000))} 秒）。`);
+			timeoutError.name = "TimeoutError";
+			throw timeoutError;
+		}
+		throw error;
 	} finally {
 		clearTimeout(timeoutId);
 		externalSignal?.removeEventListener?.("abort", abortFromExternal);
@@ -1444,8 +1469,10 @@ function injectStyles() {
 	.qwen-te-panel__advanced-chip{border:1px solid rgba(88,108,136,.72);border-radius:9px;background:linear-gradient(180deg,rgba(42,55,71,.94),rgba(26,36,48,.98));color:#dbe7f7;cursor:pointer;font-size:9.5px;line-height:1.18;min-height:28px;padding:6px 7px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;transition:background .12s ease,border-color .12s ease,box-shadow .12s ease,color .12s ease}
 	.qwen-te-panel__advanced-chip:hover{border-color:#7f9abc;background:linear-gradient(180deg,rgba(53,69,88,.98),rgba(34,45,58,.99))}
 	.qwen-te-panel__advanced-chip.is-active{border-color:#d3a75e;background:linear-gradient(180deg,#60471e,#423115);color:#fff0ca;box-shadow:0 0 0 1px rgba(255,214,140,.12)}
-	.qwen-te-panel__advanced-input{width:100%;box-sizing:border-box;border:1px solid rgba(75,94,120,.82);border-radius:10px;background:rgba(7,11,16,.86);color:#e9f2ff;padding:7px 9px;font-size:10.5px;line-height:1.35;outline:none;min-height:30px}
-	.qwen-te-panel__advanced-input:focus{border-color:#d0a250;box-shadow:0 0 0 1px rgba(255,214,140,.14)}
+	.qwen-te-panel__advanced-input,.qwen-te-panel__advanced-select{width:100%;box-sizing:border-box;border:1px solid rgba(75,94,120,.82);border-radius:10px;background:rgba(7,11,16,.86);color:#e9f2ff;padding:7px 9px;font-size:10.5px;line-height:1.35;outline:none;min-height:30px}
+	.qwen-te-panel__advanced-select{color-scheme:dark;cursor:pointer;text-overflow:ellipsis}
+	.qwen-te-panel__advanced-select option{background:#111923;color:#e9f2ff}
+	.qwen-te-panel__advanced-input:focus,.qwen-te-panel__advanced-select:focus{border-color:#d0a250;box-shadow:0 0 0 1px rgba(255,214,140,.14)}
 	textarea.qwen-te-panel__advanced-input{min-height:58px;max-height:92px;resize:vertical;overflow:auto;overscroll-behavior:contain}
 	.qwen-te-panel__advanced-note{font-size:9.5px;line-height:1.35;color:#8395ad}
 	.qwen-te-panel__slots{display:flex;flex-direction:column;gap:7px;max-height:clamp(280px,52vh,480px);overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;scrollbar-gutter:stable;border:1px solid rgba(84,104,131,.54);border-radius:16px;background:linear-gradient(180deg,rgba(18,25,34,.98),rgba(11,16,23,.99));padding:9px 7px 9px 9px;box-shadow:inset 0 1px 0 rgba(255,255,255,.03),0 12px 24px rgba(0,0,0,.16)}
@@ -1609,6 +1636,10 @@ function injectStyles() {
 	.qwen-te-model__section-value{font-size:10px;color:#f1d498;line-height:1.25;text-align:right;max-width:58%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 	.qwen-te-model__select-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:6px}
 	.qwen-te-model__select{border:1px solid rgba(76,96,122,.78);border-radius:10px;background:linear-gradient(180deg,rgba(35,47,61,.96),rgba(21,30,40,.98));color:#eaf2ff;font-size:10px;line-height:1.2;padding:6px 8px;min-width:0}
+	.qwen-te-panel__slot-select,.qwen-te-model__select{color-scheme:dark}
+	.qwen-te-panel__slot-select option,.qwen-te-panel__slot-select optgroup,.qwen-te-model__select option,.qwen-te-model__select optgroup{background-color:#101923!important;color:#e6f0ff!important}
+	.qwen-te-panel__slot-select option:checked,.qwen-te-model__select option:checked{background-color:#493819!important;color:#fff0ca!important}
+	.qwen-te-panel__slot-select option:disabled,.qwen-te-model__select option:disabled{background-color:#101923!important;color:#78889b!important}
 	.qwen-te-model__api-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
 	.qwen-te-model__input{border:1px solid rgba(76,96,122,.78);border-radius:10px;background:linear-gradient(180deg,rgba(14,19,26,.98),rgba(9,13,18,.99));color:#eaf2ff;font-size:10px;line-height:1.3;padding:7px 9px;min-width:0;outline:none}
 	textarea.qwen-te-model__input{min-height:58px;resize:vertical;font-family:Consolas,"Cascadia Code","SFMono-Regular",monospace}
@@ -1846,7 +1877,7 @@ function injectStyles() {
 	.qwen-te-online-search__card:disabled{cursor:not-allowed;opacity:.48}
 	.qwen-te-online-search__result-route{font-size:10px;line-height:1.2;color:#78a889;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 	.qwen-te-online-search__card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
-	.qwen-te-online-search__card-name{min-width:0;font-size:16px;font-weight:600;line-height:1.3;letter-spacing:0;color:#8ab4f8;word-break:break-word}
+	.qwen-te-online-search__card-name{min-width:0;font-size:13px;font-weight:600;line-height:1.45;letter-spacing:0;color:#8ab4f8;word-break:break-word;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 	.qwen-te-online-search__result-badges{flex:0 0 auto;margin:0}
 	.qwen-te-online-search__result-badges .qwen-te-modal__content-pill{border-radius:4px;padding:3px 6px;font-size:9.5px}
 	.qwen-te-online-search__card-summary{font-size:11px;line-height:1.45;color:#aab5c2;white-space:normal}
@@ -1945,6 +1976,14 @@ function injectStyles() {
 	.qwen-te-modal[data-qwen-modal="preset-manager"] .qwen-te-preset-card__action-row{gap:6px}
 	.qwen-te-modal[data-qwen-modal="preset-manager"] .qwen-te-preset-card__action-row--primary{grid-template-columns:repeat(auto-fit,minmax(96px,1fr))}
 	.qwen-te-modal[data-qwen-modal="preset-manager"] .qwen-te-preset-card__action-row--danger{grid-template-columns:repeat(2,minmax(0,1fr))}
+	.qwen-te-modal[data-qwen-modal="preset-manager"] .qwen-te-preset-card__editor{display:flex;flex-direction:column;gap:9px;padding:10px;border:1px solid rgba(180,138,67,.58);border-radius:10px;background:linear-gradient(180deg,rgba(42,34,22,.9),rgba(24,27,33,.98))}
+	.qwen-te-modal[data-qwen-modal="preset-manager"] .qwen-te-preset-card__editor-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:9px}
+	.qwen-te-modal[data-qwen-modal="preset-manager"] .qwen-te-preset-card__editor-field{display:flex;flex-direction:column;gap:5px;min-width:0}
+	.qwen-te-modal[data-qwen-modal="preset-manager"] .qwen-te-preset-card__editor-field--wide{grid-column:1/-1}
+	.qwen-te-modal[data-qwen-modal="preset-manager"] .qwen-te-preset-card__editor-label{font-size:10.5px;font-weight:700;color:#e8d4ab}
+	.qwen-te-modal[data-qwen-modal="preset-manager"] .qwen-te-preset-card__editor-help{font-size:10px;line-height:1.4;color:#9fb1c8}
+	.qwen-te-modal[data-qwen-modal="preset-manager"] .qwen-te-preset-card__editor-textarea{min-height:168px;font-family:Consolas,"Cascadia Code","SFMono-Regular",monospace;font-size:11px;line-height:1.45}
+	.qwen-te-modal[data-qwen-modal="preset-manager"] .qwen-te-preset-card__editor-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
 	.qwen-te-modal[data-qwen-modal="preset-manager"] .qwen-te-preset-card__header{align-items:flex-start}
 	.qwen-te-modal[data-qwen-modal="preset-manager"] .qwen-te-preset-card__select{min-width:84px}
 	.qwen-te-modal[data-qwen-modal="preset-manager"] .qwen-te-preset-card__name{font-size:13px}
@@ -2083,6 +2122,8 @@ function injectStyles() {
 		.qwen-te-preset-card__detail-item strong{color:#fff4df}
 	@media (max-width: 1180px){
 		.qwen-te-modal[data-qwen-modal="preset-manager"] .qwen-te-modal__batch-dashboard{grid-template-columns:minmax(0,1fr)}
+		.qwen-te-modal[data-qwen-modal="preset-manager"] .qwen-te-preset-card__editor-grid{grid-template-columns:minmax(0,1fr)}
+		.qwen-te-modal[data-qwen-modal="preset-manager"] .qwen-te-preset-card__editor-field--wide{grid-column:auto}
 		.qwen-te-modal[data-qwen-modal="preset-manager"] .qwen-te-modal__toolbar-row--preset-run{grid-template-columns:repeat(3,minmax(0,1fr))}
 		.qwen-te-modal[data-qwen-modal="preset-manager"] .qwen-te-modal__toolbar-row--preset-export{grid-template-columns:repeat(3,minmax(0,1fr))}
 	}
@@ -2275,6 +2316,48 @@ function normalizeOnlineSearchSamples(rawSamples, maxItems = 6) {
 		if (samples.length >= limit) break;
 	}
 	return samples;
+}
+
+function normalizeOnlinePromptItems(rawItems, rawSamples = [], maxItems = 16) {
+    const limit = Math.max(1, Math.min(16, Math.trunc(Number(maxItems) || 16)));
+    const sourceItems = Array.isArray(rawItems) && rawItems.length ? rawItems : Array.from(rawSamples ?? []);
+    const items = [];
+    const seen = new Set();
+    for (const [index, rawItem] of sourceItems.entries()) {
+        const rawPrompt = typeof rawItem === "string"
+            ? rawItem
+            : (rawItem?.prompt ?? rawItem?.text ?? rawItem?.sample ?? "");
+        const prompt = String(rawPrompt ?? "").trim().replace(/\s+/gu, " ").slice(0, 1200);
+        const key = getOnlineSearchCanonicalKey(prompt);
+        if (!key || seen.has(key) || prompt.length < 8 || isOnlineNoiseTag(prompt)) continue;
+        seen.add(key);
+        const source = String(typeof rawItem === "object" ? rawItem?.source ?? "" : "").trim() || "unknown";
+        const sourceLabel = String(typeof rawItem === "object" ? rawItem?.source_label ?? "" : "").trim()
+            || (source.includes("local_fallback") ? "本地回退" : source);
+        const confidence = Math.max(0, Math.min(1, Number(typeof rawItem === "object" ? rawItem?.confidence ?? 0.62 : 0.62) || 0.62));
+        const segmentCount = Math.max(
+            1,
+            Number(typeof rawItem === "object" ? rawItem?.segment_count ?? 0 : 0)
+                || parseCustomTags(prompt).length
+                || 1,
+        );
+        items.push({
+            id: String(typeof rawItem === "object" ? rawItem?.id ?? "" : "").trim() || key,
+            prompt,
+            tag: prompt,
+            confidence,
+            group: sourceLabel || "搜索结果",
+            section: prompt.length >= 180 ? "详细提示词" : "精简提示词",
+            exists: false,
+            source,
+            sourceLabel,
+            count: segmentCount,
+            length: Math.max(prompt.length, Number(typeof rawItem === "object" ? rawItem?.length ?? 0 : 0) || 0),
+            rank: Math.max(1, Number(typeof rawItem === "object" ? rawItem?.rank ?? index + 1 : index + 1) || index + 1),
+        });
+        if (items.length >= limit) break;
+    }
+    return items;
 }
 
 function formatOnlineSearchWarning(rawWarning) {
@@ -2549,6 +2632,68 @@ async function launchPromptCompanionBrowser(rawTarget, options = {}) {
 	}
 }
 
+function resolveEmbeddedBrowserViewport(rect, options = {}) {
+    const sourceWidth = Number(rect?.width);
+    const sourceHeight = Number(rect?.height);
+    const minWidth = Math.max(480, Math.trunc(Number(options.minWidth) || 640));
+    const minHeight = Math.max(270, Math.trunc(Number(options.minHeight) || 360));
+    const maxWidth = Math.max(minWidth, Math.trunc(Number(options.maxWidth) || 1600));
+    const maxHeight = Math.max(minHeight, Math.trunc(Number(options.maxHeight) || 900));
+    const fallbackWidth = Math.max(minWidth, Math.min(maxWidth, Math.trunc(Number(options.fallbackWidth) || 1280)));
+    const fallbackHeight = Math.max(minHeight, Math.min(maxHeight, Math.trunc(Number(options.fallbackHeight) || 720)));
+    if (![sourceWidth, sourceHeight].every((value) => Number.isFinite(value) && value > 0)) {
+        return { width: fallbackWidth, height: fallbackHeight };
+    }
+    const aspect = sourceWidth / sourceHeight;
+    let width = Math.max(minWidth, Math.min(maxWidth, Math.round(sourceWidth)));
+    let height = Math.round(width / aspect);
+    if (height > maxHeight) {
+        height = maxHeight;
+        width = Math.round(height * aspect);
+    }
+    if (height < minHeight) {
+        height = minHeight;
+        width = Math.round(height * aspect);
+    }
+    if (width > maxWidth) {
+        width = maxWidth;
+        height = Math.round(width / aspect);
+    }
+    if (width < minWidth) {
+        width = minWidth;
+        height = Math.round(width / aspect);
+    }
+    return {
+        width: Math.max(minWidth, Math.min(maxWidth, width)),
+        height: Math.max(minHeight, Math.min(maxHeight, height)),
+    };
+}
+function getEmbeddedBrowserFrameCaptureProfile(rect, options = {}) {
+	const fast = !!options.fast;
+	const hasFrame = !!options.hasFrame;
+	const settled = !!options.pageReady && hasFrame && !fast;
+	const viewport = resolveEmbeddedBrowserViewport(rect, settled ? {
+		minWidth: 720,
+		minHeight: 405,
+		maxWidth: 1600,
+		maxHeight: 900,
+		fallbackWidth: 1440,
+		fallbackHeight: 810,
+	} : {
+		minWidth: 560,
+		minHeight: 315,
+		maxWidth: 1120,
+		maxHeight: 630,
+		fallbackWidth: 1120,
+		fallbackHeight: 630,
+	});
+	return {
+		maxWidth: viewport.width,
+		maxHeight: viewport.height,
+		quality: settled ? 78 : (hasFrame ? 62 : 66),
+		profile: settled ? "sharp" : "fast",
+	};
+}
 function mapEmbeddedBrowserPointerPoint(clientX, clientY, rect, frameWidth, frameHeight, viewportWidth, viewportHeight) {
 	const box = rect ?? {};
 	const rectWidth = Number(box.width);
@@ -2609,6 +2754,9 @@ async function fetchEmbeddedPromptBrowserFrame(sessionId, options = {}) {
 		body: JSON.stringify({
 			session_id: String(sessionId ?? ""),
 			previous_frame_id: previousFrameId,
+            max_width: Math.max(480, Math.min(1280, Math.trunc(Number(options.maxWidth) || 1120))),
+            max_height: Math.max(270, Math.min(720, Math.trunc(Number(options.maxHeight) || 630))),
+            quality: Math.max(40, Math.min(85, Math.trunc(Number(options.quality) || 58))),
 		}),
 		cache: "no-store",
 	}, {
@@ -2756,39 +2904,55 @@ function resolveOnlineSearchSelectedTags(candidateItems, selectedTags, options =
 }
 
 async function searchOnlinePromptTags(query, limit = 24, options = {}) {
-	const normalized = String(query ?? "").trim();
-	if (!normalized) return { tags: [], tagItems: [], samples: [], source: "none", message: "请输入关键词后再搜索。" };
-	const data = await mutateTagLibrary("/qwen_te/tag_library/online_search", { query: normalized, limit }, {
-		...options,
-		timeoutMs: options.timeoutMs ?? 90000,
-	});
-	const rawItems = Array.isArray(data?.tag_items) ? data.tag_items : [];
-	const normalizedItems = normalizeOnlineSearchTagItems(rawItems, limit);
-	const fallbackItems = normalizeOnlineSearchTagItems(
-		parseCustomTags((data?.tags ?? []).join(", ")).map((tag, index) => ({
-		tag,
-		count: Math.max(1, normalizedItems.length - index),
-		confidence: 0.55,
-		group: "",
-		section: "",
-		exists: false,
-		source: "legacy_tags",
-		})),
-		limit,
-	);
-	const tagItems = normalizedItems.length ? normalizedItems : fallbackItems;
-	const tags = tagItems.map((item) => item.tag);
-	return {
-		tags,
-		tagItems,
-		samples: normalizeOnlineSearchSamples(Array.isArray(data?.samples) ? data.samples : [], 6),
-		source: String(data?.source ?? "unknown"),
-		message: String(data?.message ?? ""),
-		warning: String(data?.warning ?? ""),
-		cached: !!data?.cached,
-	};
+    const normalized = String(query ?? "").trim();
+    if (!normalized) return { prompts: [], promptItems: [], tags: [], tagItems: [], samples: [], source: "none", message: "请输入主题或提示词后再搜索。" };
+    const data = await mutateTagLibrary("/qwen_te/tag_library/online_search", { query: normalized, limit }, {
+        ...options,
+        timeoutMs: options.timeoutMs ?? 90000,
+    });
+    const rawItems = Array.isArray(data?.tag_items) ? data.tag_items : [];
+    const normalizedItems = normalizeOnlineSearchTagItems(rawItems, limit);
+    const fallbackItems = normalizeOnlineSearchTagItems(
+        parseCustomTags((data?.tags ?? []).join(", ")).map((tag, index) => ({
+            tag,
+            count: Math.max(1, normalizedItems.length - index),
+            confidence: 0.55,
+            group: "",
+            section: "",
+            exists: false,
+            source: "legacy_tags",
+        })),
+        limit,
+    );
+    const tagItems = normalizedItems.length ? normalizedItems : fallbackItems;
+    const tags = tagItems.map((item) => item.tag);
+    const samples = normalizeOnlineSearchSamples(
+        Array.isArray(data?.prompts) && data.prompts.length ? data.prompts : (Array.isArray(data?.samples) ? data.samples : []),
+        12,
+    );
+    let promptItems = normalizeOnlinePromptItems(
+        Array.isArray(data?.prompt_items) ? data.prompt_items : [],
+        samples,
+        Math.min(16, limit),
+    );
+    if (!promptItems.length && tags.length) {
+        promptItems = normalizeOnlinePromptItems([], [tags.join(", ")], 1);
+    }
+    return {
+        prompts: promptItems.map((item) => item.prompt),
+        promptItems,
+        tags,
+        tagItems,
+        samples: promptItems.map((item) => item.prompt),
+        source: String(data?.source ?? "unknown"),
+        message: String(data?.message ?? ""),
+        warning: String(data?.warning ?? ""),
+        cached: !!data?.cached,
+    };
 }
-
+async function searchOnlinePrompts(query, limit = 24, options = {}) {
+    return searchOnlinePromptTags(query, limit, options);
+}
 async function requestQualityAudit(payload = {}, options = {}) {
 	const { response, data } = await fetchJsonWithTimeout("/qwen_te/quality_audit", {
 		method: "POST",
@@ -3833,6 +3997,115 @@ function saveUserPreset(name, state, options = {}) {
 	const bounded = boundUserPresets(presets);
 	if (!bounded.some((item) => item.id === nextPreset.id)) return false;
 	return setUserPresets(bounded);
+}
+
+
+function updateUserPreset(id, changes = {}) {
+	const presetId = String(id ?? "").trim();
+	if (!presetId) return { ok: false, reason: "missing-id" };
+	const presets = getUserPresets();
+	const index = presets.findIndex((item) => String(item.id ?? "") === presetId);
+	if (index < 0) return { ok: false, reason: "not-found" };
+	const existing = presets[index];
+	const nextName = String(changes.name ?? existing.name ?? "").trim();
+	if (!nextName || nextName.length > USER_PRESET_NAME_MAX_CHARS) return { ok: false, reason: "invalid-name" };
+	const duplicate = presets.some((item, itemIndex) => (
+		itemIndex !== index
+		&& String(item.name ?? "").trim().toLowerCase() === nextName.toLowerCase()
+	));
+	if (duplicate) return { ok: false, reason: "duplicate-name" };
+	const nextPreset = normalizeUserPresetItem({
+		...existing,
+		name: nextName,
+		state: clonePresetState(changes.state ?? existing.state),
+		updatedAt: Date.now(),
+	});
+	if (!nextPreset || utf8ByteLength(nextPreset) > USER_PRESET_ITEM_MAX_BYTES) {
+		return { ok: false, reason: "too-large" };
+	}
+	const nextPresets = [...presets];
+	nextPresets.splice(index, 1, nextPreset);
+	const bounded = boundUserPresets(nextPresets);
+	if (!bounded.some((item) => String(item.id ?? "") === presetId)) return { ok: false, reason: "capacity" };
+	if (!setUserPresets(bounded)) return { ok: false, reason: "storage" };
+	return { ok: true, preset: bounded.find((item) => String(item.id ?? "") === presetId) ?? nextPreset };
+}
+
+function formatPresetSelectionEditorText(state, library) {
+	const lines = [];
+	for (const group of library?.slot_config ?? []) {
+		const groupName = String(group?.name ?? "").trim();
+		if (!groupName) continue;
+		const values = uniqueTextList(state?.selected?.[groupName] ?? []);
+		lines.push(`${groupName}: ${values.join(", ")}`);
+	}
+	lines.push(`自定义补充标签: ${uniqueTextList(state?.customTags ?? []).join(", ")}`);
+	return lines.join("\n");
+}
+
+function parsePresetSelectionEditorText(rawText, library) {
+	const groups = (library?.slot_config ?? []).map((group) => String(group?.name ?? "").trim()).filter(Boolean);
+	const groupSet = new Set(groups);
+	const selected = Object.fromEntries(groups.map((groupName) => [groupName, []]));
+	const customTags = [];
+	const errors = [];
+	const lines = String(rawText ?? "").split(/\r?\n/u);
+	for (let index = 0; index < lines.length; index += 1) {
+		const line = lines[index].trim();
+		if (!line) continue;
+		const separatorIndex = line.search(/[:：]/u);
+		if (separatorIndex < 0) {
+			for (const tag of parseCustomTags(line)) addUniqueTag(customTags, tag);
+			continue;
+		}
+		const label = line.slice(0, separatorIndex).trim();
+		const values = parseCustomTags(line.slice(separatorIndex + 1));
+		if (label === "自定义补充标签" || label === "自定义标签") {
+			for (const tag of values) addUniqueTag(customTags, tag);
+			continue;
+		}
+		if (!groupSet.has(label)) {
+			errors.push(`第 ${index + 1} 行包含未知分组：${label}`);
+			continue;
+		}
+		for (const tag of values) addUniqueTag(selected[label], tag);
+	}
+	return errors.length ? { ok: false, error: errors.join("；") } : { ok: true, selected, customTags };
+}
+
+function formatPresetSettingsEditorText(state) {
+	try { return JSON.stringify(state?.settings ?? {}, null, 2); } catch (_error) { return "{}"; }
+}
+
+function parsePresetSettingsEditorText(rawText) {
+	let parsed;
+	try {
+		parsed = JSON.parse(String(rawText ?? "").trim() || "{}");
+	} catch (error) {
+		return { ok: false, error: `设置 JSON 格式错误：${error?.message ?? error}` };
+	}
+	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+		return { ok: false, error: "设置 JSON 必须是对象。" };
+	}
+	const settings = {};
+	for (const [rawKey, value] of Object.entries(parsed)) {
+		const key = String(rawKey ?? "").trim();
+		if (!key || key.length > 128 || ["__proto__", "prototype", "constructor"].includes(key)) continue;
+		settings[key] = value;
+	}
+	return { ok: true, settings };
+}
+
+function buildEditedPresetState(baseState, library, selectionText, settingsText) {
+	const selectionResult = parsePresetSelectionEditorText(selectionText, library);
+	if (!selectionResult.ok) return selectionResult;
+	const settingsResult = parsePresetSettingsEditorText(settingsText);
+	if (!settingsResult.ok) return settingsResult;
+	const nextState = clonePresetState(baseState ?? {});
+	nextState.selected = selectionResult.selected;
+	nextState.customTags = selectionResult.customTags;
+	nextState.settings = settingsResult.settings;
+	return { ok: true, state: nextState };
 }
 
 function parsePercentText(value) {
@@ -7844,11 +8117,19 @@ function normalizeControlOption(option) {
 }
 
 function getAdvancedWidgetOptions(node, name) {
-	const configured = CONTROL_WIDGET_OPTIONS[name];
-	if (Array.isArray(configured)) return configured.map(normalizeControlOption);
-	const widgetValues = getWidgetOptions(node, name);
-	if (widgetValues.length && widgetValues.length <= 12) return widgetValues.map(normalizeControlOption);
-	return [];
+	const configured = Array.isArray(CONTROL_WIDGET_OPTIONS[name])
+		? CONTROL_WIDGET_OPTIONS[name].map(normalizeControlOption)
+		: [];
+	const widgetOptions = getWidgetOptions(node, name).map(normalizeControlOption);
+	const merged = [];
+	const seen = new Set();
+	for (const option of [...configured, ...widgetOptions]) {
+		const key = `${typeof option.value}:${String(option.value)}`;
+		if (seen.has(key)) continue;
+		seen.add(key);
+		merged.push(option);
+	}
+	return merged;
 }
 
 function getAdvancedOptionColumnCount(name, options) {
@@ -7877,6 +8158,37 @@ function createAdvancedChip(node, name, label, value, hint = "") {
 		if (setControlWidgetValue(node, name, value)) setNodeStatusText(node, hint ? `${name} 已设为 ${String(value)}。${String(hint)}` : `${name} 已设为 ${String(value)}。`);
 	});
 	return button;
+}
+
+function createAdvancedSelect(node, name, options) {
+	const select = document.createElement("select");
+	select.className = "qwen-te-panel__advanced-select";
+	select.dataset.widgetName = name;
+	const widget = getWidget(node, name);
+	const currentValue = String(widget?.value ?? "");
+	const normalizedOptions = [...options];
+	if (currentValue && !normalizedOptions.some((option) => String(option.value) === currentValue)) {
+		normalizedOptions.unshift({ value: currentValue, label: currentValue, hint: "当前工作流中的兼容值" });
+	}
+	for (const option of normalizedOptions) {
+		const optionEl = document.createElement("option");
+		optionEl.value = String(option.value);
+		optionEl.textContent = String(option.label ?? option.value);
+		if (option.hint) optionEl.title = String(option.hint);
+		select.appendChild(optionEl);
+	}
+	select.value = currentValue;
+	for (const eventName of ["pointerdown", "mousedown", "click", "wheel"]) {
+		select.addEventListener(eventName, stopCanvasTextInputEvent, { passive: eventName !== "wheel" });
+	}
+	select.addEventListener("change", () => {
+		const matched = normalizedOptions.find((option) => String(option.value) === select.value);
+		const nextValue = matched?.value ?? select.value;
+		if (setControlWidgetValue(node, name, nextValue)) {
+			setNodeStatusText(node, `${name} 已设为 ${String(nextValue)}。${matched?.hint ? String(matched.hint) : ""}`);
+		}
+	});
+	return select;
 }
 
 function bindAdvancedTextInputEvents(input, node, name) {
@@ -7967,7 +8279,9 @@ function buildAdvancedPanel(node) {
 			const valueEl = document.createElement("div");
 			valueEl.className = "qwen-te-panel__advanced-value";
 			const options = getAdvancedWidgetOptions(node, name);
-			if (options.length) {
+			if (options.length > 12) {
+				valueEl.appendChild(createAdvancedSelect(node, name, options));
+			} else if (options.length) {
 				const optionGrid = document.createElement("div");
 				optionGrid.className = "qwen-te-panel__advanced-options";
 				optionGrid.style.setProperty("--qwen-te-advanced-cols", String(getAdvancedOptionColumnCount(name, options)));
@@ -8197,6 +8511,9 @@ function refreshAdvancedPanel(node, options = {}) {
 		if (!name || !widget) continue;
 		for (const chip of row.querySelectorAll?.(".qwen-te-panel__advanced-chip") ?? []) {
 			chip.classList.toggle("is-active", String(widget.value ?? "") === String(chip.dataset?.widgetValue ?? ""));
+		}
+		for (const select of row.querySelectorAll?.(".qwen-te-panel__advanced-select") ?? []) {
+			select.value = String(widget.value ?? "");
 		}
 		for (const input of row.querySelectorAll?.(".qwen-te-panel__advanced-input") ?? []) {
 			if (!force && document.activeElement === input) continue;
@@ -10421,13 +10738,13 @@ function mapNsfwWorkspaceToStageState(node, library, workspace, catalogOrNegativ
 		? effectiveWorkspace.trigger_words.map((item) => String(item ?? "").trim()).filter(Boolean)
 		: parseCustomTags(effectiveWorkspace?.trigger_words ?? "");
 	const textFields = ["workspace_custom_tags", "selector_character", "selector_outfit", "selector_action", "selector_scene", "selector_expression", "selector_prop", "scene", "action", "outfit", "mood", "anatomy_terms", "explicit_terms", "adult_action_style", "camera_movement", "camera_angle", "light_source", "light_type", "lens_type", "focal_length", "color_tone", "visual_style", "effect", "filter", "custom_prefix", "custom_suffix"];
+	for (const tag of triggerWords) pushMappedTerms(tag);
+	for (const field of textFields) pushMappedTerms(effectiveWorkspace?.[field], field.startsWith("selector_"));
 	for (const tag of catalog.qualityTags?.[effectiveWorkspace.quality_tier] ?? []) {
 		const text = String(tag ?? "").trim();
 		if (text && !customTags.includes(text)) customTags.push(text);
 		pushGeneratedTerm(text);
 	}
-	for (const tag of triggerWords) pushMappedTerms(tag);
-	for (const field of textFields) pushMappedTerms(effectiveWorkspace?.[field], field.startsWith("selector_"));
 	const negativePrompt = resolveNsfwNegativePrompt(effectiveWorkspace, catalog.negativePresets);
 	const negative = {
 		mode: String(effectiveWorkspace?.negative_apply_mode ?? "preview").trim() || "preview",
@@ -11831,20 +12148,40 @@ function injectStageExample(node, library, statusEl) {
 	return true;
 }
 
-function cloneRewriteSubjectSceneState(currentState, library, excludeSet = new Set()) {
+const REWRITE_MAINLINE_PERSON_GROUPS = new Set(["主体", "场景背景", "服装造型", "动作姿态", "道具世界观"]);
+const REWRITE_MAINLINE_NON_PERSON_GROUPS = new Set(["主体", "场景背景", "道具世界观"]);
+
+function getRewriteMainlineGroupSet(currentState) {
+	const subjectType = String(currentState?.settings?.["主体类型解析结果"] ?? currentState?.settings?.["主体类型"] ?? "自动").trim();
+	return subjectType === "非人物主体" ? REWRITE_MAINLINE_NON_PERSON_GROUPS : REWRITE_MAINLINE_PERSON_GROUPS;
+}
+
+function getRewriteMainlineAdditionCap(groupName, intensity, themePool = "自动") {
+	if (String(themePool ?? "").trim() && String(themePool ?? "").trim() !== "自动") return 1;
+	const caps = {
+		主体: { 弱: 1, 中: 2, 强: 3 },
+		场景背景: { 弱: 1, 中: 2, 强: 3 },
+		服装造型: { 弱: 1, 中: 2, 强: 3 },
+		动作姿态: { 弱: 1, 中: 1, 强: 2 },
+		道具世界观: { 弱: 1, 中: 1, 强: 2 },
+	};
+	return Number(caps[groupName]?.[intensity] ?? 0);
+}
+
+function cloneRewriteMainlineState(currentState, library, excludeSet = new Set()) {
 	const selected = Object.fromEntries((library.slot_config ?? []).map((group) => [group.name, []]));
 	const tagGroupIndex = buildTagGroupIndex(library);
+	const rewriteGroups = getRewriteMainlineGroupSet(currentState);
 	for (const group of library.slot_config ?? []) {
-		if (group.name === "主体" || group.name === "场景背景") continue;
+		if (rewriteGroups.has(group.name)) continue;
 		const source = Array.isArray(currentState.selected?.[group.name]) ? currentState.selected[group.name] : [];
 		selected[group.name] = source.filter((tag) => tag && !excludeSet.has(tag)).slice(0, Number(group.slots ?? source.length ?? 0));
 	}
 	const customTags = (currentState.customTags ?? []).filter((tag) => {
 		if (!tag || excludeSet.has(tag)) return false;
-		const groupName = tagGroupIndex.get(tag);
-		return groupName !== "主体" && groupName !== "场景背景";
+		return !rewriteGroups.has(tagGroupIndex.get(tag));
 	});
-	return { selected, customTags: uniqueTextList(customTags) };
+	return { selected, customTags: uniqueTextList(customTags), rewriteGroups };
 }
 
 function countSettingTags(raw) {
@@ -11923,20 +12260,21 @@ function buildRandomStateLocal(node, library, sourceState = null) {
 	const preservedCoreState = randomMode === "保留已选核心标签"
 		? cloneCoreStateWithLimit(currentState, library, lockedCount, whitelist, excludeSet)
 		: randomMode === "重写主体与场景"
-			? cloneRewriteSubjectSceneState(currentState, library, excludeSet)
+			? cloneRewriteMainlineState(currentState, library, excludeSet)
 			: { selected: Object.fromEntries((library.slot_config ?? []).map((group) => [group.name, []])), customTags: [] };
 	const state = { selected: preservedCoreState.selected, customTags: [...preservedCoreState.customTags], settings: { ...currentState.settings } };
 	if (currentState.nsfwWorkspace) state.nsfwWorkspace = cloneNsfwWorkspaceState(currentState.nsfwWorkspace);
 	const preservedFlatTags = [...Object.values(preservedCoreState.selected).flatMap((tags) => tags ?? []), ...preservedCoreState.customTags];
+	const rewriteGroups = randomMode === "重写主体与场景" ? getRewriteMainlineGroupSet(currentState) : new Set();
 	for (const group of library.slot_config ?? []) {
-		if (randomMode === "重写主体与场景" && group.name !== "主体" && group.name !== "场景背景") continue;
+		if (randomMode === "重写主体与场景" && !rewriteGroups.has(group.name)) continue;
 		const allTags = flattenUniqueTags(library.tag_library?.[group.name]);
 		const current = state.selected[group.name] ?? [];
 		const limit = Number(group.slots ?? 0);
 		for (const tag of whitelist) {
 			if (allTags.includes(tag) && !current.includes(tag) && current.length < limit) current.push(tag);
 		}
-		const rewriteSourceTags = randomMode === "重写主体与场景" && (group.name === "主体" || group.name === "场景背景")
+		const rewriteSourceTags = randomMode === "重写主体与场景" && rewriteGroups.has(group.name)
 			? new Set((currentState.selected?.[group.name] ?? []).filter(Boolean))
 			: new Set();
 		let pool = allTags.filter((tag) => !current.includes(tag) && !shouldSkipRandomTag(tag, whitelistSet, excludeSet) && !rewriteSourceTags.has(tag));
@@ -11945,12 +12283,17 @@ function buildRandomStateLocal(node, library, sourceState = null) {
 		}
 		const dedupedPool = pool.filter((tag) => !previousSupplementSet.has(tag));
 		const effectivePool = dedupedPool.length ? dedupedPool : pool;
-		while (current.length < limit && effectivePool.length) {
+		const rewriteAdditionCap = randomMode === "重写主体与场景"
+			? getRewriteMainlineAdditionCap(group.name, randomIntensity, currentState.settings["随机主题池"])
+			: Number.POSITIVE_INFINITY;
+		let additions = 0;
+		while (current.length < limit && effectivePool.length && additions < rewriteAdditionCap) {
 			const tag = randomItem(effectivePool);
 			addUniqueTag(current, tag);
 			effectivePool.splice(effectivePool.indexOf(tag), 1);
-			if (randomIntensity === "弱" && current.length >= 1) break;
-			if (randomIntensity === "中" && current.length >= Math.min(2, limit)) break;
+			additions += 1;
+			if (randomMode !== "重写主体与场景" && randomIntensity === "弱" && current.length >= 1) break;
+			if (randomMode !== "重写主体与场景" && randomIntensity === "中" && current.length >= Math.min(2, limit)) break;
 		}
 		state.selected[group.name] = current;
 	}
@@ -11989,7 +12332,7 @@ async function buildRandomState(node, library, sourceState = null) {
 			settings: { ...currentState.settings },
 		};
 	} else if (randomMode === "重写主体与场景") {
-		const rewrittenState = cloneRewriteSubjectSceneState(currentState, library, excludeSet);
+		const rewrittenState = cloneRewriteMainlineState(currentState, library, excludeSet);
 		requestState = {
 			selected: cloneSelection(rewrittenState.selected),
 			customTags: [...rewrittenState.customTags],
@@ -12201,7 +12544,7 @@ function openPresetManager(node, library) {
 	const listSurfaceHead = document.createElement("div"); listSurfaceHead.className = "qwen-te-modal__surface-head"; listSurface.appendChild(listSurfaceHead);
 	const listSurfaceHeadText = document.createElement("div"); listSurfaceHead.appendChild(listSurfaceHeadText);
 	const listSurfaceTitle = document.createElement("div"); listSurfaceTitle.className = "qwen-te-modal__surface-title"; listSurfaceTitle.textContent = "预设结果"; listSurfaceHeadText.appendChild(listSurfaceTitle);
-	const listSurfaceDesc = document.createElement("div"); listSurfaceDesc.className = "qwen-te-modal__surface-desc"; listSurfaceDesc.textContent = "每个预设只保留高频动作：载入、运行、置顶、删除。"; listSurfaceHeadText.appendChild(listSurfaceDesc);
+	const listSurfaceDesc = document.createElement("div"); listSurfaceDesc.className = "qwen-te-modal__surface-desc"; listSurfaceDesc.textContent = "可载入、运行或直接修改已保存的标签与参数。"; listSurfaceHeadText.appendChild(listSurfaceDesc);
 	const list = document.createElement("div"); list.className = "qwen-te-preset-list qwen-te-modal__list-scroll"; listSurface.appendChild(list);
 	const reportSurface = document.createElement("section"); reportSurface.className = "qwen-te-modal__surface"; workspaceSide.appendChild(reportSurface);
 	reportSurface.classList.add("qwen-te-hidden");
@@ -12227,6 +12570,7 @@ function openPresetManager(node, library) {
 	let activeSort = "updated_desc";
 	const filterButtons = new Map();
 	const expandedPresetIds = new Set();
+	let editingPresetId = "";
 	const initialBatchState = getNodePresetBatchState(node);
 	const selectedPresetIds = new Set(initialBatchState.selectedIds);
 		let batchLoadCursor = 0;
@@ -12588,6 +12932,97 @@ function openPresetManager(node, library) {
 				s.className = "qwen-te-preset-card__summary";
 				s.textContent = buildUserPresetSummaryText(preset);
 				card.appendChild(s);
+
+				const isEditingPreset = editingPresetId === presetId;
+				if (isEditingPreset) {
+					let editorBaseState = clonePresetState(preset.state);
+					const editor = document.createElement("div");
+					editor.className = "qwen-te-preset-card__editor";
+					card.appendChild(editor);
+					const editorHelp = document.createElement("div");
+					editorHelp.className = "qwen-te-preset-card__editor-help";
+					editorHelp.textContent = "按“分组: 标签1, 标签2”修改标签；设置区使用 JSON。NSFW、设定图等附加状态会保留，抓取当前节点时会一起替换。";
+					editor.appendChild(editorHelp);
+					const editorGrid = document.createElement("div");
+					editorGrid.className = "qwen-te-preset-card__editor-grid";
+					editor.appendChild(editorGrid);
+					const nameField = document.createElement("label");
+					nameField.className = "qwen-te-preset-card__editor-field qwen-te-preset-card__editor-field--wide";
+					editorGrid.appendChild(nameField);
+					const nameLabel = document.createElement("span");
+					nameLabel.className = "qwen-te-preset-card__editor-label";
+					nameLabel.textContent = "预设名称";
+					nameField.appendChild(nameLabel);
+					const editNameInput = document.createElement("input");
+					editNameInput.className = "qwen-te-modal__search";
+					editNameInput.maxLength = USER_PRESET_NAME_MAX_CHARS;
+					editNameInput.value = String(preset.name ?? "");
+					nameField.appendChild(editNameInput);
+					const tagField = document.createElement("label");
+					tagField.className = "qwen-te-preset-card__editor-field";
+					editorGrid.appendChild(tagField);
+					const tagLabel = document.createElement("span");
+					tagLabel.className = "qwen-te-preset-card__editor-label";
+					tagLabel.textContent = "分组标签与自定义标签";
+					tagField.appendChild(tagLabel);
+					const tagEditor = document.createElement("textarea");
+					tagEditor.className = "qwen-te-modal__textarea qwen-te-preset-card__editor-textarea";
+					tagEditor.value = formatPresetSelectionEditorText(editorBaseState, library);
+					tagField.appendChild(tagEditor);
+					const settingsField = document.createElement("label");
+					settingsField.className = "qwen-te-preset-card__editor-field";
+					editorGrid.appendChild(settingsField);
+					const settingsLabel = document.createElement("span");
+					settingsLabel.className = "qwen-te-preset-card__editor-label";
+					settingsLabel.textContent = "预设参数 JSON";
+					settingsField.appendChild(settingsLabel);
+					const settingsEditor = document.createElement("textarea");
+					settingsEditor.className = "qwen-te-modal__textarea qwen-te-preset-card__editor-textarea";
+					settingsEditor.value = formatPresetSettingsEditorText(editorBaseState);
+					settingsField.appendChild(settingsEditor);
+					const editorActions = document.createElement("div");
+					editorActions.className = "qwen-te-preset-card__editor-actions";
+					editor.appendChild(editorActions);
+					const captureCurrent = document.createElement("button");
+					captureCurrent.className = "qwen-te-modal__footer-button";
+					captureCurrent.textContent = "抓取当前节点";
+					captureCurrent.onclick = () => {
+						editorBaseState = clonePresetState(collectNodeState(node, library));
+						tagEditor.value = formatPresetSelectionEditorText(editorBaseState, library);
+						settingsEditor.value = formatPresetSettingsEditorText(editorBaseState);
+						statusEl.textContent = `已抓取当前节点内容，确认后点击“保存修改”：${preset.name}`;
+					};
+					editorActions.appendChild(captureCurrent);
+					const cancelEdit = document.createElement("button");
+					cancelEdit.className = "qwen-te-modal__footer-button";
+					cancelEdit.textContent = "取消修改";
+					cancelEdit.onclick = () => { editingPresetId = ""; statusEl.textContent = "已取消修改预设。"; render(); };
+					editorActions.appendChild(cancelEdit);
+					const saveEdit = document.createElement("button");
+					saveEdit.className = "qwen-te-modal__footer-button qwen-te-modal__footer-button--primary";
+					saveEdit.textContent = "保存修改";
+					saveEdit.onclick = () => {
+						const built = buildEditedPresetState(editorBaseState, library, tagEditor.value, settingsEditor.value);
+						if (!built.ok) { statusEl.textContent = built.error || "预设内容格式不正确。"; return; }
+						const result = updateUserPreset(presetId, { name: editNameInput.value, state: built.state });
+						if (!result.ok) {
+							const messages = {
+								"invalid-name": "预设名称为空或过长。",
+								"duplicate-name": "已有同名预设，请换一个名称。",
+								"too-large": "修改后的预设内容超过单项容量上限。",
+								capacity: "预设库容量不足，未保存修改。",
+								storage: "浏览器本地存储空间不足，未保存修改。",
+								"not-found": "原预设已不存在，请刷新列表。",
+							};
+							statusEl.textContent = messages[result.reason] ?? "保存预设修改失败。";
+							return;
+						}
+						editingPresetId = "";
+						statusEl.textContent = `已保存预设修改：${result.preset?.name ?? preset.name}`;
+						render();
+					};
+					editorActions.appendChild(saveEdit);
+				}
 				const actions = document.createElement("div");
 				actions.className = "qwen-te-preset-card__actions";
 				card.appendChild(actions);
@@ -12605,6 +13040,15 @@ function openPresetManager(node, library) {
 				};
 				primaryActions.appendChild(toggleDetail);
 			}
+			const editPreset = document.createElement("button");
+			editPreset.className = "qwen-te-modal__footer-button";
+			editPreset.textContent = isEditingPreset ? "收起修改" : "修改内容";
+			editPreset.onclick = () => {
+				editingPresetId = isEditingPreset ? "" : presetId;
+				statusEl.textContent = isEditingPreset ? `已收起预设修改：${preset.name}` : `正在修改预设：${preset.name}`;
+				render();
+			};
+			primaryActions.appendChild(editPreset);
 			const load = document.createElement("button");
 			load.className = "qwen-te-modal__footer-button";
 			load.textContent = "载入";
@@ -12643,6 +13087,7 @@ function openPresetManager(node, library) {
 					return;
 				}
 				expandedPresetIds.delete(presetId);
+				if (editingPresetId === presetId) editingPresetId = "";
 				deleteUserPreset(preset.id);
 				statusEl.textContent = `已删除预设：${preset.name}`;
 				render();
@@ -14601,7 +15046,7 @@ function openOnlinePromptSearchDialog(node, library) {
 		return { button, title: tabTitle };
 	};
 	const webModeTab = createBrowserModeTab("web", "网页浏览器", modalContext.nodeName, "qwen-te-online-search-web-title");
-	const tagModeTab = createBrowserModeTab("tags", "标签搜索", "候选标签与标签库", "qwen-te-online-search-tags-title");
+	const tagModeTab = createBrowserModeTab("tags", "提示词搜索", "完整提示词与提示词库", "qwen-te-online-search-tags-title");
 	dialog.setAttribute("aria-labelledby", webModeTab.title.id);
 	const closeButton = document.createElement("button");
 	closeButton.type = "button";
@@ -14682,21 +15127,21 @@ function openOnlinePromptSearchDialog(node, library) {
 	const actionBar = document.createElement("div");
 	actionBar.className = "qwen-te-modal__toolbar qwen-te-modal__toolbar--online-actions qwen-te-online-search__actions";
 	actionBar.setAttribute("role", "group");
-	actionBar.setAttribute("aria-label", "候选标签操作");
+	actionBar.setAttribute("aria-label", "候选提示词操作");
 	const applyButton = document.createElement("button");
 	applyButton.type = "button";
 	applyButton.className = "qwen-te-modal__footer-button";
-	applyButton.textContent = "回填到自定义";
+	applyButton.textContent = "回填提示词";
 	actionBar.appendChild(applyButton);
 	const importButton = document.createElement("button");
 	importButton.type = "button";
 	importButton.className = "qwen-te-modal__footer-button";
-	importButton.textContent = "批量入库";
+	importButton.textContent = "拆分入库";
 	actionBar.appendChild(importButton);
 	const importHighButton = document.createElement("button");
 	importHighButton.type = "button";
 	importHighButton.className = "qwen-te-modal__footer-button";
-	importHighButton.textContent = "高置信入库";
+	importHighButton.textContent = "复制提示词";
 	actionBar.appendChild(importHighButton);
 
 	const webQuickBar = document.createElement("div");
@@ -14745,7 +15190,7 @@ function openOnlinePromptSearchDialog(node, library) {
 	const statusEl = document.createElement("div");
 	statusEl.className = "qwen-te-modal__status qwen-te-online-search__status qwen-te-hidden";
 	statusEl.setAttribute("aria-live", "polite");
-	statusEl.textContent = "先输入关键词并点击“联网搜索”。";
+	statusEl.textContent = "输入主题、画面风格或提示词片段后搜索。";
 	topbar.appendChild(statusEl);
 	const webStatusEl = document.createElement("div");
 	webStatusEl.className = "qwen-te-modal__status qwen-te-online-search__status qwen-te-online-search__web-status";
@@ -14765,12 +15210,12 @@ function openOnlinePromptSearchDialog(node, library) {
 	const selectionBadge = document.createElement("div");
 	selectionBadge.className = "qwen-te-modal__status qwen-te-modal__status--inline qwen-te-online-search__selection-status";
 	selectionBadge.setAttribute("role", "status");
-	selectionBadge.textContent = "未选择候选标签。";
+	selectionBadge.textContent = "未选择候选提示词。";
 
 	const groupFilterLabel = document.createElement("div");
 	groupFilterLabel.className = "qwen-te-online-search__filter-label";
 	groupFilterLabel.id = "qwen-te-online-search-group-filter-label";
-	groupFilterLabel.textContent = "标签分组";
+	groupFilterLabel.textContent = "提示词来源";
 	filtersWrap.appendChild(groupFilterLabel);
 	const filterBar = document.createElement("div");
 	filterBar.className = "qwen-te-modal__pillbar qwen-te-online-search__filter-list qwen-te-online-search__filter-list--groups";
@@ -14781,7 +15226,7 @@ function openOnlinePromptSearchDialog(node, library) {
 	const metaFilterLabel = document.createElement("div");
 	metaFilterLabel.className = "qwen-te-online-search__filter-label";
 	metaFilterLabel.id = "qwen-te-online-search-meta-filter-label";
-	metaFilterLabel.textContent = "结果状态";
+	metaFilterLabel.textContent = "提示词长度";
 	filtersWrap.appendChild(metaFilterLabel);
 	const metaFilterBar = document.createElement("div");
 	metaFilterBar.className = "qwen-te-modal__pillbar qwen-te-online-search__filter-list qwen-te-online-search__filter-list--status";
@@ -14819,7 +15264,7 @@ function openOnlinePromptSearchDialog(node, library) {
 
 	const resultSub = document.createElement("div");
 	resultSub.className = "qwen-te-online-search__panel-sub";
-	resultSub.textContent = "点击结果即可加入或移出本次操作。";
+	resultSub.textContent = "点击完整提示词即可加入或移出本次操作。";
 	resultHeadText.appendChild(resultSub);
 
 	const resultTools = document.createElement("div");
@@ -14829,7 +15274,7 @@ function openOnlinePromptSearchDialog(node, library) {
 	const resultList = document.createElement("div");
 	resultList.className = "qwen-te-online-search__cards";
 	resultList.setAttribute("role", "group");
-	resultList.setAttribute("aria-label", "候选标签");
+	resultList.setAttribute("aria-label", "候选提示词");
 	resultPanel.appendChild(resultList);
 
 	const samplePanel = document.createElement("div");
@@ -14847,30 +15292,30 @@ function openOnlinePromptSearchDialog(node, library) {
 	const sampleTitle = document.createElement("div");
 	sampleTitle.className = "qwen-te-online-search__panel-title";
 	sampleTitle.id = "qwen-te-online-search-reference-title";
-	sampleTitle.textContent = "参考样本";
+	sampleTitle.textContent = "提示词预览";
 	samplePanel.setAttribute("aria-labelledby", sampleTitle.id);
 	sampleHeadText.appendChild(sampleTitle);
 
 	const sampleSub = document.createElement("div");
 	sampleSub.className = "qwen-te-online-search__panel-sub";
-	sampleSub.textContent = "先检查已选标签，再决定回填当前节点或写入标签库。";
+	sampleSub.textContent = "检查完整提示词后，可回填、复制或拆分写入标签库。";
 	sampleHeadText.appendChild(sampleSub);
 	samplePanel.appendChild(selectionBadge);
 	const selectedPreview = document.createElement("div");
 	selectedPreview.className = "qwen-te-online-search__selected-preview";
 	selectedPreview.setAttribute("role", "group");
-	selectedPreview.setAttribute("aria-label", "已选择的候选标签");
+	selectedPreview.setAttribute("aria-label", "已选择的候选提示词");
 	samplePanel.appendChild(selectedPreview);
 	samplePanel.appendChild(actionBar);
 	const referenceLabel = document.createElement("div");
 	referenceLabel.className = "qwen-te-online-search__section-label";
-	referenceLabel.textContent = "参考内容";
+	referenceLabel.textContent = "完整提示词";
 	samplePanel.appendChild(referenceLabel);
 
 	const sampleBox = document.createElement("textarea");
 	sampleBox.className = "qwen-te-modal__textarea qwen-te-online-search__sample-box";
 	sampleBox.readOnly = true;
-	sampleBox.placeholder = "联网搜索后会显示部分样本。";
+	sampleBox.placeholder = "搜索后会显示完整提示词。";
 	samplePanel.appendChild(sampleBox);
 
 	const sampleList = document.createElement("div");
@@ -14879,7 +15324,7 @@ function openOnlinePromptSearchDialog(node, library) {
 
 	const sampleHint = document.createElement("div");
 	sampleHint.className = "qwen-te-online-search__hint";
-	sampleHint.textContent = "参考内容可能来自联网样本，也可能是根据候选标签生成的本地摘要。";
+	sampleHint.textContent = "提示词可能来自联网样本，也可能由本地标签库组合生成。";
 	samplePanel.appendChild(sampleHint);
 
 	const webWorkspace = document.createElement("div");
@@ -14964,9 +15409,10 @@ function openOnlinePromptSearchDialog(node, library) {
 	let webHistoryIndex = 0;
 	let currentWebUrl = "";
 	let companionBrowserBusy = false;
+	let embeddedNavigationBusy = false;
 	let embeddedBrowserSessionId = "";
-	let embeddedBrowserWidth = 1360;
-	let embeddedBrowserHeight = 760;
+	let embeddedBrowserWidth = 1280;
+	let embeddedBrowserHeight = 720;
 	let embeddedCanGoBack = false;
 	let embeddedCanGoForward = false;
 	let embeddedFrameTimer = null;
@@ -14983,19 +15429,23 @@ function openOnlinePromptSearchDialog(node, library) {
 	let embeddedPointerButtons = 0;
 	let embeddedLastPointerMoveAt = 0;
 	let embeddedInputQueue = Promise.resolve();
+	let embeddedWheelTimer = null;
+	let embeddedWheelPayload = null;
+	let embeddedTextTimer = null;
+	let embeddedPendingText = "";
 	let busyState = false;
 	const isContinuousRunActive = () => !!ensureNodeContinuousRuntime(node).running;
 	const isInteractionBlocked = () => busyState || isContinuousRunActive();
 	const rejectDuringContinuousRun = () => {
 		if (!isContinuousRunActive()) return false;
-		statusEl.textContent = "连续测试进行中，请先停止再搜索、回填或入库。";
+		statusEl.textContent = "连续测试进行中，请先停止再搜索、回填、复制或拆分入库。";
 		syncActionButtons();
 		return true;
 	};
 	const matchesMetaFilter = (item) => {
 		if (activeMetaFilter === "high") return isHighConfidence(item);
-		if (activeMetaFilter === "new") return !item?.exists;
-		if (activeMetaFilter === "existing") return !!item?.exists;
+		if (activeMetaFilter === "concise") return Number(item?.length ?? String(item?.tag ?? "").length) < 180;
+		if (activeMetaFilter === "detailed") return Number(item?.length ?? String(item?.tag ?? "").length) >= 180;
 		return true;
 	};
 	const getFilteredItems = () => {
@@ -15011,10 +15461,10 @@ function openOnlinePromptSearchDialog(node, library) {
 	const renderSummaryBar = () => {
 		summaryBar.replaceChildren();
 		const items = [
-			`候选 ${candidateItems.length}`,
-			`高置信 ${candidateItems.filter((item) => isHighConfidence(item)).length}`,
-			`已在库 ${candidateItems.filter((item) => !!item.exists).length}`,
-			`待新增 ${candidateItems.filter((item) => !item.exists).length}`,
+			"提示词 " + candidateItems.length,
+			"优选 " + candidateItems.filter((item) => isHighConfidence(item)).length,
+			"精简 " + candidateItems.filter((item) => Number(item?.length ?? 0) < 180).length,
+			"详细 " + candidateItems.filter((item) => Number(item?.length ?? 0) >= 180).length,
 			`已选择 ${selectedTags.size}`,
 		];
 		for (const text of items) {
@@ -15036,23 +15486,23 @@ function openOnlinePromptSearchDialog(node, library) {
 	const renderSelectionBadge = () => {
 		selectedPreview.replaceChildren();
 		if (!candidateItems.length) {
-			selectionBadge.textContent = "已选择 0 个标签";
+			selectionBadge.textContent = "已选择 0 条提示词";
 			const empty = document.createElement("div");
 			empty.className = "qwen-te-online-search__selected-empty";
-			empty.textContent = "搜索后可在结果列表中选择标签。";
+			empty.textContent = "搜索后可在结果列表中选择完整提示词。";
 			selectedPreview.appendChild(empty);
 			return;
 		}
 		const selectedItems = getSelectedItems();
 		if (!selectedItems.length) {
-			selectionBadge.textContent = "已选择 0 个标签";
+			selectionBadge.textContent = "已选择 0 条提示词";
 			const empty = document.createElement("div");
 			empty.className = "qwen-te-online-search__selected-empty";
-			empty.textContent = "未选择时不会执行回填或入库。";
+			empty.textContent = "未选择时不会执行回填、复制或拆分入库。";
 			selectedPreview.appendChild(empty);
 			return;
 		}
-		selectionBadge.textContent = `已选择 ${selectedItems.length} 个标签`;
+		selectionBadge.textContent = "已选择 " + selectedItems.length + " 条提示词";
 		for (const item of selectedItems.slice(0, 12)) {
 			const chip = document.createElement("button");
 			chip.type = "button";
@@ -15070,26 +15520,18 @@ function openOnlinePromptSearchDialog(node, library) {
 		if (selectedItems.length > 12) {
 			const more = document.createElement("span");
 			more.className = "qwen-te-online-search__selected-more";
-			more.textContent = `另有 ${selectedItems.length - 12} 个`;
+			more.textContent = "另有 " + (selectedItems.length - 12) + " 条";
 			selectedPreview.appendChild(more);
 		}
 	};
-	const getEffectiveSelectionCounts = () => {
-		const applyTags = getEffectiveSelection({ onlyHighConfidence: false });
-		const importTags = getEffectiveSelection({ onlyHighConfidence: false }).filter((tag) => {
-			const item = candidateItems.find((entry) => entry.tag === tag);
-			return item ? !item.exists : true;
-		});
-		const importHighTags = getEffectiveSelection({ onlyHighConfidence: true }).filter((tag) => {
-			const item = candidateItems.find((entry) => entry.tag === tag);
-			return item ? !item.exists : true;
-		});
-		return {
-			applyCount: applyTags.length,
-			importCount: importTags.length,
-			importHighCount: importHighTags.length,
-		};
-	};
+const getEffectiveSelectionCounts = () => {
+        const selectedPrompts = getEffectiveSelection({ onlyHighConfidence: false });
+        return {
+            applyCount: selectedPrompts.length,
+            importCount: parseCustomTags(selectedPrompts.join(", ")).length,
+            importHighCount: selectedPrompts.length,
+        };
+    };
 	const getPromptBrowserCurrentOrigin = () => {
 		try { return new URL(String(location?.href ?? "")).origin; } catch (_error) { return ""; }
 	};
@@ -15138,11 +15580,20 @@ function openOnlinePromptSearchDialog(node, library) {
 		}
 		syncActionButtons();
 	};
+	const getEmbeddedFrameCaptureOptions = () => getEmbeddedBrowserFrameCaptureProfile(
+		webFrameShell.getBoundingClientRect?.(),
+		{
+			fast: Date.now() < embeddedFrameFastUntil,
+			hasFrame: !!embeddedFrameObjectUrl,
+			pageReady: embeddedPageReady,
+		},
+	);
 	const getEmbeddedFramePollDelay = () => {
-		if (Date.now() < embeddedFrameFastUntil) return 180;
-		if (!embeddedPageReady) return 320;
-		if (embeddedUnchangedFrameCount >= 2) return 1200;
-		return 700;
+		if (typeof document !== "undefined" && document.hidden) return 3200;
+		if (Date.now() < embeddedFrameFastUntil) return 160;
+		if (!embeddedPageReady || !embeddedFrameObjectUrl) return 260;
+		if (embeddedUnchangedFrameCount >= 3) return 2200;
+		return 760;
 	};
 	const scheduleEmbeddedFramePoll = (delay = null) => {
 		if (overlay.__qwenDisposed || !embeddedBrowserSessionId || activeBrowserMode !== "web") return;
@@ -15167,10 +15618,14 @@ function openOnlinePromptSearchDialog(node, library) {
 		embeddedFrameBusy = true;
 		const sessionId = embeddedBrowserSessionId;
 		try {
-			const frameResult = await fetchEmbeddedPromptBrowserFrame(sessionId, {
+			const frameCapture = getEmbeddedFrameCaptureOptions();
+            const frameResult = await fetchEmbeddedPromptBrowserFrame(sessionId, {
 				owner: overlay,
 				key: "embedded-browser-frame",
 				previousFrameId: embeddedLastFrameId,
+                maxWidth: frameCapture.maxWidth,
+                maxHeight: frameCapture.maxHeight,
+                quality: frameCapture.quality,
 				timeoutMs: 20000,
 			});
 			if (overlay.__qwenDisposed || sessionId !== embeddedBrowserSessionId) return;
@@ -15197,7 +15652,7 @@ function openOnlinePromptSearchDialog(node, library) {
 			webFrame.src = nextUrl;
 			setWebFrameOverlay("");
 		} catch (error) {
-			if (error?.name === "AbortError" || overlay.__qwenDisposed || sessionId !== embeddedBrowserSessionId) return;
+			if (isAbortLikeError(error) || overlay.__qwenDisposed || sessionId !== embeddedBrowserSessionId) return;
 			setWebFrameOverlay(`画面更新失败：${error?.message ?? error}`, { passive: !!embeddedFrameObjectUrl });
 			if ([404, 503].includes(Number(error?.status ?? 0))) embeddedBrowserSessionId = "";
 		} finally {
@@ -15217,13 +15672,13 @@ function openOnlinePromptSearchDialog(node, library) {
 			});
 			if (!overlay.__qwenDisposed && sessionId === embeddedBrowserSessionId) applyEmbeddedBrowserStatus(data);
 		} catch (error) {
-			if (error?.name !== "AbortError" && !overlay.__qwenDisposed) {
+			if (!isAbortLikeError(error) && !overlay.__qwenDisposed) {
 				setWebStatus(`内嵌浏览器状态读取失败：${error?.message ?? error}`);
 				if ([404, 503].includes(Number(error?.status ?? 0))) embeddedBrowserSessionId = "";
 			}
 		} finally {
 			embeddedStatusBusy = false;
-			scheduleEmbeddedStatusPoll(embeddedBrowserSessionId ? 800 : 1500);
+			scheduleEmbeddedStatusPoll(embeddedBrowserSessionId ? (embeddedPageReady ? 1600 : 600) : 1800);
 		}
 	};
 	const startEmbeddedBrowserPolling = () => {
@@ -15256,7 +15711,7 @@ function openOnlinePromptSearchDialog(node, library) {
 	const sendEmbeddedBrowserInput = (payload) => {
 		if (!embeddedBrowserSessionId || overlay.__qwenDisposed) return Promise.resolve(false);
 		const sessionId = embeddedBrowserSessionId;
-		markEmbeddedBrowserActivity();
+		if (payload?.type !== "mouseMove") markEmbeddedBrowserActivity();
 		embeddedInputQueue = embeddedInputQueue.catch(() => false).then(async () => {
 			if (!sessionId || sessionId !== embeddedBrowserSessionId || overlay.__qwenDisposed) return false;
 			await requestEmbeddedPromptBrowser("input", { session_id: sessionId, ...payload }, {
@@ -15266,10 +15721,48 @@ function openOnlinePromptSearchDialog(node, library) {
 				timeoutMs: 10000,
 			});
 			if (payload?.type === "mouseUp") scheduleEmbeddedStatusPoll(160);
+			scheduleEmbeddedFramePoll(0);
 			return true;
 		});
 		return embeddedInputQueue;
 	};
+    const flushEmbeddedBrowserWheel = () => {
+        if (embeddedWheelTimer != null) clearTimeout(embeddedWheelTimer);
+        embeddedWheelTimer = null;
+        const payload = embeddedWheelPayload;
+        embeddedWheelPayload = null;
+        if (payload && (payload.delta_x || payload.delta_y)) void sendEmbeddedBrowserInput(payload);
+    };
+    const queueEmbeddedBrowserWheel = (payload) => {
+        const next = payload ?? {};
+        if (!embeddedWheelPayload) {
+            embeddedWheelPayload = { ...next, delta_x: 0, delta_y: 0 };
+        } else {
+            embeddedWheelPayload.x = next.x;
+            embeddedWheelPayload.y = next.y;
+            embeddedWheelPayload.modifiers = next.modifiers;
+        }
+        embeddedWheelPayload.delta_x += Number(next.delta_x) || 0;
+        embeddedWheelPayload.delta_y += Number(next.delta_y) || 0;
+        if (embeddedWheelTimer != null) return;
+        embeddedWheelTimer = setTimeout(flushEmbeddedBrowserWheel, 38);
+        embeddedWheelTimer?.unref?.();
+    };
+    const flushEmbeddedBrowserText = () => {
+        if (embeddedTextTimer != null) clearTimeout(embeddedTextTimer);
+        embeddedTextTimer = null;
+        const value = embeddedPendingText;
+        embeddedPendingText = "";
+        if (value) void sendEmbeddedBrowserInput({ type: "text", text: value });
+    };
+    const queueEmbeddedBrowserText = (value) => {
+        const textValue = String(value ?? "");
+        if (!textValue) return;
+        embeddedPendingText += textValue;
+        if (embeddedTextTimer != null) return;
+        embeddedTextTimer = setTimeout(flushEmbeddedBrowserText, 42);
+        embeddedTextTimer?.unref?.();
+    };
 	const runEmbeddedBrowserCommand = async (action) => {
 		if (!embeddedBrowserSessionId) return false;
 		try {
@@ -15300,6 +15793,10 @@ function openOnlinePromptSearchDialog(node, library) {
 		syncActionButtons();
 	};
 	const navigateWebsite = async (rawTarget, options = {}) => {
+		if (embeddedNavigationBusy) {
+			setWebStatus("内嵌浏览器正在启动或导航，请稍候。");
+			return false;
+		}
 		const target = options.resolved
 			? { ok: true, kind: "url", url: String(rawTarget ?? "").trim(), display: String(rawTarget ?? "").trim() }
 			: resolvePromptBrowserTarget(rawTarget, { currentOrigin: getPromptBrowserCurrentOrigin() });
@@ -15319,6 +15816,8 @@ function openOnlinePromptSearchDialog(node, library) {
 		webHome.classList.add("qwen-te-hidden");
 		webFrameShell.classList.remove("qwen-te-hidden");
 		setWebFrameOverlay(embeddedBrowserSessionId ? "正在导航..." : "正在启动本机内嵌浏览器...");
+		embeddedNavigationBusy = true;
+		syncActionButtons();
 		setWebStatus(`正在内嵌浏览器中打开 ${target.url}`);
 		try {
 			let data;
@@ -15326,13 +15825,19 @@ function openOnlinePromptSearchDialog(node, library) {
 				data = await requestEmbeddedPromptBrowser("navigate", {
 					session_id: embeddedBrowserSessionId,
 					url: target.url,
-				}, { owner: overlay, key: "embedded-browser-navigate", timeoutMs: 20000 });
+				}, { owner: overlay, key: "embedded-browser-navigate", timeoutMs: 30000 });
 			} else {
+				const startViewport = resolveEmbeddedBrowserViewport(webFrameShell.getBoundingClientRect?.(), {
+				    minWidth: 640, minHeight: 360, maxWidth: 1600, maxHeight: 900,
+				    fallbackWidth: embeddedBrowserWidth, fallbackHeight: embeddedBrowserHeight,
+				});
+				embeddedBrowserWidth = startViewport.width;
+				embeddedBrowserHeight = startViewport.height;
 				data = await requestEmbeddedPromptBrowser("start", {
 					url: target.url,
 					width: embeddedBrowserWidth,
 					height: embeddedBrowserHeight,
-				}, { owner: overlay, key: "embedded-browser-start", timeoutMs: 25000 });
+				}, { owner: overlay, key: "embedded-browser-start", timeoutMs: 60000 });
 				embeddedBrowserSessionId = String(data.session_id ?? "");
 				embeddedLastFrameId = "";
 				embeddedUnchangedFrameCount = 0;
@@ -15344,11 +15849,16 @@ function openOnlinePromptSearchDialog(node, library) {
 			startEmbeddedBrowserPolling();
 			return true;
 		} catch (error) {
-			setWebFrameOverlay(`内嵌浏览器不可用：${error?.message ?? error}`);
-			setWebStatus(`内嵌浏览器打开失败：${error?.message ?? error}`);
+			const message = isAbortLikeError(error)
+				? "内嵌浏览器启动请求已取消，请稍后重试。"
+				: String(error?.message ?? error);
+			setWebFrameOverlay(`内嵌浏览器不可用：${message}`);
+			setWebStatus(`内嵌浏览器打开失败：${message}`);
 			if ([404, 503].includes(Number(error?.status ?? 0))) embeddedBrowserSessionId = "";
-			syncActionButtons();
 			return false;
+		} finally {
+			embeddedNavigationBusy = false;
+			if (!overlay.__qwenDisposed) syncActionButtons();
 		}
 	};
 	const renderWebHistoryEntry = (entry) => {
@@ -15421,13 +15931,13 @@ function openOnlinePromptSearchDialog(node, library) {
 		addressBadge.textContent = tagMode ? tagAddressBadgeText : "网页";
 		searchInput.maxLength = tagMode ? 256 : 2048;
 		searchInput.placeholder = tagMode
-			? "输入联网检索关键词，例如：cinematic portrait、古风神女"
+			? "输入主题、风格或完整提示词片段，例如：柔和色彩、电影人像"
 			: "输入网址或网页搜索词";
 		searchInput.setAttribute("aria-label", tagMode ? "提示词搜索地址栏" : "网页浏览器地址栏");
 		searchInput.value = tagMode ? tagQueryDraft : webAddressDraft;
 		searchButton.textContent = tagMode ? "搜索" : "打开";
-		searchButton.title = tagMode ? "执行联网标签搜索" : "在内嵌网页中打开";
-		browserNav.setAttribute("aria-label", tagMode ? "标签搜索历史导航" : "网页导航");
+		searchButton.title = tagMode ? "执行联网提示词搜索" : "在内嵌网页中打开";
+		browserNav.setAttribute("aria-label", tagMode ? "提示词搜索历史导航" : "网页导航");
 		dialog.setAttribute("aria-labelledby", tagMode ? tagModeTab.title.id : webModeTab.title.id);
 		if (tagMode) stopEmbeddedBrowserPolling();
 		else if (embeddedBrowserSessionId) startEmbeddedBrowserPolling();
@@ -15443,28 +15953,28 @@ function openOnlinePromptSearchDialog(node, library) {
 			String(searchInput.value ?? "").trim() || currentWebUrl,
 			{ currentOrigin: getPromptBrowserCurrentOrigin() },
 		);
-		dialog.setAttribute("aria-busy", tagMode && busyState ? "true" : "false");
-		searchInput.disabled = tagMode && interactionBlocked;
-		searchButton.disabled = tagMode ? interactionBlocked : !webTarget.ok;
+		dialog.setAttribute("aria-busy", (tagMode && busyState) || (!tagMode && embeddedNavigationBusy) ? "true" : "false");
+		searchInput.disabled = tagMode ? interactionBlocked : embeddedNavigationBusy;
+		searchButton.disabled = tagMode ? interactionBlocked : embeddedNavigationBusy || !webTarget.ok;
 		backButton.disabled = tagMode
 			? interactionBlocked || queryHistoryIndex <= 0
-			: !embeddedBrowserSessionId || !embeddedCanGoBack;
+			: embeddedNavigationBusy || !embeddedBrowserSessionId || !embeddedCanGoBack;
 		forwardButton.disabled = tagMode
 			? interactionBlocked || queryHistoryIndex < 0 || queryHistoryIndex >= queryHistory.length - 1
-			: !embeddedBrowserSessionId || !embeddedCanGoForward;
+			: embeddedNavigationBusy || !embeddedBrowserSessionId || !embeddedCanGoForward;
 		reloadButton.disabled = tagMode
 			? interactionBlocked || !String(searchInput.value ?? "").trim()
-			: !embeddedBrowserSessionId;
-		homeButton.disabled = tagMode;
+			: embeddedNavigationBusy || !embeddedBrowserSessionId;
+		homeButton.disabled = tagMode || embeddedNavigationBusy;
 		openExternalButton.disabled = tagMode || !externalTarget.ok;
 		companionBrowserButton.disabled = tagMode || companionBrowserBusy || !externalTarget.ok;
 		frameExternalButton.disabled = companionBrowserBusy || !currentWebUrl;
 		applyButton.disabled = interactionBlocked || counts.applyCount <= 0;
 		importButton.disabled = interactionBlocked || counts.importCount <= 0;
-		importHighButton.disabled = interactionBlocked || counts.importHighCount <= 0;
-		applyButton.textContent = counts.applyCount > 0 ? `回填到自定义 (${counts.applyCount})` : "回填到自定义";
-		importButton.textContent = counts.importCount > 0 ? `批量入库 (${counts.importCount})` : "批量入库";
-		importHighButton.textContent = counts.importHighCount > 0 ? `高置信入库 (${counts.importHighCount})` : "高置信入库";
+		importHighButton.disabled = interactionBlocked || counts.applyCount <= 0;
+		applyButton.textContent = counts.applyCount > 0 ? "回填提示词 (" + counts.applyCount + ")" : "回填提示词";
+		importButton.textContent = counts.importCount > 0 ? "拆分入库 (" + counts.importCount + ")" : "拆分入库";
+		importHighButton.textContent = counts.applyCount > 0 ? "复制提示词 (" + counts.applyCount + ")" : "复制提示词";
 		for (const quickButton of quickButtons) quickButton.disabled = interactionBlocked;
 		for (const button of groupFilterButtons.values()) button.disabled = interactionBlocked;
 		for (const button of metaFilterButtons.values()) button.disabled = interactionBlocked;
@@ -15476,8 +15986,8 @@ function openOnlinePromptSearchDialog(node, library) {
 			else if (button.title === "连续测试进行中，请先停止。") button.title = "";
 		}
 		if (tagMode && blockedHint) searchButton.title = blockedHint;
-		else searchButton.title = tagMode ? "执行联网标签搜索" : "在内嵌网页中打开";
-		searchButton.classList.toggle("is-busy", tagMode && busyState);
+		else searchButton.title = tagMode ? "执行联网提示词搜索" : "在内嵌网页中打开";
+		searchButton.classList.toggle("is-busy", tagMode ? busyState : embeddedNavigationBusy);
 		companionBrowserButton.classList.toggle("is-busy", companionBrowserBusy);
 	};
 	const setBusy = (busy) => {
@@ -15506,7 +16016,7 @@ function openOnlinePromptSearchDialog(node, library) {
 			const count = option === "all"
 				? candidateItems.length
 				: candidateItems.filter((item) => String(item?.group ?? "").trim() === option).length;
-			button.textContent = `${option === "all" ? "全部分组" : option} (${count})`;
+			button.textContent = `${option === "all" ? "全部来源" : option} (${count})`;
 			setFilterButtonState(button, option === activeGroupFilter);
 			button.setAttribute("aria-pressed", option === activeGroupFilter ? "true" : "false");
 			button.disabled = isInteractionBlocked();
@@ -15521,33 +16031,33 @@ function openOnlinePromptSearchDialog(node, library) {
 			groupFilterButtons.set(option, button);
 		}
 	};
-	const renderMetaFilters = () => {
-		metaFilterBar.replaceChildren();
-		metaFilterButtons.clear();
-		const options = [
-			{ key: "all", label: "全部状态", count: candidateItems.length },
-			{ key: "high", label: "高置信", count: candidateItems.filter((item) => isHighConfidence(item)).length },
-			{ key: "new", label: "待新增", count: candidateItems.filter((item) => !item.exists).length },
-			{ key: "existing", label: "已在库", count: candidateItems.filter((item) => !!item.exists).length },
-		];
-		for (const option of options) {
-			const button = document.createElement("button");
-			button.type = "button";
-			button.className = "qwen-te-modal__preset";
-			button.textContent = `${option.label} (${option.count})`;
-			setFilterButtonState(button, option.key === activeMetaFilter);
-			button.setAttribute("aria-pressed", option.key === activeMetaFilter ? "true" : "false");
-			button.disabled = isInteractionBlocked();
-			button.onclick = () => {
-				if (isInteractionBlocked()) return;
-				activeMetaFilter = option.key;
-				renderMetaFilters();
-				renderResults();
-			};
-			metaFilterBar.appendChild(button);
-			metaFilterButtons.set(option.key, button);
-		}
-	};
+    const renderMetaFilters = () => {
+        metaFilterBar.replaceChildren();
+        metaFilterButtons.clear();
+        const options = [
+            { key: "all", label: "全部提示词", count: candidateItems.length },
+            { key: "high", label: "优选", count: candidateItems.filter((item) => isHighConfidence(item)).length },
+            { key: "concise", label: "精简", count: candidateItems.filter((item) => Number(item?.length ?? String(item?.tag ?? "").length) < 180).length },
+            { key: "detailed", label: "详细", count: candidateItems.filter((item) => Number(item?.length ?? String(item?.tag ?? "").length) >= 180).length },
+        ];
+        for (const option of options) {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = "qwen-te-modal__preset";
+            button.textContent = option.label + " (" + option.count + ")";
+            setFilterButtonState(button, option.key === activeMetaFilter);
+            button.setAttribute("aria-pressed", option.key === activeMetaFilter ? "true" : "false");
+            button.disabled = isInteractionBlocked();
+            button.onclick = () => {
+                if (isInteractionBlocked()) return;
+                activeMetaFilter = option.key;
+                renderMetaFilters();
+                renderResults();
+            };
+            metaFilterBar.appendChild(button);
+            metaFilterButtons.set(option.key, button);
+        }
+    };
 	const renderSelectionTools = () => {
 		resultTools.replaceChildren();
 		const tools = [
@@ -15559,7 +16069,7 @@ function openOnlinePromptSearchDialog(node, library) {
 				},
 			},
 			{
-				label: "仅选高置信",
+				label: "仅选优选",
 				onclick: () => {
 					selectedTags.clear();
 					for (const item of getFilteredItems().filter((entry) => isHighConfidence(entry))) selectedTags.add(item.tag);
@@ -15599,7 +16109,7 @@ function openOnlinePromptSearchDialog(node, library) {
 			const card = document.createElement("button");
 			card.type = "button";
 			card.className = "qwen-te-online-search__card";
-			card.title = `${tag}${item.section ? ` | ${item.section}` : ""}${item.exists ? " | 已存在于标签库" : " | 可新增入库"}`;
+			card.title = tag;
 			card.classList.toggle("is-selected", selectedTags.has(tag));
 			card.classList.toggle("is-high", isHighConfidence(item));
 			card.classList.toggle("is-existing", !!item.exists);
@@ -15608,7 +16118,7 @@ function openOnlinePromptSearchDialog(node, library) {
 			card.disabled = isInteractionBlocked();
 			const route = document.createElement("div");
 			route.className = "qwen-te-online-search__result-route";
-			route.textContent = [String(item.group ?? "").trim(), String(item.section ?? "").trim()].filter(Boolean).join(" / ") || "未分类候选";
+			route.textContent = [String(item.group ?? "").trim(), String(item.section ?? "").trim()].filter(Boolean).join(" / ") || "提示词搜索结果";
 			card.appendChild(route);
 
 			const head = document.createElement("div");
@@ -15631,15 +16141,15 @@ function openOnlinePromptSearchDialog(node, library) {
 
 			const statusPill = document.createElement("div");
 			statusPill.className = `qwen-te-modal__content-pill${item.exists ? " qwen-te-modal__content-pill--muted" : ""}`;
-			statusPill.textContent = item.exists ? "已在库" : "待新增";
+			statusPill.textContent = Number(item.length ?? tag.length) >= 180 ? "详细" : "精简";
 			pillBar.appendChild(statusPill);
 
 			const summaryLines = [];
 			if (String(item.source ?? "").trim()) summaryLines.push(`来源 ${String(item.source ?? "").trim()}`);
-			if (Number(item.count ?? 0) > 0) summaryLines.push(`独立样本支持 ${Number(item.count ?? 0)}`);
+			if (Number(item.count ?? 0) > 0) summaryLines.push("包含片段 " + Number(item.count ?? 0));
 			const summary = document.createElement("div");
 			summary.className = "qwen-te-online-search__card-summary";
-			summary.textContent = summaryLines.join(" · ") || "该候选来自当前搜索结果。";
+			summary.textContent = summaryLines.join(" · ") || "该提示词来自当前搜索结果。";
 			card.appendChild(summary);
 
 			const foot = document.createElement("div");
@@ -15648,7 +16158,7 @@ function openOnlinePromptSearchDialog(node, library) {
 
 			const actionHint = document.createElement("div");
 			actionHint.className = "qwen-te-online-search__hint";
-			actionHint.textContent = selectedTags.has(tag) ? "已纳入本次操作" : "点击加入本次操作";
+			actionHint.textContent = selectedTags.has(tag) ? "已选择该提示词" : "点击选择该提示词";
 			foot.appendChild(actionHint);
 
 			card.onclick = () => {
@@ -15659,7 +16169,7 @@ function openOnlinePromptSearchDialog(node, library) {
 				card.classList.toggle("is-selected", selected);
 				card.setAttribute("aria-pressed", selected ? "true" : "false");
 				card.setAttribute("aria-label", `${selected ? "取消选择" : "选择"} ${tag}`);
-				actionHint.textContent = selected ? "已纳入本次操作" : "点击加入本次操作";
+				actionHint.textContent = selected ? "已选择该提示词" : "点击选择该提示词";
 				renderSummaryBar();
 				renderSelectionBadge();
 				syncActionButtons();
@@ -15670,7 +16180,7 @@ function openOnlinePromptSearchDialog(node, library) {
 		if (!filteredItems.length) {
 			const empty = document.createElement("div");
 			empty.className = "qwen-te-online-search__card-empty";
-			empty.textContent = candidateItems.length ? "当前分组下暂无候选标签。" : "暂无候选标签。";
+			empty.textContent = candidateItems.length ? "当前筛选下暂无提示词。" : "暂无提示词结果。";
 			resultList.appendChild(empty);
 		}
 		sampleList.replaceChildren();
@@ -15693,8 +16203,8 @@ function openOnlinePromptSearchDialog(node, library) {
 			const empty = document.createElement("div");
 			empty.className = "qwen-te-online-search__card-empty";
 			empty.textContent = candidateItems.length
-				? "这次没有拿到原始参考样本，右侧会在后端回退摘要可用时自动显示。"
-				: "联网搜索后会在这里显示参考样本或回退摘要。";
+				? "这次没有可用的完整提示词，请尝试更具体的主题或风格。"
+				: "搜索后会在这里显示完整提示词。";
 			sampleList.appendChild(empty);
 			sampleList.classList.remove("qwen-te-hidden");
 			sampleBox.classList.add("qwen-te-hidden");
@@ -15733,16 +16243,14 @@ function openOnlinePromptSearchDialog(node, library) {
 		try {
 			const result = await searchOnlinePromptTags(effectiveQuery, 30, { owner: overlay, key: "online-search" });
 			if (currentRequestId !== requestId) return;
-			candidateTags = [...(result.tags ?? [])];
-			candidateItems = Array.isArray(result.tagItems) && result.tagItems.length
-				? result.tagItems
-				: candidateTags.map((tag) => ({ tag, confidence: 0.55, group: "", section: "", exists: false, source: "legacy_tags", count: 1 }));
-			sampleTexts = [...(result.samples ?? [])];
+            candidateTags = [...(result.tags ?? [])];
+            candidateItems = Array.isArray(result.promptItems) ? result.promptItems : [];
+            sampleTexts = candidateItems.map((item) => String(item?.prompt ?? item?.tag ?? "")).filter(Boolean);
 			activeGroupFilter = "all";
 			activeMetaFilter = "all";
 			selectedTags.clear();
-			for (const item of candidateItems.filter((entry) => isHighConfidence(entry)).slice(0, 8)) selectedTags.add(item.tag);
-			if (!selectedTags.size) for (const item of candidateItems.slice(0, 8)) selectedTags.add(item.tag);
+			for (const item of candidateItems.filter((entry) => isHighConfidence(entry)).slice(0, 3)) selectedTags.add(item.tag);
+			if (!selectedTags.size) for (const item of candidateItems.slice(0, 2)) selectedTags.add(item.tag);
 			renderGroupFilters();
 			renderMetaFilters();
 			renderResults();
@@ -15762,13 +16270,11 @@ function openOnlinePromptSearchDialog(node, library) {
 			const warning = warningText ? `（来源状态：${warningText}）` : "";
 			const cacheHint = result.cached ? "（复用近期搜索结果）" : "";
 			const highCount = candidateItems.filter((item) => isHighConfidence(item)).length;
-			const existingCount = candidateItems.filter((item) => !!item.exists).length;
-			const newCount = candidateItems.length - existingCount;
 			const normalizeHint = compacted.normalized ? `（已过滤 ${compacted.dropped} 个低信息词）` : "";
 			const fallbackHint = String(result.source ?? "").includes("local_fallback")
 				? "（当前仅命中本地回退，可尝试英文词：adult / boudoir / half body）"
 				: "";
-			statusEl.textContent = `${source}返回 ${candidateItems.length} 个候选标签，高置信 ${highCount} 个，待新增 ${newCount} 个。${cacheHint}${normalizeHint}${warning}${fallbackHint}`.trim();
+            statusEl.textContent = source + "返回 " + candidateItems.length + " 条提示词，其中优选 " + highCount + " 条。" + cacheHint + normalizeHint + warning + fallbackHint;
 			statusEl.title = statusEl.textContent;
 			tagAddressBadgeText = result.cached ? "缓存" : source.split("+")[0] || "搜索";
 			if (activeBrowserMode === "tags") addressBadge.textContent = tagAddressBadgeText;
@@ -15793,7 +16299,7 @@ function openOnlinePromptSearchDialog(node, library) {
 		if (busyState || rejectDuringContinuousRun()) return;
 		const tagsToApply = getEffectiveSelection({ onlyHighConfidence: false });
 		if (!tagsToApply.length) {
-			statusEl.textContent = "没有可回填的候选标签。";
+			statusEl.textContent = "没有可回填的提示词。";
 			return;
 		}
 		setBusy(true);
@@ -15813,8 +16319,8 @@ function openOnlinePromptSearchDialog(node, library) {
 			if (!isDialogOperationCurrent() || rejectDuringContinuousRun()) return;
 			if (!applyNodeState(node, nextLibrary, nextState, { recordHistory: true, historySource: "manual-apply", mutationRevision })) return;
 			statusEl.textContent = skippedCount > 0
-				? `已处理 ${tagsToApply.length} 个标签：新增 ${addedCount}，已存在跳过 ${skippedCount}。`
-				: `已回填 ${addedCount} 个标签到“自定义补充标签”。`;
+				? `已处理 ${tagsToApply.length} 条提示词：新增 ${addedCount}，重复内容跳过 ${skippedCount}。`
+				: `已回填 ${addedCount} 条提示词到“自定义补充标签”。`;
 		} catch (error) {
 			if (!isDialogOperationCurrent()) return;
 			statusEl.textContent = `回填失败：${error.message}`;
@@ -15822,17 +16328,26 @@ function openOnlinePromptSearchDialog(node, library) {
 			if (isDialogOperationCurrent()) setBusy(false);
 		}
 	};
-	const importToLibrary = async (options = {}) => {
+    const copySelectedPrompts = async () => {
+        if (busyState || rejectDuringContinuousRun()) return;
+        const prompts = getEffectiveSelection({ onlyHighConfidence: false });
+        if (!prompts.length) {
+            statusEl.textContent = "没有可复制的提示词。";
+            return;
+        }
+        const copied = await copyToClipboard(prompts.join("\n\n"));
+        statusEl.textContent = copied
+            ? "已复制 " + prompts.length + " 条提示词。"
+            : "复制失败，请手动选择提示词文本。";
+    };
+	const importToLibrary = async () => {
 		if (busyState || rejectDuringContinuousRun()) return;
-		const onlyHigh = !!options.onlyHighConfidence;
-		const tagsToImport = getEffectiveSelection({ onlyHighConfidence: onlyHigh }).filter((tag) => {
-			const item = candidateItems.find((entry) => entry.tag === tag);
-			return item ? !item.exists : true;
-		});
-		if (!tagsToImport.length) {
-			statusEl.textContent = onlyHigh ? "没有可入库的高置信新增标签。" : "没有可入库的新增候选标签。";
-			return;
-		}
+        const selectedPrompts = getEffectiveSelection({ onlyHighConfidence: false });
+        const tagsToImport = parseCustomTags(selectedPrompts.join(", "));
+        if (!tagsToImport.length) {
+            statusEl.textContent = "所选提示词没有可拆分入库的标签片段。";
+            return;
+        }
 		setBusy(true);
 		const currentRequestId = ++requestId;
 		const isDialogOperationCurrent = () => currentRequestId === requestId && !overlay.__qwenDisposed;
@@ -15877,7 +16392,7 @@ function openOnlinePromptSearchDialog(node, library) {
 			renderMetaFilters();
 			renderResults();
 			if (addedCount > 0) {
-				statusEl.textContent = `已批量入库 ${addedCount} 个${onlyHigh ? "高置信" : ""}标签${unresolvedCount > 0 ? `，${unresolvedCount} 个未能归类` : ""}。`;
+				statusEl.textContent = "已拆分入库 " + addedCount + " 个标签片段" + (unresolvedCount > 0 ? "，" + unresolvedCount + " 个未能归类" : "") + "。";
 			} else if (unresolvedCount > 0) {
 				statusEl.textContent = `${unresolvedCount} 个标签未能归类，本次没有写入新标签。`;
 			} else {
@@ -15902,8 +16417,8 @@ function openOnlinePromptSearchDialog(node, library) {
 				renderResults();
 			} catch (_refreshError) {}
 			statusEl.textContent = confirmedCount > 0
-				? `批量入库未完全完成：已确认 ${confirmedCount} 个标签在库，${unresolvedCount} 个未完成。${error.message}`
-				: `批量入库失败：${error.message}`;
+				? `拆分入库未完全完成：已确认 ${confirmedCount} 个标签在库，${unresolvedCount} 个未完成。${error.message}`
+				: `拆分入库失败：${error.message}`;
 		} finally {
 			if (isDialogOperationCurrent()) setBusy(false);
 		}
@@ -16026,7 +16541,7 @@ function openOnlinePromptSearchDialog(node, library) {
 		const point = getEmbeddedPointerPoint(event);
 		if (!point) return;
 		event.preventDefault();
-		void sendEmbeddedBrowserInput({ type: "mouseWheel", ...point, delta_x: event.deltaX, delta_y: event.deltaY, modifiers: getEmbeddedInputModifiers(event) });
+		queueEmbeddedBrowserWheel({ type: "mouseWheel", ...point, delta_x: event.deltaX, delta_y: event.deltaY, modifiers: getEmbeddedInputModifiers(event) });
 	}, { passive: false });
 	const forwardedControlKeys = new Set(["Backspace", "Tab", "Enter", "Escape", "PageUp", "PageDown", "End", "Home", "ArrowLeft", "ArrowUp", "ArrowRight", "ArrowDown", "Insert", "Delete"]);
 	webInputSink.addEventListener("keydown", (event) => {
@@ -16038,21 +16553,22 @@ function openOnlinePromptSearchDialog(node, library) {
 	webInputSink.addEventListener("beforeinput", (event) => {
 		if (event.isComposing || !event.data) return;
 		event.preventDefault();
-		void sendEmbeddedBrowserInput({ type: "text", text: event.data });
+		queueEmbeddedBrowserText(event.data);
 	});
 	webInputSink.addEventListener("compositionend", (event) => {
-		if (event.data) void sendEmbeddedBrowserInput({ type: "text", text: event.data });
+		if (event.data) queueEmbeddedBrowserText(event.data);
 		webInputSink.value = "";
 	});
 	webInputSink.addEventListener("paste", (event) => {
 		const text = String(event.clipboardData?.getData?.("text") ?? "");
 		if (!text) return;
 		event.preventDefault();
+		flushEmbeddedBrowserText();
 		void sendEmbeddedBrowserInput({ type: "text", text });
 	});
 	applyButton.onclick = () => { void applyToNode(); };
-	importButton.onclick = () => { void importToLibrary({ onlyHighConfidence: false }); };
-	importHighButton.onclick = () => { void importToLibrary({ onlyHighConfidence: true }); };
+	importButton.onclick = () => { void importToLibrary(); };
+	importHighButton.onclick = () => { void copySelectedPrompts(); };
 	searchInput.addEventListener("keydown", (event) => {
 		if (event.isComposing || event.key !== "Enter") return;
 		event.preventDefault();
@@ -16078,12 +16594,18 @@ function openOnlinePromptSearchDialog(node, library) {
 		closeDialog();
 	});
 	overlay.__qwenSyncRuntimeState = () => {
-		if (isContinuousRunActive() && !busyState) statusEl.textContent = "连续测试进行中，请先停止再搜索、回填或入库。";
+		if (isContinuousRunActive() && !busyState) statusEl.textContent = "连续测试进行中，请先停止再搜索、回填、复制或拆分入库。";
 		syncActionButtons();
 		renderSelectionTools();
 	};
 	overlay.__qwenDispose = () => {
 		requestId += 1;
+		if (embeddedWheelTimer != null) clearTimeout(embeddedWheelTimer);
+		if (embeddedTextTimer != null) clearTimeout(embeddedTextTimer);
+		embeddedWheelTimer = null;
+		embeddedTextTimer = null;
+		embeddedWheelPayload = null;
+		embeddedPendingText = "";
 		void closeEmbeddedBrowserSession({ revokeFrame: true });
 		webInputSink.value = "";
 		delete overlay.__qwenSyncRuntimeState;

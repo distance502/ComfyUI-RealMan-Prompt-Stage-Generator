@@ -27,7 +27,11 @@ EMBEDDED_BROWSER_DEFAULT_WIDTH = 1360
 EMBEDDED_BROWSER_DEFAULT_HEIGHT = 760
 EMBEDDED_BROWSER_FRAME_MAX_BYTES = 8 * 1024 * 1024
 EMBEDDED_BROWSER_FRAME_JPEG_QUALITY = 68
-EMBEDDED_BROWSER_FRAME_CACHE_SECONDS = 0.28
+EMBEDDED_BROWSER_FRAME_MIN_WIDTH = 480
+EMBEDDED_BROWSER_FRAME_MIN_HEIGHT = 270
+EMBEDDED_BROWSER_FRAME_MAX_WIDTH = 1600
+EMBEDDED_BROWSER_FRAME_MAX_HEIGHT = 900
+EMBEDDED_BROWSER_FRAME_CACHE_SECONDS = 0.16
 EMBEDDED_BROWSER_TEXT_MAX_CHARS = 4096
 EMBEDDED_BROWSER_SESSION_TTL_SECONDS = 20 * 60.0
 
@@ -91,6 +95,26 @@ def normalize_embedded_browser_viewport(width: Any, height: Any) -> tuple[int, i
         max(EMBEDDED_BROWSER_MIN_HEIGHT, min(EMBEDDED_BROWSER_MAX_HEIGHT, normalized_height)),
     )
 
+
+def normalize_embedded_browser_frame_size(
+    width: Any,
+    height: Any,
+    *,
+    viewport_width: int,
+    viewport_height: int,
+) -> tuple[int, int]:
+    try:
+        requested_width = int(width)
+    except (TypeError, ValueError):
+        requested_width = int(viewport_width)
+    try:
+        requested_height = int(height)
+    except (TypeError, ValueError):
+        requested_height = int(viewport_height)
+    return (
+        max(EMBEDDED_BROWSER_FRAME_MIN_WIDTH, min(EMBEDDED_BROWSER_FRAME_MAX_WIDTH, int(viewport_width), requested_width)),
+        max(EMBEDDED_BROWSER_FRAME_MIN_HEIGHT, min(EMBEDDED_BROWSER_FRAME_MAX_HEIGHT, int(viewport_height), requested_height)),
+    )
 
 def normalize_embedded_browser_coordinate(value: Any, maximum: int) -> float:
     try:
@@ -261,6 +285,7 @@ class _EmbeddedBrowserSession:
     last_frame: bytes = b""
     last_frame_id: str = ""
     last_frame_captured_at: float = 0.0
+    last_frame_size: tuple[int, int, int] = (0, 0, 0)
 
 
 class EmbeddedBrowserManager:
@@ -531,25 +556,53 @@ class EmbeddedBrowserManager:
         self,
         session_id: Any,
         previous_frame_id: Any = "",
+        max_width: Any = None,
+        max_height: Any = None,
+        quality: Any = None,
     ) -> tuple[bytes | None, str]:
         session = await self._get_session(session_id)
         previous_id = str(previous_frame_id or "").strip()[:128]
+        frame_width, frame_height = normalize_embedded_browser_frame_size(
+            max_width,
+            max_height,
+            viewport_width=session.width,
+            viewport_height=session.height,
+        )
+        try:
+            frame_quality = int(quality)
+        except (TypeError, ValueError):
+            frame_quality = EMBEDDED_BROWSER_FRAME_JPEG_QUALITY
+        frame_quality = max(40, min(85, frame_quality))
+        frame_size_key = (frame_width, frame_height, frame_quality)
         async with session.frame_lock:
             now = self._monotonic()
             cached_frame = bytes(getattr(session, "last_frame", b"") or b"")
             cached_id = str(getattr(session, "last_frame_id", "") or "")
             cached_at = float(getattr(session, "last_frame_captured_at", 0.0) or 0.0)
-            if cached_frame and cached_id and now - cached_at < EMBEDDED_BROWSER_FRAME_CACHE_SECONDS:
+            if (
+                cached_frame
+                and cached_id
+                and getattr(session, "last_frame_size", (0, 0, 0)) == frame_size_key
+                and now - cached_at < EMBEDDED_BROWSER_FRAME_CACHE_SECONDS
+            ):
                 return (None if previous_id == cached_id else cached_frame), cached_id
-
+            scale = min(1.0, frame_width / float(session.width), frame_height / float(session.height))
+            scale = max(0.1, scale)
             result = await session.connection.call(
                 "Page.captureScreenshot",
                 {
                     "format": "jpeg",
-                    "quality": EMBEDDED_BROWSER_FRAME_JPEG_QUALITY,
+                    "quality": frame_quality,
                     "fromSurface": True,
                     "captureBeyondViewport": False,
                     "optimizeForSpeed": True,
+                    "clip": {
+                        "x": 0,
+                        "y": 0,
+                        "width": session.width,
+                        "height": session.height,
+                        "scale": scale,
+                    },
                 },
                 timeout=20.0,
             )
@@ -566,6 +619,7 @@ class EmbeddedBrowserManager:
             session.last_frame = frame
             session.last_frame_id = frame_id
             session.last_frame_captured_at = now
+            session.last_frame_size = frame_size_key
         return (None if previous_id == frame_id else frame), frame_id
 
     async def dispatch_input(self, session_id: Any, payload: dict[str, Any]) -> None:
