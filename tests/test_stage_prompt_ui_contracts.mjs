@@ -242,6 +242,10 @@ globalThis.__stagePromptUiTestExports = {
 	bindSummaryRefresh,
 	getSlotPanelGroupValues,
 	getSlotPanelLibrarySignature,
+	normalizeTagGroupSlotLimit,
+	getTagGroupSlotLimit,
+	toggleBoundedTagSelection,
+	getRuntimeRandomAdditionCap,
 	setNodeStatusText,
 	openNsfwWorkspaceDialog,
 	openCharacterSheetDialog,
@@ -4236,6 +4240,46 @@ test("advanced panel groups expert controls into compact cards", async () => {
 	assert.equal(source.includes("qwen-te-panel__advanced-card--wide"), true);
 	assert.equal(source.includes("qwen-te-panel__advanced-input"), true);
 	assert.equal(source.includes("refreshAdvancedPanel(node)"), true);
+});
+
+test("legacy ten-slot workflows insert expanded tag defaults without shifting later settings", async () => {
+	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	const widgetNames = [
+		"模板风格",
+		...Array.from({ length: 20 }, (_value, index) => `主体标签${index + 1}`),
+		...Array.from({ length: 20 }, (_value, index) => `场景背景标签${index + 1}`),
+		"提示词语言",
+	];
+	const node = { properties: {}, widgets: widgetNames.map((name) => ({ name, value: /标签\d+$/u.test(name) ? "无" : `默认:${name}` })) };
+	const legacyValues = [
+		"真实感",
+		...Array.from({ length: 10 }, (_value, index) => index === 0 ? "成年女性" : "无"),
+		...Array.from({ length: 10 }, (_value, index) => index === 0 ? "雨夜街道" : "无"),
+		"纯中文",
+	];
+	const normalized = exports.normalizeLegacyWidgetValues(node, legacyValues);
+	assert.equal(normalized.length, widgetNames.length);
+	assert.equal(normalized[1], "成年女性");
+	assert.equal(normalized[11], "无");
+	assert.equal(normalized[21], "雨夜街道");
+	assert.equal(normalized.at(-1), "纯中文");
+});
+
+test("tag selection capacity is bounded, removable, and reported per group", async () => {
+	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	const library = { slot_config: [{ name: "主体", slots: 20 }] };
+	const selected = { 主体: Array.from({ length: 20 }, (_value, index) => `标签${index + 1}`) };
+	assert.equal(exports.getTagGroupSlotLimit(library, "主体"), 20);
+	assert.equal(exports.normalizeTagGroupSlotLimit(500, 0), 32);
+	assert.deepEqual(
+		Object.fromEntries(Object.entries(exports.toggleBoundedTagSelection(selected, "主体", "超额标签", 20))),
+		{ changed: false, reason: "full", count: 20, limit: 20 },
+	);
+	assert.equal(exports.toggleBoundedTagSelection(selected, "主体", "标签20", 20).reason, "removed");
+	assert.equal(exports.toggleBoundedTagSelection(selected, "主体", "替补标签", 20).reason, "added");
+	assert.equal(selected.主体.length, 20);
+	assert.equal(exports.getRuntimeRandomAdditionCap(0, 20, "强"), 10);
+	assert.equal(exports.getRuntimeRandomAdditionCap(0, 20, "强 / 极限拉开"), 10);
 });
 
 test("advanced panel merges full backend catalogs and renders long enums as selects", async () => {

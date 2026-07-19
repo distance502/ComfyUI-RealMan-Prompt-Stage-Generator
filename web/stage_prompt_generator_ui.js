@@ -1779,6 +1779,8 @@ function injectStyles() {
 	.qwen-te-modal__content-pills{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
 	.qwen-te-modal__content-pill{border:1px solid #536277;border-radius:999px;padding:4px 8px;background:linear-gradient(180deg,#2c3641,#232b35);font-size:11px;line-height:1.2;color:#edf4ff}
 	.qwen-te-modal__content-pill--muted{border-color:#6c5935;background:linear-gradient(180deg,#3a2d1c,#2a2116);color:#f3ddb0}
+	button.qwen-te-modal__content-pill{font-family:inherit;cursor:pointer}
+	button.qwen-te-modal__content-pill:hover{border-color:#d0ad6c;color:#fff0ca}
 	.qwen-te-modal__content-tools{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
 	.qwen-te-modal__mini-button{border:1px solid #4a5568;background:#232a33;color:#e5ecf6;border-radius:999px;padding:6px 10px;font-size:11px;line-height:1.2;cursor:pointer}
 	.qwen-te-modal__mini-button.is-hidden{display:none}
@@ -1806,6 +1808,7 @@ function injectStyles() {
 	.qwen-te-chip{border:1px solid #4b4b4b;background:#262626;color:#efefef;border-radius:999px;padding:6px 10px;cursor:pointer;font-size:12px;line-height:1.15}
 	.qwen-te-chip:hover{background:#333}
 	.qwen-te-chip.is-selected{border-color:#d7b36a;background:linear-gradient(180deg,#6a5223,#4b3918);color:#fff0ca;box-shadow:0 0 0 1px rgba(255,223,155,.12),0 8px 16px rgba(0,0,0,.14)}
+	.qwen-te-chip.is-capacity-blocked{opacity:.42;cursor:not-allowed}
 	.qwen-te-hidden{display:none!important}
 	.qwen-te-modal__textarea{width:100%;min-height:88px;background:#101010;border:1px solid #444;color:#fff;border-radius:10px;padding:10px 12px;font-size:13px;resize:vertical;box-sizing:border-box}
 	.qwen-te-modal__footer{display:flex;justify-content:flex-end;gap:10px;padding:16px 20px 20px;border-top:1px solid #303030}
@@ -4616,6 +4619,20 @@ function normalizeLegacyWidgetValues(node, widgetValues) {
 		values = [...values.slice(0, embeddedModelIndex), ...defaults, ...values.slice(embeddedModelIndex)];
 		if (values.length === currentLength) return values;
 	}
+	const expandedTagWidgets = widgets.filter((widget) => {
+		const match = String(widget?.name ?? "").match(/标签(\d+)$/u);
+		return match && Number(match[1]) > 10;
+	});
+	if (expandedTagWidgets.length && values.length === currentLength - expandedTagWidgets.length) {
+		const expandedSet = new Set(expandedTagWidgets);
+		const migrated = [];
+		let legacyIndex = 0;
+		for (const widget of widgets) {
+			if (expandedSet.has(widget)) migrated.push(getDefaultWidgetValue(widget));
+			else migrated.push(values[legacyIndex++]);
+		}
+		return migrated;
+	}
 	for (const batch of LEGACY_WIDGET_BATCHES) {
 		const unresolved = currentLength - values.length;
 		if (unresolved <= 0) break;
@@ -4712,6 +4729,45 @@ function flattenSectionTags(groupData, sectionNames = []) {
 
 function cloneSelection(selection) {
 	return Object.fromEntries(Object.entries(selection).map(([key, value]) => [key, [...value]]));
+}
+
+const TAG_GROUP_SLOT_HARD_LIMIT = 32;
+const TAG_SELECTION_PILL_PREVIEW_LIMIT = 12;
+const RUNTIME_RANDOM_AUTO_SLOT_BUDGET = 10;
+
+function normalizeTagGroupSlotLimit(value, fallback = 0) {
+	let numeric = Number(value);
+	if (!Number.isFinite(numeric) || numeric <= 0) numeric = Number(fallback);
+	if (!Number.isFinite(numeric) || numeric <= 0) return 0;
+	return Math.min(TAG_GROUP_SLOT_HARD_LIMIT, Math.max(1, Math.trunc(numeric)));
+}
+
+function getTagGroupSlotLimit(library, groupName) {
+	const group = (library?.slot_config ?? []).find((item) => String(item?.name ?? "") === String(groupName ?? ""));
+	return normalizeTagGroupSlotLimit(group?.slots, 0);
+}
+
+function toggleBoundedTagSelection(selection, groupName, rawTag, limit) {
+	if (!selection || typeof selection !== "object") return { changed: false, reason: "invalid", count: 0, limit: 0 };
+	const tag = String(rawTag ?? "").trim();
+	const boundedLimit = normalizeTagGroupSlotLimit(limit, 0);
+	const current = Array.isArray(selection[groupName]) ? selection[groupName] : (selection[groupName] = []);
+	const existingIndex = current.indexOf(tag);
+	if (existingIndex >= 0) {
+		current.splice(existingIndex, 1);
+		return { changed: true, reason: "removed", count: current.length, limit: boundedLimit };
+	}
+	if (!tag) return { changed: false, reason: "empty", count: current.length, limit: boundedLimit };
+	if (current.length >= boundedLimit) return { changed: false, reason: "full", count: current.length, limit: boundedLimit };
+	current.push(tag);
+	return { changed: true, reason: "added", count: current.length, limit: boundedLimit };
+}
+
+function getRuntimeRandomAdditionCap(currentCount, slotCount, intensity) {
+	const remaining = Math.max(0, Math.min(RUNTIME_RANDOM_AUTO_SLOT_BUDGET, normalizeTagGroupSlotLimit(slotCount, 0)) - Math.max(0, Math.trunc(Number(currentCount) || 0)));
+	if (String(intensity ?? "").trim() === "弱") return Math.min(1, remaining);
+	if (String(intensity ?? "").trim() === "中") return Math.min(2, remaining);
+	return remaining;
 }
 
 function collectNsfwWorkspaceTerms(workspace) {
@@ -7356,7 +7412,7 @@ function autoSyncStageNegativePrompt(node) {
 function syncRawWidgetOptions(node, library) {
 	for (const group of library.slot_config ?? []) {
 		const values = ["无", ...flattenUniqueTags(library.tag_library?.[group.name])];
-		for (let index = 1; index <= Number(group.slots ?? 0); index += 1) {
+		for (let index = 1; index <= getTagGroupSlotLimit(library, group.name); index += 1) {
 			const widget = getWidget(node, `${group.name}标签${index}`);
 			if (!widget) continue;
 			widget.options = widget.options ?? {};
@@ -7439,7 +7495,7 @@ function sanitizeStagePromptNode(node, library) {
 	const apiModelWidget = getWidget(node, "API模型");
 	if (apiModelWidget && isLikelyStaleApiModelValue(apiModelWidget.value)) setWidgetValue(node, apiModelWidget.name, "");
 	for (const group of library.slot_config ?? []) {
-		for (let index = 1; index <= Number(group.slots ?? 0); index += 1) {
+		for (let index = 1; index <= getTagGroupSlotLimit(library, group.name); index += 1) {
 			const widget = getWidget(node, `${group.name}标签${index}`);
 			if (widget && widget.value == null) setWidgetValue(node, widget.name, "无");
 		}
@@ -7540,7 +7596,7 @@ function collectNodeState(node, library) {
 	const selected = {};
 	for (const group of library.slot_config ?? []) {
 		const tags = [];
-		for (let index = 1; index <= Number(group.slots ?? 0); index += 1) {
+		for (let index = 1; index <= getTagGroupSlotLimit(library, group.name); index += 1) {
 			const value = String(getWidget(node, `${group.name}标签${index}`)?.value ?? "").trim();
 			if (value && value !== "无" && !tags.includes(value)) tags.push(value);
 		}
@@ -7769,15 +7825,16 @@ function applyNodeState(node, library, state, options = {}) {
 		beginNodeStateMutation(node);
 	}
 	const selected = state?.selected ?? {};
-	const mergedCustomTags = [...(state?.customTags ?? [])];
+	const mergedCustomTags = uniqueTextList(state?.customTags ?? []);
 	for (const group of library.slot_config ?? []) {
 		const allowedValues = new Set(flattenUniqueTags(library.tag_library?.[group.name]));
 		const values = [];
 		for (const value of selected[group.name] ?? []) {
-			if (allowedValues.has(value)) values.push(value);
-			else addUniqueTag(mergedCustomTags, value);
+			if (allowedValues.has(value)) {
+				if (!values.includes(value)) values.push(value);
+			} else addUniqueTag(mergedCustomTags, value);
 		}
-		const limit = Number(group.slots ?? 0);
+		const limit = getTagGroupSlotLimit(library, group.name);
 		for (const extra of values.slice(limit)) addUniqueTag(mergedCustomTags, extra);
 		for (let index = 1; index <= limit; index += 1) {
 			setWidgetValue(node, `${group.name}标签${index}`, values[index - 1] ?? "无");
@@ -8354,7 +8411,7 @@ function getSlotPanelLibrarySignature(library) {
 	if (cached) return cached;
 	const signature = JSON.stringify((library.slot_config ?? []).map((group) => {
 		const groupName = String(group?.name ?? "");
-		return [groupName, Math.max(0, Number(group?.slots ?? 0) || 0), getSlotPanelGroupValues(library, groupName)];
+		return [groupName, normalizeTagGroupSlotLimit(group?.slots, 0), getSlotPanelGroupValues(library, groupName)];
 	}));
 	SLOT_PANEL_LIBRARY_SIGNATURE_CACHE.set(library, signature);
 	return signature;
@@ -8367,7 +8424,7 @@ function buildSlotPanel(node, library) {
 	panel.addEventListener("wheel", stopCanvasWheelEvent, { passive: true });
 	for (const group of library?.slot_config ?? []) {
 		const groupName = String(group.name ?? "");
-		const slotCount = Number(group.slots ?? 0);
+		const slotCount = getTagGroupSlotLimit(library, groupName);
 		if (!groupName || slotCount <= 0) continue;
 		const values = getSlotPanelGroupValues(library, groupName);
 		const card = document.createElement("div");
@@ -8491,7 +8548,7 @@ function refreshSlotPanel(node) {
 	}
 	for (const count of panel.querySelectorAll?.(".qwen-te-panel__slot-count") ?? []) {
 		const groupName = String(count.dataset?.groupName ?? "");
-		if (groupName) count.textContent = `${groupCounts.get(groupName) ?? 0} 已选`;
+		if (groupName) count.textContent = `${groupCounts.get(groupName) ?? 0} / ${getTagGroupSlotLimit(panelState?.library, groupName)}`;
 		const widgetName = String(count.dataset?.widgetName ?? "");
 		if (widgetName === "自定义补充标签") count.textContent = `${parseCustomTags(getWidget(node, widgetName)?.value ?? "").length} 补充`;
 	}
@@ -10709,7 +10766,7 @@ function mapNsfwWorkspaceToStageState(node, library, workspace, catalogOrNegativ
 	const customTags = [...(nextState.customTags ?? [])];
 	const generatedTerms = [];
 	const tagGroupIndex = buildTagGroupIndex(library);
-	const groupLimits = Object.fromEntries((library?.slot_config ?? []).map((group) => [group.name, Math.max(0, Number(group.slots ?? 0))]));
+	const groupLimits = Object.fromEntries((library?.slot_config ?? []).map((group) => [group.name, getTagGroupSlotLimit(library, group.name)]));
 	const pushGeneratedTerm = (value) => {
 		const text = String(value ?? "").trim();
 		if (text && text !== "——" && !generatedTerms.includes(text)) generatedTerms.push(text);
@@ -12175,7 +12232,7 @@ function cloneRewriteMainlineState(currentState, library, excludeSet = new Set()
 	for (const group of library.slot_config ?? []) {
 		if (rewriteGroups.has(group.name)) continue;
 		const source = Array.isArray(currentState.selected?.[group.name]) ? currentState.selected[group.name] : [];
-		selected[group.name] = source.filter((tag) => tag && !excludeSet.has(tag)).slice(0, Number(group.slots ?? source.length ?? 0));
+		selected[group.name] = source.filter((tag) => tag && !excludeSet.has(tag)).slice(0, getTagGroupSlotLimit(library, group.name));
 	}
 	const customTags = (currentState.customTags ?? []).filter((tag) => {
 		if (!tag || excludeSet.has(tag)) return false;
@@ -12270,7 +12327,7 @@ function buildRandomStateLocal(node, library, sourceState = null) {
 		if (randomMode === "重写主体与场景" && !rewriteGroups.has(group.name)) continue;
 		const allTags = flattenUniqueTags(library.tag_library?.[group.name]);
 		const current = state.selected[group.name] ?? [];
-		const limit = Number(group.slots ?? 0);
+		const limit = getTagGroupSlotLimit(library, group.name);
 		for (const tag of whitelist) {
 			if (allTags.includes(tag) && !current.includes(tag) && current.length < limit) current.push(tag);
 		}
@@ -12285,15 +12342,13 @@ function buildRandomStateLocal(node, library, sourceState = null) {
 		const effectivePool = dedupedPool.length ? dedupedPool : pool;
 		const rewriteAdditionCap = randomMode === "重写主体与场景"
 			? getRewriteMainlineAdditionCap(group.name, randomIntensity, currentState.settings["随机主题池"])
-			: Number.POSITIVE_INFINITY;
+			: getRuntimeRandomAdditionCap(current.length, limit, randomIntensity);
 		let additions = 0;
 		while (current.length < limit && effectivePool.length && additions < rewriteAdditionCap) {
 			const tag = randomItem(effectivePool);
 			addUniqueTag(current, tag);
 			effectivePool.splice(effectivePool.indexOf(tag), 1);
 			additions += 1;
-			if (randomMode !== "重写主体与场景" && randomIntensity === "弱" && current.length >= 1) break;
-			if (randomMode !== "重写主体与场景" && randomIntensity === "中" && current.length >= Math.min(2, limit)) break;
 		}
 		state.selected[group.name] = current;
 	}
@@ -17018,32 +17073,41 @@ function openTagDialog(node, library) {
 		};
 
 	const toggleTag = (groupName, tag) => {
-		const current = workingState.selected[groupName] ?? [];
-		const existingIndex = current.indexOf(tag);
-		if (existingIndex >= 0) {
-			current.splice(existingIndex, 1);
-			return;
+		const result = toggleBoundedTagSelection(
+			workingState.selected,
+			groupName,
+			tag,
+			getTagGroupSlotLimit(library, groupName),
+		);
+		if (result.reason === "full") {
+			statusEl.textContent = `${groupName} 已达到 ${result.limit} 个标签上限，请先取消一个已选标签。`;
+		} else if (result.changed) {
+			statusEl.textContent = `${groupName} 已选 ${result.count} / ${result.limit} 个标签；当前总计 ${Object.values(workingState.selected).reduce((sum, items) => sum + (items?.length ?? 0), 0)} 个。`;
 		}
-		current.push(tag);
+		return result;
 	};
 
 	const renderCurrentGroupPills = (groupName) => {
 		if (!currentGroupUi || currentGroupUi.groupName !== groupName) return;
 		const { contentCount, contentPills } = currentGroupUi;
 		const selectedTags = workingState.selected[groupName] ?? [];
-		contentCount.textContent = `${selectedTags.length} 已选`;
+		const limit = getTagGroupSlotLimit(library, groupName);
+		contentCount.textContent = `${selectedTags.length} / ${limit}`;
 		contentPills.replaceChildren();
 		if (selectedTags.length) {
-			for (const tag of selectedTags.slice(0, 10)) {
-				const pill = document.createElement("div");
+			for (const tag of selectedTags.slice(0, TAG_SELECTION_PILL_PREVIEW_LIMIT)) {
+				const pill = document.createElement("button");
+				pill.type = "button";
 				pill.className = "qwen-te-modal__content-pill";
 				pill.textContent = tag;
+				pill.title = "点击移除此标签";
+				pill.onclick = () => { toggleTag(groupName, tag); refreshSelectionUiOnly(); };
 				contentPills.appendChild(pill);
 			}
-			if (selectedTags.length > 10) {
+			if (selectedTags.length > TAG_SELECTION_PILL_PREVIEW_LIMIT) {
 				const pill = document.createElement("div");
 				pill.className = "qwen-te-modal__content-pill qwen-te-modal__content-pill--muted";
-				pill.textContent = `+${selectedTags.length - 10}`;
+				pill.textContent = `+${selectedTags.length - TAG_SELECTION_PILL_PREVIEW_LIMIT}`;
 				contentPills.appendChild(pill);
 			}
 		} else {
@@ -17057,14 +17121,21 @@ function openTagDialog(node, library) {
 	const refreshSelectionUiOnly = () => {
 		for (const chip of chipRecords) {
 			const selectedTags = workingState.selected[chip.groupName] ?? [];
-			chip.element.classList.toggle("is-selected", selectedTags.includes(chip.tag));
+			const selected = selectedTags.includes(chip.tag);
+			const limit = getTagGroupSlotLimit(library, chip.groupName);
+			const blocked = !selected && selectedTags.length >= limit;
+			chip.element.classList.toggle("is-selected", selected);
+			chip.element.classList.toggle("is-capacity-blocked", blocked);
+			chip.element.title = selected ? "点击取消选择" : (blocked ? `已达到本组 ${limit} 个标签上限` : "点击选择");
+			chip.element.setAttribute?.("aria-disabled", blocked ? "true" : "false");
 		}
 		for (const group of library.slot_config ?? []) {
 			const count = (workingState.selected[group.name] ?? []).length;
+			const limit = getTagGroupSlotLimit(library, group.name);
 			const countEl = countElements.get(group.name);
-			if (countEl) countEl.textContent = `${count} 已选`;
+			if (countEl) countEl.textContent = `${count} / ${limit}`;
 			const navRecord = navButtons.get(group.name);
-			if (navRecord) navRecord.count.textContent = `${count}`;
+			if (navRecord) navRecord.count.textContent = `${count}/${limit}`;
 		}
 		renderCurrentGroupPills(activeGroupName);
 	};
@@ -17102,7 +17173,7 @@ function openTagDialog(node, library) {
 		contentTitle.appendChild(contentName);
 		const contentCount = document.createElement("div");
 		contentCount.className = "qwen-te-group__count";
-		contentCount.textContent = `${(workingState.selected[groupConfig.name] ?? []).length} 已选`;
+		contentCount.textContent = `${(workingState.selected[groupConfig.name] ?? []).length} / ${getTagGroupSlotLimit(library, groupConfig.name)}`;
 		contentTitle.appendChild(contentCount);
 		const contentSub = document.createElement("div");
 		contentSub.className = "qwen-te-modal__content-sub";
@@ -17111,28 +17182,8 @@ function openTagDialog(node, library) {
 		const contentPills = document.createElement("div");
 		contentPills.className = "qwen-te-modal__content-pills";
 		contentHeader.appendChild(contentPills);
-		const selectedTags = workingState.selected[groupConfig.name] ?? [];
-		const selectedTagSet = new Set(selectedTags);
-		if (selectedTags.length) {
-			for (const tag of selectedTags.slice(0, 10)) {
-				const pill = document.createElement("div");
-				pill.className = "qwen-te-modal__content-pill";
-				pill.textContent = tag;
-				contentPills.appendChild(pill);
-			}
-			if (selectedTags.length > 10) {
-				const pill = document.createElement("div");
-				pill.className = "qwen-te-modal__content-pill qwen-te-modal__content-pill--muted";
-				pill.textContent = `+${selectedTags.length - 10}`;
-				contentPills.appendChild(pill);
-			}
-		} else {
-			const pill = document.createElement("div");
-			pill.className = "qwen-te-modal__content-pill qwen-te-modal__content-pill--muted";
-			pill.textContent = "当前分组还未选择标签";
-			contentPills.appendChild(pill);
-		}
 		currentGroupUi = { groupName: groupConfig.name, contentCount, contentPills };
+		renderCurrentGroupPills(groupConfig.name);
 		const contentTools = document.createElement("div");
 		contentTools.className = "qwen-te-modal__content-tools";
 		contentHeader.appendChild(contentTools);
@@ -17346,7 +17397,7 @@ function openTagDialog(node, library) {
 				const normalizedTag = String(step.tag ?? "").trim();
 				const normalizedGroup = String(step.group ?? "").trim();
 				if (!normalizedTag || !normalizedGroup) return "ignored";
-				const slotLimit = Number((library.slot_config ?? []).find((group) => group.name === normalizedGroup)?.slots ?? 0);
+				const slotLimit = getTagGroupSlotLimit(library, normalizedGroup);
 				const selectedTags = state.nextSelected[normalizedGroup] ?? [];
 				if (selectedTags.includes(normalizedTag)) {
 					state.nextSelected[normalizedGroup] = selectedTags;
@@ -17927,7 +17978,13 @@ function openTagDialog(node, library) {
 		renderGroupContent(activeGroupName);
 		for (const chip of chipRecords) {
 			const selectedTags = workingState.selected[chip.groupName] ?? [];
-			chip.element.classList.toggle("is-selected", selectedTags.includes(chip.tag));
+			const selected = selectedTags.includes(chip.tag);
+			const limit = getTagGroupSlotLimit(library, chip.groupName);
+			const blocked = !selected && selectedTags.length >= limit;
+			chip.element.classList.toggle("is-selected", selected);
+			chip.element.classList.toggle("is-capacity-blocked", blocked);
+			chip.element.title = selected ? "点击取消选择" : (blocked ? `已达到本组 ${limit} 个标签上限` : "点击选择");
+			chip.element.setAttribute?.("aria-disabled", blocked ? "true" : "false");
 			chip.element.classList.toggle("qwen-te-hidden", !!keyword && !chip.tag.toLowerCase().includes(keyword));
 		}
 		const visibleSectionsByGroup = new Map();
@@ -17947,12 +18004,12 @@ function openTagDialog(node, library) {
 			navRecord.button.classList.toggle("is-active", group.name === activeGroupName);
 			navRecord.button.classList.toggle("is-match", visibleCount > 0 && keyword.length > 0);
 			navRecord.match.textContent = keyword && visibleCount > 0 ? `${visibleCount} 匹配` : "";
-			navRecord.count.textContent = `${(workingState.selected[group.name] ?? []).length}`;
+			navRecord.count.textContent = `${(workingState.selected[group.name] ?? []).length}/${getTagGroupSlotLimit(library, group.name)}`;
 		}
 		for (const group of library.slot_config ?? []) {
 			const count = (workingState.selected[group.name] ?? []).length;
 			const countEl = countElements.get(group.name);
-			if (countEl) countEl.textContent = `${count} 已选`;
+			if (countEl) countEl.textContent = `${count} / ${getTagGroupSlotLimit(library, group.name)}`;
 		}
 	};
 
@@ -18104,7 +18161,7 @@ window.__QWEN_TE_STAGE_GET_PROMPT_OUTPUT__ = (nodeOrId) => {
 
 function getRawTagWidgetNames(library) {
 	return (library?.slot_config ?? [])
-		.flatMap((group) => Array.from({ length: Number(group?.slots ?? 0) }, (_, index) => `${group.name}标签${index + 1}`))
+		.flatMap((group) => Array.from({ length: getTagGroupSlotLimit(library, group?.name) }, (_, index) => `${group.name}标签${index + 1}`))
 		.concat(["自定义补充标签"]);
 }
 
