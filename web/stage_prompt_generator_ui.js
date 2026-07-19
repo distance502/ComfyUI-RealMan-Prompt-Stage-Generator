@@ -2438,6 +2438,8 @@ function stepOnlineSearchBrowserHistory(rawItems, currentIndex, direction) {
 
 const PROMPT_BROWSER_HOME_ENTRY = "qwen-browser://home";
 const PROMPT_BROWSER_SEARCH_BASE_URL = "https://www.google.com/search?igu=1&q=";
+const PROMPT_BROWSER_EMBEDDED_RETRY_DELAY_MS = 2 * 60 * 1000;
+let promptBrowserEmbeddedRetryAfter = 0;
 const PROMPT_BROWSER_BLOCKED_SCHEMES = new Set([
 	"about", "blob", "chrome", "data", "file", "ftp", "javascript", "mailto", "resource", "tel", "view-source", "ws", "wss",
 ]);
@@ -15439,8 +15441,8 @@ function openOnlinePromptSearchDialog(node, library) {
 	const frameExternalButton = document.createElement("button");
 	frameExternalButton.type = "button";
 	frameExternalButton.className = "qwen-te-online-search__frame-external";
-	frameExternalButton.textContent = "▣ 备用窗口";
-	frameExternalButton.title = "内嵌浏览器不可用时，在独立窗口打开";
+	frameExternalButton.textContent = "▣ 独立浏览器";
+	frameExternalButton.title = "在真正的 Edge/Chromium 窗口中打开当前网页，支持标签页、下载、登录和证书操作";
 	frameExternalButton.disabled = true;
 	webFrameShell.appendChild(frameExternalButton);
 
@@ -15466,6 +15468,7 @@ function openOnlinePromptSearchDialog(node, library) {
 	let companionBrowserBusy = false;
 	let embeddedNavigationBusy = false;
 	let embeddedBrowserSessionId = "";
+	let embeddedBrowserFallbackActive = Date.now() < promptBrowserEmbeddedRetryAfter;
 	let embeddedBrowserWidth = 1280;
 	let embeddedBrowserHeight = 720;
 	let embeddedCanGoBack = false;
@@ -15839,6 +15842,7 @@ const getEffectiveSelectionCounts = () => {
 			webHistoryIndex = next.index;
 		}
 		void closeEmbeddedBrowserSession({ revokeFrame: true });
+		embeddedBrowserFallbackActive = Date.now() < promptBrowserEmbeddedRetryAfter;
 		currentWebUrl = "";
 		webAddressDraft = "";
 		if (activeBrowserMode === "web") searchInput.value = "";
@@ -15860,6 +15864,9 @@ const getEffectiveSelectionCounts = () => {
 			syncActionButtons();
 			return false;
 		}
+		if (embeddedBrowserFallbackActive && Date.now() >= promptBrowserEmbeddedRetryAfter) {
+			embeddedBrowserFallbackActive = false;
+		}
 		if (options.recordHistory !== false) {
 			const next = pushOnlineSearchBrowserHistory(webHistory, webHistoryIndex, target.url, 30);
 			webHistory = next.items;
@@ -15870,6 +15877,15 @@ const getEffectiveSelectionCounts = () => {
 		if (activeBrowserMode === "web") searchInput.value = target.url;
 		webHome.classList.add("qwen-te-hidden");
 		webFrameShell.classList.remove("qwen-te-hidden");
+		if (embeddedBrowserFallbackActive && !embeddedBrowserSessionId && !options.forceEmbedded) {
+			setWebFrameOverlay("正在打开独立浏览器...", { passive: true });
+			const companionResult = await openCurrentWebCompanion(target.url);
+			if (companionResult) {
+				setWebFrameOverlay("已切换到独立浏览器。该窗口支持标签页、下载、登录和证书操作。", { passive: true });
+			}
+			syncActionButtons();
+			return companionResult;
+		}
 		setWebFrameOverlay(embeddedBrowserSessionId ? "正在导航..." : "正在启动本机内嵌浏览器...");
 		embeddedNavigationBusy = true;
 		syncActionButtons();
@@ -15898,6 +15914,8 @@ const getEffectiveSelectionCounts = () => {
 				embeddedUnchangedFrameCount = 0;
 			}
 			if (!embeddedBrowserSessionId) throw new Error("后端没有返回内嵌浏览器会话。");
+			embeddedBrowserFallbackActive = false;
+			promptBrowserEmbeddedRetryAfter = 0;
 			applyEmbeddedBrowserStatus(data, { updateMessage: false });
 			markEmbeddedBrowserActivity(2400);
 			setWebStatus(`${data.browser || "内嵌浏览器"} 已启动，可直接点击和输入。`);
@@ -15907,9 +15925,20 @@ const getEffectiveSelectionCounts = () => {
 			const message = isAbortLikeError(error)
 				? "内嵌浏览器启动请求已取消，请稍后重试。"
 				: String(error?.message ?? error);
+			const status = Number(error?.status ?? 0) || 0;
+			if ([500, 502, 503].includes(status) || /调试端口|内嵌浏览器不可用|启动失败/iu.test(message)) {
+				embeddedBrowserFallbackActive = true;
+				promptBrowserEmbeddedRetryAfter = Date.now() + PROMPT_BROWSER_EMBEDDED_RETRY_DELAY_MS;
+				await closeEmbeddedBrowserSession({ revokeFrame: false });
+				const companionResult = await openCurrentWebCompanion(target.url);
+				if (companionResult) {
+					setWebFrameOverlay("内嵌预览不可用，已自动打开独立浏览器。\n该窗口支持标签页、下载、登录和证书操作。", { passive: true });
+					return true;
+				}
+			}
 			setWebFrameOverlay(`内嵌浏览器不可用：${message}`);
-			setWebStatus(`内嵌浏览器打开失败：${message}`);
-			if ([404, 503].includes(Number(error?.status ?? 0))) embeddedBrowserSessionId = "";
+			setWebStatus(`内嵌浏览器打开失败：${message}。可点击“独立浏览器”继续使用。`);
+			if ([404, 503].includes(status)) embeddedBrowserSessionId = "";
 			return false;
 		} finally {
 			embeddedNavigationBusy = false;
@@ -15955,7 +15984,9 @@ const getEffectiveSelectionCounts = () => {
 			}
 			webAddressDraft = result.url;
 			if (activeBrowserMode === "web") searchInput.value = result.url;
-			setWebStatus(`${result.browser || "完整浏览器"} 已启动。内嵌预览保持不变。`);
+			setWebStatus(embeddedBrowserFallbackActive
+				? `${result.browser || "完整浏览器"} 已启动，当前已切换为独立浏览器模式。`
+				: `${result.browser || "完整浏览器"} 已启动。内嵌预览保持不变。`);
 			return true;
 		} finally {
 			companionBrowserBusy = false;
@@ -16041,7 +16072,7 @@ const getEffectiveSelectionCounts = () => {
 			else if (button.title === "连续测试进行中，请先停止。") button.title = "";
 		}
 		if (tagMode && blockedHint) searchButton.title = blockedHint;
-		else searchButton.title = tagMode ? "执行联网提示词搜索" : "在内嵌网页中打开";
+		else searchButton.title = tagMode ? "执行联网提示词搜索" : (embeddedBrowserFallbackActive ? "在独立浏览器中打开" : "在内嵌网页中打开");
 		searchButton.classList.toggle("is-busy", tagMode ? busyState : embeddedNavigationBusy);
 		companionBrowserButton.classList.toggle("is-busy", companionBrowserBusy);
 	};

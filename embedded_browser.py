@@ -9,6 +9,7 @@ import json
 import math
 import os
 import secrets
+import socket
 import shutil
 import subprocess
 import time
@@ -34,6 +35,9 @@ EMBEDDED_BROWSER_FRAME_MAX_HEIGHT = 900
 EMBEDDED_BROWSER_FRAME_CACHE_SECONDS = 0.16
 EMBEDDED_BROWSER_TEXT_MAX_CHARS = 4096
 EMBEDDED_BROWSER_SESSION_TTL_SECONDS = 20 * 60.0
+EMBEDDED_BROWSER_DEBUG_PORT_WAIT_SECONDS = 4.0
+EMBEDDED_BROWSER_CDP_STARTUP_TIMEOUT_SECONDS = 4.0
+EMBEDDED_BROWSER_DIAGNOSTIC_MAX_CHARS = 1600
 
 _EMBEDDED_BROWSER_SINGLE_PAGE_NAVIGATION_SCRIPT = r"""
 (() => {
@@ -320,11 +324,23 @@ class EmbeddedBrowserManager:
         self._start_times.append(now)
 
     def _build_arguments(self, executable: Path, profile: Path, width: int, height: int) -> list[str]:
+        return self._build_arguments_with_port(executable, profile, width, height, 0)
+
+    def _build_arguments_with_port(
+        self,
+        executable: Path,
+        profile: Path,
+        width: int,
+        height: int,
+        remote_debugging_port: int,
+    ) -> list[str]:
+        port = int(remote_debugging_port or 0)
         return [
             str(executable),
             "--headless=new",
             "--remote-debugging-address=127.0.0.1",
-            "--remote-debugging-port=0",
+            f"--remote-debugging-port={port}",
+            "--remote-allow-origins=*",
             f"--user-data-dir={profile}",
             "--no-first-run",
             "--no-default-browser-check",
@@ -335,31 +351,91 @@ class EmbeddedBrowserManager:
             "about:blank",
         ]
 
-    def _launch_process(self, executable: Path, profile: Path, width: int, height: int) -> subprocess.Popen:
+    def _launch_process(
+        self,
+        executable: Path,
+        profile: Path,
+        width: int,
+        height: int,
+        remote_debugging_port: int = 0,
+    ) -> subprocess.Popen:
         creation_flags = 0
         if os.name == "nt":
             creation_flags |= int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
             creation_flags |= int(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
+        log_handle = None
         try:
-            return self._process_factory(
-                self._build_arguments(executable, profile, width, height),
+            log_path = profile / "browser.log"
+            log_handle = log_path.open("ab")
+            process = self._process_factory(
+                self._build_arguments_with_port(
+                    executable,
+                    profile,
+                    width,
+                    height,
+                    remote_debugging_port,
+                ),
                 shell=False,
                 stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stdout=log_handle,
+                stderr=log_handle,
                 close_fds=True,
                 creationflags=creation_flags,
                 cwd=str(executable.parent),
             )
+            setattr(process, "_qwen_te_embedded_log_handle", log_handle)
+            return process
         except OSError as exc:
+            if log_handle is not None:
+                log_handle.close()
             raise EmbeddedBrowserUnavailable("内嵌浏览器进程启动失败。") from exc
 
-    async def _wait_for_debug_port(self, process: subprocess.Popen, profile: Path, *, timeout: float = 15.0) -> int:
+    @staticmethod
+    def _read_diagnostic_tail(profile: Path) -> str:
+        try:
+            text = (profile / "browser.log").read_text(encoding="utf-8", errors="replace")
+        except (OSError, UnicodeError):
+            return ""
+        cleaned = " ".join(line.strip() for line in text.splitlines() if line.strip())
+        return cleaned[-EMBEDDED_BROWSER_DIAGNOSTIC_MAX_CHARS:]
+
+    @staticmethod
+    def _reserve_debug_port() -> int:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.bind(("127.0.0.1", 0))
+            return int(sock.getsockname()[1])
+
+    async def _debug_port_is_open(self, port: int) -> bool:
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection("127.0.0.1", int(port)),
+                timeout=0.25,
+            )
+        except (OSError, asyncio.TimeoutError, ValueError):
+            return False
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except (OSError, RuntimeError):
+            pass
+        return True
+
+    async def _wait_for_debug_port(
+        self,
+        process: subprocess.Popen,
+        profile: Path,
+        *,
+        expected_port: int = 0,
+        timeout: float = EMBEDDED_BROWSER_DEBUG_PORT_WAIT_SECONDS,
+    ) -> int:
         port_file = profile / "DevToolsActivePort"
         deadline = self._monotonic() + max(2.0, float(timeout))
         while self._monotonic() < deadline:
             if process.poll() is not None:
-                raise EmbeddedBrowserUnavailable("内嵌浏览器启动后立即退出。")
+                diagnostic = self._read_diagnostic_tail(profile)
+                suffix = f" 启动日志：{diagnostic}" if diagnostic else ""
+                raise EmbeddedBrowserUnavailable(f"内嵌浏览器启动后立即退出。{suffix}")
             try:
                 lines = port_file.read_text(encoding="utf-8").splitlines()
             except (FileNotFoundError, OSError, UnicodeError):
@@ -371,8 +447,14 @@ class EmbeddedBrowserManager:
                     port = 0
                 if 1 <= port <= 65535:
                     return port
+            if expected_port and await self._debug_port_is_open(expected_port):
+                return int(expected_port)
             await asyncio.sleep(0.1)
-        raise EmbeddedBrowserUnavailable("等待内嵌浏览器调试端口超时。")
+        diagnostic = self._read_diagnostic_tail(profile)
+        suffix = f" 启动日志：{diagnostic}" if diagnostic else ""
+        raise EmbeddedBrowserUnavailable(
+            f"浏览器未开放本机调试端口，等待超时。请检查 Edge 的远程调试策略或使用独立浏览器窗口。{suffix}"
+        )
 
     async def _find_page_websocket(self, client: aiohttp.ClientSession, port: int) -> str:
         endpoint = f"http://127.0.0.1:{port}/json/list"
@@ -391,32 +473,49 @@ class EmbeddedBrowserManager:
 
     async def _configure_page(self, session: _EmbeddedBrowserSession) -> None:
         connection = session.connection
-        await connection.call("Page.enable")
-        await connection.call("Runtime.enable")
-        await connection.call("Network.enable")
-        await connection.call(
-            "Page.addScriptToEvaluateOnNewDocument",
-            {"source": _EMBEDDED_BROWSER_SINGLE_PAGE_NAVIGATION_SCRIPT},
-        )
-        await connection.call(
-            "Runtime.evaluate",
-            {"expression": _EMBEDDED_BROWSER_SINGLE_PAGE_NAVIGATION_SCRIPT},
-        )
-        await connection.call(
-            "Emulation.setDeviceMetricsOverride",
-            {
-                "width": session.width,
-                "height": session.height,
-                "deviceScaleFactor": 1,
-                "mobile": False,
-                "screenWidth": session.width,
-                "screenHeight": session.height,
-            },
-        )
-        await connection.call("Emulation.setFocusEmulationEnabled", {"enabled": True})
+        startup_timeout = EMBEDDED_BROWSER_CDP_STARTUP_TIMEOUT_SECONDS
         try:
-            await connection.call("Browser.setDownloadBehavior", {"behavior": "deny"})
-        except EmbeddedBrowserError:
+            await connection.call("Page.enable", timeout=startup_timeout)
+            await connection.call("Runtime.enable", timeout=startup_timeout)
+            await connection.call("Network.enable", timeout=startup_timeout)
+            await connection.call(
+                "Page.addScriptToEvaluateOnNewDocument",
+                {"source": _EMBEDDED_BROWSER_SINGLE_PAGE_NAVIGATION_SCRIPT},
+                timeout=startup_timeout,
+            )
+            await connection.call(
+                "Runtime.evaluate",
+                {"expression": _EMBEDDED_BROWSER_SINGLE_PAGE_NAVIGATION_SCRIPT},
+                timeout=startup_timeout,
+            )
+            await connection.call(
+                "Emulation.setDeviceMetricsOverride",
+                {
+                    "width": session.width,
+                    "height": session.height,
+                    "deviceScaleFactor": 1,
+                    "mobile": False,
+                    "screenWidth": session.width,
+                    "screenHeight": session.height,
+                },
+                timeout=startup_timeout,
+            )
+            await connection.call(
+                "Emulation.setFocusEmulationEnabled",
+                {"enabled": True},
+                timeout=startup_timeout,
+            )
+        except asyncio.TimeoutError as exc:
+            raise EmbeddedBrowserUnavailable(
+                "浏览器调试连接建立后没有响应，请使用独立浏览器窗口。"
+            ) from exc
+        try:
+            await connection.call(
+                "Browser.setDownloadBehavior",
+                {"behavior": "deny"},
+                timeout=startup_timeout,
+            )
+        except (EmbeddedBrowserError, asyncio.TimeoutError):
             pass
 
     async def start(self, url: str, *, width: Any = None, height: Any = None) -> dict[str, Any]:
@@ -434,8 +533,19 @@ class EmbeddedBrowserManager:
             client: aiohttp.ClientSession | None = None
             connection: _CdpConnection | None = None
             try:
-                process = self._launch_process(executable, profile, normalized_width, normalized_height)
-                port = await self._wait_for_debug_port(process, profile)
+                requested_port = self._reserve_debug_port()
+                process = self._launch_process(
+                    executable,
+                    profile,
+                    normalized_width,
+                    normalized_height,
+                    requested_port,
+                )
+                port = await self._wait_for_debug_port(
+                    process,
+                    profile,
+                    expected_port=requested_port,
+                )
                 client = aiohttp.ClientSession(
                     timeout=aiohttp.ClientTimeout(total=20.0, connect=5.0, sock_connect=5.0, sock_read=20.0),
                     trust_env=False,
@@ -752,16 +862,21 @@ class EmbeddedBrowserManager:
     @staticmethod
     def _stop_process_sync(process: subprocess.Popen) -> None:
         try:
-            if process.poll() is not None:
-                return
-            process.terminate()
-            try:
-                process.wait(timeout=3.0)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=2.0)
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=3.0)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=2.0)
         except Exception:
             pass
+        log_handle = getattr(process, "_qwen_te_embedded_log_handle", None)
+        if log_handle is not None:
+            try:
+                log_handle.close()
+            except Exception:
+                pass
 
     def close_processes_sync(self) -> None:
         for session in list(self._sessions.values()):

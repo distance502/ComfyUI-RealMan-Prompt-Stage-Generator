@@ -130,6 +130,7 @@ class TestCompanionBrowserLaunch(unittest.TestCase):
         self.assertEqual(argv[0], str(edge))
         self.assertEqual(argv[-2:], ["--new-window", url])
         self.assertIn(f"--user-data-dir={profile}", argv)
+        self.assertIn("--start-maximized", argv)
         self.assertNotIn("--no-sandbox", argv)
         self.assertNotIn("--disable-web-security", argv)
         self.assertNotIn("--remote-debugging-port", " ".join(argv))

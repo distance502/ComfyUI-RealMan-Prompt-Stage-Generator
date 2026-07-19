@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from embedded_browser import (
     EmbeddedBrowserError,
     EmbeddedBrowserManager,
+    EmbeddedBrowserUnavailable,
     embedded_browser_history_index,
     embedded_browser_virtual_key_code,
     normalize_embedded_browser_coordinate,
@@ -83,6 +84,21 @@ class EmbeddedBrowserHelperTests(unittest.TestCase):
         self.assertNotIn("--no-sandbox", joined)
         self.assertNotIn("--disable-web-security", joined)
 
+    def test_fixed_debug_port_is_supported_for_browser_builds_without_active_port_file(self):
+        manager = EmbeddedBrowserManager(
+            executable_finder=lambda: (None, "", ""),
+            profile_root=Path("browser-profile"),
+        )
+        arguments = manager._build_arguments_with_port(
+            Path("C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"),
+            Path("browser-profile/runtime/session"),
+            1000,
+            700,
+            49223,
+        )
+        self.assertIn("--remote-debugging-port=49223", arguments)
+        self.assertIn("--remote-allow-origins=*", arguments)
+
     def test_page_configuration_keeps_blank_links_in_the_current_embedded_page(self):
         async def run():
             connection = _RecordingConnection()
@@ -99,6 +115,24 @@ class EmbeddedBrowserHelperTests(unittest.TestCase):
             self.assertEqual(len(scripts), 2)
             self.assertTrue(all('target", "_self"' in script for script in scripts))
             self.assertTrue(all("window.open = function" in script for script in scripts))
+
+        import asyncio
+        asyncio.run(run())
+
+    def test_page_configuration_converts_cdp_timeout_to_unavailable(self):
+        async def run():
+            class _TimeoutConnection:
+                async def call(self, *_args, **_kwargs):
+                    raise __import__("asyncio").TimeoutError
+
+            manager = EmbeddedBrowserManager(
+                executable_finder=lambda: (None, "", ""),
+                profile_root=Path("browser-profile"),
+            )
+            with self.assertRaisesRegex(EmbeddedBrowserUnavailable, "没有响应"):
+                await manager._configure_page(
+                    SimpleNamespace(connection=_TimeoutConnection(), width=1360, height=760)
+                )
 
         import asyncio
         asyncio.run(run())

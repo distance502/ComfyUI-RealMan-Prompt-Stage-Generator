@@ -1350,6 +1350,10 @@ test("online prompt search keeps prompt tools inside a real dual-mode web browse
 	assert.equal(dialogSource.includes('requestEmbeddedPromptBrowser("command"'), true);
 	assert.equal(dialogSource.includes('requestEmbeddedPromptBrowser("input"'), true);
 	assert.equal(dialogSource.includes("fetchEmbeddedPromptBrowserFrame"), true);
+	assert.equal(dialogSource.includes("embeddedBrowserFallbackActive"), true);
+	assert.equal(dialogSource.includes("已自动打开独立浏览器"), true);
+	assert.equal(dialogSource.includes('frameExternalButton.textContent = "▣ 独立浏览器"'), true);
+	assert.equal(dialogSource.includes("PROMPT_BROWSER_EMBEDDED_RETRY_DELAY_MS"), true);
 	assert.equal(dialogSource.includes("getEmbeddedPointerPoint"), true);
 	assert.equal(dialogSource.includes("webFrame.naturalWidth"), true);
 	assert.equal(dialogSource.includes("embeddedLastFrameId"), true);
