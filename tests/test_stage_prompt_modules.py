@@ -3831,6 +3831,35 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertEqual(len(next_selected["构图视角"]), 1)
         self.assertTrue(generated)
 
+    def test_randomizer_does_not_fill_all_twenty_expanded_slots(self) -> None:
+        options = ["无", *[f"候选{index}" for index in range(1, 31)]]
+        base_settings = {
+            "运行时随机模式": "全随机",
+            "核心标签锁定数量": 0,
+            "seed": 19,
+            "unique_id": "expanded-slot-random-budget",
+            "锁定标签白名单": "",
+            "随机排除标签": "",
+            "随机补充避重缓存": "",
+            "随机主题池": "自动",
+        }
+        for intensity, expected in (("弱", 1), ("中", 2), ("强", 10), ("强 / 极限拉开", 10)):
+            next_selected, _next_custom, generated = randomizer.build_runtime_tags(
+                OrderedDict({"主体": []}),
+                [],
+                {**base_settings, "运行时随机强度": intensity},
+                all_tag_groups=lambda: [("主体", 20, options)],
+                tag_group_index=lambda: {tag: "主体" for tag in options if tag != "无"},
+                parse_tags=lambda _value: [],
+                uniq=uniq,
+                seed_normalizer=lambda value: int(value),
+                history_loader=lambda _node_id: [],
+                random_module=random,
+                empty_tag="无",
+            )
+            self.assertEqual(len(next_selected["主体"]), expected)
+            self.assertEqual(len(generated), expected)
+
     def test_randomizer_preserves_limited_core_tags(self) -> None:
         selected = OrderedDict(
             {
@@ -8381,8 +8410,14 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertIn("图片反推生成", input_types["required"])
         self.assertIn("图片反推模式", input_types["required"])
         for group_name in ("主体", "画面风格", "成人向表达", "光影氛围", "构图视角", "动作姿态", "服装造型", "场景背景", "道具世界观", "技术画质"):
-            self.assertIn(f"{group_name}标签10", input_types["required"])
-            self.assertNotIn(f"{group_name}标签11", input_types["required"])
+            self.assertIn(f"{group_name}标签20", input_types["required"])
+            self.assertNotIn(f"{group_name}标签21", input_types["required"])
+
+    def test_tag_library_expands_and_bounds_every_group_capacity(self) -> None:
+        frontend = tag_library.前端标签库数据()
+        self.assertEqual(len(frontend["slot_config"]), 10)
+        self.assertTrue(all(group["slots"] == 20 for group in frontend["slot_config"]))
+        self.assertTrue(all(group["slots"] <= tag_library._标签分组槽位硬上限 for group in frontend["slot_config"]))
 
     def test_character_sheet_reverse_prompt_does_not_lock_visual_theme(self) -> None:
         module = load_stage_prompt_generator_for_integration_test()

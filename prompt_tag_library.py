@@ -76,6 +76,8 @@ _自定义标签库最大标签总数 = 5_000
 _自定义标签库最大JSON字节 = 2 * 1024 * 1024
 _自定义标签批量输入最大字符 = 32_768
 _自定义标签库单小类最大扫描项 = 4 * _自定义标签库最大小类标签数
+_标签分组默认槽位数 = 20
+_标签分组槽位硬上限 = 32
 
 
 def _读取快照() -> dict[str, Any]:
@@ -83,6 +85,34 @@ def _读取快照() -> dict[str, Any]:
         raise FileNotFoundError(f"未找到标签库快照：{_快照文件路径}")
     payload = json.loads(_快照文件路径.read_text(encoding="utf-8"))
     return payload if isinstance(payload, dict) else {}
+
+
+def _规范化分组配置(value: Any) -> list[dict[str, Any]]:
+    """Normalize slot metadata once so every consumer shares the same capacity."""
+    if not isinstance(value, list):
+        return []
+    result: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw_group in value[:64]:
+        if not isinstance(raw_group, dict):
+            continue
+        name = _规范化标签文本(raw_group.get("name", ""))
+        if not name or name in seen:
+            continue
+        try:
+            raw_slots = int(raw_group.get("slots", _标签分组默认槽位数))
+        except (TypeError, ValueError):
+            raw_slots = _标签分组默认槽位数
+        group = deepcopy(raw_group)
+        group["name"] = name
+        group["slots"] = max(
+            _标签分组默认槽位数,
+            min(_标签分组槽位硬上限, max(1, raw_slots)),
+        )
+        group["tooltip"] = _规范化标签文本(group.get("tooltip", ""))
+        result.append(group)
+        seen.add(name)
+    return result
 
 
 def _转为有序结构(value: Any) -> Any:
@@ -611,7 +641,7 @@ def _构建内置标签库(merged_library: OrderedDict[str, OrderedDict[str, lis
 
 _快照 = _读取快照()
 
-分组配置 = deepcopy(_快照.get("slot_config", []))
+分组配置 = _规范化分组配置(_快照.get("slot_config", []))
 自定义标签默认小类 = deepcopy(_快照.get("custom_tag_rules", {}).get("default_sections", {}))
 自定义标签规则 = deepcopy(_快照.get("custom_tag_rules", {}))
 自定义标签规则.setdefault("max_groups", len(分组配置))
