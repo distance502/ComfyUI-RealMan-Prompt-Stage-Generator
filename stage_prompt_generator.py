@@ -509,6 +509,8 @@ _MODEL_RUNTIME_STATE_KEYS = (
     "模型调用错误",
     "模型活动回退数量",
     "模型调用基础来源",
+    "模型传输重试次数",
+    "模型最近瞬时错误",
     "推理纠偏说明",
 )
 _IMAGE_REVERSE_CACHE: OrderedDict[str, str] = OrderedDict()
@@ -817,6 +819,8 @@ SETTING_DEFAULTS = {
     "模型调用采纳次数": 0,
     "模型活动回退数量": 0,
     "模型调用错误": [],
+    "模型传输重试次数": 0,
+    "模型最近瞬时错误": "",
     "模型调用基础来源": "仅Skill",
     "图片反推状态": "未启用",
     "图片反推错误": "",
@@ -832,8 +836,9 @@ SETTING_DEFAULTS = {
     "API地址": "",
     "API密钥": "env:QWEN_TE_API_KEY",
     "API模型": "",
-    "API超时秒": 60,
+    "API超时秒": 120,
     "API额外请求头": "",
+    "模型瞬时重试次数": 1,
 	"系统提示词覆盖": DEFAULT_STAGE_PROMPT_SYSTEM_TEMPLATE,
     "最大生成token": 1800,
     "温度": 0.62,
@@ -1345,7 +1350,7 @@ class _TEAPIChatModel:
         model = str(self.config.get("model") or "").strip()
         if not model:
             raise RuntimeError("API模型为空。请在模型按钮里填写模型名。")
-        timeout = _safe_float(self.config.get("timeout"), 60.0, 5.0, 600.0)
+        timeout = _safe_float(self.config.get("timeout"), 120.0, 5.0, 600.0)
         messages = list(kwargs.get("messages") or [])
         max_tokens = _safe_int(kwargs.get("max_tokens", 1800), 1800, 1, 8192)
         temperature = _safe_float(kwargs.get("temperature", 0.62), 0.62, 0.0, 2.0)
@@ -1575,6 +1580,8 @@ def _安全加载阶段模型(settings: dict[str, Any]) -> Any:
     settings["模型活动回退数量"] = 0
     settings["模型调用采纳次数"] = 0
     settings["模型调用错误"] = []
+    settings["模型传输重试次数"] = 0
+    settings["模型最近瞬时错误"] = ""
     if source == "仅Skill":
         settings["模型来源实际"] = "仅Skill"
         settings["模型回退说明"] = ""
@@ -4121,6 +4128,7 @@ def _run_stage_impl(
     style_track = _style_track(template_style, tags)
     recent_tracks = _update_history(cache_key, style_track)
     prompt_recent_tracks = _random_history(cache_key)
+    settings["最近提示词指纹"] = _prompt_history_fingerprints(cache_key)
     tag_block_payload = _parse_tag_block_payload_impl(settings.get("标签块编排JSON", ""))
     tag_block_enabled = bool(settings.get("标签块编排启用", False)) and bool(tag_block_payload.get("blocks"))
     if tag_block_enabled:
@@ -4142,6 +4150,7 @@ def _run_stage_impl(
             template_style=template_style,
             generation_count=int(settings.get("生成数量", 1) or 1),
         )
+        tag_block_narrative_plans = list(settings.get("全局剧情规划", []) or [])
         natural_contract_fallback_list = _build_prompt_list_impl(
             selected,
             custom_tags,
@@ -4155,6 +4164,8 @@ def _run_stage_impl(
             infer_subject_type=_infer_subject_type,
             infer_output_structure=_infer_output_structure,
         )
+        if tag_block_narrative_plans:
+            settings["全局剧情规划"] = tag_block_narrative_plans
     else:
         settings["标签块编排摘要"] = ""
         prompt_list = _build_prompt_list_impl(
@@ -4172,7 +4183,6 @@ def _run_stage_impl(
         )
         natural_contract_fallback_list = list(prompt_list)
     raw_prompt_list = list(prompt_list)
-    settings["最近提示词指纹"] = _prompt_history_fingerprints(cache_key)
     model_prompt_list = _maybe_model_refine_batch_impl(
         model,
         prompt_list,
@@ -5418,7 +5428,16 @@ class QwenTE阶段式提示词生成器:
         required["API地址"] = ("STRING", {"default": "", "multiline": False, "tooltip": "可填 Base URL，例如 https://api.openai.com/v1；不得包含查询参数或片段。留空时使用服务商预设。"})
         required["API密钥"] = ("STRING", {"default": "env:QWEN_TE_API_KEY", "multiline": False, "tooltip": "推荐 env:环境变量名。环境变量密钥只会发送到服务商预设来源；自定义来源需加入 QWEN_TE_CUSTOM_API_SECRET_ORIGINS。直接填写的 key 会保存在工作流中。"})
         required["API模型"] = ("STRING", {"default": "", "multiline": False, "tooltip": "模型名，例如 gpt-4o-mini、deepseek-chat、qwen-plus、claude-3-5-haiku-latest、gemini-2.5-flash。"})
-        required["API超时秒"] = ("INT", {"default": 60, "min": 5, "max": 600, "step": 1})
+        required["API超时秒"] = (
+            "INT",
+            {
+                "default": 120,
+                "min": 5,
+                "max": 600,
+                "step": 1,
+                "tooltip": "连接与响应读取超时。瞬时超时、断连、429 和服务端 5xx 会自动有界重试一次。",
+            },
+        )
         required["API额外请求头"] = ("STRING", {"default": "", "multiline": True, "tooltip": "可选。支持 JSON 或每行 Header: Value，例如 OpenRouter 的 HTTP-Referer / X-Title。"})
         required["模板风格"] = (模板选项, {"default": "自动"})
         required["主体类型"] = (主体类型选项, {"default": "自动"})

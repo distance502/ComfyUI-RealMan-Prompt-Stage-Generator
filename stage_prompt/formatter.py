@@ -241,6 +241,8 @@ def build_json_payload(
         "model_call_failure_count": int(settings.get("模型调用失败次数", 0) or 0),
         "model_call_adopted_count": int(settings.get("模型调用采纳次数", 0) or 0),
         "model_active_fallback_count": int(settings.get("模型活动回退数量", 0) or 0),
+        "model_transport_retry_count": int(settings.get("模型传输重试次数", 0) or 0),
+        "model_last_transient_error": str(settings.get("模型最近瞬时错误", "") or ""),
         "image_reverse_status": str(settings.get("图片反推状态", "未启用") or "未启用"),
         "image_reverse_error": str(settings.get("图片反推错误", "") or ""),
         "model_call_errors": [str(item) for item in settings.get("模型调用错误", []) if str(item).strip()],

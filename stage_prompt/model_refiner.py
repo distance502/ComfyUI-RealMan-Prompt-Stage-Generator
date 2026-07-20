@@ -7,7 +7,13 @@ from collections import Counter
 import json
 import os
 import re
+import time
 from typing import Any, Callable
+
+try:
+    from .narrative import GLOBAL_NARRATIVE_MODEL_CONTRACT
+except Exception:  # pragma: no cover - exercised by direct import tests
+    from stage_prompt_narrative_test import GLOBAL_NARRATIVE_MODEL_CONTRACT  # type: ignore
 
 DEFAULT_STAGE_PROMPT_SYSTEM_TEMPLATE = """
 你是 Qwen TE 阶段式提示词生成器的默认图像提示词整理模板，兼具资深视觉艺术总监、电影摄影指导、高端人像修图审美和生成式图像 Prompt 工程能力。
@@ -17,11 +23,11 @@ DEFAULT_STAGE_PROMPT_SYSTEM_TEMPLATE = """
 输出硬规则：
 1. 只输出最终提示词正文，不输出标题、解释、分析、参数、表格、Markdown、代码块、引号、前后缀或“提示词：”。
 2. 默认跟随输入语言；中文输入输出中文，英文输入输出英文，中英混合时优先保留可出图的英文美学词。
-3. 输出为一段自然完整的提示词，可用逗号/顿号分隔短语；不要分条，不要换行，不要写成教程或摄影分析。中文目标 650-900 字并尽量接近 800 字；英文目标 320-520 words。
+3. 输出为一段自然完整的提示词正文；不要分条，不要换行，不要写成教程或摄影分析。中文目标 700-1100 字；英文目标 360-600 words。
 4. 保留主体身份、年龄锚点、人数、服装、动作、场景、构图景别、镜头、光影、材质、风格、画质和负面规避意图；尤其不要删除“中景半身、全景全身、近景、侧逆光、古风、CG感、神话感、NSFW”等关键锚点。
 5. 同一批多条提示词必须保持各自差异，不要合并成同一条，也不要把不同随机主题池改成相同画面。
-6. 按“主体身份与气质、发型五官与服装材质、动作姿态与情绪、场景空间与前中后景、光影色彩与镜头语言、画质结构与生成稳定性”六个维度展开。只补足缺失的合理细节，不要锁死用户没选的主题，不要用近义词反复灌水。
-7. 全局构图方法来自用户素材库的可泛化规则：按“主体 → 环境 → 光线 → 风格/媒介 → 镜头”组织画面；先写清楚谁/什么、在哪里、由什么光照亮、属于什么媒介质感、如何取景。
+6. 先建立事件与因果，再自然展开主体身份、服装材质、动作目的、情绪转折、场景空间、环境反馈、光影迁移、镜头时机和画质稳定性。不要按固定维度逐段点名，不要用近义词反复灌水。
+7. 全局构图必须服务剧情：主体的动作改变环境，环境或道具给出回应，光线与焦点随事件推进，最后定格在具有前因后果和继续想象空间的状态。
 8. 具体描述优先于空泛形容：用“暖色侧逆光、雨雾竹林、35mm 胶片颗粒、丝绸边缘高光、湿润石阶反光”这类可见信息替代“好看、震撼、顶级、神级”等空词。
 9. 外部平台参数、码图 --profile / profile code、UUID、--ar、--stylize、--raw、--hd、--seed 等只可作为参考来源信息，绝对不要进入最终提示词正文。
 10. 素材库只提供写法和词汇方向，不提供固定模板；不得锁死“古风、武侠、CG、全身、白底、某个角色、某个场景”。用户已选标签和当前随机结果永远优先。
@@ -42,8 +48,11 @@ DEFAULT_STAGE_PROMPT_SYSTEM_TEMPLATE = """
 质量与限制：
 加入必要的高质量约束，如顶级画质、清晰对焦、精致纹理、真实材质、自然解剖、手部自然、无多余肢体、无畸形、无文字、无水印、无 logo、无低清伪影。不要生成廉价网红感、证件照感、商业棚拍过修感、塑料皮肤、卡通化、过度磨皮、过曝高光或脏乱背景。
 
-最终目标：输出一段“主题明确、细节丰富、模式一致、可直接出图”的高质量正向提示词。目标接近 800 字，但必须靠有效画面信息、镜头组织、材质与光影细节自然展开，不能为了字数重复叠加标签。
+最终目标：输出一段“主题明确、剧情清楚、细节丰富、模式一致、可直接出图”的高质量正向提示词。长度必须靠事件推进、空间关系、镜头组织、材质与光影反馈自然展开，不能为了字数重复叠加标签。
 """.strip()
+DEFAULT_STAGE_PROMPT_SYSTEM_TEMPLATE = (
+    f"{DEFAULT_STAGE_PROMPT_SYSTEM_TEMPLATE}\n\n{GLOBAL_NARRATIVE_MODEL_CONTRACT}"
+)
 
 _DEFAULT_IMAGE_REFINER_SYSTEM = DEFAULT_STAGE_PROMPT_SYSTEM_TEMPLATE
 _PROMPT_LABEL_PATTERN = re.compile(
@@ -666,22 +675,23 @@ def _language_instruction(settings: dict[str, Any]) -> str:
     if language == "纯英文":
         return (
             "\n\nLanguage override: The final positive prompt must be English only. "
-            "Target 320-520 English words. Do not output Chinese characters, Chinese labels, explanations, headings, Markdown, or bilingual notes."
+            "Target 360-600 English words. Do not output Chinese characters, Chinese labels, explanations, headings, Markdown, or bilingual notes."
         )
     if language == "英文提示词+中文说明":
         return (
-            "\n\nLanguage override: Output an English prompt body first, targeting 320-520 English words, "
+            "\n\nLanguage override: Output an English prompt body first, targeting 360-600 English words, "
             "then append one short Chinese companion note beginning with `中文说明：` to summarize the visual direction. "
             "Keep the English prompt usable by itself; do not add headings, Markdown, or analysis."
         )
     if language == "纯中文":
-        return "\n\n语言覆盖：最终正向提示词正文必须使用中文，不要改成英文提示词；中文目标 650-900 字，尽量接近 800 字。"
+        return "\n\n语言覆盖：最终正向提示词正文必须使用中文，不要改成英文提示词；中文目标 700-1100 字。"
     return ""
 
 
 def _resolve_system_prompt(settings: dict[str, Any]) -> str:
     base_prompt = str(settings.get("系统提示词覆盖") or _DEFAULT_IMAGE_REFINER_SYSTEM)
-    return f"{base_prompt}{_language_instruction(settings)}"
+    narrative_contract = "" if GLOBAL_NARRATIVE_MODEL_CONTRACT in base_prompt else f"\n\n{GLOBAL_NARRATIVE_MODEL_CONTRACT}"
+    return f"{base_prompt}{narrative_contract}{_language_instruction(settings)}"
 
 
 def _violates_language(text: str, settings: dict[str, Any]) -> bool:
@@ -726,6 +736,42 @@ def is_natural_language_prompt(text: str, settings: dict[str, Any] | None = None
     if active_settings and _violates_language(prompt, active_settings):
         return False
     return _looks_like_natural_prose_prompt(prompt)
+
+
+_NARRATIVE_MARKER_GROUPS_ZH = (
+    ("故事", "事件", "发生", "随后", "当", "起初"),
+    ("因此", "于是", "因为", "迫使", "打破", "触发"),
+    ("回应", "选择", "动作", "移动", "停下", "转身", "靠近"),
+    ("情绪", "神情", "警觉", "犹豫", "决断", "释然", "不安"),
+    ("环境", "空间", "光线", "反射", "阴影", "空气", "材质"),
+    ("镜头", "定格", "最后一帧", "结尾", "画面停在", "最终画面"),
+)
+_NARRATIVE_MARKER_GROUPS_EN = (
+    ("story", "event", "begins", "opens", "then", "during"),
+    ("because", "therefore", "forces", "interrupts", "breaks", "trigger"),
+    ("respond", "answers", "chooses", "movement", "pauses", "turns"),
+    ("emotion", "resolve", "alert", "hesitation", "unease", "relief"),
+    ("environment", "space", "lighting", "reflection", "shadow", "material"),
+    ("camera", "final frame", "last frame", "ending", "holds", "settles"),
+)
+
+
+def _requires_narrative_contract(settings: dict[str, Any]) -> bool:
+    return bool(settings.get("全局剧情规划")) or bool(settings.get("全局叙事合同启用", False))
+
+
+def _looks_like_narrative_prompt(text: str, settings: dict[str, Any]) -> bool:
+    if not _requires_narrative_contract(settings):
+        return True
+    body = str(text or "").split("中文说明：", 1)[0].strip()
+    if not body:
+        return False
+    if _CJK_PATTERN.search(body):
+        hits = sum(any(marker in body for marker in group) for group in _NARRATIVE_MARKER_GROUPS_ZH)
+        return hits >= 5 and len(_CJK_PATTERN.findall(body)) >= 260
+    lowered = body.casefold()
+    hits = sum(any(marker in lowered for marker in group) for group in _NARRATIVE_MARKER_GROUPS_EN)
+    return hits >= 5 and len(_ENGLISH_WORD_PATTERN.findall(body)) >= 150
 
 
 _NON_PERSON_HUMAN_INTRUSION_TERMS = (
@@ -807,11 +853,11 @@ def _violates_subject_type(original_prompt: str, candidate_prompt: str, settings
 def _batch_language_instruction(settings: dict[str, Any]) -> str:
     language = _prompt_language_mode(settings)
     if language == "纯英文":
-        return "Language requirement: output every final prompt body in English only, 320-520 words per item, with no Chinese characters.\n"
+        return "Language requirement: output every final prompt body in English only, 360-600 words per item, with no Chinese characters.\n"
     if language == "英文提示词+中文说明":
-        return "Language requirement: each item outputs an English prompt body first, 320-520 words per item, then one short Chinese note beginning with 中文说明： before the separator.\n"
+        return "Language requirement: each item outputs an English prompt body first, 360-600 words per item, then one short Chinese note beginning with 中文说明： before the separator.\n"
     if language == "纯中文":
-        return "语言要求：每条成品提示词正文必须使用中文，不要改成英文提示词；每条目标 650-900 字，尽量接近 800 字。\n"
+        return "语言要求：每条成品提示词正文必须使用中文，不要改成英文提示词；每条目标 700-1100 字。\n"
     return ""
 
 
@@ -821,8 +867,8 @@ def _refiner_token_limit(settings: dict[str, Any], *, prompt_count: int = 1) -> 
     except Exception:
         requested = 1800
     count = max(1, int(prompt_count or 1))
-    floor = 1280 if count == 1 else min(8192, 1280 * count)
-    return min(8192, max(floor, requested))
+    per_prompt = max(128, min(8192, requested))
+    return min(8192, per_prompt * count)
 
 
 def _safe_float_setting(settings: dict[str, Any], key: str, default: float, min_value: float, max_value: float) -> float:
@@ -957,6 +1003,11 @@ def _skill_context_for_model(settings: dict[str, Any]) -> str:
     tag_block_context = str(settings.get("标签块编排摘要", "") or "").strip()
     danbooru_context = str(settings.get("Danbooru通用视觉标签摘要", "") or "").strip()
     dynamic_strategy = str(settings.get("Skill动态变化策略", "") or "").strip()
+    narrative_plans = [
+        str(item).strip()
+        for item in settings.get("全局剧情规划", [])
+        if str(item).strip()
+    ]
     diversity_markers = [
         str(marker).strip()
         for marker in [
@@ -1009,6 +1060,11 @@ def _skill_context_for_model(settings: dict[str, Any]) -> str:
         )
     if dynamic_strategy:
         extra_lines.append(f"Skill动态变化策略：{dynamic_strategy}")
+    if narrative_plans:
+        extra_lines.append(
+            "本次全局剧情规划：" + " | ".join(narrative_plans[:20])
+            + "。必须保留每条规划中的事件、情绪转折、空间动线与结尾状态，但要把它们写成自然正文，不能复述规划字段名。"
+        )
     extra_lines.append(
         "全局非锁死策略：当前标签、NSFW 工作台、智能文本和标签块只提供本次素材锚点；"
         "不要把历史输出、示例、默认词或上一轮随机档案当成固定模板。若某个维度没有被用户明确选择，"
@@ -1077,11 +1133,14 @@ def _prompt_signature(prompt: str, *, limit: int = 14) -> str:
 
 def _compose_batch_prompt(prompts: list[str], settings: dict[str, Any]) -> str:
     diversity_lines = []
+    narrative_plans = [str(item).strip() for item in settings.get("全局剧情规划", []) if str(item).strip()]
     for index, prompt in enumerate(prompts, start=1):
         signature = _prompt_signature(prompt)
+        narrative_plan = narrative_plans[index - 1] if index - 1 < len(narrative_plans) else "沿本条正文提炼独立事件"
         diversity_lines.append(
             f"第{index}条差异锚点：{signature or '按该条输入自行提炼'}。"
-            "输出时围绕本条锚点重组主体、场景、服装、动作、持物、光影和色彩，并至少保留两个维度与其他条不同，不要复制其他条的主线。"
+            f"第{index}条剧情规划：{narrative_plan}。"
+            "输出时围绕本条锚点与剧情规划重组主体、场景、服装、动作目的、环境响应、镜头时机、光影和色彩，并至少保留四个叙事维度与其他条不同，不要复制其他条的主线。"
         )
     return (
         _skill_context_for_model(settings)
@@ -1414,6 +1473,86 @@ def _call_model_text(
     raise RuntimeError("当前模型对象不支持 create_chat_completion、invoke 或 generate_content。")
 
 
+_TRANSIENT_MODEL_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
+_TRANSIENT_MODEL_ERROR_MARKERS = (
+    "timed out",
+    "timeout",
+    "read operation timed out",
+    "读取超过总时限",
+    "连接超时",
+    "connection reset",
+    "connection aborted",
+    "connection refused",
+    "temporarily unavailable",
+    "temporary failure",
+    "server disconnected",
+    "remote end closed",
+    "incomplete read",
+    "eof occurred",
+    "rate limit",
+    "too many requests",
+)
+
+
+def _is_transient_model_error(exc: Exception) -> bool:
+    if isinstance(exc, (TimeoutError, ConnectionError)):
+        return True
+    status = getattr(exc, "status", None)
+    if status is None:
+        status = getattr(exc, "code", None)
+    try:
+        if int(status) in _TRANSIENT_MODEL_STATUS_CODES:
+            return True
+        if 400 <= int(status) < 500:
+            return False
+    except (TypeError, ValueError):
+        pass
+    reason = getattr(exc, "reason", None)
+    if isinstance(reason, (TimeoutError, ConnectionError)):
+        return True
+    text = f"{type(exc).__name__}: {exc}".casefold()
+    return any(marker in text for marker in _TRANSIENT_MODEL_ERROR_MARKERS)
+
+
+def _call_model_text_with_retry(
+    llm: Any,
+    prompt: str,
+    settings: dict[str, Any],
+    *,
+    chat_completion: Callable[..., Any],
+    clean_think_text: Callable[[str], str],
+    prompt_count: int,
+) -> str:
+    retry_limit = _safe_int_setting(settings, "模型瞬时重试次数", 1, 0, 2)
+    retry_index = 0
+    while True:
+        try:
+            text = _call_model_text(
+                llm,
+                prompt,
+                settings,
+                chat_completion=chat_completion,
+                clean_think_text=clean_think_text,
+                prompt_count=prompt_count,
+            )
+            if retry_index:
+                _append_model_runtime_note(
+                    settings,
+                    f"模型传输瞬时失败后第 {retry_index + 1} 次请求已恢复，最终未因该错误回退 Skill。",
+                )
+            return text
+        except Exception as exc:
+            if retry_index >= retry_limit or not _is_transient_model_error(exc):
+                raise
+            retry_index += 1
+            settings["模型传输重试次数"] = max(
+                0,
+                int(settings.get("模型传输重试次数", 0) or 0),
+            ) + 1
+            settings["模型最近瞬时错误"] = _safe_model_call_reason(exc, settings)
+            time.sleep(min(0.35, 0.12 * (2 ** (retry_index - 1))))
+
+
 def maybe_model_refine(
     model: Any,
     prompt: str,
@@ -1426,7 +1565,7 @@ def maybe_model_refine(
     if llm is None:
         return prompt
     try:
-        raw_text = _call_model_text(
+        raw_text = _call_model_text_with_retry(
             llm,
             prompt,
             settings,
@@ -1452,6 +1591,13 @@ def maybe_model_refine(
     if _violates_subject_type(prompt, cleaned, settings):
         _record_model_call_result(settings, outcome="failure", reason="模型响应改变了当前主体类型。")
         return prompt
+    if not _looks_like_narrative_prompt(cleaned, settings):
+        _record_model_call_result(
+            settings,
+            outcome="failure",
+            reason="模型响应缺少完整的事件触发、主体回应、情绪转折、环境反馈或结尾定格。",
+        )
+        return prompt
     _record_model_call_result(settings, outcome="success", changed=cleaned != str(prompt or "").strip())
     return cleaned
 
@@ -1476,7 +1622,7 @@ def maybe_model_refine_batch(
 
     batch_prompt = _compose_batch_prompt(clean_prompts, settings)
     try:
-        raw_text = _call_model_text(
+        raw_text = _call_model_text_with_retry(
             llm,
             batch_prompt,
             settings,
@@ -1556,7 +1702,17 @@ def maybe_model_refine_batch(
         cleaned = _postprocess_prompt_text(part)
         cleaned = _restore_composition_anchors(original_prompt, cleaned)
         cleaned = _restore_mode_literal_guards(original_prompt, cleaned)
-        candidate = cleaned if cleaned and not _looks_like_broken_prompt(cleaned) and not _violates_language(cleaned, settings) and not _violates_subject_type(original_prompt, cleaned, settings) else original_prompt
+        candidate = (
+            cleaned
+            if (
+                cleaned
+                and not _looks_like_broken_prompt(cleaned)
+                and not _violates_language(cleaned, settings)
+                and not _violates_subject_type(original_prompt, cleaned, settings)
+                and _looks_like_narrative_prompt(cleaned, settings)
+            )
+            else original_prompt
+        )
         if candidate == original_prompt:
             rejected = True
         candidate_key = _normalize_for_compare(candidate)

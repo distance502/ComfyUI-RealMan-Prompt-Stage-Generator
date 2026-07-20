@@ -12,6 +12,15 @@ except Exception:  # pragma: no cover - exercised by direct import tests
     from stage_prompt_skills_test import resolve_base_template_style  # type: ignore
 
 try:
+    from .narrative import build_narrative_plan, render_narrative_prompt, summarize_narrative_plan
+except Exception:  # pragma: no cover - exercised by direct import tests
+    from stage_prompt_narrative_test import (  # type: ignore
+        build_narrative_plan,
+        render_narrative_prompt,
+        summarize_narrative_plan,
+    )
+
+try:
     from .fantasy_profiles import (
         FANTASY_STYLE_LEAD_EN,
         FANTASY_STYLE_LEAD_ZH,
@@ -108,6 +117,8 @@ class _PromptBuildContext(TypedDict):
     identity: str
     style_track: str
     recent_tracks: list[str]
+    output_index: NotRequired[int]
+    output_count: NotRequired[int]
 
 
 class _PromptFragmentItem(TypedDict):
@@ -4495,63 +4506,44 @@ def _build_concise_chinese_prompt(
         limit=24,
     )
 
-    first = f"{lead}，这是一段自然连贯的正向画面说明，画面以{subject}为{'非人物主题核心' if non_person else '核心'}"
-    if style:
-        first += f"，整体遵循{style}的统一媒介语言"
-    if style_bridge_hint:
-        first += f"，同时保留{style_bridge_hint}的媒介质感"
-    if scene:
-        first += f"，主体处于{scene}中"
-    if action:
-        first += f"并呈现{action}的自然状态"
-    if adult:
-        first += f"，成人氛围通过{adult}克制而明确地呈现"
-    elif adult_mode and not non_person:
-        first += "，画面保持明确成年主体和成熟私密氛围"
-    first += "。"
-
-    second_parts: list[str] = []
-    if outfit:
-        second_parts.append(("外观结构" if non_person else "服装造型") + f"围绕{outfit}展开")
-    if lighting:
-        second_parts.append(f"以{lighting}塑造主光、阴影和轮廓层次")
-    if props:
-        second_parts.append(f"让{props}作为克制的叙事锚点")
-    if composition:
-        second_parts.append(f"镜头采用{composition}并保持主体结构与空间透视完整")
-    if custom:
-        second_parts.append(f"将{custom}自然融入同一条画面主线")
-    if residual:
-        second_parts.append(f"其余细节围绕{residual}展开，并服从同一主体、空间和风格逻辑")
-    second = "；".join(second_parts)
-    if second:
-        second += "。"
-
-    detail_level = str(settings.get("详细度", "标准") or "标准").strip()
-    detail_sentences: list[str] = []
-    if detail_level not in {"简洁", "短"}:
-        if non_person:
-            detail_sentences.append(
-                "主体的轮廓、结构比例、功能部件与表面分区保持清楚，材质接缝、边缘磨损、反射变化和尺度参照共同建立可信的存在感。"
-            )
-        else:
-            detail_sentences.append(
-                "人物的主体身份与成年属性、面部朝向、肩颈关系、手部位置和身体重心保持清楚，服装褶皱与材质高光顺着动作自然变化。"
-            )
-        if scene or lighting or composition:
-            detail_sentences.append(
-                "前景、中景和背景围绕同一空间主线展开，主光、辅光与轮廓光具有明确方向，镜头距离和透视关系稳定，不让环境细节遮挡主体。"
-            )
-    if detail_level == "详细":
-        detail_sentences.append(
-            "可见细节通过真实的表面纹理、接触阴影、细微反射、空气层次与焦点过渡逐级展开，使画面丰富但不过度堆砌。"
-        )
-
-    finish = f"最终画面保持主题明确、层次清楚、材质可信"
-    if quality:
-        finish += f"，并体现{quality}"
-    finish += "，避免标签堆叠、互斥场景、文字水印、低清伪影和结构错误。"
-    return f"{first}{second}{''.join(detail_sentences)}{finish}"
+    anchors = {
+        "lead": lead,
+        "subject": subject,
+        "style": style,
+        "style_bridge": style_bridge_hint,
+        "scene": scene,
+        "composition": composition,
+        "action": action,
+        "adult": adult,
+        "outfit": outfit,
+        "lighting": lighting,
+        "props": props,
+        "custom": custom,
+        "residual": residual,
+        "quality": quality,
+        "style_track": context.get("style_track", ""),
+    }
+    recent_history = [
+        *list(context.get("recent_tracks", [])),
+        *[str(item).strip() for item in settings.get("最近提示词指纹", []) if str(item).strip()],
+    ]
+    plan = build_narrative_plan(
+        anchors,
+        output_index=int(context.get("output_index", 0) or 0),
+        output_count=int(context.get("output_count", 1) or 1),
+        recent_history=recent_history,
+        seed=int(settings.get("运行时随机有效种子", 0) or settings.get("seed", 0) or 0),
+    )
+    narrative_plans = settings.setdefault("全局剧情规划", [])
+    narrative_plans.append(summarize_narrative_plan(plan))
+    return render_narrative_prompt(
+        anchors,
+        plan,
+        language="纯中文",
+        detail_level=str(settings.get("详细度", "标准") or "标准"),
+        non_person=non_person,
+        adult_mode=adult_mode,
+    )
 
 
 def _build_concise_english_prompt(
@@ -4617,63 +4609,44 @@ def _build_concise_english_prompt(
         english=True,
     )
 
-    first = f"{lead} presents one coherent positive scene description centered on {_english_subject_phrase(subject)}"
-    if style:
-        first += f", unified through {style}"
-    if style_bridge_hint:
-        first += f", while retaining the media texture of {style_bridge_hint}"
-    if scene:
-        first += f", situated in {scene}"
-    if action:
-        first += f", with {action} expressed as one believable moment"
-    if adult:
-        first += f", while {adult} establishes a clearly adult yet visually coherent intimate direction"
-    elif adult_mode and not non_person:
-        first += ", with clearly adult subjects and a mature intimate atmosphere"
-    first += "."
-
-    details: list[str] = []
-    if outfit:
-        details.append(f"The {'surface design' if non_person else 'wardrobe'} follows {outfit}")
-    if lighting:
-        details.append(f"Lighting built from {lighting} shapes the key light, shadow depth, and rim separation")
-    if props:
-        details.append(f"Story elements such as {props} remain restrained narrative anchors")
-    if composition:
-        details.append(f"The camera uses {composition} while preserving complete structure and stable perspective")
-    if custom:
-        details.append(f"User details such as {custom} are integrated into the same visual direction")
-    if residual:
-        details.append(f"Additional visual cues such as {residual} follow the same subject, spatial, and stylistic logic")
-    second = ". ".join(details)
-    if second:
-        second += "."
-
-    detail_level = str(settings.get("详细度", "标准") or "标准").strip()
-    detail_sentences: list[str] = []
-    if detail_level not in {"简洁", "短"}:
-        if non_person:
-            detail_sentences.append(
-                "The silhouette, structural proportions, functional components, and surface divisions remain readable, while seams, edge wear, reflections, and scale references establish a believable physical presence."
-            )
-        else:
-            detail_sentences.append(
-                "Adult identity, facial direction, shoulder and neck relationships, hand placement, and body weight remain readable, with fabric folds and material highlights responding naturally to the pose."
-            )
-        if scene or lighting or composition:
-            detail_sentences.append(
-                "Foreground, middle ground, and background follow one spatial direction; key, fill, and rim light have clear origins, and camera distance and perspective remain stable without letting the environment obscure the subject."
-            )
-    if detail_level == "详细":
-        detail_sentences.append(
-            "Visible information develops through surface texture, contact shadows, subtle reflections, atmospheric depth, and controlled focus transitions, producing richness without keyword accumulation."
-        )
-
-    finish = "The final image keeps a clear subject hierarchy, believable materials, coherent space, and natural visual flow"
-    if quality:
-        finish += f", supported by {quality}"
-    finish += ", without tag-chain phrasing, conflicting settings, text, watermark, low-resolution artifacts, or structural errors."
-    return " ".join(part for part in (first, second, *detail_sentences, finish) if part)
+    anchors = {
+        "lead": lead,
+        "subject": _english_subject_phrase(subject),
+        "style": style,
+        "style_bridge": style_bridge_hint,
+        "scene": scene,
+        "composition": composition,
+        "action": action,
+        "adult": adult,
+        "outfit": outfit,
+        "lighting": lighting,
+        "props": props,
+        "custom": custom,
+        "residual": residual,
+        "quality": quality,
+        "style_track": context.get("style_track", ""),
+    }
+    recent_history = [
+        *list(context.get("recent_tracks", [])),
+        *[str(item).strip() for item in settings.get("最近提示词指纹", []) if str(item).strip()],
+    ]
+    plan = build_narrative_plan(
+        anchors,
+        output_index=int(context.get("output_index", 0) or 0),
+        output_count=int(context.get("output_count", 1) or 1),
+        recent_history=recent_history,
+        seed=int(settings.get("运行时随机有效种子", 0) or settings.get("seed", 0) or 0),
+    )
+    narrative_plans = settings.setdefault("全局剧情规划", [])
+    narrative_plans.append(summarize_narrative_plan(plan, english=True))
+    return render_narrative_prompt(
+        anchors,
+        plan,
+        language="纯英文",
+        detail_level=str(settings.get("详细度", "标准") or "标准"),
+        non_person=non_person,
+        adult_mode=adult_mode,
+    )
 
 
 def _build_mixed_language_companion(
@@ -5563,6 +5536,7 @@ def build_prompt_list(
     }
     runtime_diversity_markers: list[str] = []
     settings["运行时随机档案标记"] = runtime_diversity_markers
+    settings["全局剧情规划"] = []
     style_lead = _resolve_prompt_style_lead(
         selected,
         explicit_template_style=explicit_template_style,
@@ -5610,6 +5584,8 @@ def build_prompt_list(
                     else ""
                 ).strip(),
             ),
+            "output_index": index,
+            "output_count": generation_count,
         }
         style_variant_profile = _build_runtime_style_variant_profile(
             subject,

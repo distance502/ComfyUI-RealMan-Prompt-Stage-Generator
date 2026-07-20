@@ -671,7 +671,7 @@ const PRESET_SETTING_DEFAULTS = {
 	"API服务商": "OpenAI兼容",
 	"API地址": "",
 	"API模型": "",
-	"API超时秒": 60,
+	"API超时秒": 120,
 	"额外要求": "",
 	"seed": 0,
 	[RUNTIME_RANDOM_PROTECTED_TAGS_WIDGET_NAME]: "",
@@ -5469,7 +5469,7 @@ function refreshModelLoaderDeck(deck, node) {
 	const apiModel = String(getModelWidget(node, "API模型")?.value ?? "").trim();
 	const apiBaseUrl = String(getModelWidget(node, "API地址")?.value ?? "").trim();
 	const apiKey = String(getModelWidget(node, "API密钥")?.value ?? "").trim();
-	const apiTimeout = Number(getModelWidget(node, "API超时秒")?.value ?? 60);
+	const apiTimeout = Number(getModelWidget(node, "API超时秒")?.value ?? 120);
 	const apiProviderDisplay = getApiProviderDisplayName(provider, apiBaseUrl);
 	if (deck.statusEl) {
 		const text = getModelLoaderSummary(node);
@@ -5743,7 +5743,7 @@ function buildModelLoaderDeck(node, options = {}) {
 	const apiBaseInput = createModelLoaderTextInput(node, "API地址", "API Base URL", { placeholder: "留空用服务商预设，或填 https://host/v1" });
 	const apiKeyInput = createModelLoaderTextInput(node, "API密钥", "API Key", { placeholder: "推荐 env:变量名；自定义地址需授权来源" });
 	const apiModelInput = createModelLoaderTextInput(node, "API模型", "API 模型名", { placeholder: "例如 gpt-4o-mini / deepseek-chat / qwen-plus" });
-	const apiTimeoutInput = createModelLoaderTextInput(node, "API超时秒", "超时秒", { placeholder: "建议 30-90" });
+	const apiTimeoutInput = createModelLoaderTextInput(node, "API超时秒", "超时秒", { placeholder: "建议 90-180，瞬时错误自动重试" });
 	apiInputGrid.appendChild(apiBaseInput);
 	apiInputGrid.appendChild(apiKeyInput);
 	apiInputGrid.appendChild(apiModelInput);
@@ -7452,7 +7452,7 @@ function sanitizeStagePromptNode(node, library) {
 	const intDefaults = {
 		"内置上下文长度": { defaultValue: 8192, min: 1024, max: 327680 },
 		"内置GPU层数": { defaultValue: -1, min: -1, max: 9999 },
-		"API超时秒": { defaultValue: 60, min: 5, max: 600 },
+		"API超时秒": { defaultValue: 120, min: 5, max: 600 },
 		"图片反推最大边长": { defaultValue: 960, min: 256, max: 2048 },
 		"核心标签锁定数量": { defaultValue: 10, min: 0, max: 100 },
 		"生成数量": { defaultValue: 3, min: 1, max: 20 },

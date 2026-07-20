@@ -6,6 +6,15 @@ import re
 from collections import OrderedDict
 from typing import Any
 
+try:
+    from .narrative import build_narrative_plan, render_narrative_prompt, summarize_narrative_plan
+except Exception:  # pragma: no cover - direct file loading in focused tests
+    from stage_prompt_narrative_test import (  # type: ignore
+        build_narrative_plan,
+        render_narrative_prompt,
+        summarize_narrative_plan,
+    )
+
 try:  # Reuse the main prompt vocabulary when the plugin package is loaded normally.
     from .prompt_builder import _translate_prompt_fragment as _translate_shared_prompt_fragment
 except Exception:  # pragma: no cover - direct file loading in focused tests
@@ -550,6 +559,20 @@ def _variation_sentence(language: str, variation_index: int) -> str:
     return f"构图重点放在{focus}，以{treatment}组织画面"
 
 
+def _record_narrative_plan(
+    settings: dict[str, Any],
+    plan: dict[str, Any],
+    *,
+    variation_index: int,
+    english: bool,
+) -> None:
+    plans = settings.setdefault("全局剧情规划", [])
+    index = max(0, int(variation_index or 0))
+    while len(plans) <= index:
+        plans.append("")
+    plans[index] = summarize_narrative_plan(plan, english=english)
+
+
 def _ordered_zh_clauses(ordered: list[tuple[str, str, list[str] | str]]) -> list[str]:
     clauses: list[str] = []
     for kind, group, payload in ordered:
@@ -606,58 +629,40 @@ def _build_tag_block_prompt_zh(blocks: list[dict[str, Any]], settings: dict[str,
     quality_text = _join_terms(by_group.get("技术画质", []), fallback="高细节、清晰对焦、材质纹理稳定")
     custom_text = _join_terms(by_group.get("自定义补充", []))
 
-    subject_phrase = subject_text
-    if _find_text_subject(text_blocks) and _find_text_subject(text_blocks) not in subject_phrase:
-        subject_phrase = f"{subject_phrase}，{_find_text_subject(text_blocks)}"
-
-    sentences: list[str] = []
     ordered_clauses = _ordered_zh_clauses(ordered)
-    if ordered_clauses:
-        _append_sentence(
-            sentences,
-            f"{style_text}作为整体视觉方向，" + "，".join(ordered_clauses[:8]) + "，所有元素围绕同一条视觉主线衔接，主体占比、身体比例、手脚位置和画面边界保持清楚",
-        )
-    else:
-        _append_sentence(
-            sentences,
-            f"{style_text}作为整体视觉方向，画面围绕{subject_phrase}展开，镜头采用{composition_text}，让主体占比、身体比例、手脚位置和画面边界保持清楚",
-        )
     variation_sentence = _variation_sentence("纯中文", variation_index)
-    if variation_sentence:
-        _append_sentence(sentences, variation_sentence)
-    second_parts: list[str] = []
-    if light_text:
-        second_parts.append(f"光影氛围保持{light_text}，主光、辅光和轮廓光围绕主体组织，亮部与暗部过渡克制")
-    if scene_text:
-        second_parts.append(f"场景放在{scene_text}，前景、中景和背景只服务同一条视觉主线")
-    if prop_text:
-        second_parts.append(f"{prop_text}作为叙事锚点出现，不抢走人物焦点")
-    if second_parts:
-        _append_sentence(sentences, "，".join(second_parts))
-
-    action_parts: list[str] = []
-    if outfit_text:
-        action_parts.append(f"服装造型围绕{outfit_text}展开，强调材质厚薄、褶皱、边缘高光和身体轮廓之间的自然关系")
-    if adult_text:
-        action_parts.append(f"{adult_text}只作为成熟造型与情绪方向融入画面，不破坏构图稳定性")
-    if action_text:
-        action_parts.append(f"动作姿态表现为{action_text}，道具、手部、肩颈、腰胯和视线方向要互相协调")
-    if inserted_text:
-        action_parts.append(f"用户补充的{inserted_text}自然并入主体设定，不额外扩展成无关主题")
-    if action_parts:
-        _append_sentence(sentences, "，".join(action_parts))
-
-    finish = f"整体画质强调{quality_text}"
-    if custom_text:
-        finish += f"，并把{custom_text}作为轻微补充细节"
-    finish += "；避免标签清单感、同义词堆叠、风格串词、互斥场景拼贴、文字水印、低清伪影、多余肢体和手部畸形，让人物、环境、服装、动作、光影、道具与画质统一成一段可直接出图的正向画面说明"
-    _append_sentence(sentences, finish)
-
-    if detail == "详细":
-        _append_sentence(sentences, "细节展开时优先补足可见材质、空间深度、焦点层级、皮肤或表面纹理、道具接触点和背景边缘信息，但不新增用户未选择的主风格或主场景")
-    elif detail == "简洁":
-        return "".join(sentences[:3]).strip()
-    return "".join(sentences).strip()
+    ordered_lead = "，".join(ordered_clauses)
+    anchors = {
+        "lead": f"{style_text}作为整体视觉方向，{ordered_lead}" if ordered_lead else style_text,
+        "subject": subject_text,
+        "scene": scene_text,
+        "composition": composition_text,
+        "action": action_text,
+        "adult": adult_text,
+        "outfit": outfit_text,
+        "lighting": light_text,
+        "props": prop_text,
+        "custom": "、".join(value for value in (inserted_text, custom_text) if value),
+        "residual": "；".join([*ordered_clauses, variation_sentence] if variation_sentence else ordered_clauses),
+        "quality": quality_text,
+        "style_track": style_track,
+    }
+    plan = build_narrative_plan(
+        anchors,
+        output_index=variation_index,
+        output_count=max(1, int(settings.get("生成数量", 1) or 1)),
+        recent_history=[str(item).strip() for item in settings.get("最近提示词指纹", []) if str(item).strip()],
+        seed=int(settings.get("运行时随机有效种子", 0) or settings.get("seed", 0) or 0),
+    )
+    _record_narrative_plan(settings, plan, variation_index=variation_index, english=False)
+    return render_narrative_prompt(
+        anchors,
+        plan,
+        language="纯中文",
+        detail_level=detail,
+        non_person=str(subject_type).strip() == "非人物主体",
+        adult_mode=bool(adult_text),
+    )
 
 
 def _ordered_en_clauses(ordered: list[tuple[str, str, list[str] | str]]) -> list[str]:
@@ -716,32 +721,45 @@ def _build_tag_block_prompt_en(blocks: list[dict[str, Any]], settings: dict[str,
     quality_text = _join_terms(by_group.get("技术画质", []), sep=", ", fallback="high detail, clean focus, stable material texture")
     custom_text = _join_terms(by_group.get("自定义补充", []), sep=", ")
 
-    sentences: list[str] = []
     ordered_clauses = _ordered_en_clauses(ordered)
-    if ordered_clauses:
-        _append_sentence(sentences, f"A {style_text} image follows one coherent visual sequence: " + "; ".join(ordered_clauses[:8]) + ", with stable scale, clear boundaries and a readable subject hierarchy", punctuation=".")
-    else:
-        _append_sentence(sentences, f"A {style_text} image centered on {subject_text}, framed as {composition_text}, with a clear subject hierarchy, stable scale and readable body or structure", punctuation=".")
     variation_sentence = _variation_sentence("纯英文", variation_index)
-    if variation_sentence:
-        _append_sentence(sentences, variation_sentence, punctuation=".")
-    if scene_text or light_text or prop_text:
-        _append_sentence(sentences, f"The environment {('is set in ' + scene_text) if scene_text else 'stays controlled'}, lighting uses {light_text or 'balanced key light and soft fill'}, and {prop_text or 'supporting details'} remain secondary to the main subject", punctuation=".")
-    if outfit_text or action_text or adult_text or inserted_text:
-        _append_sentence(sentences, f"Outfit and surface design follow {outfit_text or 'the selected visual direction'}, while the pose shows {action_text or 'a natural stable stance'} with believable limb, hand and gaze relationships", punctuation=".")
-        if adult_text:
-            _append_sentence(sentences, f"The mature styling direction uses {adult_text} as controlled emotional and visual tension without breaking composition stability", punctuation=".")
-        if inserted_text:
-            _append_sentence(sentences, f"The user-provided detail {inserted_text} remains part of the same subject and scene instead of becoming a separate theme", punctuation=".")
-    finish = f"Finish with {quality_text}, coherent material texture, clean background control, no text, no watermark, no low-resolution artifacts and no extra limbs"
-    if custom_text:
-        finish += f", weaving {custom_text} into the same visual concept"
-    _append_sentence(sentences, finish, punctuation=".")
-    if detail == "详细":
-        _append_sentence(sentences, "Develop visible material response, spatial depth, focal hierarchy, surface texture, prop contact points and clean background edges without introducing an unselected primary style or scene", punctuation=".")
-    elif detail == "简洁":
-        return " ".join(sentences[:3]).strip()
-    return " ".join(sentences).strip()
+    ordered_lead = "; ".join(ordered_clauses)
+    article = "An" if style_text[:1].casefold() in {"a", "e", "i", "o", "u"} else "A"
+    anchors = {
+        "lead": (
+            f"{article} {style_text} image follows one coherent visual sequence: {ordered_lead}"
+            if ordered_lead
+            else f"{article} {style_text} image"
+        ),
+        "subject": subject_text,
+        "scene": scene_text,
+        "composition": composition_text,
+        "action": action_text,
+        "adult": adult_text,
+        "outfit": outfit_text,
+        "lighting": light_text,
+        "props": prop_text,
+        "custom": "; ".join(value for value in (inserted_text, custom_text) if value),
+        "residual": "; ".join([*ordered_clauses, variation_sentence] if variation_sentence else ordered_clauses),
+        "quality": quality_text,
+        "style_track": style_track,
+    }
+    plan = build_narrative_plan(
+        anchors,
+        output_index=variation_index,
+        output_count=max(1, int(settings.get("生成数量", 1) or 1)),
+        recent_history=[str(item).strip() for item in settings.get("最近提示词指纹", []) if str(item).strip()],
+        seed=int(settings.get("运行时随机有效种子", 0) or settings.get("seed", 0) or 0),
+    )
+    _record_narrative_plan(settings, plan, variation_index=variation_index, english=True)
+    return render_narrative_prompt(
+        anchors,
+        plan,
+        language="纯英文",
+        detail_level=detail,
+        non_person=str(subject_type).strip() == "非人物主体",
+        adult_mode=bool(adult_text),
+    )
 
 
 def build_tag_block_prompt_list(

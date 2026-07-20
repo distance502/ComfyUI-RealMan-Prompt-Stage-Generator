@@ -12,15 +12,20 @@ try:
 except ImportError:  # Standalone module tests load skills under this compatibility name.
     from stage_prompt_skills_test import resolve_base_template_style  # type: ignore
 
+try:
+    from .narrative import GLOBAL_NARRATIVE_MODEL_CONTRACT
+except Exception:  # pragma: no cover - standalone module tests
+    from stage_prompt_narrative_test import GLOBAL_NARRATIVE_MODEL_CONTRACT  # type: ignore
+
 
 SMART_TEXT_SYSTEM_TEMPLATE = """
 你是 Qwen TE 节点内置的 Smart Prompt Skill。任务：把用户描述、节点标签和 NSFW 成熟写真工作台标签压成一段可直接出图的正向提示词。
 
-输出结构：主体身份 + 关键外观/服装 + 主场景 + 动作情绪 + 光影镜头 + 材质细节 + 画质约束。
+输出方式：先明确此刻正在发生的事件和主体动机，再让服装、场景、动作、环境反馈、光影镜头、材质与画质围绕事件自然展开。
 核心规则：
 1. 先判断画面主线，只选最有用的元素；冲突标签只保留一个方向。
 2. 写成自然连贯的摄影/美术 brief，不要标签清单，不要逐项罗列，不要照抄节点标签原文。
-3. 中文输出建议 650-900 字，目标接近 800 字；英文输出建议 320-520 words；中英模式先输出英文提示词，再用一小段中文说明总结视觉方向。内容必须精细，但不要用近义词反复堆叠凑字数。
+3. 中文输出建议 700-1100 字；英文输出建议 360-600 words；中英模式先输出英文提示词，再用一小段中文说明总结视觉方向。内容必须精细，但不要用近义词反复堆叠凑字数。
 4. 成人成熟模式只表达明确成年主体、成熟写真氛围、服装与光影；若出现女孩/少女/校园语义，改写为年轻成年女性、青春感成年女性、学院风穿搭或大学场景。
 5. 优先吸收已匹配入槽位的成熟标签，把它们融合成句子，不要一条一条列出来。
 6. 默认使用全景全身或完整人物入镜；只有用户明确写近景、特写、半身、头像时，才切换到对应景别。
@@ -28,7 +33,7 @@ SMART_TEXT_SYSTEM_TEMPLATE = """
 8. 每个维度只保留一条主方向：一种主风格、一种主场景、一种主景别、一种主情绪、一组主光线；其余元素作为细节融入，不要重复叠加。
 9. 只输出提示词正文；不要标题、解释、Markdown、分析过程、参数或“以下是为您优化”等话术。
 10. 不要只输出“成年女性”“CG感”“真实感”这类单点结论；必须把主体、外观、服装、场景、动作、镜头、光线、材质和质量控制组织成完整画面。
-11. 全局写法遵循“主体 → 环境 → 光线 → 风格/媒介 → 镜头”：先明确谁/什么，再写空间，再写光源与色彩，再写媒介质感，最后写取景与稳定约束。
+11. 全局写法遵循“事件触发 → 主体回应 → 情绪转折 → 环境与光线反馈 → 镜头定格”：每个视觉细节都要服务同一条因果清楚的剧情。
 12. 具体描述优先：把“好看、精致、高级、震撼”改成可见细节，例如雾气层次、侧逆光轮廓、胶片颗粒、丝绸褶皱、金属边缘高光、雨水反光、背景虚化程度。
 13. 外部 MJ 参数或码图信息只作为灵感，不进入正文；丢弃 --ar、--profile、--stylize、--raw、--hd、--seed、UUID、preview、profile code 等非画面词。
 14. 不要锁死素材库风格。古风电影、港式武侠、都市生活流、科幻机甲、东方赛博、商业广告、时尚编辑、神话史诗等只作为可选风格通道，必须跟随用户输入、节点标签、NSFW 工作台和随机主题池动态切换。
@@ -41,6 +46,7 @@ SMART_TEXT_SYSTEM_TEMPLATE = """
 输入：书店女孩，霓虹夜色，面部聚焦
 输出：杂志感人像，年轻成年女性站在书店玻璃窗前回望，全景全身构图，人物完整入镜，霓虹反光落在面部、发梢与书架玻璃边缘，姿态自然克制，服装线条干净，背景保持轻微虚化但能看出书店层次；画面以面部神情和完整身体比例为视觉中心，柔和高光勾出轮廓，整体干净、细腻、有电影感与封面感。
 """.strip()
+SMART_TEXT_SYSTEM_TEMPLATE = f"{SMART_TEXT_SYSTEM_TEMPLATE}\n\n{GLOBAL_NARRATIVE_MODEL_CONTRACT}"
 
 _SMART_TEXT_WORD_SPLIT_PATTERN = re.compile(r"[\s,，、;；|/\\]+")
 _CJK_PATTERN = re.compile(r"[\u4e00-\u9fff]")
@@ -1358,15 +1364,15 @@ def build_smart_text_seed(
         else "成人成熟模式：未启用。按普通图像提示词处理，把输入整理成自然连贯的成片描述。"
     )
     if language == "纯英文":
-        language_instruction = "语言要求：只输出英文正向提示词，目标 320-520 words，不要包含中文解释。"
+        language_instruction = "语言要求：只输出英文正向提示词，目标 360-600 words，不要包含中文解释。"
     elif language == "英文提示词+中文说明":
-        language_instruction = "语言要求：先输出英文正向提示词，目标 320-520 words；末尾追加一小段中文说明，以“中文说明：”开头，说明画面主线。"
+        language_instruction = "语言要求：先输出英文正向提示词，目标 360-600 words；末尾追加一小段中文说明，以“中文说明：”开头，说明画面主线。"
     else:
-        language_instruction = "语言要求：只输出中文正向提示词，目标 650-900 字并尽量接近 800 字。"
+        language_instruction = "语言要求：只输出中文正向提示词，目标 700-1100 字。"
     output_instruction = (
-        "输出：当前是非人物主体，优先吸收基础提示词和当前主线，再按“主体结构 + 外观材质 + 场景空间 + 运动状态/功能关系 + 光影镜头 + 画质约束”写一段自然正向提示词；聚焦物体、机械、建筑、场景或概念设计本身，只补结构、材质、尺度、功能部件和空间关系；目标接近 800 字/或 320-520 英文词；不要原样抄写标签，不要锁死风格和景别，不要重复堆同义标签。"
+        "输出：当前是非人物主体，优先吸收基础提示词和当前主线，写清事件触发、主体状态变化、功能或运动回应、环境反馈、光影迁移与最后定格；聚焦物体、机械、建筑、场景或概念设计本身，只补结构、材质、尺度、功能部件和空间关系；目标 700-1100 中文字/或 360-600 英文词；不要原样抄写标签，不要锁死风格和景别，不要重复堆同义标签。"
         if non_person
-        else "输出：优先吸收基础提示词和当前主线，再按“主体身份 + 外观服装 + 场景空间 + 动作情绪 + 光影镜头 + 材质细节 + 画质约束”写一段自然正向提示词；目标接近 800 字/或 320-520 英文词；默认完整人物入镜，除非用户明确要求近景、特写或半身；不要原样抄写标签，不要锁死风格和景别，不要重复堆同义标签，语气像摄影成片说明，不像标签列表。"
+        else "输出：优先吸收基础提示词和当前主线，写清此刻发生的事件、人物动机、动作回应、情绪转折、环境与光线反馈以及镜头最终定格；目标 700-1100 中文字/或 360-600 英文词；默认完整人物入镜，除非用户明确要求近景、特写或半身；不要原样抄写标签，不要锁死风格和景别，不要重复堆同义标签，语气像具有剧情的电影剧照说明，不像标签列表。"
     )
     return "\n".join(
         [
@@ -1393,7 +1399,7 @@ def build_smart_text_seed(
 def build_smart_text_settings(settings: dict[str, Any]) -> dict[str, Any]:
     next_settings = dict(settings)
     next_settings["系统提示词覆盖"] = SMART_TEXT_SYSTEM_TEMPLATE
-    next_settings["最大生成token"] = max(1280, min(2200, int(next_settings.get("最大生成token", 1800) or 1800)))
+    next_settings["最大生成token"] = max(128, min(2200, int(next_settings.get("最大生成token", 1800) or 1800)))
     next_settings["温度"] = min(0.62, max(0.28, float(next_settings.get("温度", 0.48) or 0.48)))
     next_settings["top_p"] = min(0.9, max(0.72, float(next_settings.get("top_p", 0.86) or 0.86)))
     next_settings["top_k"] = min(40, max(16, int(next_settings.get("top_k", 32) or 32)))
@@ -1632,6 +1638,51 @@ def sanitize_smart_text_prompt(
     return raw
 
 
+def _looks_like_rich_narrative_prompt(text: str, *, english: bool = False) -> bool:
+    source = _strip_smart_text_meta(text)
+    if english:
+        word_count = len(re.findall(r"\b[A-Za-z][A-Za-z'-]*\b", source))
+        markers = ("because", "therefore", "respond", "turns from", "final frame", "story")
+        return word_count >= 220 and sum(marker in source.casefold() for marker in markers) >= 2
+    cjk_count = len(_CJK_PATTERN.findall(source))
+    markers = ("故事", "因此", "回应", "情绪", "镜头", "定格", "结尾", "动作")
+    return cjk_count >= 420 and sum(marker in source for marker in markers) >= 3
+
+
+def _merge_smart_text_into_rich_narrative(
+    *,
+    user_text: str,
+    primary_prompt: str,
+    english: bool = False,
+) -> str:
+    primary = _strip_smart_text_meta(primary_prompt)
+    if not _looks_like_rich_narrative_prompt(primary, english=english):
+        return ""
+    user_terms = _split_prompt_terms(user_text)
+    additions = [
+        term
+        for term in user_terms
+        if term and term.casefold() not in primary.casefold() and term.casefold() not in _FALLBACK_NOISE_TERMS
+    ][:6]
+    if not additions:
+        return primary
+    if english:
+        visible = "; ".join(term for term in additions if not _CJK_PATTERN.search(term))
+        if not visible:
+            return primary
+        bridge = (
+            f" The added intention, {visible}, becomes a concrete cause inside the same event: "
+            "it changes the subject's attention, motivates the next movement, and produces a visible response in nearby light, materials, or space rather than forming a separate keyword list."
+        )
+        return f"{primary}{bridge}"
+    visible = "、".join(additions)
+    bridge = (
+        f"其中，{visible}成为同一事件里的补充动机或具体线索，它会改变主体的注意方向与下一步动作，"
+        "并让附近的光线、材质或空间出现可见回应，而不是另起一串互不相关的标签。"
+    )
+    return f"{primary}{bridge}"
+
+
 def _fallback_smart_text_chinese(
     *,
     user_text: str,
@@ -1640,6 +1691,16 @@ def _fallback_smart_text_chinese(
     subject_type: str = "自动",
     adult_mode: bool = False,
 ) -> str:
+    rich_narrative = _merge_smart_text_into_rich_narrative(
+        user_text=user_text,
+        primary_prompt=primary_prompt,
+        english=False,
+    )
+    if rich_narrative:
+        adult = bool(adult_mode) or looks_like_adult_request(f"{user_text} {primary_prompt}", [])
+        return _soften_explicit_adult_terms(
+            _normalize_adult_subject_terms(rich_narrative, adult=adult)
+        )
     terms = _split_prompt_terms(user_text, primary_prompt)
     if not terms:
         return _normalize_text(primary_prompt)
@@ -1783,6 +1844,14 @@ def _fallback_smart_text_english(
     subject_type: str = "自动",
     adult_mode: bool = False,
 ) -> str:
+    rich_narrative = _merge_smart_text_into_rich_narrative(
+        user_text=user_text,
+        primary_prompt=primary_prompt,
+        english=True,
+    )
+    if rich_narrative:
+        adult = bool(adult_mode) or looks_like_adult_request(f"{user_text} {primary_prompt}", [])
+        return _normalize_english_adult_subject_terms(rich_narrative, adult=adult)
     source = f"{user_text} {primary_prompt}".strip()
     non_person = str(subject_type or "自动").strip() == "非人物主体"
     adult = bool(adult_mode) or looks_like_adult_request(source, [])

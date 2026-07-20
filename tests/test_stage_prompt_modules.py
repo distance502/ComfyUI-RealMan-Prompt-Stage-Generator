@@ -139,6 +139,7 @@ def load_nodes_for_storage_test(models_dir: pathlib.Path, runtime: dict[str, obj
     return module, FakeLlama, runtime
 
 
+narrative = load_module("stage_prompt/narrative.py", "stage_prompt_narrative_test")
 skills = load_module("stage_prompt/skills.py", "stage_prompt_skills_test")
 normalizer = load_module("stage_prompt/normalizer.py", "stage_prompt_normalizer_test")
 negative_builder = load_module("stage_prompt/negative_builder.py", "stage_prompt_negative_builder_test")
@@ -191,6 +192,7 @@ def load_stage_prompt_generator_for_integration_test(*, nodes_available: bool = 
             f"{package_prefix}.stage_prompt.nsfw_workspace",
             f"{package_prefix}.stage_prompt.formatter",
             f"{package_prefix}.stage_prompt.model_refiner",
+            f"{package_prefix}.stage_prompt.narrative",
             f"{package_prefix}.stage_prompt.normalizer",
             f"{package_prefix}.stage_prompt.prompt_builder",
             f"{package_prefix}.stage_prompt.randomizer",
@@ -226,6 +228,7 @@ def load_stage_prompt_generator_for_integration_test(*, nodes_available: bool = 
     sys.modules[f"{package_prefix}.stage_prompt.nsfw_workspace"] = nsfw_workspace
     sys.modules[f"{package_prefix}.stage_prompt.formatter"] = formatter
     sys.modules[f"{package_prefix}.stage_prompt.model_refiner"] = model_refiner
+    sys.modules[f"{package_prefix}.stage_prompt.narrative"] = narrative
     sys.modules[f"{package_prefix}.stage_prompt.normalizer"] = normalizer
     sys.modules[f"{package_prefix}.stage_prompt.prompt_builder"] = prompt_builder
     sys.modules[f"{package_prefix}.stage_prompt.randomizer"] = randomizer
@@ -2315,7 +2318,7 @@ class TestStagePromptModules(unittest.TestCase):
                 self.assertNotIn(other_cue, prompt)
         self.assertEqual(len(prompts), 5)
         self.assertEqual(len(set(prompts)), 5)
-        self.assertEqual(len({tuple(parts) for parts in non_leading_fragments}), 1)
+        self.assertTrue(all("故事" in prompt and "最终画面" in prompt for prompt in prompts))
 
     def test_prompt_builder_auto_template_stays_more_neutral_than_realistic(self) -> None:
         selected = OrderedDict(
@@ -2412,7 +2415,9 @@ class TestStagePromptModules(unittest.TestCase):
         )[0]
 
         self.assertTrue(prompt.startswith("realistic photography"))
-        self.assertIn("coherent positive scene description", prompt)
+        self.assertIn("is centered on", prompt)
+        self.assertIn("Because of it", prompt)
+        self.assertIn("The final image", prompt)
         self.assertIn("full-body", prompt)
         self.assertIn("selected subject", prompt)
         self.assertNotIn("adult woman", prompt)
@@ -2459,10 +2464,12 @@ class TestStagePromptModules(unittest.TestCase):
         )[0]
 
         self.assertTrue(prompt.startswith("写实摄影"))
-        self.assertIn("正向画面说明", prompt)
+        self.assertIn("故事", prompt)
+        self.assertIn("因此", prompt)
+        self.assertIn("最终画面", prompt)
         self.assertIn("湖畔夕照", prompt)
         self.assertIn("全景全身", prompt)
-        self.assertIn("主体身份", prompt)
+        self.assertIn("人物主体", prompt)
         self.assertNotIn("成年女性", prompt)
         self.assertNotIn("--ar", prompt)
 
@@ -4928,6 +4935,8 @@ class TestStagePromptModules(unittest.TestCase):
                 "模型调用成功次数": 1,
                 "模型调用失败次数": 0,
                 "模型调用采纳次数": 1,
+                "模型传输重试次数": 1,
+                "模型最近瞬时错误": "The read operation timed out",
                 "核心标签锁定数量": 10,
                 "优先柔和肤质": True,
                 "抑制文字伪影": False,
@@ -4961,6 +4970,8 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertEqual(payload["model_call_success_count"], 1)
         self.assertEqual(payload["model_call_failure_count"], 0)
         self.assertEqual(payload["model_call_adopted_count"], 1)
+        self.assertEqual(payload["model_transport_retry_count"], 1)
+        self.assertEqual(payload["model_last_transient_error"], "The read operation timed out")
         self.assertIn("Skill前置 + API模型后置润色", payload["model_skill_pipeline"])
         self.assertIn("标签作为素材锚点而非固定模板", payload["skill_dynamic_strategy"])
         self.assertEqual(payload["recent_prompt_fingerprint_count"], 2)
@@ -6238,8 +6249,8 @@ class TestStagePromptModules(unittest.TestCase):
             infer_subject_type=lambda tags, explicit: explicit,
             infer_output_structure=lambda subject, explicit: explicit,
         )[0]
-        fragments = [fragment.strip() for fragment in prompt.split("，") if fragment.strip()]
-        self.assertLessEqual(len(fragments), 34)
+        self.assertGreaterEqual(len(prompt), 650)
+        self.assertFalse(model_refiner._looks_like_tag_chain_prompt(prompt), prompt)
         for required in ("成年女性", "校园", "中景半身", "暧昧", "相机", "固定校园图书馆主场景"):
             self.assertIn(required, prompt)
         self.assertIn("自定义补充1", prompt)
@@ -6822,10 +6833,11 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertIn("只输出最终提示词正文", template)
         self.assertIn("真实但美", template)
         self.assertIn("不要强行改成写实摄影", template)
-        self.assertIn("650-900", template)
-        self.assertIn("320-520", template)
-        self.assertIn("目标接近 800 字", template)
-        self.assertIn("主体 → 环境 → 光线 → 风格/媒介 → 镜头", template)
+        self.assertIn("700-1100", template)
+        self.assertIn("360-600", template)
+        self.assertIn("事件触发", template)
+        self.assertIn("主体回应", template)
+        self.assertIn("镜头定格", template)
         self.assertIn("具体描述优先", template)
         self.assertIn("--profile", template)
         self.assertIn("不得锁死", template)
@@ -8145,7 +8157,7 @@ class TestStagePromptModules(unittest.TestCase):
             chat_completion=fake_chat_completion,
             clean_think_text=lambda text: text,
         )
-        self.assertGreaterEqual(captured["params"]["max_tokens"], 1280)
+        self.assertEqual(captured["params"]["max_tokens"], 256)
 
     def test_model_refiner_uses_scaled_token_budget_for_batch(self) -> None:
         class DummyChatLlm:
@@ -8165,7 +8177,7 @@ class TestStagePromptModules(unittest.TestCase):
             chat_completion=fake_chat_completion,
             clean_think_text=lambda text: text,
         )
-        self.assertGreaterEqual(captured["params"]["max_tokens"], 3840)
+        self.assertEqual(captured["params"]["max_tokens"], 768)
         self.assertGreaterEqual(captured["params"]["temperature"], 0.72)
         self.assertGreaterEqual(captured["params"]["repeat_penalty"], 1.1)
         self.assertGreaterEqual(captured["params"]["frequency_penalty"], 0.18)
@@ -9460,7 +9472,7 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertIn("最近输出避重", seed)
         self.assertIn("蒸汽浴室", seed)
         self.assertIn("湿身淋浴", seed)
-        self.assertIn("目标 650-900 字", seed)
+        self.assertIn("目标 700-1100 字", seed)
 
     def test_smart_text_seed_requests_prompt_first_and_not_tag_list(self) -> None:
         seed = smart_text.build_smart_text_seed(
@@ -9532,8 +9544,8 @@ class TestStagePromptModules(unittest.TestCase):
             selected_tags_text="",
             settings={"提示词语言": "英文提示词+中文说明"},
         )
-        self.assertIn("目标 650-900 字", chinese_seed)
-        self.assertIn("320-520 words", english_seed)
+        self.assertIn("目标 700-1100 字", chinese_seed)
+        self.assertIn("360-600 words", english_seed)
         self.assertIn("中文说明", bilingual_seed)
 
     def test_smart_text_settings_use_compact_fast_sampling(self) -> None:
@@ -9548,11 +9560,11 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertGreaterEqual(settings["重复惩罚"], 1.1)
         self.assertGreaterEqual(settings["频率惩罚"], 0.12)
         self.assertGreaterEqual(settings["存在惩罚"], 0.06)
-        self.assertIn("650-900", settings["系统提示词覆盖"])
-        self.assertIn("320-520", settings["系统提示词覆盖"])
+        self.assertIn("700-1100", settings["系统提示词覆盖"])
+        self.assertIn("360-600", settings["系统提示词覆盖"])
         self.assertIn("不要标签清单", settings["系统提示词覆盖"])
         self.assertIn("不要用近义词反复堆叠", settings["系统提示词覆盖"])
-        self.assertIn("主体 → 环境 → 光线 → 风格/媒介 → 镜头", settings["系统提示词覆盖"])
+        self.assertIn("事件触发 → 主体回应 → 情绪转折 → 环境与光线反馈 → 镜头定格", settings["系统提示词覆盖"])
         self.assertIn("中文模式必须输出自然中文正向提示词", settings["系统提示词覆盖"])
         self.assertIn("--profile", settings["系统提示词覆盖"])
         self.assertIn("不要锁死素材库风格", settings["系统提示词覆盖"])
@@ -9778,7 +9790,7 @@ class TestStagePromptModules(unittest.TestCase):
         )[0]
         self.assertLess(prompt.index("湖畔"), prompt.index("成年女性"))
         self.assertIn("人物站在画面右侧", prompt)
-        self.assertIn("正向画面说明", prompt)
+        self.assertIn("剧情推进", prompt)
         self.assertNotIn("根据用户拖拽后的标签块顺序", prompt)
         self.assertNotIn("块顺序摘要", prompt)
 
@@ -9916,9 +9928,9 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertLess(prompt.index("moonlit hall"), prompt.index("red ribbon"))
         self.assertLess(prompt.index("red ribbon"), prompt.index("mature elegance"))
         self.assertLess(prompt.index("mature elegance"), prompt.index("adult woman"))
-        self.assertIn("Develop visible material response", prompt)
-        self.assertIn("The mature styling direction", prompt)
-        self.assertIn("The user-provided detail", prompt)
+        self.assertIn("Color and material changes", prompt)
+        self.assertIn("treated as clearly adult", prompt)
+        self.assertIn("The user detail", prompt)
 
     def test_tag_block_composer_pure_english_localizes_real_ui_chinese_tags(self) -> None:
         payload = tag_block_composer.parse_tag_block_payload(json.dumps({
@@ -13823,6 +13835,265 @@ class TestStagePromptModules(unittest.TestCase):
             model_refiner.is_natural_language_prompt(result[1], {"提示词语言": "纯中文"}),
             result[1],
         )
+
+    def test_global_narrative_planner_creates_distinct_batch_story_arcs(self) -> None:
+        anchors = {
+            "subject": "成年女性剑客",
+            "scene": "雨夜竹林",
+            "action": "持剑回身",
+            "lighting": "青蓝月光",
+            "props": "剑与灯笼",
+        }
+        plans = [
+            narrative.build_narrative_plan(
+                anchors,
+                output_index=index,
+                output_count=3,
+                recent_history=[],
+                seed=42,
+            )
+            for index in range(3)
+        ]
+        self.assertEqual(len({plan["signature"] for plan in plans}), 3)
+        self.assertEqual(len({plan["arc_id"] for plan in plans}), 3)
+        self.assertEqual(len({plan["emotion_zh"] for plan in plans}), 3)
+        self.assertTrue(all(plan["ending_zh"] for plan in plans))
+
+    def test_prompt_builder_outputs_long_causal_natural_language_for_every_item(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["成年女性", "东亚", "剑客", "清冷"],
+                "画面风格": ["古风电影剧照", "照片级"],
+                "服装造型": ["汉服", "披风"],
+                "场景背景": ["雨夜竹林", "石阶"],
+                "构图视角": ["全景全身", "低机位"],
+                "动作姿态": ["持剑回身", "侧目看向远处"],
+                "光影氛围": ["青蓝月光", "暖色轮廓逆光"],
+                "道具世界观": ["剑", "灯笼"],
+                "技术画质": ["高细节", "清晰对焦"],
+            }
+        )
+        settings = {
+            "模板风格": "古风",
+            "主体类型": "人物角色",
+            "案例输出结构": "案例长段版",
+            "标签反推模式": "自动平衡",
+            "运行时随机标签": False,
+            "提示词语言": "纯中文",
+            "详细度": "标准",
+            "生成数量": 3,
+            "额外要求": "",
+            "seed": 42,
+        }
+        prompts = prompt_builder.build_prompt_list(
+            selected,
+            [],
+            settings,
+            scene_group="ancient",
+            identity="剑客",
+            style_track="武侠剧照",
+            recent_tracks=[],
+            uniq=uniq,
+            infer_template_style=lambda _tags, explicit: explicit,
+            infer_subject_type=lambda _tags, explicit: explicit,
+            infer_output_structure=lambda _subject, explicit: explicit,
+        )
+        self.assertEqual(len(prompts), 3)
+        self.assertEqual(len(set(prompts)), 3)
+        self.assertEqual(len(settings["全局剧情规划"]), 3)
+        for prompt in prompts:
+            self.assertGreaterEqual(len(prompt), 650, prompt)
+            self.assertIn("故事", prompt)
+            self.assertIn("因此", prompt)
+            self.assertIn("情绪", prompt)
+            self.assertIn("镜头", prompt)
+            self.assertTrue(any(marker in prompt for marker in ("结尾", "定格", "最后一帧")))
+            self.assertIn("雨夜竹林", prompt)
+            self.assertIn("持剑回身", prompt)
+            self.assertFalse(model_refiner._looks_like_tag_chain_prompt(prompt), prompt)
+
+    def test_narrative_plan_changes_when_recent_output_history_changes(self) -> None:
+        anchors = {"subject": "成年女性", "scene": "城市天台", "action": "回眸"}
+        first = narrative.build_narrative_plan(anchors, recent_history=[], seed=11)
+        second = narrative.build_narrative_plan(
+            anchors,
+            recent_history=[narrative.summarize_narrative_plan(first)],
+            seed=11,
+        )
+        self.assertNotEqual(first["signature"], second["signature"])
+        self.assertTrue(
+            first["arc_id"] != second["arc_id"]
+            or first["spatial_zh"] != second["spatial_zh"]
+            or first["camera_zh"] != second["camera_zh"]
+        )
+
+    def test_stage_consecutive_fixed_inputs_still_change_global_story_plan(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        settings = {
+            "unique_id": "global-story-consecutive-fixed",
+            "主体标签1": "成年女性",
+            "主体标签2": "剑客",
+            "画面风格标签1": "古风电影剧照",
+            "服装造型标签1": "汉服",
+            "场景背景标签1": "雨夜竹林",
+            "构图视角标签1": "全景全身",
+            "动作姿态标签1": "持剑回身",
+            "光影氛围标签1": "青蓝月光",
+            "道具世界观标签1": "灯笼",
+            "技术画质标签1": "高细节",
+            "模板风格": "古风",
+            "详细度": "标准",
+            "生成数量": 1,
+            "提示词语言": "纯中文",
+            "运行时随机标签": False,
+            "模型来源": "仅Skill",
+            "seed": 20260721,
+        }
+        first = module._run_stage(None, **settings)[1]
+        second = module._run_stage(None, **settings)[1]
+        self.assertNotEqual(first, second)
+        for prompt in (first, second):
+            self.assertGreaterEqual(len(prompt), 650)
+            self.assertIn("因此", prompt)
+            self.assertIn("情绪", prompt)
+            self.assertIn("最终画面", prompt)
+
+    def test_model_contract_is_global_and_user_token_limit_is_honored_per_item(self) -> None:
+        resolved = model_refiner._resolve_system_prompt(
+            {
+                "系统提示词覆盖": "只输出正文。",
+                "提示词语言": "纯中文",
+            }
+        )
+        self.assertIn("全局剧情与自然语言合同", resolved)
+        self.assertIn("事件触发", resolved)
+        self.assertEqual(model_refiner._refiner_sampling_params({"最大生成token": 256})["max_tokens"], 256)
+        self.assertEqual(
+            model_refiner._refiner_sampling_params({"最大生成token": 256}, prompt_count=3)["max_tokens"],
+            768,
+        )
+        self.assertEqual(
+            smart_text.build_smart_text_settings({"最大生成token": 256})["最大生成token"],
+            256,
+        )
+
+    def test_model_refiner_keeps_skill_story_when_model_removes_narrative_chain(self) -> None:
+        class DummyLLM:
+            def create_chat_completion(self, *args, **kwargs):
+                return None
+
+        original = (
+            "电影写实画面以成年女性为叙事中心。故事从她抵达雨夜站台开始，远处的列车声打破平静，"
+            "因此她停下脚步回望，情绪由疲惫转为警觉。环境中的霓虹反射沿湿地面移动，"
+            "镜头最终定格在列车尚未进入画面的瞬间。" * 4
+        )
+        flat_model_text = (
+            "电影写实成年女性位于雨夜站台，穿着剪裁利落的深色长款风衣，衣领与袖口具有细密织物纹理。"
+            "全景全身构图保留完整身体比例，低角度取景强调站台顶棚与轨道的透视延伸。"
+            "青蓝霓虹逆光勾勒轮廓，暖色广告灯形成局部色温对比，湿地面保留细腻而克制的反射。"
+            "面部皮肤保留毛孔、细微肤色差与自然高光，发丝边缘清楚，手部结构稳定。"
+            "背景包含候车座椅、玻璃挡板、站牌和远处轨道，前景水迹提供空间尺度，中景主体保持清楚。"
+            "整体使用电影色彩、浅景深、胶片颗粒、清晰对焦和高细节材质，避免文字、水印、畸形与低清伪影。"
+        )
+        settings = {
+            "提示词语言": "纯中文",
+            "主体类型": "人物角色",
+            "主体类型解析结果": "人物角色",
+            "模型来源": "API接口",
+            "全局剧情规划": ["叙事弧=等待与信号；情绪转折=由疲惫转为警觉；结尾定格=列车到来前"],
+        }
+        refined = model_refiner.maybe_model_refine(
+            DummyLLM(),
+            original,
+            settings,
+            chat_completion=lambda *_args, **_kwargs: {
+                "choices": [{"message": {"content": flat_model_text}}]
+            },
+            clean_think_text=lambda value: value,
+        )
+        self.assertEqual(refined, original)
+        self.assertIn("缺少完整的事件触发", settings.get("模型回退说明", ""))
+
+    def test_model_refiner_retries_transient_timeout_and_recovers_without_skill_fallback(self) -> None:
+        class FlakyLLM:
+            def __init__(self):
+                self.calls = 0
+
+            def create_chat_completion(self, *args, **kwargs):
+                self.calls += 1
+                if self.calls == 1:
+                    raise TimeoutError("The read operation timed out")
+                return {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": (
+                                    "成年女性在雨夜站台听见远处列车声，因此停下脚步回望。"
+                                    "她的情绪由等待转为警觉，霓虹反射随着动作掠过衣料和湿地面，"
+                                    "镜头最终定格在列车尚未进入画面的瞬间。"
+                                )
+                            }
+                        }
+                    ]
+                }
+
+        llm = FlakyLLM()
+        settings = {
+            "提示词语言": "纯中文",
+            "主体类型": "人物角色",
+            "主体类型解析结果": "人物角色",
+            "模型来源": "API接口",
+            "模型调用基础来源": "API接口",
+            "模型瞬时重试次数": 1,
+        }
+        result = model_refiner.maybe_model_refine(
+            llm,
+            "成年女性在雨夜站台等待，霓虹逆光，全景全身，高细节",
+            settings,
+            chat_completion=lambda model, messages, params: model.create_chat_completion(
+                messages=messages,
+                **params,
+            ),
+            clean_think_text=lambda value: value,
+        )
+        self.assertEqual(llm.calls, 2)
+        self.assertIn("因此", result)
+        self.assertEqual(settings.get("模型传输重试次数"), 1)
+        self.assertEqual(settings.get("模型活动回退数量", 0), 0)
+        self.assertTrue(any("已恢复" in note for note in settings.get("推理纠偏说明", [])))
+
+    def test_model_refiner_does_not_retry_nontransient_auth_error(self) -> None:
+        class AuthError(RuntimeError):
+            code = 401
+
+        class RejectingLLM:
+            def __init__(self):
+                self.calls = 0
+
+            def create_chat_completion(self, *args, **kwargs):
+                self.calls += 1
+                raise AuthError("unauthorized")
+
+        llm = RejectingLLM()
+        original = "成年女性在雨夜站台等待，霓虹逆光，全景全身，高细节"
+        result = model_refiner.maybe_model_refine(
+            llm,
+            original,
+            {
+                "提示词语言": "纯中文",
+                "主体类型": "人物角色",
+                "主体类型解析结果": "人物角色",
+                "模型来源": "API接口",
+                "模型瞬时重试次数": 2,
+            },
+            chat_completion=lambda model, messages, params: model.create_chat_completion(
+                messages=messages,
+                **params,
+            ),
+            clean_think_text=lambda value: value,
+        )
+        self.assertEqual(llm.calls, 1)
+        self.assertEqual(result, original)
 
 if __name__ == "__main__":
     unittest.main()
