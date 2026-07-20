@@ -6853,6 +6853,60 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertEqual(module.SETTING_DEFAULTS["最大生成token"], 1800)
         self.assertEqual(input_types["required"]["最大生成token"][1]["default"], 1800)
 
+        expected_defaults = {
+            "运行时随机模式": "自动判断",
+            "生成数量": 3,
+            "提示词语言": "纯中文",
+            "详细度": "标准",
+            "风格隔离策略": "平衡收敛",
+            "内置上下文长度": 8192,
+            "内置GPU层数": -1,
+            "API超时秒": 120,
+            "温度": 0.62,
+            "top_p": 0.9,
+            "top_k": 40,
+            "重复惩罚": 1.08,
+            "频率惩罚": 0.0,
+            "存在惩罚": 0.0,
+        }
+        for name, expected in expected_defaults.items():
+            with self.subTest(name=name):
+                self.assertEqual(module.SETTING_DEFAULTS[name], expected)
+                self.assertEqual(input_types["required"][name][1]["default"], expected)
+
+        documented_parameters = (
+            "内置上下文长度",
+            "内置GPU层数",
+            "模板风格",
+            "运行时随机标签",
+            "运行时随机模式",
+            "运行时随机强度",
+            "随机主题池",
+            "生成数量",
+            "提示词语言",
+            "详细度",
+            "输出模式",
+            "风格隔离策略",
+            "智能文本匹配",
+            "智能文本输入",
+            "智能文本风格优先",
+            "图片反推模式",
+            "图片反推最大边长",
+            "系统提示词覆盖",
+            "最大生成token",
+            "温度",
+            "top_p",
+            "top_k",
+            "重复惩罚",
+            "频率惩罚",
+            "存在惩罚",
+            "seed",
+            "输出think块",
+        )
+        for name in documented_parameters:
+            with self.subTest(tooltip=name):
+                self.assertTrue(input_types["required"][name][1].get("tooltip"))
+
     def test_stage_generator_style_track_routes_reference_driven_branches(self) -> None:
         module = load_stage_prompt_generator_for_integration_test()
         self.assertEqual(

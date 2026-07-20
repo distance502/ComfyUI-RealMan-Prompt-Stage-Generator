@@ -247,6 +247,7 @@ globalThis.__stagePromptUiTestExports = {
 	setControlWidgetValue,
 	getAdvancedWidgetOptions,
 	createAdvancedSelect,
+	getAdvancedWidgetTooltip,
 	ADVANCED_WIDGET_NAMES,
 	CONTROL_WIDGET_OPTIONS,
 	bindSummaryRefresh,
@@ -336,6 +337,7 @@ globalThis.__stagePromptUiTestExports = {
 	collectNodeState,
 	createRuntimeRandomPreviewMarker,
 	PRESET_SETTING_NAMES,
+	PRESET_SETTING_DEFAULTS,
 	RUNTIME_RANDOM_PROTECTED_TAGS_WIDGET_NAME,
 	RUNTIME_RANDOM_PREVIEW_TOKEN_WIDGET_NAME,
 };
@@ -2329,6 +2331,26 @@ test("runtime random preview token stays out of preset and history settings", as
 	assert.equal(JSON.parse(token).source, "ui");
 });
 
+test("preset state keeps reproducible generation settings without credentials or runtime caches", async () => {
+	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	for (const name of [
+		"风格隔离策略", "智能文本匹配", "智能文本输入", "内置模型系列", "内置主模型",
+		"内置上下文长度", "内置GPU层数", "系统提示词覆盖", "最大生成token", "温度",
+		"top_p", "top_k", "重复惩罚", "频率惩罚", "存在惩罚", "输出think块",
+	]) {
+		assert.equal(exports.PRESET_SETTING_NAMES.includes(name), true, `${name} should be saved in presets`);
+	}
+	for (const name of ["API密钥", "API额外请求头", "随机补充避重缓存", "连续生成避重缓存", exports.RUNTIME_RANDOM_PREVIEW_TOKEN_WIDGET_NAME]) {
+		assert.equal(exports.PRESET_SETTING_NAMES.includes(name), false, `${name} should stay out of presets`);
+	}
+	assert.equal(exports.PRESET_SETTING_DEFAULTS["生成数量"], 3);
+	assert.equal(exports.PRESET_SETTING_DEFAULTS["详细度"], "标准");
+	assert.equal(exports.PRESET_SETTING_DEFAULTS["运行时随机模式"], "自动判断");
+	assert.equal(exports.PRESET_SETTING_DEFAULTS["风格隔离策略"], "平衡收敛");
+	assert.equal(exports.PRESET_SETTING_DEFAULTS["最大生成token"], 1800);
+	assert.equal(exports.PRESET_SETTING_DEFAULTS["温度"], 0.62);
+});
+
 test("random mode options expose rewrite subject and scene mode", async () => {
 	const source = await fs.readFile(UI_PATH, "utf8");
 	assert.match(source, /value:\s*"自动判断"/u);
@@ -2409,6 +2431,7 @@ test("stage sanitize repairs embedded model and image reverse stale values", asy
 			{ name: "API模型", value: "重写主体与场景" },
 			{ name: "内置上下文长度", value: 0 },
 			{ name: "图片反推最大边长", value: 0 },
+			{ name: "核心标签锁定数量", value: 999 },
 		],
 	};
 	exports.sanitizeStagePromptNode(node, { slot_config: [] });
@@ -2422,6 +2445,7 @@ test("stage sanitize repairs embedded model and image reverse stale values", asy
 	assert.equal(node.widgets[7].value, "");
 	assert.equal(node.widgets[8].value, 1024);
 	assert.equal(node.widgets[9].value, 256);
+	assert.equal(node.widgets[10].value, 500);
 });
 
 test("panel status messages are folded into the compact summary", async () => {
@@ -4597,6 +4621,10 @@ test("advanced panel merges full backend catalogs and renders long enums as sele
 	assert.equal(select.className, "qwen-te-panel__advanced-select");
 	assert.equal(select.value, "宇宙神话");
 	assert.ok(select.children.length >= 90);
+	node.widgets[0].options.tooltip = "选择整体视觉风格";
+	const describedSelect = exports.createAdvancedSelect(node, "模板风格", options);
+	assert.equal(exports.getAdvancedWidgetTooltip(node, "模板风格"), "选择整体视觉风格");
+	assert.equal(describedSelect.title, "选择整体视觉风格");
 	assert.equal(exports.ADVANCED_WIDGET_NAMES.includes("风格隔离策略"), true);
 	assert.equal(exports.ADVANCED_WIDGET_NAMES.includes("智能文本风格优先"), true);
 	assert.deepEqual(Array.from(exports.CONTROL_WIDGET_OPTIONS["输出模式"]), ["完整结果", "仅提示词优先"]);

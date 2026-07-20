@@ -625,8 +625,11 @@ const PRESET_SETTING_NAMES = [
 	"详细度",
 	"输出模式",
 	"标签反推模式",
+	"风格隔离策略",
 	"优先柔和肤质",
 	"抑制文字伪影",
+	"智能文本匹配",
+	"智能文本输入",
 	"智能文本风格优先",
 	TAG_BLOCK_COMPOSER_ENABLED_WIDGET_NAME,
 	TAG_BLOCK_COMPOSER_JSON_WIDGET_NAME,
@@ -634,12 +637,29 @@ const PRESET_SETTING_NAMES = [
 	"图片反推模式",
 	"图片反推最大边长",
 	"模型来源",
+	"内置模型系列",
+	"内置主模型",
+	"内置视觉投影mmproj",
+	"内置启用思考",
+	"内置上下文长度",
+	"内置GPU层数",
+	"内置KV缓存K类型",
+	"内置KV缓存V类型",
 	"API服务商",
 	"API地址",
 	"API模型",
 	"API超时秒",
 	"额外要求",
+	"系统提示词覆盖",
+	"最大生成token",
+	"温度",
+	"top_p",
+	"top_k",
+	"重复惩罚",
+	"频率惩罚",
+	"存在惩罚",
 	"seed",
+	"输出think块",
 	RUNTIME_RANDOM_PROTECTED_TAGS_WIDGET_NAME,
 ];
 
@@ -654,13 +674,16 @@ const PRESET_SETTING_DEFAULTS = {
 	"随机主题池": "自动",
 	"锁定标签白名单": "",
 	"随机排除标签": "",
-	"生成数量": 5,
+	"生成数量": 3,
 	"提示词语言": "纯中文",
-	"详细度": "详细",
+	"详细度": "标准",
 	"输出模式": "完整结果",
 	"标签反推模式": "自动平衡",
+	"风格隔离策略": "平衡收敛",
 	"优先柔和肤质": false,
 	"抑制文字伪影": false,
+	"智能文本匹配": false,
+	"智能文本输入": "",
 	"智能文本风格优先": "自动判断",
 	[TAG_BLOCK_COMPOSER_ENABLED_WIDGET_NAME]: false,
 	[TAG_BLOCK_COMPOSER_JSON_WIDGET_NAME]: "",
@@ -668,12 +691,29 @@ const PRESET_SETTING_DEFAULTS = {
 	"图片反推模式": "角色设定图",
 	"图片反推最大边长": 960,
 	"模型来源": "仅Skill",
+	"内置模型系列": "Qwen3.5-VL",
+	"内置主模型": "",
+	"内置视觉投影mmproj": "无",
+	"内置启用思考": false,
+	"内置上下文长度": 8192,
+	"内置GPU层数": -1,
+	"内置KV缓存K类型": "默认(F16)",
+	"内置KV缓存V类型": "默认(F16)",
 	"API服务商": "OpenAI兼容",
 	"API地址": "",
 	"API模型": "",
 	"API超时秒": 120,
 	"额外要求": "",
+	"系统提示词覆盖": "",
+	"最大生成token": 1800,
+	"温度": 0.62,
+	"top_p": 0.9,
+	"top_k": 40,
+	"重复惩罚": 1.08,
+	"频率惩罚": 0,
+	"存在惩罚": 0,
 	"seed": 0,
+	"输出think块": false,
 	[RUNTIME_RANDOM_PROTECTED_TAGS_WIDGET_NAME]: "",
 };
 const CLEAR_PROMPT_INPUT_WIDGET_NAMES = ["额外要求", "智能文本输入", TAG_BLOCK_COMPOSER_JSON_WIDGET_NAME];
@@ -7454,7 +7494,7 @@ function sanitizeStagePromptNode(node, library) {
 		"内置GPU层数": { defaultValue: -1, min: -1, max: 9999 },
 		"API超时秒": { defaultValue: 120, min: 5, max: 600 },
 		"图片反推最大边长": { defaultValue: 960, min: 256, max: 2048 },
-		"核心标签锁定数量": { defaultValue: 10, min: 0, max: 100 },
+		"核心标签锁定数量": { defaultValue: 10, min: 0, max: 500 },
 		"生成数量": { defaultValue: 3, min: 1, max: 20 },
 		"最大生成token": { defaultValue: 1800, min: 128, max: 8192 },
 		"top_k": { defaultValue: 40, min: 0, max: 200 },
@@ -8203,14 +8243,18 @@ function isAdvancedTextWidgetName(name) {
 	return ["智能文本输入", "额外要求", "系统提示词覆盖", "锁定标签白名单", "随机排除标签"].includes(name);
 }
 
-function createAdvancedChip(node, name, label, value, hint = "") {
+function getAdvancedWidgetTooltip(node, name) {
+	return String(getWidget(node, name)?.options?.tooltip ?? "").trim();
+}
+
+function createAdvancedChip(node, name, label, value, hint = "", parameterHint = "") {
 	const button = document.createElement("button");
 	button.type = "button";
 	button.className = "qwen-te-panel__advanced-chip";
 	button.textContent = label;
 	button.dataset.widgetName = name;
 	button.dataset.widgetValue = String(value);
-	if (hint) button.title = String(hint);
+	button.title = [parameterHint, hint].map((item) => String(item ?? "").trim()).filter(Boolean).join("\n");
 	button.addEventListener("pointerdown", (event) => { event.stopPropagation(); });
 	button.addEventListener("mousedown", (event) => { event.stopPropagation(); });
 	button.addEventListener("click", (event) => {
@@ -8224,6 +8268,7 @@ function createAdvancedSelect(node, name, options) {
 	const select = document.createElement("select");
 	select.className = "qwen-te-panel__advanced-select";
 	select.dataset.widgetName = name;
+	select.title = getAdvancedWidgetTooltip(node, name);
 	const widget = getWidget(node, name);
 	const currentValue = String(widget?.value ?? "");
 	const normalizedOptions = [...options];
@@ -8276,6 +8321,7 @@ function createAdvancedInput(node, name) {
 	input.className = "qwen-te-panel__advanced-input";
 	if (!multiline) input.type = typeof widget?.value === "number" ? "number" : "text";
 	input.dataset.widgetName = name;
+	input.title = getAdvancedWidgetTooltip(node, name);
 	input.value = String(widget?.value ?? "");
 	input.placeholder = name === "智能文本输入"
 		? "输入一句描述，点匹配启用后生成智能文本"
@@ -8329,13 +8375,14 @@ function buildAdvancedPanel(node) {
 		body.className = "qwen-te-panel__advanced-body";
 		for (const name of section.rows) {
 			if (!getWidget(node, name)) continue;
+			const parameterHint = getAdvancedWidgetTooltip(node, name);
 			const row = document.createElement("div");
 			row.className = "qwen-te-panel__advanced-row";
 			row.dataset.widgetName = name;
 			const label = document.createElement("div");
 			label.className = "qwen-te-panel__advanced-label";
 			label.textContent = name;
-			label.title = name;
+			label.title = parameterHint || name;
 			const valueEl = document.createElement("div");
 			valueEl.className = "qwen-te-panel__advanced-value";
 			const options = getAdvancedWidgetOptions(node, name);
@@ -8345,7 +8392,7 @@ function buildAdvancedPanel(node) {
 				const optionGrid = document.createElement("div");
 				optionGrid.className = "qwen-te-panel__advanced-options";
 				optionGrid.style.setProperty("--qwen-te-advanced-cols", String(getAdvancedOptionColumnCount(name, options)));
-				for (const option of options) optionGrid.appendChild(createAdvancedChip(node, name, option.label, option.value, option.hint));
+				for (const option of options) optionGrid.appendChild(createAdvancedChip(node, name, option.label, option.value, option.hint, parameterHint));
 				valueEl.appendChild(optionGrid);
 			} else {
 				valueEl.appendChild(createAdvancedInput(node, name));
