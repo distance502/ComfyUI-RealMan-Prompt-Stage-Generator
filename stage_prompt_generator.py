@@ -5409,7 +5409,12 @@ class QwenTE阶段式提示词生成器:
         for group in 分组配置:
             group_name = str(group["name"])
             for index in range(1, int(group["slots"]) + 1):
-                required[f"{group_name}标签{index}"] = (_group_tags(group_name), {"default": "无"})
+                # The custom panel hydrates choices from /qwen_te/prompt_library.
+                # Keeping the same lists in every raw slot made object_info exceed 1 MB.
+                required[f"{group_name}标签{index}"] = (
+                    "STRING",
+                    {"default": "无", "multiline": False},
+                )
         required["自定义补充标签"] = ("STRING", {"default": "", "multiline": False})
         required["额外要求"] = ("STRING", {"default": "", "multiline": True})
         required["智能文本匹配"] = ("BOOLEAN", {"default": False})

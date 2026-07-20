@@ -52,6 +52,9 @@ function makeElement(tagName = "div") {
 			child.isConnected = this.isConnected;
 			return child;
 		},
+		append(...children) {
+			for (const child of children) this.appendChild(child);
+		},
 		replaceChildren(...children) {
 			for (const child of this.children) {
 				child.parentNode = null;
@@ -71,7 +74,10 @@ function makeElement(tagName = "div") {
 			this.__listeners.set(type, handler);
 		},
 		removeEventListener() {},
-		setAttribute() {},
+		setAttribute(name, value) {
+			this.attributes ??= {};
+			this.attributes[String(name)] = String(value);
+		},
 		remove() {
 			if (this.parentNode?.removeChild) this.parentNode.removeChild(this);
 			this.isConnected = false;
@@ -240,6 +246,8 @@ globalThis.__stagePromptUiTestExports = {
 	ADVANCED_WIDGET_NAMES,
 	CONTROL_WIDGET_OPTIONS,
 	bindSummaryRefresh,
+	buildLazySlotPanel,
+	populateSlotPanel,
 	getSlotPanelGroupValues,
 	getSlotPanelLibrarySignature,
 	normalizeTagGroupSlotLimit,
@@ -457,7 +465,7 @@ test("prompt library retries transient failures and preserves the last valid sna
 	const refreshed = await exports.getPromptLibrary();
 	assert.equal(refreshed.slot_config[0].name, "场景背景");
 	assert.equal(calls, 4);
-	assert.equal(optionsSeen.every((options) => options?.cache === "no-store"), true);
+	assert.equal(optionsSeen.every((options) => options?.cache === "no-cache"), true);
 });
 
 test("out-of-order prompt library refreshes cannot overwrite the newest node library", async () => {
@@ -540,6 +548,22 @@ test("fresh library UI actions wait for a slow refresh instead of returning the 
 	resolveFetch({ ok: true, status: 200, json: async () => freshLibrary });
 	const resolvedLibrary = await pendingRefresh;
 	assert.equal(resolvedLibrary.slot_config[0].name, "场景背景");
+});
+
+test("panel actions reuse the validated prompt library snapshot", async () => {
+	let calls = 0;
+	const library = { slot_config: [{ name: "主体", slots: 1 }], tag_library: { 主体: ["成年女性"] } };
+	const exports = await loadUiExports("http://127.0.0.1:8188/", {
+		fetch: async () => {
+			calls += 1;
+			return { ok: true, status: 200, json: async () => library };
+		},
+	});
+	await exports.getPromptLibrary();
+	const node = { widgets: [], properties: {} };
+	const resolved = await exports.getFreshLibraryForUi(node, { slot_config: [], tag_library: {} });
+	assert.equal(resolved.slot_config[0].name, "主体");
+	assert.equal(calls, 1);
 });
 
 test("owned fetches abort the previous request and modal disposal aborts the current request", async () => {
@@ -1213,7 +1237,7 @@ test("embedded prompt browser sends guarded session and frame requests", async (
 	assert.equal(frame.blob.type, "image/jpeg");
 	assert.equal(frameRequest.url, "/qwen_te/embedded_browser/frame");
 	assert.equal(frameRequest.init.cache, "no-store");
-	assert.deepEqual(JSON.parse(frameRequest.init.body), { session_id: "session-1", previous_frame_id: "previous-frame", max_width: 1120, max_height: 630, quality: 58 });
+	assert.deepEqual(JSON.parse(frameRequest.init.body), { session_id: "session-1", previous_frame_id: "previous-frame", max_width: 1440, max_height: 810, quality: 76 });
 	assert.equal(frameRequest.options.key, "embedded-browser-frame");
 
 	const unchanged = await exports.fetchEmbeddedPromptBrowserFrame("session-1", {
@@ -1251,20 +1275,22 @@ test("embedded prompt browser sends guarded session and frame requests", async (
 test("embedded browser frame profile switches from responsive preview to sharp settled frame", async () => {
 	const exports = await loadUiExports("http://127.0.0.1:8188/");
 	const rect = { width: 1600, height: 900 };
-	const fast = exports.getEmbeddedBrowserFrameCaptureProfile(rect, { fast: true, hasFrame: true, pageReady: true });
-	assert.equal(fast.maxWidth, 1120);
-	assert.equal(fast.maxHeight, 630);
-	assert.equal(fast.quality, 62);
+	const fast = exports.getEmbeddedBrowserFrameCaptureProfile(rect, { fast: true, hasFrame: true, pageReady: true, pixelRatio: 2 });
+	assert.equal(fast.maxWidth, 1600);
+	assert.equal(fast.maxHeight, 900);
+	assert.equal(fast.quality, 72);
 	assert.equal(fast.profile, "fast");
-	const sharp = exports.getEmbeddedBrowserFrameCaptureProfile(rect, { fast: false, hasFrame: true, pageReady: true });
-	assert.equal(sharp.maxWidth, 1600);
-	assert.equal(sharp.maxHeight, 900);
-	assert.equal(sharp.quality, 78);
+	assert.equal(fast.pixelRatio, 1);
+	const sharp = exports.getEmbeddedBrowserFrameCaptureProfile(rect, { fast: false, hasFrame: true, pageReady: true, pixelRatio: 2 });
+	assert.equal(sharp.maxWidth, 2400);
+	assert.equal(sharp.maxHeight, 1350);
+	assert.equal(sharp.quality, 90);
 	assert.equal(sharp.profile, "sharp");
-	const loading = exports.getEmbeddedBrowserFrameCaptureProfile(rect, { fast: false, hasFrame: false, pageReady: false });
-	assert.equal(loading.maxWidth, 1120);
-	assert.equal(loading.maxHeight, 630);
-	assert.equal(loading.quality, 66);
+	assert.equal(sharp.pixelRatio, 1.5);
+	const loading = exports.getEmbeddedBrowserFrameCaptureProfile(rect, { fast: false, hasFrame: false, pageReady: false, pixelRatio: 2 });
+	assert.equal(loading.maxWidth, 1600);
+	assert.equal(loading.maxHeight, 900);
+	assert.equal(loading.quality, 76);
 	assert.equal(loading.profile, "fast");
 });
 
@@ -1357,14 +1383,18 @@ test("online prompt search keeps prompt tools inside a real dual-mode web browse
 	assert.equal(dialogSource.includes("getEmbeddedPointerPoint"), true);
 	assert.equal(dialogSource.includes("webFrame.naturalWidth"), true);
 	assert.equal(dialogSource.includes("embeddedLastFrameId"), true);
-	assert.equal(dialogSource.includes("embeddedUnchangedFrameCount >= 3"), true);
+	assert.equal(dialogSource.includes("embeddedUnchangedFrameCount >= 4"), true);
 	assert.equal(dialogSource.includes("document.hidden"), true);
 	assert.equal(dialogSource.includes("getEmbeddedFrameCaptureOptions"), true);
 	assert.equal(dialogSource.includes("maxWidth: frameCapture.maxWidth"), true);
 	assert.equal(dialogSource.includes("copySelectedPrompts"), true);
 	assert.equal(dialogSource.includes("const startViewport = resolveEmbeddedBrowserViewport"), true);
 	assert.equal(dialogSource.includes("queueEmbeddedBrowserWheel"), true);
+	assert.equal(dialogSource.includes("queueEmbeddedBrowserPointerMove"), true);
 	assert.equal(dialogSource.includes("queueEmbeddedBrowserText"), true);
+	assert.equal(dialogSource.includes('requestEmbeddedPromptBrowser("resize"'), true);
+	assert.equal(dialogSource.includes("new ResizeObserver"), true);
+	assert.equal(dialogSource.includes('document.addEventListener("visibilitychange"'), true);
 	assert.equal(dialogSource.includes("scheduleEmbeddedFramePoll(0)"), true);
 	assert.equal(dialogSource.includes("markEmbeddedBrowserActivity"), true);
 	assert.equal(dialogSource.includes("replace: false"), true);
@@ -4155,7 +4185,7 @@ test("slot and advanced widget groups restore widgets and request layout refresh
 
 test("quickbar slot toggle uses compact slot panel instead of raw widget stack", async () => {
 	const source = await fs.readFile(UI_PATH, "utf8");
-	assert.equal(source.includes('const slotPanel = buildSlotPanel(node, library); mainWorkspace.appendChild(slotPanel);'), true);
+	assert.equal(source.includes('const slotPanel = buildLazySlotPanel(library); mainWorkspace.appendChild(slotPanel);'), true);
 	assert.equal(source.includes('setWidgetGroupVisibility(node, node[PANEL_KEY]?.rawTagWidgetNames ?? rawTagWidgetNames, false, "Raw")'), true);
 	assert.equal(source.includes("setSlotPanelVisible(node, hiddenState.showRawTags)"), true);
 	assert.equal(source.includes('setPanelToggleButtonState(rawToggleButton, hiddenState.showRawTags, "收槽位", "槽位")'), true);
@@ -4173,11 +4203,53 @@ test("slot panel groups raw tag widgets into compact cards", async () => {
 	assert.equal(source.includes("refreshSlotPanel(node)"), true);
 });
 
-test("model and slot native selects force dark dropdown menus", async () => {
+test("slot inputs use shared datalists while model selects keep dark menus", async () => {
 	const source = await fs.readFile(UI_PATH, "utf8");
 	assert.equal(source.includes(".qwen-te-panel__slot-select,.qwen-te-model__select{color-scheme:dark}"), true);
-	assert.equal(source.includes(".qwen-te-panel__slot-select option,.qwen-te-panel__slot-select optgroup,.qwen-te-model__select option,.qwen-te-model__select optgroup{background-color:#101923!important;color:#e6f0ff!important}"), true);
-	assert.equal(source.includes(".qwen-te-panel__slot-select option:checked,.qwen-te-model__select option:checked{background-color:#493819!important;color:#fff0ca!important}"), true);
+	assert.equal(source.includes(".qwen-te-model__select option,.qwen-te-model__select optgroup{background-color:#101923!important;color:#e6f0ff!important}"), true);
+	assert.equal(source.includes("function createSlotDatalist(options, listId)"), true);
+	assert.equal(source.includes('input.setAttribute("list", listId)'), true);
+});
+
+test("slot panel defers DOM creation and shares one option list per group", async () => {
+	const ElementLike = class {
+		static [Symbol.hasInstance](value) {
+			return !!value?.tagName;
+		}
+	};
+	const exports = await loadUiExports("http://127.0.0.1:8188/", { HTMLElement: ElementLike });
+	const library = {
+		slot_config: [{ name: "主体", slots: 2 }],
+		tag_library: { 主体: ["成年女性", "成年男性"] },
+	};
+	const node = {
+		widgets: [
+			{ name: "主体标签1", value: "无" },
+			{ name: "主体标签2", value: "成年女性" },
+			{ name: "自定义补充标签", value: "" },
+		],
+	};
+	const panel = exports.buildLazySlotPanel(library);
+	assert.equal(panel.children.length, 0);
+	exports.populateSlotPanel(panel, node, library);
+
+	const allElements = [];
+	const visit = (element) => {
+		allElements.push(element);
+		for (const child of element.children ?? []) visit(child);
+	};
+	visit(panel);
+	assert.equal(allElements.filter((element) => element.tagName === "DATALIST").length, 1);
+	assert.equal(allElements.filter((element) => element.tagName === "OPTION").length, 3);
+	const inputs = allElements.filter((element) => element.tagName === "INPUT");
+	assert.equal(inputs.length, 2);
+	assert.equal(allElements.filter((element) => element.tagName === "SELECT").length, 0);
+	inputs[0].value = "成年男性";
+	inputs[0].__listeners.get("input")();
+	assert.equal(node.widgets[0].value, "成年男性");
+	inputs[0].value = "不在库里的标签";
+	inputs[0].__listeners.get("input")();
+	assert.equal(node.widgets[0].value, "成年男性");
 });
 
 test("slot panel library signatures and options track tag additions and deletions", async () => {
@@ -4204,7 +4276,7 @@ test("slot panel uses compact one-row group layout", async () => {
 	assert.equal(source.includes(".qwen-te-panel__slot-card{border:1px solid rgba(83,103,130,.44);border-radius:12px;background:linear-gradient(180deg,rgba(25,35,47,.88),rgba(16,23,32,.94));padding:7px;display:flex;flex-direction:column"), true);
 	assert.equal(source.includes(".qwen-te-panel__slot-body{display:grid;grid-template-columns:repeat(auto-fit,minmax(82px,1fr))"), true);
 	assert.equal(source.includes(".qwen-te-panel__slot-label{display:none}"), true);
-	assert.equal(source.includes("select.title = widgetName;"), true);
+	assert.equal(source.includes("input.title = widgetName;"), true);
 	assert.equal(source.includes('panel.addEventListener("wheel", stopCanvasWheelEvent, { passive: true })'), true);
 	assert.equal(source.includes('child.classList?.contains("qwen-te-panel__slots")'), true);
 	assert.equal(source.includes('label.textContent = `槽 ${index}`'), false);

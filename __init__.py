@@ -2217,6 +2217,27 @@ def _json_response(payload: dict[str, Any], *, status: int = 200):
     )
 
 
+def _prompt_library_response(payload: dict[str, Any], request: Any):
+    if web is None:
+        raise RuntimeError("aiohttp.web 不可用，无法返回提示词库响应。")
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    digest = hashlib.sha256(body).hexdigest()
+    etag = f'W/"{digest}"'
+    headers = {
+        "Cache-Control": "no-cache, max-age=0, must-revalidate",
+        "ETag": etag,
+        "Vary": "Accept-Encoding",
+    }
+    request_headers = getattr(request, "headers", None)
+    candidate = str(request_headers.get("If-None-Match", "") if request_headers is not None else "")
+    validators = {part.strip() for part in candidate.split(",") if part.strip()}
+    if "*" in validators or etag in validators:
+        return web.Response(status=304, headers=headers)
+    response = web.Response(body=body, content_type="application/json", charset="utf-8", headers=headers)
+    response.enable_compression()
+    return response
+
+
 def _no_store_file_response(path: Path):
     if web is None:
         raise RuntimeError("aiohttp.web 不可用，无法返回文件响应。")
@@ -2638,9 +2659,9 @@ def _register_tag_routes() -> bool:
         return samples, source, warning, tag_items, cached
 
     @routes.get("/qwen_te/prompt_library")
-    async def _get_prompt_library(_request):
+    async def _get_prompt_library(request):
         payload = await _run_tag_library_transaction(_build_frontend_prompt_library_payload)
-        return _json_response(payload)
+        return _prompt_library_response(payload, request)
 
     @routes.post("/qwen_te/companion_browser/open")
     async def _open_companion_browser(request):
@@ -2785,6 +2806,21 @@ def _register_tag_routes() -> bool:
             return error_response
         try:
             status_payload = await _get_embedded_browser_manager().status(data.get("session_id"))
+        except Exception as exc:
+            return _embedded_browser_error_response(exc)
+        return _json_response({"ok": True, **status_payload}, status=200)
+
+    @routes.post("/qwen_te/embedded_browser/resize")
+    async def _resize_embedded_browser(request):
+        data, error_response = await _read_embedded_browser_request(request)
+        if error_response is not None:
+            return error_response
+        try:
+            status_payload = await _get_embedded_browser_manager().resize(
+                data.get("session_id"),
+                data.get("width"),
+                data.get("height"),
+            )
         except Exception as exc:
             return _embedded_browser_error_response(exc)
         return _json_response({"ok": True, **status_payload}, status=200)

@@ -726,6 +726,25 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertIn("nsfw_workspace_catalog", payload)
         self.assertFalse(payload["nsfw_workspace_catalog"]["defaults"]["enabled"])
 
+    def test_prompt_library_response_supports_compression_and_etag_revalidation(self) -> None:
+        module = load_plugin_init_for_integration_test(failing_imports={"cv2", "rapidocr_onnxruntime"})
+        payload = {"slot_config": [{"name": "主体", "slots": 20}], "tag_library": {"主体": ["成年女性"]}}
+        response = module._prompt_library_response(payload, types.SimpleNamespace(headers={}))
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.headers["Cache-Control"], "no-cache, max-age=0, must-revalidate")
+        self.assertEqual(response.headers["Vary"], "Accept-Encoding")
+        self.assertTrue(response.headers["ETag"].startswith('W/"'))
+        self.assertEqual(json.loads(response.body.decode("utf-8")), payload)
+        self.assertTrue(response.compression)
+
+        not_modified = module._prompt_library_response(
+            payload,
+            types.SimpleNamespace(headers={"If-None-Match": response.headers["ETag"]}),
+        )
+        self.assertEqual(not_modified.status, 304)
+        self.assertEqual(not_modified.headers["ETag"], response.headers["ETag"])
+        self.assertIsNone(not_modified.body)
+
     def test_stage_output_route_forwards_cache_namespace(self) -> None:
         module = load_plugin_init_for_integration_test(failing_imports={"cv2", "rapidocr_onnxruntime"})
         handlers: dict[tuple[str, str], object] = {}
@@ -8410,8 +8429,14 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertIn("图片反推生成", input_types["required"])
         self.assertIn("图片反推模式", input_types["required"])
         for group_name in ("主体", "画面风格", "成人向表达", "光影氛围", "构图视角", "动作姿态", "服装造型", "场景背景", "道具世界观", "技术画质"):
-            self.assertIn(f"{group_name}标签20", input_types["required"])
+            first_slot = input_types["required"][f"{group_name}标签1"]
+            last_slot = input_types["required"][f"{group_name}标签20"]
+            self.assertEqual(first_slot, ("STRING", {"default": "无", "multiline": False}))
+            self.assertEqual(last_slot, ("STRING", {"default": "无", "multiline": False}))
             self.assertNotIn(f"{group_name}标签21", input_types["required"])
+
+        serialized = json.dumps(input_types, ensure_ascii=False).encode("utf-8")
+        self.assertLess(len(serialized), 256 * 1024)
 
     def test_tag_library_expands_and_bounds_every_group_capacity(self) -> None:
         frontend = tag_library.前端标签库数据()

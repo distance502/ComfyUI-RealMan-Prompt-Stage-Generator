@@ -44,7 +44,9 @@ const NODE_QUALITY_AUDIT_REVISION_KEY = Symbol("qwen_te_quality_audit_revision")
 const NODE_PROGRAMMATIC_WIDGET_WRITE_DEPTH_KEY = Symbol("qwen_te_programmatic_widget_write_depth");
 const WIDGET_SUMMARY_REFRESH_BOUND_KEY = Symbol("qwen_te_summary_refresh_bound");
 const SLOT_PANEL_LIBRARY_SIGNATURE_KEY = Symbol("qwen_te_slot_panel_library_signature");
+const SLOT_PANEL_POPULATED_KEY = Symbol("qwen_te_slot_panel_populated");
 const SLOT_PANEL_LIBRARY_SIGNATURE_CACHE = new WeakMap();
+let slotPanelListSequence = 0;
 const NODE_REMOVED_KEY = Symbol.for("qwen_te.node.removed");
 const NODE_ENHANCE_RETRY_STATE_KEY = Symbol.for("qwen_te.stage_prompt.enhance_retry_state");
 const STAGE_NODE_LIFECYCLE_PATCH_KEY = Symbol.for("qwen_te.stage_prompt.lifecycle_patch");
@@ -1487,9 +1489,10 @@ function injectStyles() {
 	.qwen-te-panel__slot-body{display:grid;grid-template-columns:repeat(auto-fit,minmax(82px,1fr));gap:5px;min-width:0}
 	.qwen-te-panel__slot-row{display:flex;min-width:0}
 	.qwen-te-panel__slot-label{display:none}
-	.qwen-te-panel__slot-select{width:100%;min-width:0;box-sizing:border-box;border:1px solid rgba(75,94,120,.78);border-radius:8px;background:#101923;color:#e6f0ff;padding:5px 6px;font-size:9.5px;line-height:1.15;outline:none;cursor:pointer}
+	.qwen-te-panel__slot-select{width:100%;min-width:0;box-sizing:border-box;border:1px solid rgba(75,94,120,.78);border-radius:8px;background:#101923;color:#e6f0ff;padding:5px 6px;font-size:9.5px;line-height:1.15;outline:none;cursor:text}
 	.qwen-te-panel__slot-select:focus{border-color:#d0a250;box-shadow:0 0 0 1px rgba(255,214,140,.14)}
 	.qwen-te-panel__slot-select.is-filled{border-color:#b88a42;background:linear-gradient(180deg,#493819,#2c2518);color:#fff0ca}
+	.qwen-te-panel__slot-select.is-invalid{border-color:#d85b65;background:#2a151a;color:#ffd9dc}
 	.qwen-te-panel__slot-custom{width:100%;box-sizing:border-box;border:1px solid rgba(75,94,120,.82);border-radius:10px;background:rgba(7,11,16,.86);color:#e9f2ff;padding:7px 9px;font-size:10.5px;line-height:1.4;outline:none;min-height:52px;max-height:92px;resize:vertical;overflow:auto;overscroll-behavior:contain}
 	.qwen-te-panel__slot-custom:focus{border-color:#d0a250;box-shadow:0 0 0 1px rgba(255,214,140,.14)}
 	.qwen-te-panel__slot-empty{font-size:9.5px;line-height:1.35;color:#8395ad}
@@ -1637,9 +1640,9 @@ function injectStyles() {
 	.qwen-te-model__select-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:6px}
 	.qwen-te-model__select{border:1px solid rgba(76,96,122,.78);border-radius:10px;background:linear-gradient(180deg,rgba(35,47,61,.96),rgba(21,30,40,.98));color:#eaf2ff;font-size:10px;line-height:1.2;padding:6px 8px;min-width:0}
 	.qwen-te-panel__slot-select,.qwen-te-model__select{color-scheme:dark}
-	.qwen-te-panel__slot-select option,.qwen-te-panel__slot-select optgroup,.qwen-te-model__select option,.qwen-te-model__select optgroup{background-color:#101923!important;color:#e6f0ff!important}
-	.qwen-te-panel__slot-select option:checked,.qwen-te-model__select option:checked{background-color:#493819!important;color:#fff0ca!important}
-	.qwen-te-panel__slot-select option:disabled,.qwen-te-model__select option:disabled{background-color:#101923!important;color:#78889b!important}
+	.qwen-te-model__select option,.qwen-te-model__select optgroup{background-color:#101923!important;color:#e6f0ff!important}
+	.qwen-te-model__select option:checked{background-color:#493819!important;color:#fff0ca!important}
+	.qwen-te-model__select option:disabled{background-color:#101923!important;color:#78889b!important}
 	.qwen-te-model__api-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
 	.qwen-te-model__input{border:1px solid rgba(76,96,122,.78);border-radius:10px;background:linear-gradient(180deg,rgba(14,19,26,.98),rgba(9,13,18,.99));color:#eaf2ff;font-size:10px;line-height:1.3;padding:7px 9px;min-width:0;outline:none}
 	textarea.qwen-te-model__input{min-height:58px;resize:vertical;font-family:Consolas,"Cascadia Code","SFMono-Regular",monospace}
@@ -1909,8 +1912,8 @@ function injectStyles() {
 	.qwen-te-online-search__site-button:focus-visible{outline:2px solid #83a9d3;outline-offset:2px}
 	.qwen-te-online-search__site-icon{display:inline-flex;width:28px;height:28px;align-items:center;justify-content:center;border:1px solid #526478;border-radius:50%;background:#24303d;color:#dceafa;font-size:12px;font-weight:700}
 	.qwen-te-online-search__site-label{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10.5px}
-	.qwen-te-online-search__web-frame-shell{position:relative;display:flex;align-items:center;justify-content:center;flex:1 1 auto;min-width:0;min-height:0;background:#fff;overflow:hidden;isolation:isolate}
-	.qwen-te-online-search__web-frame{position:relative;z-index:1;width:100%;height:100%;flex:1 1 auto;min-width:0;min-height:0;border:0;background:#fff;object-fit:contain;pointer-events:auto;touch-action:none;user-select:none;-webkit-user-drag:none;outline:none;cursor:default}
+	.qwen-te-online-search__web-frame-shell{position:relative;display:flex;align-items:center;justify-content:center;flex:1 1 auto;min-width:0;min-height:0;background:#fff;overflow:hidden;isolation:isolate;contain:paint}
+	.qwen-te-online-search__web-frame{position:relative;z-index:1;width:100%;height:100%;flex:1 1 auto;min-width:0;min-height:0;border:0;background:#fff;object-fit:contain;image-rendering:auto;pointer-events:auto;touch-action:none;user-select:none;-webkit-user-drag:none;outline:none;cursor:default}
 	.qwen-te-online-search__web-frame:focus-visible{box-shadow:inset 0 0 0 2px #78a6df}
 	.qwen-te-online-search__frame-overlay{position:absolute;inset:0;z-index:2;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(15,19,24,.82);color:#dbe5f1;font-size:12px;line-height:1.5;text-align:center;pointer-events:none}
 	.qwen-te-online-search__frame-overlay.is-passive{background:rgba(15,19,24,.38);align-items:flex-end;justify-content:flex-start;text-align:left}
@@ -2187,7 +2190,7 @@ async function getPromptLibrary(force = false) {
 	const requestGeneration = promptLibraryRequestGeneration + 1;
 	promptLibraryRequestGeneration = requestGeneration;
 	let requestPromise = null;
-	requestPromise = fetchJsonWithTimeout("/qwen_te/prompt_library", { cache: "no-store" }, {
+	requestPromise = fetchJsonWithTimeout("/qwen_te/prompt_library", { cache: "no-cache" }, {
 		owner: PROMPT_LIBRARY_REQUEST_OWNER,
 		key: "prompt-library",
 		replace: false,
@@ -2642,10 +2645,10 @@ function resolveEmbeddedBrowserViewport(rect, options = {}) {
     const sourceHeight = Number(rect?.height);
     const minWidth = Math.max(480, Math.trunc(Number(options.minWidth) || 640));
     const minHeight = Math.max(270, Math.trunc(Number(options.minHeight) || 360));
-    const maxWidth = Math.max(minWidth, Math.trunc(Number(options.maxWidth) || 1600));
-    const maxHeight = Math.max(minHeight, Math.trunc(Number(options.maxHeight) || 900));
-    const fallbackWidth = Math.max(minWidth, Math.min(maxWidth, Math.trunc(Number(options.fallbackWidth) || 1280)));
-    const fallbackHeight = Math.max(minHeight, Math.min(maxHeight, Math.trunc(Number(options.fallbackHeight) || 720)));
+    const maxWidth = Math.max(minWidth, Math.trunc(Number(options.maxWidth) || 1920));
+    const maxHeight = Math.max(minHeight, Math.trunc(Number(options.maxHeight) || 1080));
+    const fallbackWidth = Math.max(minWidth, Math.min(maxWidth, Math.trunc(Number(options.fallbackWidth) || 1440)));
+    const fallbackHeight = Math.max(minHeight, Math.min(maxHeight, Math.trunc(Number(options.fallbackHeight) || 810)));
     if (![sourceWidth, sourceHeight].every((value) => Number.isFinite(value) && value > 0)) {
         return { width: fallbackWidth, height: fallbackHeight };
     }
@@ -2677,26 +2680,24 @@ function getEmbeddedBrowserFrameCaptureProfile(rect, options = {}) {
 	const fast = !!options.fast;
 	const hasFrame = !!options.hasFrame;
 	const settled = !!options.pageReady && hasFrame && !fast;
-	const viewport = resolveEmbeddedBrowserViewport(rect, settled ? {
-		minWidth: 720,
-		minHeight: 405,
-		maxWidth: 1600,
-		maxHeight: 900,
+	const viewport = resolveEmbeddedBrowserViewport(rect, {
+		minWidth: 640,
+		minHeight: 360,
+		maxWidth: 1920,
+		maxHeight: 1080,
 		fallbackWidth: 1440,
 		fallbackHeight: 810,
-	} : {
-		minWidth: 560,
-		minHeight: 315,
-		maxWidth: 1120,
-		maxHeight: 630,
-		fallbackWidth: 1120,
-		fallbackHeight: 630,
 	});
+	const requestedPixelRatio = Number(options.pixelRatio ?? globalThis.devicePixelRatio ?? 1);
+	const pixelRatio = settled && Number.isFinite(requestedPixelRatio)
+		? Math.max(1, Math.min(1.5, requestedPixelRatio))
+		: 1;
 	return {
-		maxWidth: viewport.width,
-		maxHeight: viewport.height,
-		quality: settled ? 78 : (hasFrame ? 62 : 66),
+		maxWidth: Math.min(2880, Math.round(viewport.width * pixelRatio)),
+		maxHeight: Math.min(1620, Math.round(viewport.height * pixelRatio)),
+		quality: settled ? 90 : (hasFrame ? 72 : 76),
 		profile: settled ? "sharp" : "fast",
+		pixelRatio,
 	};
 }
 function mapEmbeddedBrowserPointerPoint(clientX, clientY, rect, frameWidth, frameHeight, viewportWidth, viewportHeight) {
@@ -2759,9 +2760,9 @@ async function fetchEmbeddedPromptBrowserFrame(sessionId, options = {}) {
 		body: JSON.stringify({
 			session_id: String(sessionId ?? ""),
 			previous_frame_id: previousFrameId,
-            max_width: Math.max(480, Math.min(1280, Math.trunc(Number(options.maxWidth) || 1120))),
-            max_height: Math.max(270, Math.min(720, Math.trunc(Number(options.maxHeight) || 630))),
-            quality: Math.max(40, Math.min(85, Math.trunc(Number(options.quality) || 58))),
+			max_width: Math.max(480, Math.min(2880, Math.trunc(Number(options.maxWidth) || 1440))),
+			max_height: Math.max(270, Math.min(1620, Math.trunc(Number(options.maxHeight) || 810))),
+			quality: Math.max(40, Math.min(92, Math.trunc(Number(options.quality) || 76))),
 		}),
 		cache: "no-store",
 	}, {
@@ -3003,7 +3004,7 @@ function isNodeLibraryRefreshCurrent(node, revision) {
 async function refreshLibraryOnNode(node, options = {}) {
 	const refreshRevision = beginNodeLibraryRefresh(node);
 	const mutationRevision = Math.max(0, Number(options.mutationRevision ?? 0) || 0);
-	const library = await getPromptLibrary(true);
+	const library = await getPromptLibrary(options.force === true);
 	if (!isNodeLibraryRefreshCurrent(node, refreshRevision)) return node?.[PANEL_KEY]?.library ?? library;
 	if (mutationRevision > 0 && !isNodeStateMutationCurrent(node, mutationRevision)) return node?.[PANEL_KEY]?.library ?? library;
 	if (typeof options.commitGuard === "function" && !options.commitGuard()) return node?.[PANEL_KEY]?.library ?? library;
@@ -8380,25 +8381,57 @@ function bindPanelTextInputEvents(input, node, name, valueParser = (value) => va
 	});
 }
 
-function createSlotSelect(node, widgetName, options) {
-	const select = document.createElement("select");
-	select.className = "qwen-te-panel__slot-select";
-	select.dataset.widgetName = widgetName;
+function createSlotInput(node, widgetName, options, listId) {
+	const input = document.createElement("input");
+	input.type = "text";
+	input.className = "qwen-te-panel__slot-select";
+	input.dataset.widgetName = widgetName;
+	input.autocomplete = "off";
+	input.spellcheck = false;
+	input.setAttribute("list", listId);
+	input.value = String(getWidget(node, widgetName)?.value ?? "无");
+	const allowedValues = new Set(options.map((value) => String(value)));
+	const validate = () => {
+		const value = String(input.value ?? "").trim() || "无";
+		const valid = allowedValues.has(value);
+		input.classList.toggle("is-invalid", !valid);
+		input.setCustomValidity?.(valid ? "" : "请从当前分组的候选标签中选择。自定义内容请填写在补充标签中。");
+		return { valid, value };
+	};
+	const commitValidValue = (value) => {
+		if (String(getWidget(node, widgetName)?.value ?? "无") === value) return;
+		setControlWidgetValue(node, widgetName, value);
+	};
+	for (const eventName of ["pointerdown", "mousedown", "click", "keydown", "wheel"]) {
+		input.addEventListener(eventName, stopCanvasTextInputEvent, { passive: eventName !== "wheel" });
+	}
+	input.addEventListener("input", () => {
+		const { valid, value } = validate();
+		if (valid) commitValidValue(value);
+	});
+	input.addEventListener("change", () => {
+		const { valid, value } = validate();
+		if (!valid) {
+			input.reportValidity?.();
+			setNodeStatusText(node, `${widgetName} 未写入：请从候选标签中选择。`);
+			return;
+		}
+		input.value = value;
+		commitValidValue(value);
+		setNodeStatusText(node, value === "无" ? `${widgetName} 已清空。` : `${widgetName} 已设为 ${value}。`);
+	});
+	return input;
+}
+
+function createSlotDatalist(options, listId) {
+	const datalist = document.createElement("datalist");
+	datalist.id = listId;
 	for (const value of options) {
 		const option = document.createElement("option");
 		option.value = String(value);
-		option.textContent = String(value);
-		select.appendChild(option);
+		datalist.appendChild(option);
 	}
-	select.value = String(getWidget(node, widgetName)?.value ?? "无");
-	for (const eventName of ["pointerdown", "mousedown", "click", "wheel"]) {
-		select.addEventListener(eventName, stopCanvasTextInputEvent, { passive: eventName !== "wheel" });
-	}
-	select.addEventListener("change", () => {
-		setControlWidgetValue(node, widgetName, select.value);
-		setNodeStatusText(node, select.value === "无" ? `${widgetName} 已清空。` : `${widgetName} 已设为 ${select.value}。`);
-	});
-	return select;
+	return datalist;
 }
 
 function getSlotPanelGroupValues(library, groupName) {
@@ -8419,16 +8452,29 @@ function getSlotPanelLibrarySignature(library) {
 	return signature;
 }
 
-function buildSlotPanel(node, library) {
+function createSlotPanelShell(library) {
 	const panel = document.createElement("div");
 	panel.className = "qwen-te-panel__slots qwen-te-hidden";
 	panel[SLOT_PANEL_LIBRARY_SIGNATURE_KEY] = getSlotPanelLibrarySignature(library);
+	panel[SLOT_PANEL_POPULATED_KEY] = false;
 	panel.addEventListener("wheel", stopCanvasWheelEvent, { passive: true });
+	return panel;
+}
+
+function populateSlotPanel(panel, node, library) {
+	if (!(panel instanceof HTMLElement)) return panel ?? null;
+	const signature = getSlotPanelLibrarySignature(library);
+	if (panel[SLOT_PANEL_POPULATED_KEY] && panel[SLOT_PANEL_LIBRARY_SIGNATURE_KEY] === signature) return panel;
+	panel.replaceChildren();
+	panel[SLOT_PANEL_LIBRARY_SIGNATURE_KEY] = signature;
+	const listNamespace = `qwen-te-slot-list-${++slotPanelListSequence}`;
+	let groupIndex = 0;
 	for (const group of library?.slot_config ?? []) {
 		const groupName = String(group.name ?? "");
 		const slotCount = getTagGroupSlotLimit(library, groupName);
 		if (!groupName || slotCount <= 0) continue;
 		const values = getSlotPanelGroupValues(library, groupName);
+		const listId = `${listNamespace}-${groupIndex++}`;
 		const card = document.createElement("div");
 		card.className = "qwen-te-panel__slot-card";
 		const head = document.createElement("div");
@@ -8444,6 +8490,7 @@ function buildSlotPanel(node, library) {
 		card.appendChild(head);
 		const body = document.createElement("div");
 		body.className = "qwen-te-panel__slot-body";
+		card.appendChild(createSlotDatalist(values, listId));
 		for (let index = 1; index <= slotCount; index += 1) {
 			const widgetName = `${groupName}标签${index}`;
 			if (!getWidget(node, widgetName)) continue;
@@ -8451,9 +8498,9 @@ function buildSlotPanel(node, library) {
 			row.className = "qwen-te-panel__slot-row";
 			row.dataset.widgetName = widgetName;
 			row.dataset.groupName = groupName;
-			const select = createSlotSelect(node, widgetName, values);
-			select.title = widgetName;
-			row.appendChild(select);
+			const input = createSlotInput(node, widgetName, values, listId);
+			input.title = widgetName;
+			row.appendChild(input);
 			body.appendChild(row);
 		}
 		if (!body.children.length) {
@@ -8484,7 +8531,16 @@ function buildSlotPanel(node, library) {
 	bindPanelTextInputEvents(customInput, node, "自定义补充标签");
 	customCard.append(customHead, customInput);
 	panel.appendChild(customCard);
+	panel[SLOT_PANEL_POPULATED_KEY] = true;
 	return panel;
+}
+
+function buildSlotPanel(node, library) {
+	return populateSlotPanel(createSlotPanelShell(library), node, library);
+}
+
+function buildLazySlotPanel(library) {
+	return createSlotPanelShell(library);
 }
 
 function replaceSlotPanelForLibrary(node, library) {
@@ -8493,14 +8549,14 @@ function replaceSlotPanelForLibrary(node, library) {
 	if (!(currentPanel instanceof HTMLElement)) return currentPanel ?? null;
 	const signature = getSlotPanelLibrarySignature(library);
 	if (currentPanel[SLOT_PANEL_LIBRARY_SIGNATURE_KEY] === signature) return currentPanel;
-	const nextPanel = buildSlotPanel(node, library);
-	if (!currentPanel.classList.contains("qwen-te-hidden")) nextPanel.classList.remove("qwen-te-hidden");
-	nextPanel.scrollTop = Number(currentPanel.scrollTop ?? 0) || 0;
-	if (typeof currentPanel.replaceWith === "function") currentPanel.replaceWith(nextPanel);
-	else if (typeof currentPanel.parentNode?.replaceChild === "function") currentPanel.parentNode.replaceChild(nextPanel, currentPanel);
-	else return currentPanel;
-	panelState.slotPanel = nextPanel;
-	return nextPanel;
+	if (!currentPanel[SLOT_PANEL_POPULATED_KEY]) {
+		currentPanel[SLOT_PANEL_LIBRARY_SIGNATURE_KEY] = signature;
+		return currentPanel;
+	}
+	const scrollTop = Number(currentPanel.scrollTop ?? 0) || 0;
+	populateSlotPanel(currentPanel, node, library);
+	currentPanel.scrollTop = scrollTop;
+	return currentPanel;
 }
 
 function refreshControlSurface(node) {
@@ -8541,10 +8597,14 @@ function refreshSlotPanel(node) {
 		const groupName = String(row.dataset?.groupName ?? "");
 		const widget = getWidget(node, name);
 		if (!widget) continue;
-		for (const select of row.querySelectorAll?.(".qwen-te-panel__slot-select") ?? []) {
-			select.value = String(widget.value ?? "无");
-			const filled = !!select.value && select.value !== "无";
-			select.classList.toggle("is-filled", filled);
+		for (const input of row.querySelectorAll?.(".qwen-te-panel__slot-select") ?? []) {
+			if (document.activeElement !== input) input.value = String(widget.value ?? "无");
+			const filled = !!widget.value && widget.value !== "无";
+			input.classList.toggle("is-filled", filled);
+			if (document.activeElement !== input) {
+				input.classList.remove("is-invalid");
+				input.setCustomValidity?.("");
+			}
 			if (filled && groupName) groupCounts.set(groupName, (groupCounts.get(groupName) ?? 0) + 1);
 		}
 	}
@@ -8582,8 +8642,10 @@ function refreshAdvancedPanel(node, options = {}) {
 }
 
 function setSlotPanelVisible(node, visible) {
-	const panel = node?.[PANEL_KEY]?.slotPanel;
+	const panelState = node?.[PANEL_KEY];
+	const panel = panelState?.slotPanel;
 	if (!(panel instanceof HTMLElement)) return false;
+	if (visible) populateSlotPanel(panel, node, panelState?.library ?? { slot_config: [], tag_library: {} });
 	panel.classList.toggle("qwen-te-hidden", !visible);
 	refreshSlotPanel(node);
 	scheduleNodeLayoutUpdate(node);
@@ -15475,8 +15537,11 @@ function openOnlinePromptSearchDialog(node, library) {
 	let embeddedCanGoForward = false;
 	let embeddedFrameTimer = null;
 	let embeddedStatusTimer = null;
+	let embeddedResizeTimer = null;
 	let embeddedFrameBusy = false;
 	let embeddedStatusBusy = false;
+	let embeddedResizeBusy = false;
+	let embeddedResizePending = false;
 	let embeddedFrameObjectUrl = "";
 	let embeddedLastFrameId = "";
 	let embeddedUnchangedFrameCount = 0;
@@ -15486,11 +15551,15 @@ function openOnlinePromptSearchDialog(node, library) {
 	let embeddedPointerButton = "left";
 	let embeddedPointerButtons = 0;
 	let embeddedLastPointerMoveAt = 0;
+	let embeddedPointerMovePayload = null;
+	let embeddedPointerMoveBusy = false;
 	let embeddedInputQueue = Promise.resolve();
 	let embeddedWheelTimer = null;
 	let embeddedWheelPayload = null;
+	let embeddedWheelBusy = false;
 	let embeddedTextTimer = null;
 	let embeddedPendingText = "";
+	let embeddedViewportObserver = null;
 	let busyState = false;
 	const isContinuousRunActive = () => !!ensureNodeContinuousRuntime(node).running;
 	const isInteractionBlocked = () => busyState || isContinuousRunActive();
@@ -15611,10 +15680,13 @@ const getEffectiveSelectionCounts = () => {
 	const stopEmbeddedBrowserPolling = (options = {}) => {
 		if (embeddedFrameTimer != null) clearTimeout(embeddedFrameTimer);
 		if (embeddedStatusTimer != null) clearTimeout(embeddedStatusTimer);
+		if (embeddedResizeTimer != null) clearTimeout(embeddedResizeTimer);
 		embeddedFrameTimer = null;
 		embeddedStatusTimer = null;
+		embeddedResizeTimer = null;
 		abortOwnedRequest(overlay, "embedded-browser-frame");
 		abortOwnedRequest(overlay, "embedded-browser-status");
+		abortOwnedRequest(overlay, "embedded-browser-resize");
 		if (options.revokeFrame) {
 			revokeEmbeddedFrameObjectUrl();
 			webFrame.removeAttribute("src");
@@ -15644,26 +15716,28 @@ const getEffectiveSelectionCounts = () => {
 			fast: Date.now() < embeddedFrameFastUntil,
 			hasFrame: !!embeddedFrameObjectUrl,
 			pageReady: embeddedPageReady,
+			pixelRatio: globalThis.devicePixelRatio,
 		},
 	);
 	const getEmbeddedFramePollDelay = () => {
-		if (typeof document !== "undefined" && document.hidden) return 3200;
-		if (Date.now() < embeddedFrameFastUntil) return 160;
-		if (!embeddedPageReady || !embeddedFrameObjectUrl) return 260;
-		if (embeddedUnchangedFrameCount >= 3) return 2200;
-		return 760;
+		if (typeof document !== "undefined" && document.hidden) return 4000;
+		if (Date.now() < embeddedFrameFastUntil) return 72;
+		if (!embeddedPageReady || !embeddedFrameObjectUrl) return 120;
+		if (embeddedUnchangedFrameCount >= 4) return 1600;
+		return 420;
 	};
 	const scheduleEmbeddedFramePoll = (delay = null) => {
 		if (overlay.__qwenDisposed || !embeddedBrowserSessionId || activeBrowserMode !== "web") return;
 		if (embeddedFrameTimer != null) clearTimeout(embeddedFrameTimer);
 		const resolvedDelay = delay == null ? getEmbeddedFramePollDelay() : Number(delay);
-		embeddedFrameTimer = setTimeout(() => { embeddedFrameTimer = null; void pollEmbeddedBrowserFrame(); }, Math.max(80, resolvedDelay || 180));
+		const normalizedDelay = Number.isFinite(resolvedDelay) ? resolvedDelay : 120;
+		embeddedFrameTimer = setTimeout(() => { embeddedFrameTimer = null; void pollEmbeddedBrowserFrame(); }, Math.max(48, normalizedDelay));
 		embeddedFrameTimer?.unref?.();
 	};
 	const markEmbeddedBrowserActivity = (durationMs = 1800) => {
 		embeddedFrameFastUntil = Math.max(embeddedFrameFastUntil, Date.now() + Math.max(400, Number(durationMs) || 1800));
 		embeddedUnchangedFrameCount = 0;
-		scheduleEmbeddedFramePoll(80);
+		scheduleEmbeddedFramePoll(0);
 	};
 	const scheduleEmbeddedStatusPoll = (delay = 800) => {
 		if (overlay.__qwenDisposed || !embeddedBrowserSessionId || activeBrowserMode !== "web") return;
@@ -15736,12 +15810,62 @@ const getEffectiveSelectionCounts = () => {
 			}
 		} finally {
 			embeddedStatusBusy = false;
-			scheduleEmbeddedStatusPoll(embeddedBrowserSessionId ? (embeddedPageReady ? 1600 : 600) : 1800);
+			scheduleEmbeddedStatusPoll(embeddedBrowserSessionId ? (embeddedPageReady ? 1200 : 400) : 1800);
 		}
 	};
 	const startEmbeddedBrowserPolling = () => {
 		scheduleEmbeddedFramePoll(0);
 		scheduleEmbeddedStatusPoll(300);
+		scheduleEmbeddedViewportSync(80);
+	};
+	const syncEmbeddedBrowserViewport = async () => {
+		if (embeddedResizeBusy || overlay.__qwenDisposed || !embeddedBrowserSessionId || activeBrowserMode !== "web") {
+			embeddedResizePending = embeddedResizeBusy && !!embeddedBrowserSessionId;
+			return;
+		}
+		const viewport = resolveEmbeddedBrowserViewport(webFrameShell.getBoundingClientRect?.(), {
+			minWidth: 640,
+			minHeight: 360,
+			maxWidth: 1920,
+			maxHeight: 1080,
+			fallbackWidth: embeddedBrowserWidth,
+			fallbackHeight: embeddedBrowserHeight,
+		});
+		if (Math.abs(viewport.width - embeddedBrowserWidth) <= 2 && Math.abs(viewport.height - embeddedBrowserHeight) <= 2) return;
+		embeddedResizeBusy = true;
+		embeddedResizePending = false;
+		const sessionId = embeddedBrowserSessionId;
+		try {
+			const data = await requestEmbeddedPromptBrowser("resize", {
+				session_id: sessionId,
+				width: viewport.width,
+				height: viewport.height,
+			}, {
+				owner: overlay,
+				key: "embedded-browser-resize",
+				timeoutMs: 12000,
+			});
+			if (overlay.__qwenDisposed || sessionId !== embeddedBrowserSessionId) return;
+			embeddedLastFrameId = "";
+			applyEmbeddedBrowserStatus(data, { updateMessage: false });
+			markEmbeddedBrowserActivity(900);
+		} catch (error) {
+			if (!isAbortLikeError(error) && !overlay.__qwenDisposed && sessionId === embeddedBrowserSessionId) {
+				setWebStatus(`浏览器尺寸同步失败：${error?.message ?? error}`);
+			}
+		} finally {
+			embeddedResizeBusy = false;
+			if (embeddedResizePending && embeddedBrowserSessionId) scheduleEmbeddedViewportSync(80);
+		}
+	};
+	const scheduleEmbeddedViewportSync = (delay = 140) => {
+		if (overlay.__qwenDisposed || !embeddedBrowserSessionId || activeBrowserMode !== "web") return;
+		if (embeddedResizeTimer != null) clearTimeout(embeddedResizeTimer);
+		embeddedResizeTimer = setTimeout(() => {
+			embeddedResizeTimer = null;
+			void syncEmbeddedBrowserViewport();
+		}, Math.max(60, Number(delay) || 140));
+		embeddedResizeTimer?.unref?.();
 	};
 	const closeEmbeddedBrowserSession = async (options = {}) => {
 		const sessionId = embeddedBrowserSessionId;
@@ -15754,6 +15878,8 @@ const getEffectiveSelectionCounts = () => {
 		embeddedPageReady = false;
 		embeddedPointerDown = false;
 		embeddedPointerButtons = 0;
+		embeddedPointerMovePayload = null;
+		embeddedResizePending = false;
 		stopEmbeddedBrowserPolling({ revokeFrame: options.revokeFrame !== false });
 		if (!sessionId) return false;
 		try {
@@ -15769,7 +15895,7 @@ const getEffectiveSelectionCounts = () => {
 	const sendEmbeddedBrowserInput = (payload) => {
 		if (!embeddedBrowserSessionId || overlay.__qwenDisposed) return Promise.resolve(false);
 		const sessionId = embeddedBrowserSessionId;
-		if (payload?.type !== "mouseMove") markEmbeddedBrowserActivity();
+		markEmbeddedBrowserActivity(payload?.type === "mouseMove" ? 650 : 1800);
 		embeddedInputQueue = embeddedInputQueue.catch(() => false).then(async () => {
 			if (!sessionId || sessionId !== embeddedBrowserSessionId || overlay.__qwenDisposed) return false;
 			await requestEmbeddedPromptBrowser("input", { session_id: sessionId, ...payload }, {
@@ -15784,13 +15910,42 @@ const getEffectiveSelectionCounts = () => {
 		});
 		return embeddedInputQueue;
 	};
-    const flushEmbeddedBrowserWheel = () => {
-        if (embeddedWheelTimer != null) clearTimeout(embeddedWheelTimer);
-        embeddedWheelTimer = null;
-        const payload = embeddedWheelPayload;
-        embeddedWheelPayload = null;
-        if (payload && (payload.delta_x || payload.delta_y)) void sendEmbeddedBrowserInput(payload);
-    };
+	const flushEmbeddedBrowserPointerMove = async () => {
+		if (embeddedPointerMoveBusy) return;
+		const payload = embeddedPointerMovePayload;
+		embeddedPointerMovePayload = null;
+		if (!payload) return;
+		embeddedPointerMoveBusy = true;
+		try {
+			await sendEmbeddedBrowserInput(payload);
+		} finally {
+			embeddedPointerMoveBusy = false;
+			if (embeddedPointerMovePayload && embeddedBrowserSessionId) void flushEmbeddedBrowserPointerMove();
+		}
+	};
+	const queueEmbeddedBrowserPointerMove = (payload) => {
+		embeddedPointerMovePayload = payload ?? null;
+		markEmbeddedBrowserActivity(650);
+		if (!embeddedPointerMoveBusy) void flushEmbeddedBrowserPointerMove();
+	};
+	const flushEmbeddedBrowserWheel = async () => {
+		if (embeddedWheelTimer != null) clearTimeout(embeddedWheelTimer);
+		embeddedWheelTimer = null;
+		if (embeddedWheelBusy) return;
+		const payload = embeddedWheelPayload;
+		embeddedWheelPayload = null;
+		if (!payload || (!payload.delta_x && !payload.delta_y)) return;
+		embeddedWheelBusy = true;
+		try {
+			await sendEmbeddedBrowserInput(payload);
+		} finally {
+			embeddedWheelBusy = false;
+			if (embeddedWheelPayload && embeddedBrowserSessionId) {
+				embeddedWheelTimer = setTimeout(() => { void flushEmbeddedBrowserWheel(); }, 0);
+				embeddedWheelTimer?.unref?.();
+			}
+		}
+	};
     const queueEmbeddedBrowserWheel = (payload) => {
         const next = payload ?? {};
         if (!embeddedWheelPayload) {
@@ -15802,8 +15957,9 @@ const getEffectiveSelectionCounts = () => {
         }
         embeddedWheelPayload.delta_x += Number(next.delta_x) || 0;
         embeddedWheelPayload.delta_y += Number(next.delta_y) || 0;
-        if (embeddedWheelTimer != null) return;
-        embeddedWheelTimer = setTimeout(flushEmbeddedBrowserWheel, 38);
+		markEmbeddedBrowserActivity(900);
+		if (embeddedWheelBusy || embeddedWheelTimer != null) return;
+		embeddedWheelTimer = setTimeout(() => { void flushEmbeddedBrowserWheel(); }, 24);
         embeddedWheelTimer?.unref?.();
     };
     const flushEmbeddedBrowserText = () => {
@@ -15818,7 +15974,7 @@ const getEffectiveSelectionCounts = () => {
         if (!textValue) return;
         embeddedPendingText += textValue;
         if (embeddedTextTimer != null) return;
-        embeddedTextTimer = setTimeout(flushEmbeddedBrowserText, 42);
+		embeddedTextTimer = setTimeout(flushEmbeddedBrowserText, 32);
         embeddedTextTimer?.unref?.();
     };
 	const runEmbeddedBrowserCommand = async (action) => {
@@ -15899,7 +16055,7 @@ const getEffectiveSelectionCounts = () => {
 				}, { owner: overlay, key: "embedded-browser-navigate", timeoutMs: 30000 });
 			} else {
 				const startViewport = resolveEmbeddedBrowserViewport(webFrameShell.getBoundingClientRect?.(), {
-				    minWidth: 640, minHeight: 360, maxWidth: 1600, maxHeight: 900,
+				    minWidth: 640, minHeight: 360, maxWidth: 1920, maxHeight: 1080,
 				    fallbackWidth: embeddedBrowserWidth, fallbackHeight: embeddedBrowserHeight,
 				});
 				embeddedBrowserWidth = startViewport.width;
@@ -16598,6 +16754,7 @@ const getEffectiveSelectionCounts = () => {
 		event.preventDefault();
 		focusEmbeddedKeyboard();
 		embeddedPointerDown = true;
+		embeddedPointerMovePayload = null;
 		embeddedPointerButton = pointerButtonName(event.button);
 		embeddedPointerButtons = Number(event.buttons) || 1;
 		try { webFrame.setPointerCapture(event.pointerId); } catch (_error) {}
@@ -16610,13 +16767,14 @@ const getEffectiveSelectionCounts = () => {
 		const point = getEmbeddedPointerPoint(event);
 		if (!point) return;
 		embeddedLastPointerMoveAt = now;
-		void sendEmbeddedBrowserInput({ type: "mouseMove", ...point, button: embeddedPointerButton, buttons: Number(event.buttons) || embeddedPointerButtons, modifiers: getEmbeddedInputModifiers(event) });
+		queueEmbeddedBrowserPointerMove({ type: "mouseMove", ...point, button: embeddedPointerButton, buttons: Number(event.buttons) || embeddedPointerButtons, modifiers: getEmbeddedInputModifiers(event) });
 	});
 	const releaseEmbeddedPointer = (event) => {
 		if (!embeddedPointerDown) return;
 		const point = getEmbeddedPointerPoint(event);
 		embeddedPointerDown = false;
 		embeddedPointerButtons = 0;
+		embeddedPointerMovePayload = null;
 		try { webFrame.releasePointerCapture(event.pointerId); } catch (_error) {}
 		if (point) void sendEmbeddedBrowserInput({ type: "mouseUp", ...point, button: embeddedPointerButton, buttons: 0, modifiers: getEmbeddedInputModifiers(event) });
 	};
@@ -16652,6 +16810,19 @@ const getEffectiveSelectionCounts = () => {
 		flushEmbeddedBrowserText();
 		void sendEmbeddedBrowserInput({ type: "text", text });
 	});
+	const handleEmbeddedBrowserVisibilityChange = () => {
+		if (document.hidden || !embeddedBrowserSessionId || activeBrowserMode !== "web") return;
+		markEmbeddedBrowserActivity(900);
+		scheduleEmbeddedViewportSync(80);
+	};
+	document.addEventListener("visibilitychange", handleEmbeddedBrowserVisibilityChange);
+	if (typeof ResizeObserver !== "undefined") {
+		embeddedViewportObserver = new ResizeObserver(() => {
+			if (!embeddedBrowserSessionId || activeBrowserMode !== "web") return;
+			scheduleEmbeddedViewportSync();
+		});
+		embeddedViewportObserver.observe(webFrameShell);
+	}
 	applyButton.onclick = () => { void applyToNode(); };
 	importButton.onclick = () => { void importToLibrary(); };
 	importHighButton.onclick = () => { void copySelectedPrompts(); };
@@ -16692,6 +16863,10 @@ const getEffectiveSelectionCounts = () => {
 		embeddedTextTimer = null;
 		embeddedWheelPayload = null;
 		embeddedPendingText = "";
+		embeddedPointerMovePayload = null;
+		embeddedViewportObserver?.disconnect?.();
+		embeddedViewportObserver = null;
+		document.removeEventListener("visibilitychange", handleEmbeddedBrowserVisibilityChange);
 		void closeEmbeddedBrowserSession({ revokeFrame: true });
 		webInputSink.value = "";
 		delete overlay.__qwenSyncRuntimeState;
@@ -18330,7 +18505,7 @@ function enhanceStagePromptNode(node, library) {
 		displayTabs.appendChild(button);
 		displayTabButtons.set(mode.key, button);
 	}
-	const slotPanel = buildSlotPanel(node, library); mainWorkspace.appendChild(slotPanel);
+	const slotPanel = buildLazySlotPanel(library); mainWorkspace.appendChild(slotPanel);
 	const advancedPanel = buildAdvancedPanel(node); mainWorkspace.appendChild(advancedPanel);
 	const quickbar = document.createElement("div"); quickbar.className="qwen-te-panel__quickbar"; mainWorkspace.appendChild(quickbar);
 	const panelButtons = { onlineSearch: displaySearch };

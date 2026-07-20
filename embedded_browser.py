@@ -21,23 +21,25 @@ import aiohttp
 
 
 EMBEDDED_BROWSER_MIN_WIDTH = 640
-EMBEDDED_BROWSER_MAX_WIDTH = 1600
+EMBEDDED_BROWSER_MAX_WIDTH = 1920
 EMBEDDED_BROWSER_MIN_HEIGHT = 360
-EMBEDDED_BROWSER_MAX_HEIGHT = 1000
+EMBEDDED_BROWSER_MAX_HEIGHT = 1080
 EMBEDDED_BROWSER_DEFAULT_WIDTH = 1360
 EMBEDDED_BROWSER_DEFAULT_HEIGHT = 760
 EMBEDDED_BROWSER_FRAME_MAX_BYTES = 8 * 1024 * 1024
-EMBEDDED_BROWSER_FRAME_JPEG_QUALITY = 68
+EMBEDDED_BROWSER_FRAME_JPEG_QUALITY = 76
 EMBEDDED_BROWSER_FRAME_MIN_WIDTH = 480
 EMBEDDED_BROWSER_FRAME_MIN_HEIGHT = 270
-EMBEDDED_BROWSER_FRAME_MAX_WIDTH = 1600
-EMBEDDED_BROWSER_FRAME_MAX_HEIGHT = 900
-EMBEDDED_BROWSER_FRAME_CACHE_SECONDS = 0.16
+EMBEDDED_BROWSER_FRAME_MAX_WIDTH = 2880
+EMBEDDED_BROWSER_FRAME_MAX_HEIGHT = 1620
+EMBEDDED_BROWSER_FRAME_MAX_SCALE = 1.5
+EMBEDDED_BROWSER_FRAME_CACHE_SECONDS = 0.055
 EMBEDDED_BROWSER_TEXT_MAX_CHARS = 4096
 EMBEDDED_BROWSER_SESSION_TTL_SECONDS = 20 * 60.0
 EMBEDDED_BROWSER_DEBUG_PORT_WAIT_SECONDS = 4.0
 EMBEDDED_BROWSER_CDP_STARTUP_TIMEOUT_SECONDS = 4.0
 EMBEDDED_BROWSER_DIAGNOSTIC_MAX_CHARS = 1600
+EMBEDDED_BROWSER_PROFILE_CLEANUP_ATTEMPTS = 5
 
 _EMBEDDED_BROWSER_SINGLE_PAGE_NAVIGATION_SCRIPT = r"""
 (() => {
@@ -116,8 +118,8 @@ def normalize_embedded_browser_frame_size(
     except (TypeError, ValueError):
         requested_height = int(viewport_height)
     return (
-        max(EMBEDDED_BROWSER_FRAME_MIN_WIDTH, min(EMBEDDED_BROWSER_FRAME_MAX_WIDTH, int(viewport_width), requested_width)),
-        max(EMBEDDED_BROWSER_FRAME_MIN_HEIGHT, min(EMBEDDED_BROWSER_FRAME_MAX_HEIGHT, int(viewport_height), requested_height)),
+        max(EMBEDDED_BROWSER_FRAME_MIN_WIDTH, min(EMBEDDED_BROWSER_FRAME_MAX_WIDTH, requested_width)),
+        max(EMBEDDED_BROWSER_FRAME_MIN_HEIGHT, min(EMBEDDED_BROWSER_FRAME_MAX_HEIGHT, requested_height)),
     )
 
 def normalize_embedded_browser_coordinate(value: Any, maximum: int) -> float:
@@ -347,6 +349,8 @@ class EmbeddedBrowserManager:
             "--disable-component-update",
             "--disable-background-timer-throttling",
             "--disable-renderer-backgrounding",
+            "--disable-breakpad",
+            "--disable-crash-reporter",
             f"--window-size={width},{height}",
             "about:blank",
         ]
@@ -488,18 +492,7 @@ class EmbeddedBrowserManager:
                 {"expression": _EMBEDDED_BROWSER_SINGLE_PAGE_NAVIGATION_SCRIPT},
                 timeout=startup_timeout,
             )
-            await connection.call(
-                "Emulation.setDeviceMetricsOverride",
-                {
-                    "width": session.width,
-                    "height": session.height,
-                    "deviceScaleFactor": 1,
-                    "mobile": False,
-                    "screenWidth": session.width,
-                    "screenHeight": session.height,
-                },
-                timeout=startup_timeout,
-            )
+            await self._set_device_metrics(session, session.width, session.height, timeout=startup_timeout)
             await connection.call(
                 "Emulation.setFocusEmulationEnabled",
                 {"enabled": True},
@@ -517,6 +510,27 @@ class EmbeddedBrowserManager:
             )
         except (EmbeddedBrowserError, asyncio.TimeoutError):
             pass
+
+    @staticmethod
+    async def _set_device_metrics(
+        session: _EmbeddedBrowserSession,
+        width: int,
+        height: int,
+        *,
+        timeout: float = 15.0,
+    ) -> None:
+        await session.connection.call(
+            "Emulation.setDeviceMetricsOverride",
+            {
+                "width": int(width),
+                "height": int(height),
+                "deviceScaleFactor": 1,
+                "mobile": False,
+                "screenWidth": int(width),
+                "screenHeight": int(height),
+            },
+            timeout=timeout,
+        )
 
     async def start(self, url: str, *, width: Any = None, height: Any = None) -> dict[str, Any]:
         normalized_width, normalized_height = normalize_embedded_browser_viewport(width, height)
@@ -589,7 +603,7 @@ class EmbeddedBrowserManager:
                     await client.close()
                 if process is not None:
                     await asyncio.to_thread(self._stop_process_sync, process)
-                await asyncio.to_thread(shutil.rmtree, profile, True)
+                await self._remove_profile_directory(profile)
                 raise
 
     async def _get_session(self, session_id: Any) -> _EmbeddedBrowserSession:
@@ -641,6 +655,20 @@ class EmbeddedBrowserManager:
         await session.connection.call("Page.navigate", {"url": str(url)})
         return await self.status(session.session_id)
 
+    async def resize(self, session_id: Any, width: Any, height: Any) -> dict[str, Any]:
+        session = await self._get_session(session_id)
+        normalized_width, normalized_height = normalize_embedded_browser_viewport(width, height)
+        if (normalized_width, normalized_height) != (session.width, session.height):
+            async with session.frame_lock:
+                await self._set_device_metrics(session, normalized_width, normalized_height)
+                session.width = normalized_width
+                session.height = normalized_height
+                session.last_frame = b""
+                session.last_frame_id = ""
+                session.last_frame_captured_at = 0.0
+                session.last_frame_size = (0, 0, 0)
+        return await self.status(session.session_id)
+
     async def command(self, session_id: Any, action: Any) -> dict[str, Any]:
         session = await self._get_session(session_id)
         command = str(action or "").strip().lower()
@@ -682,7 +710,7 @@ class EmbeddedBrowserManager:
             frame_quality = int(quality)
         except (TypeError, ValueError):
             frame_quality = EMBEDDED_BROWSER_FRAME_JPEG_QUALITY
-        frame_quality = max(40, min(85, frame_quality))
+        frame_quality = max(40, min(92, frame_quality))
         frame_size_key = (frame_width, frame_height, frame_quality)
         async with session.frame_lock:
             now = self._monotonic()
@@ -696,7 +724,11 @@ class EmbeddedBrowserManager:
                 and now - cached_at < EMBEDDED_BROWSER_FRAME_CACHE_SECONDS
             ):
                 return (None if previous_id == cached_id else cached_frame), cached_id
-            scale = min(1.0, frame_width / float(session.width), frame_height / float(session.height))
+            scale = min(
+                EMBEDDED_BROWSER_FRAME_MAX_SCALE,
+                frame_width / float(session.width),
+                frame_height / float(session.height),
+            )
             scale = max(0.1, scale)
             result = await session.connection.call(
                 "Page.captureScreenshot",
@@ -857,7 +889,16 @@ class EmbeddedBrowserManager:
             except Exception:
                 pass
         await asyncio.to_thread(self._stop_process_sync, session.process)
-        await asyncio.to_thread(shutil.rmtree, session.profile_directory, True)
+        await self._remove_profile_directory(session.profile_directory)
+
+    @staticmethod
+    async def _remove_profile_directory(profile_directory: Path) -> None:
+        profile = Path(profile_directory)
+        for attempt in range(EMBEDDED_BROWSER_PROFILE_CLEANUP_ATTEMPTS):
+            await asyncio.to_thread(shutil.rmtree, profile, True)
+            if not profile.exists():
+                return
+            await asyncio.sleep(0.12 * (attempt + 1))
 
     @staticmethod
     def _stop_process_sync(process: subprocess.Popen) -> None:

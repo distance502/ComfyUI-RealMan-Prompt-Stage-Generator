@@ -38,7 +38,7 @@ class _RunningProcess:
 
 class EmbeddedBrowserHelperTests(unittest.TestCase):
     def test_viewport_and_coordinates_are_bounded(self):
-        self.assertEqual(normalize_embedded_browser_viewport(1, 99999), (640, 1000))
+        self.assertEqual(normalize_embedded_browser_viewport(1, 99999), (640, 1080))
         self.assertEqual(normalize_embedded_browser_viewport("bad", None), (1360, 760))
         self.assertEqual(
             normalize_embedded_browser_frame_size(1120, 630, viewport_width=1360, viewport_height=760),
@@ -46,11 +46,11 @@ class EmbeddedBrowserHelperTests(unittest.TestCase):
         )
         self.assertEqual(
             normalize_embedded_browser_frame_size(1, 9999, viewport_width=1360, viewport_height=760),
-            (480, 760),
+            (480, 1620),
         )
         self.assertEqual(
-            normalize_embedded_browser_frame_size(1600, 900, viewport_width=1600, viewport_height=900),
-            (1600, 900),
+            normalize_embedded_browser_frame_size(2400, 1350, viewport_width=1600, viewport_height=900),
+            (2400, 1350),
         )
         self.assertEqual(normalize_embedded_browser_coordinate(-2, 1360), 0.0)
         self.assertEqual(normalize_embedded_browser_coordinate(2000, 1360), 1360.0)
@@ -81,6 +81,8 @@ class EmbeddedBrowserHelperTests(unittest.TestCase):
         self.assertIn("--remote-debugging-address=127.0.0.1", arguments)
         self.assertIn("--remote-debugging-port=0", arguments)
         self.assertIn("--window-size=1360,760", arguments)
+        self.assertIn("--disable-breakpad", arguments)
+        self.assertIn("--disable-crash-reporter", arguments)
         self.assertNotIn("--no-sandbox", joined)
         self.assertNotIn("--disable-web-security", joined)
 
@@ -194,6 +196,33 @@ class EmbeddedBrowserInputTests(unittest.IsolatedAsyncioTestCase):
         capture_params = next(params for method, params in self.connection.calls if method == "Page.captureScreenshot")
         self.assertEqual(capture_params["quality"], 58)
         self.assertAlmostEqual(capture_params["clip"]["scale"], 1120 / 1360)
+
+    async def test_sharp_frame_can_supersample_the_css_viewport(self):
+        frame = b"sharp-jpeg-frame-content"
+        self.connection.responses["Page.captureScreenshot"] = {
+            "data": base64.b64encode(frame).decode("ascii"),
+        }
+        await self.manager.capture_frame("session", max_width=2040, max_height=1140, quality=90)
+        capture_params = next(params for method, params in self.connection.calls if method == "Page.captureScreenshot")
+        self.assertEqual(capture_params["quality"], 90)
+        self.assertAlmostEqual(capture_params["clip"]["scale"], 1.5)
+
+    async def test_resize_updates_device_metrics_and_invalidates_frame_cache(self):
+        session = self.manager._sessions["session"]
+        session.browser = "Microsoft Edge"
+        session.last_frame = b"old-frame"
+        session.last_frame_id = "old-id"
+        session.last_frame_captured_at = 9.9
+        session.last_frame_size = (1120, 630, 72)
+
+        status = await self.manager.resize("session", 1720, 880)
+
+        metrics = next(params for method, params in self.connection.calls if method == "Emulation.setDeviceMetricsOverride")
+        self.assertEqual((metrics["width"], metrics["height"]), (1720, 880))
+        self.assertEqual((status["width"], status["height"]), (1720, 880))
+        self.assertEqual(session.last_frame, b"")
+        self.assertEqual(session.last_frame_id, "")
+        self.assertEqual(session.last_frame_size, (0, 0, 0))
 
     async def test_mouse_input_invalidates_frame_throttle(self):
         session = self.manager._sessions["session"]
