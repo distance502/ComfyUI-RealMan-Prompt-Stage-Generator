@@ -5772,7 +5772,17 @@ class TestStagePromptModules(unittest.TestCase):
             bucket["recent_prompt_signatures"] = [f"signature-{index}" for index in range(2048)]
 
         first = module.获取阶段节点输出缓存(node_id)
-        self.assertEqual(first, public_payload)
+        history_snapshot = {
+            field: deepcopy(public_payload[field])
+            for field in module._STAGE_OUTPUT_EXECUTION_HISTORY_FIELDS
+            if field in public_payload
+        }
+        history_snapshot["execution_id"] = f"{public_payload['updated_at']}:1"
+        expected_public_payload = {
+            **public_payload,
+            "execution_history": [history_snapshot],
+        }
+        self.assertEqual(first, expected_public_payload)
         self.assertNotIn("strict_prompt_dedupe", first)
         self.assertNotIn("recent_runtime_markers", first)
         self.assertNotIn("recent_prompt_signatures", first)
@@ -5780,8 +5790,9 @@ class TestStagePromptModules(unittest.TestCase):
 
         first["normalization_notes"].append("caller mutation")
         first["outputs"][0] = "caller mutation"
+        first["execution_history"][0]["prompt_text"] = "caller history mutation"
         second = module.获取阶段节点输出缓存(node_id)
-        self.assertEqual(second, public_payload)
+        self.assertEqual(second, expected_public_payload)
 
     def test_runtime_random_history_extracts_prompt_scene_outfit_action_and_light(self) -> None:
         module = load_stage_prompt_generator_for_integration_test()
@@ -7285,7 +7296,7 @@ class TestStagePromptModules(unittest.TestCase):
     def test_stage_api_config_failure_counts_all_requested_outputs(self) -> None:
         module = load_stage_prompt_generator_for_integration_test()
         node = module.QwenTE阶段式提示词生成器()
-        result = node.run(
+        execution = node.run(
             模型来源="API接口",
             API服务商="自定义",
             API地址="https://api.example.com/v1",
@@ -7302,6 +7313,9 @@ class TestStagePromptModules(unittest.TestCase):
             输出模式="完整结果",
             最大生成token=256,
         )
+        result = execution["result"]
+        self.assertEqual(execution["ui"]["qwen_te_stage_output"], list(result))
+        self.assertEqual(execution["ui"]["qwen_te_stage_output_history"], [])
         payload = json.loads(result[3])
         self.assertEqual(len(payload["prompt_list"]), 3)
         self.assertEqual(payload["model_call_attempt_count"], 1)
@@ -7782,7 +7796,7 @@ class TestStagePromptModules(unittest.TestCase):
     def test_stage_node_falls_back_to_skill_when_api_model_config_is_incomplete(self) -> None:
         module = load_stage_prompt_generator_for_integration_test()
         node = module.QwenTE阶段式提示词生成器()
-        result = node.run(
+        execution = node.run(
             模型来源="API接口",
             API服务商="自定义",
             API地址="https://api.example.com/v1",
@@ -7796,6 +7810,7 @@ class TestStagePromptModules(unittest.TestCase):
             输出模式="完整结果",
             最大生成token=256,
         )
+        result = execution["result"]
         payload = json.loads(result[3])
         self.assertTrue(result[1].strip())
         self.assertEqual(payload["model_source"], "API接口")
@@ -10902,6 +10917,29 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertFalse(getter_thread.is_alive())
         self.assertEqual(strict_errors, [])
         self.assertEqual(getter_result, [{"status": "done", "prompt_text": "other prompt"}])
+
+    def test_stage_output_cache_retains_recent_batch_executions(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        module._CACHE.clear()
+        for index in range(3):
+            module._cache_output(
+                "batch-history-node",
+                {
+                    "status": "done",
+                    "updated_at": 1000 + index,
+                    "prompt_text": f"批次 {index + 1} 提示词",
+                    "prompt_collection": f"批次 {index + 1} 提示词",
+                    "json_result": "x" * 200_000,
+                },
+            )
+
+        payload = module.获取阶段节点输出缓存("batch-history-node")
+        self.assertEqual(payload["prompt_text"], "批次 3 提示词")
+        self.assertEqual(
+            [item["prompt_text"] for item in payload["execution_history"]],
+            ["批次 3 提示词", "批次 2 提示词", "批次 1 提示词"],
+        )
+        self.assertTrue(all("json_result" not in item for item in payload["execution_history"]))
 
     def test_strict_prompt_dedupe_serializes_concurrent_runs_for_same_node(self) -> None:
         module = load_stage_prompt_generator_for_integration_test()

@@ -3403,7 +3403,7 @@ function extractStageOutputsFromHistoryEntry(entry, node) {
 	const stageOutputPayload = outputs?.[stageId];
 	const result = Array.from({ length: STAGE_OUTPUT_FIELD_KEYS.length }, () => "");
 	if (stageOutputPayload && typeof stageOutputPayload === "object") {
-		const directValues = normalizeStageExecutionOutputs(stageOutputPayload);
+		const directValues = extractStageOutputSlotsFromPayload(stageOutputPayload);
 		directValues.forEach((value, index) => {
 			if (index < result.length && String(value ?? "").trim()) result[index] = String(value);
 		});
@@ -6061,7 +6061,7 @@ function extractStageOutputSlotsFromPayload(payload) {
 		const score = scoreStageOutputSlots(slots);
 		if (score > 0) candidates.push({ slots, score });
 	};
-	for (const key of ["output", "outputs", "ui", "result", "value", "content"]) {
+	for (const key of ["qwen_te_stage_output", "output", "outputs", "ui", "result", "value", "content"]) {
 		if (key in payload) pushCandidate(payload[key]);
 	}
 	pushCandidate(payload);
@@ -12097,6 +12097,191 @@ function recordStageExecution(node, library, statusEl, stageOutputOverride = nul
 	return true;
 }
 
+function extractStageExecutionHistoryFromArgs(argsLike) {
+	for (const arg of Array.from(argsLike ?? [])) {
+		const candidates = [arg, arg?.output, arg?.outputs, arg?.ui, arg?.result];
+		for (const candidate of candidates) {
+			if (Array.isArray(candidate?.qwen_te_stage_output_history)) {
+				return candidate.qwen_te_stage_output_history;
+			}
+		}
+	}
+	return [];
+}
+
+function captureStageExecutionHistoryFromArgs(node, library, argsLike) {
+	if (!captureStageExecutionOutputsFromArgs(node, argsLike)) return false;
+	refreshStageDisplay(node);
+	const recorded = recordStageExecution(node, node?.[PANEL_KEY]?.library ?? library, null);
+	if (recorded && node?.[PANEL_KEY]) {
+		node[PANEL_KEY].stageOutputEventRecordCount = Math.max(0, Number(node[PANEL_KEY].stageOutputEventRecordCount ?? 0) || 0) + 1;
+	}
+	const executionHistory = extractStageExecutionHistoryFromArgs(argsLike);
+	const recoveredCount = executionHistory.length
+		? recordMissingStageExecutionHistoryFromCache(
+			node,
+			node?.[PANEL_KEY]?.library ?? library,
+			{
+				...normalizeHistoryStageOutputPayload(node?.[PANEL_KEY]?.lastExecutionOutputs),
+				execution_history: executionHistory,
+			},
+			{ executionStartedAt: Number(node?.[PANEL_KEY]?.lastWorkflowQueueRequestedAt ?? 0) || 0 },
+		)
+		: 0;
+	return recorded || recoveredCount > 0;
+}
+
+function getStageExecutionCacheEntryId(entry) {
+	const explicit = String(entry?.execution_id ?? "").trim();
+	if (explicit) return explicit;
+	const prompt = String(entry?.prompt_text ?? entry?.promptText ?? "").trim();
+	return JSON.stringify([normalizeStageTimestampMs(entry?.updated_at), prompt.length, prompt.slice(0, 240)]);
+}
+
+function recordMissingStageExecutionHistoryFromCache(node, library, directOutput, options = {}) {
+	const panelState = node?.[PANEL_KEY];
+	if (!panelState || !Array.isArray(directOutput?.execution_history)) return 0;
+	const executionStartedAt = Number(options.executionStartedAt ?? 0) || 0;
+	const queueRequestedAt = Number(panelState.lastWorkflowQueueRequestedAt ?? 0) || 0;
+	const freshnessBaseline = queueRequestedAt > 0 ? queueRequestedAt : executionStartedAt;
+	const candidates = directOutput.execution_history
+		.filter((entry) => {
+			if (!hasUsableStageOutputSnapshot(normalizeHistoryStageOutputPayload(entry))) return false;
+			const updatedAt = normalizeStageTimestampMs(entry?.updated_at);
+			return freshnessBaseline <= 0 || updatedAt <= 0 || updatedAt + getStageOutputTimestampToleranceMs(entry?.updated_at) >= freshnessBaseline;
+		})
+		.sort((left, right) => normalizeStageTimestampMs(right?.updated_at) - normalizeStageTimestampMs(left?.updated_at));
+	if (!candidates.length) return 0;
+	const eventRecordCount = Math.max(0, Math.trunc(Number(
+		options.recordedEventCount ?? panelState.stageOutputEventRecordCount ?? 0,
+	)) || 0);
+	const processed = new Set(Array.isArray(panelState.stageOutputCacheProcessedIds) ? panelState.stageOutputCacheProcessedIds : []);
+	let recordedCount = 0;
+	for (const entry of candidates.slice(Math.min(eventRecordCount, candidates.length)).reverse()) {
+		const executionId = getStageExecutionCacheEntryId(entry);
+		if (processed.has(executionId)) continue;
+		panelState.stageOutputRecordSignature = "";
+		if (recordStageExecution(node, panelState.library ?? library, null, entry)) recordedCount += 1;
+		processed.add(executionId);
+	}
+	panelState.stageOutputCacheProcessedIds = [...processed].slice(-64);
+	const latestOutput = normalizeHistoryStageOutputPayload(directOutput);
+	if (hasUsableStageOutputSnapshot(latestOutput)) {
+		panelState.lastExecutionOutputs = buildStageOutputListFromSnapshot(latestOutput);
+		refreshStageDisplay(node);
+	}
+	return recordedCount;
+}
+
+function getHistoryEntryNodeCacheNamespace(entry, node) {
+	const nodeId = String(node?.id ?? "");
+	const workflowNodes = getHistoryEntryPromptTuple(entry)?.[3]?.extra_pnginfo?.workflow?.nodes;
+	if (!nodeId || !Array.isArray(workflowNodes)) return "";
+	const workflowNode = workflowNodes.find((item) => String(item?.id ?? "") === nodeId);
+	return String(workflowNode?.properties?.[NODE_CACHE_NAMESPACE_KEY] ?? "").trim();
+}
+
+async function reconcileStageExecutionHistoryFromWorkflowHistory(node, library, options = {}) {
+	const panelState = node?.[PANEL_KEY];
+	if (!panelState) return 0;
+	const isCurrent = typeof options.shouldCommit === "function"
+		? options.shouldCommit
+		: () => !node?.[NODE_REMOVED_KEY] && node?.[PANEL_KEY] === panelState;
+	const queuedAt = Number(panelState.lastWorkflowQueueRequestedAt ?? 0) || 0;
+	const history = await requestWorkflowHistory(120, {
+		owner: node,
+		key: "stage-output-history-open-workflow",
+		timeoutMs: 8000,
+	});
+	if (!isCurrent()) return 0;
+	let candidates = Object.entries(history ?? {})
+		.map(([promptId, entry]) => ({
+			promptId: String(promptId ?? "").trim(),
+			entry,
+			createdAt: getHistoryEntryCreateTime(entry),
+			cacheNamespace: getHistoryEntryNodeCacheNamespace(entry, node),
+			outputs: extractStageOutputsFromHistoryEntry(entry, node),
+		}))
+		.filter((item) => item.promptId
+			&& historyEntryContainsNode(item.entry, node)
+			&& item.outputs.some((value) => String(value ?? "").trim())
+			&& (queuedAt <= 0 || item.createdAt <= 0 || item.createdAt + 2000 >= queuedAt))
+		.sort((left, right) => left.createdAt - right.createdAt);
+	if (!candidates.length) return 0;
+	const currentNamespace = String(node?.properties?.[NODE_CACHE_NAMESPACE_KEY] ?? "").trim();
+	const currentNamespaceCandidates = currentNamespace
+		? candidates.filter((item) => item.cacheNamespace === currentNamespace)
+		: [];
+	if (currentNamespaceCandidates.length) {
+		candidates = currentNamespaceCandidates;
+	} else {
+		const latestNamespace = candidates[candidates.length - 1]?.cacheNamespace ?? "";
+		if (latestNamespace) candidates = candidates.filter((item) => item.cacheNamespace === latestNamespace);
+	}
+	const processed = new Set(Array.isArray(panelState.stageOutputWorkflowProcessedIds)
+		? panelState.stageOutputWorkflowProcessedIds
+		: []);
+	if (!processed.size) {
+		const recordedExecutionCount = getNodeHistory(node).filter((item) => item?.source === "executed").length;
+		for (const item of candidates.slice(-Math.min(recordedExecutionCount, candidates.length))) {
+			processed.add(item.promptId);
+		}
+	}
+	let recordedCount = 0;
+	for (const item of candidates) {
+		if (processed.has(item.promptId)) continue;
+		panelState.stageOutputRecordSignature = "";
+		if (recordStageExecution(node, panelState.library ?? library, null, item.outputs)) recordedCount += 1;
+		processed.add(item.promptId);
+	}
+	panelState.stageOutputWorkflowProcessedIds = [...processed].slice(-120);
+	const latestOutputs = candidates[candidates.length - 1]?.outputs;
+	if (Array.isArray(latestOutputs) && latestOutputs.length) {
+		panelState.lastExecutionOutputs = latestOutputs;
+		refreshStageDisplay(node);
+	}
+	return recordedCount;
+}
+
+async function reconcileStageExecutionHistoryBeforeOpen(node, library) {
+	const panelState = node?.[PANEL_KEY];
+	if (!panelState) return 0;
+	const isCurrent = () => !node?.[NODE_REMOVED_KEY]
+		&& node?.[PANEL_KEY] === panelState
+		&& (app.graph?._nodes ?? []).includes(node);
+	let recordedCount = 0;
+	try {
+		const directOutput = await syncNodeStageOutputCache(node, {
+			shouldCommit: isCurrent,
+			requestKey: "stage-output-history-open",
+			requestTimeoutMs: 5000,
+		});
+		if (!isCurrent()) return 0;
+		if (directOutput) {
+			const executionHistory = Array.isArray(directOutput.execution_history) ? directOutput.execution_history : [];
+			const persistedExecutionCount = getNodeHistory(node).filter((item) => item?.source === "executed").length;
+			recordedCount += recordMissingStageExecutionHistoryFromCache(
+				node,
+				panelState.library ?? library,
+				directOutput,
+				{
+					executionStartedAt: Number(panelState.lastWorkflowQueueRequestedAt ?? 0) || 0,
+					recordedEventCount: Math.min(persistedExecutionCount, executionHistory.length),
+				},
+			);
+		}
+	} catch (_error) {}
+	if (!isCurrent()) return recordedCount;
+	try {
+		recordedCount += await reconcileStageExecutionHistoryFromWorkflowHistory(
+			node,
+			panelState.library ?? library,
+			{ shouldCommit: isCurrent },
+		);
+	} catch (_error) {}
+	return recordedCount;
+}
+
 async function tryCaptureFinalStageOutput(node, library, options = {}) {
 	const executionStartedAt = Number(options.executionStartedAt ?? 0) || 0;
 	const captureToken = String(options.captureToken ?? "");
@@ -12107,8 +12292,9 @@ async function tryCaptureFinalStageOutput(node, library, options = {}) {
 		&& (app.graph?._nodes ?? []).includes(node);
 	if (!isCaptureCurrent()) return false;
 	let directStageOutput = null;
+	let directOutput = null;
 	try {
-		const directOutput = await syncNodeStageOutputCache(node, { shouldCommit: isCaptureCurrent });
+		directOutput = await syncNodeStageOutputCache(node, { shouldCommit: isCaptureCurrent });
 		if (!isCaptureCurrent()) return false;
 		const staleForCurrentRun = !!node?.[PANEL_KEY]?.directStageOutputCache?._qwenStaleForCurrentRun;
 		const outputStatus = String(directOutput?.status ?? "").trim().toLowerCase();
@@ -12127,9 +12313,18 @@ async function tryCaptureFinalStageOutput(node, library, options = {}) {
 	syncNodeRandomDedupeCacheFromResult(node, directStageOutput?.jsonPayload ?? null);
 	syncNodePromptDedupeCacheFromResult(node, directStageOutput?.jsonPayload ?? null);
 	if (!isCaptureCurrent()) return false;
-	const recorded = recordStageExecution(node, node?.[PANEL_KEY]?.library ?? library, null, directStageOutput);
+	const recoveredCount = recordMissingStageExecutionHistoryFromCache(
+		node,
+		node?.[PANEL_KEY]?.library ?? library,
+		directOutput,
+		{ executionStartedAt },
+	);
+	const eventRecordCount = Math.max(0, Math.trunc(Number(node?.[PANEL_KEY]?.stageOutputEventRecordCount ?? 0)) || 0);
+	const recorded = eventRecordCount > 0 || recoveredCount > 0
+		? false
+		: recordStageExecution(node, node?.[PANEL_KEY]?.library ?? library, null, directStageOutput);
 	refreshStageDisplay(node);
-	return recorded;
+	return recorded || recoveredCount > 0 || (eventRecordCount > 0 && hasUsableStageOutputSnapshot(directStageOutput));
 }
 
 function scheduleStageExecutionOutputCapture(node, library, options = {}) {
@@ -12150,7 +12345,12 @@ function scheduleStageExecutionOutputCapture(node, library, options = {}) {
 		attempts += 1;
 		const recorded = await tryCaptureFinalStageOutput(node, library, { executionStartedAt, captureToken: token });
 		if (!isCaptureCurrent()) return;
-		if (recorded || attempts >= maxAttempts) return;
+		if (recorded) {
+			if (attempts >= 2) return;
+			setTimeout(run, Math.max(450, delayMs));
+			return;
+		}
+		if (attempts >= maxAttempts) return;
 		if (!getCurrentStageOutputText(node, STAGE_OUTPUT_INDEX.promptText)) {
 			setTimeout(run, attempts === 1 ? 160 : delayMs);
 			return;
@@ -12178,6 +12378,8 @@ function prepareStageNodeForQueueCapture(node, requestedAt = Date.now()) {
 	panelState.previewExecutionOutputs = [];
 	panelState.clearedLinkedOutputSnapshot = [];
 	panelState.stageOutputRecordSignature = "";
+	panelState.stageOutputEventRecordCount = 0;
+	panelState.stageOutputCacheProcessedIds = [];
 	refreshStageDisplay(node);
 }
 
@@ -18524,7 +18726,7 @@ function enhanceStagePromptNode(node, library) {
 	registerPanelButton("example", makeBtn(quickbar,"示例","EX", async(mutationRevision)=>{ const nextLibrary = await getFreshLibraryForUi(node, library, { mutationRevision }); if (isNodeStateMutationCurrent(node, mutationRevision)) openExampleDialog(node, nextLibrary); },"qwen-te-panel__button--accent","打开少量风格锚点，用于定调和选路。"));
 	registerPanelButton("presets", makeBtn(quickbar,"预设","PRE", async(mutationRevision)=>{ const nextLibrary = await getFreshLibraryForUi(node, library, { mutationRevision }); if (isNodeStateMutationCurrent(node, mutationRevision)) openPresetManager(node, nextLibrary); },"","管理可直接生产的稳定模板与批量连测。"));
 	registerPanelButton("nsfwWorkspace", makeBtn(quickbar,"NSFW","NS", async(mutationRevision)=>{ const nextLibrary = await getFreshLibraryForUi(node, library, { mutationRevision }); if (isNodeStateMutationCurrent(node, mutationRevision)) openNsfwWorkspaceDialog(node, nextLibrary); },"qwen-te-panel__button--accent","在当前阶段面板内打开 NSFW 工作台。"));
-	registerPanelButton("history", makeBtn(quickbar,"历史","HIS", async(mutationRevision)=>{ const nextLibrary = await getFreshLibraryForUi(node, library, { mutationRevision }); if (isNodeStateMutationCurrent(node, mutationRevision)) openHistoryManager(node, nextLibrary); },"qwen-te-panel__button--minor","查看随机与执行历史。"));
+	registerPanelButton("history", makeBtn(quickbar,"历史","HIS", async(mutationRevision)=>{ const nextLibrary = await getFreshLibraryForUi(node, library, { mutationRevision }); if (!isNodeStateMutationCurrent(node, mutationRevision)) return; await reconcileStageExecutionHistoryBeforeOpen(node, nextLibrary); if (isNodeStateMutationCurrent(node, mutationRevision)) openHistoryManager(node, nextLibrary); },"qwen-te-panel__button--minor","查看随机与执行历史。"));
 	const rawToggleButton=registerPanelButton("toggleRawSlots", makeBtn(quickbar,"槽位","SL", async()=>{ hiddenState.showRawTags=!hiddenState.showRawTags; setWidgetGroupVisibility(node, node[PANEL_KEY]?.rawTagWidgetNames ?? rawTagWidgetNames, false, "Raw"); const changed=setSlotPanelVisible(node, hiddenState.showRawTags); setPanelToggleButtonState(rawToggleButton, hiddenState.showRawTags, "收槽位", "槽位"); setNodeStatusText(node, changed ? (hiddenState.showRawTags ? "已展开槽位设置面板。" : "已收起槽位设置面板。") : "没有找到可展开的槽位设置面板。"); },"qwen-te-panel__button--minor","显示或收起槽位设置面板。"));
 	const advancedToggleButton=registerPanelButton("toggleAdvanced", makeBtn(quickbar,"高级","ADV", async()=>{ hiddenState.showAdvanced=!hiddenState.showAdvanced; setWidgetGroupVisibility(node, [...CONTROL_WIDGET_NAMES, ...ADVANCED_WIDGET_NAMES], false, "Advanced"); const changed=setAdvancedPanelVisible(node, hiddenState.showAdvanced); setPanelToggleButtonState(advancedToggleButton, hiddenState.showAdvanced, "收高级", "高级"); setNodeStatusText(node, changed ? (hiddenState.showAdvanced ? "已展开高级设置面板。" : "已收起高级设置面板。") : "没有找到可展开的高级设置面板。"); },"qwen-te-panel__button--minor","显示或收起高级设置面板。"));
 	registerPanelButton("clearTags", makeBtn(quickbar,"清空","CLR", async(mutationRevision)=>{ const nextLibrary = await getFreshLibraryForUi(node, library, { mutationRevision }); if (!applyClearedNodeState(node, nextLibrary, { mutationRevision })) return; setNodeStatusText(node, "已清空当前标签、用户输入与终端预览；历史、模型配置和 NSFW 自定义库已保留。"); },"qwen-te-panel__button--danger","清空当前已选标签、用户输入与终端预览；不删除历史、模型配置和 NSFW 自定义库。"));
@@ -18537,7 +18739,7 @@ function enhanceStagePromptNode(node, library) {
 	panelWidget.serialize=false;
 	panelWidget.computeSize=()=>[Math.max(560, Math.min(node.size[0], 720)), measurePanelContentHeight(panel, 228)];
 	const resizeObserver = attachPanelResizeObserver(node, panel);
-	node[PANEL_KEY]={library,panel,panelWidget,summaryEl:summary,statusEl:null,refreshSummary:()=>refreshNodeSummary(node,node[PANEL_KEY]?.library ?? library), resizeObserver, rawTagWidgetNames, lastPanelMessage: "", lastExecutedAt: 0, lastExecutionOutputs: [], lastWorkflowQueueRequestedAt: 0, workflowOutputMeta: getNodeWorkflowOutputMeta(node), directStageOutputCache: null, directStageOutputCacheId: "", stageOutputPollTimer: null, stageOutputPollIdleCount: 0, stageOutputPollActiveCount: 0, autoNegativeSync: autoNegativeSyncState.enabled, continuousReportMeta: getNodeContinuousReportMeta(node), presetBatchState: getNodePresetBatchState(node), continuousBadgeEl: null, continuousReportSummaryEl: null, continuousRuntime: { running: false, token: 0, mode: "", step: 0, total: 0 }, heroCaptionEl: null, randomRuntimePillsEl: null, randomTrackHistoryEl: null, heroBadges: {}, themePoolQuickCardButtons, themePoolQuickStatusEl: null, controlSurface, slotPanel, advancedPanel, panelButtons, displayBodyEl: displayBody, displaySourceEl: displaySource, displayMode: STAGE_DISPLAY_MODES[0]?.key ?? "prompt", displayTabButtons, expandedDisplayOverlay: null, expandedDisplayBodyEl: null, expandedDisplaySourceEl: null, expandedDisplayTabButtons: null, expandedDisplayMetricsEl: null, expandedDisplayViewTabButtons: null, expandedDisplayViewMode: "readable", statusWidget: null, summaryWidget: null, originalOnExecuted: null, onExecutedWrapper: null};
+	node[PANEL_KEY]={library,panel,panelWidget,summaryEl:summary,statusEl:null,refreshSummary:()=>refreshNodeSummary(node,node[PANEL_KEY]?.library ?? library), resizeObserver, rawTagWidgetNames, lastPanelMessage: "", lastExecutedAt: 0, lastExecutionOutputs: [], lastWorkflowQueueRequestedAt: 0, workflowOutputMeta: getNodeWorkflowOutputMeta(node), directStageOutputCache: null, directStageOutputCacheId: "", stageOutputPollTimer: null, stageOutputPollIdleCount: 0, stageOutputPollActiveCount: 0, stageOutputEventRecordCount: 0, stageOutputCacheProcessedIds: [], stageOutputWorkflowProcessedIds: [], autoNegativeSync: autoNegativeSyncState.enabled, continuousReportMeta: getNodeContinuousReportMeta(node), presetBatchState: getNodePresetBatchState(node), continuousBadgeEl: null, continuousReportSummaryEl: null, continuousRuntime: { running: false, token: 0, mode: "", step: 0, total: 0 }, heroCaptionEl: null, randomRuntimePillsEl: null, randomTrackHistoryEl: null, heroBadges: {}, themePoolQuickCardButtons, themePoolQuickStatusEl: null, controlSurface, slotPanel, advancedPanel, panelButtons, displayBodyEl: displayBody, displaySourceEl: displaySource, displayMode: STAGE_DISPLAY_MODES[0]?.key ?? "prompt", displayTabButtons, expandedDisplayOverlay: null, expandedDisplayBodyEl: null, expandedDisplaySourceEl: null, expandedDisplayTabButtons: null, expandedDisplayMetricsEl: null, expandedDisplayViewTabButtons: null, expandedDisplayViewMode: "readable", statusWidget: null, summaryWidget: null, originalOnExecuted: null, onExecutedWrapper: null};
 	ensureStagePromptTopStatusWidgets(node, library, summary);
 	const originalOnExecuted=node.onExecuted; const onExecutedWrapper=function(){
 		if (node[NODE_REMOVED_KEY]) return originalOnExecuted?.apply(this, arguments);
@@ -18546,6 +18748,7 @@ function enhanceStagePromptNode(node, library) {
 		if(node[PANEL_KEY]){
 			stopStageOutputPolling(node);
 			clearStageDisplayPreview(node);
+			node[PANEL_KEY].stageOutputRecordSignature = "";
 			node[PANEL_KEY].lastExecutedAt = executionStartedAt;
 			node[PANEL_KEY].displayClearedAt = 0;
 			node[PANEL_KEY].lastExecutionOutputs = [];
@@ -18558,7 +18761,7 @@ function enhanceStagePromptNode(node, library) {
 			refreshStageDisplay(node);
 		}
 		const result=originalOnExecuted?.apply(this, arguments);
-		if (captureStageExecutionOutputsFromArgs(node, executedArgs)) refreshStageDisplay(node);
+		captureStageExecutionHistoryFromArgs(node, node[PANEL_KEY]?.library ?? library, executedArgs);
 		scheduleStageExecutionOutputCapture(node, node[PANEL_KEY]?.library ?? library, { executionStartedAt });
 		setTimeout(()=>{
 			if (node[NODE_REMOVED_KEY] || !node[PANEL_KEY]) return;

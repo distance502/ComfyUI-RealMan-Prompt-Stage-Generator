@@ -2888,10 +2888,12 @@ def _register_tag_routes() -> bool:
 
     @routes.get("/extensions/comfyUI-qwen3_5-llama-TE/stage_prompt_generator_ui.js")
     @routes.get("/extensions/ComfyUI-RealMan-Prompt-Stage-Generator/stage_prompt_generator_ui.js")
+    @routes.get("/extensions/comfyUI-qwen3_5-llama-TE/stage_prompt_generator_ui_v2.js")
+    @routes.get("/extensions/ComfyUI-RealMan-Prompt-Stage-Generator/stage_prompt_generator_ui_v2.js")
     async def _get_stage_prompt_generator_ui(_request):
-        script_path = Path(__file__).with_name("web") / "stage_prompt_generator_ui.js"
+        script_path = Path(__file__).with_name("web") / "stage_prompt_generator_ui_v2.js"
         if not script_path.exists():
-            raise web.HTTPNotFound(text="stage_prompt_generator_ui.js 不存在。")
+            raise web.HTTPNotFound(text="stage_prompt_generator_ui_v2.js 不存在。")
         return _no_store_file_response(script_path)
 
     @routes.get("/qwen_te/stage_output/{node_id}")

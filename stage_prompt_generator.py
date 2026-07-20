@@ -490,6 +490,14 @@ _STAGE_OUTPUT_CACHE_PUBLIC_KEYS = (
     "normalization_notes",
     "outputs",
 )
+_STAGE_OUTPUT_EXECUTION_HISTORY_KEY = "_execution_history"
+_STAGE_OUTPUT_EXECUTION_SEQUENCE_KEY = "_execution_sequence"
+_STAGE_OUTPUT_EXECUTION_HISTORY_LIMIT = 32
+_STAGE_OUTPUT_EXECUTION_HISTORY_FIELDS = tuple(
+    field
+    for field in _STAGE_OUTPUT_CACHE_PUBLIC_KEYS
+    if field not in {"full_text", "json_result", "normalization_notes", "outputs"}
+)
 _MODEL_RUNTIME_STATE_KEYS = (
     "模型来源实际",
     "模型回退说明",
@@ -2959,7 +2967,11 @@ def 获取阶段节点输出缓存(node_id: str | None, cache_namespace: str | N
         payload = _cache_bucket_unlocked(key)
         if not isinstance(payload, dict):
             return None
-        return deepcopy({field: payload[field] for field in _STAGE_OUTPUT_CACHE_PUBLIC_KEYS if field in payload})
+        public_payload = {field: payload[field] for field in _STAGE_OUTPUT_CACHE_PUBLIC_KEYS if field in payload}
+        execution_history = payload.get(_STAGE_OUTPUT_EXECUTION_HISTORY_KEY)
+        if isinstance(execution_history, list) and execution_history:
+            public_payload["execution_history"] = execution_history
+        return deepcopy(public_payload)
 
 
 def _cache_output(node_id: str | None, payload: dict[str, Any]) -> None:
@@ -2970,6 +2982,26 @@ def _cache_output(node_id: str | None, payload: dict[str, Any]) -> None:
         with _CACHE_LOCK:
             cache = _cache_bucket_unlocked(key, create=True)
             if cache is not None:
+                updated_at = int(payload.get("updated_at", 0) or 0)
+                prompt_text = str(payload.get("prompt_text", "") or "").strip()
+                if str(payload.get("status", "") or "").strip().lower() == "done" and updated_at > 0 and prompt_text:
+                    sequence = int(cache.get(_STAGE_OUTPUT_EXECUTION_SEQUENCE_KEY, 0) or 0) + 1
+                    cache[_STAGE_OUTPUT_EXECUTION_SEQUENCE_KEY] = sequence
+                    snapshot = {
+                        field: deepcopy(payload[field])
+                        for field in _STAGE_OUTPUT_EXECUTION_HISTORY_FIELDS
+                        if field in payload
+                    }
+                    snapshot["execution_id"] = f"{updated_at}:{sequence}"
+                    history = [
+                        item
+                        for item in cache.get(_STAGE_OUTPUT_EXECUTION_HISTORY_KEY, [])
+                        if isinstance(item, dict) and item.get("execution_id") != snapshot["execution_id"]
+                    ]
+                    cache[_STAGE_OUTPUT_EXECUTION_HISTORY_KEY] = [
+                        snapshot,
+                        *history,
+                    ][:_STAGE_OUTPUT_EXECUTION_HISTORY_LIMIT]
                 cache.update(payload)
 
 
@@ -5471,7 +5503,27 @@ class QwenTE阶段式提示词生成器:
             settings["模型活动回退数量"] = 0
             settings["模型调用采纳次数"] = 0
             settings["模型调用错误"] = []
-        return _run_stage(qwen模型, **settings)
+        outputs = _run_stage(qwen模型, **settings)
+        cache_namespace = _extract_cache_namespace_from_extra_pnginfo(
+            settings.get("extra_pnginfo"),
+            settings.get("unique_id"),
+        )
+        cache_payload = 获取阶段节点输出缓存(
+            settings.get("unique_id"),
+            cache_namespace=cache_namespace or None,
+        )
+        execution_history = (
+            cache_payload.get("execution_history", [])
+            if isinstance(cache_payload, dict)
+            else []
+        )
+        return {
+            "ui": {
+                "qwen_te_stage_output": list(outputs),
+                "qwen_te_stage_output_history": execution_history,
+            },
+            "result": outputs,
+        }
 
 
 class QwenTE通用模型阶段式提示词生成器(QwenTE阶段式提示词生成器):

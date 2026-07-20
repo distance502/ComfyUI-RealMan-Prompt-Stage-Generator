@@ -15,7 +15,7 @@ CORE_FILES = [
     "nodes.py",
     "stage_prompt_generator.py",
     "prompt_tag_library.py",
-    "web/stage_prompt_generator_ui.js",
+    "web/stage_prompt_generator_ui_v2.js",
     "web/stage_prompt_generator_mini_toolbar.js",
 ]
 

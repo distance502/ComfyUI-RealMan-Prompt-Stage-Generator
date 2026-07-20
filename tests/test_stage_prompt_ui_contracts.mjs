@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
-const UI_PATH = path.join(ROOT, "web", "stage_prompt_generator_ui.js");
+const UI_PATH = path.join(ROOT, "web", "stage_prompt_generator_ui_v2.js");
 
 function makeClassList(element) {
 	const tokens = new Set();
@@ -221,6 +221,10 @@ globalThis.__stagePromptUiTestExports = {
 	resolveHistoryPromptViewStageOutput,
 	refreshStageDisplay,
 	captureStageExecutionOutputsFromArgs,
+	extractStageExecutionHistoryFromArgs,
+	captureStageExecutionHistoryFromArgs,
+	recordMissingStageExecutionHistoryFromCache,
+	reconcileStageExecutionHistoryBeforeOpen,
 	getStageOutputCacheLookupIds,
 	syncNodeStageOutputCache,
 	NODE_CACHE_NAMESPACE_KEY,
@@ -2742,6 +2746,220 @@ test("terminal preview captures API style executed output payloads", async () =>
 	assert.equal(sourceEl.textContent, "本次执行");
 });
 
+test("rapid batch execution records every generated prompt before the next result clears it", async () => {
+	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	const library = { slot_config: [], tag_library: {} };
+	const node = {
+		id: 88,
+		properties: {},
+		widgets: [
+			{ name: "自定义补充标签", value: "" },
+			{ name: "模板风格", value: "真实感" },
+			{ name: "主体类型", value: "人物角色" },
+		],
+		outputs: [],
+		[exports.PANEL_KEY]: {
+			library,
+			lastExecutionOutputs: [],
+			directStageOutputCache: null,
+			workflowOutputMeta: {},
+			stageOutputRecordSignature: "",
+		},
+	};
+	exports.__context.__testApp.graph._nodes = [node];
+	const executedPayload = (prompt) => [{ qwen_te_stage_output: ["完整结果", prompt, "标签摘要", "{}", "负面词", prompt, ""] }];
+
+	assert.equal(exports.captureStageExecutionHistoryFromArgs(node, library, executedPayload("批次一生成的完整提示词")), true);
+	node[exports.PANEL_KEY].stageOutputRecordSignature = "";
+	assert.equal(exports.captureStageExecutionHistoryFromArgs(node, library, executedPayload("批次二生成的完整提示词")), true);
+	node[exports.PANEL_KEY].stageOutputRecordSignature = "";
+	assert.equal(exports.captureStageExecutionHistoryFromArgs(node, library, executedPayload("批次二生成的完整提示词")), true);
+
+	const prompts = exports.getNodeHistory(node).map((item) => item.meta.stageOutput.promptText);
+	assert.deepEqual(Array.from(prompts), [
+		"批次二生成的完整提示词",
+		"批次二生成的完整提示词",
+		"批次一生成的完整提示词",
+	]);
+});
+
+test("batch cache reconciliation restores executions omitted by ComfyUI callbacks", async () => {
+	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	const library = { slot_config: [], tag_library: {} };
+	const node = {
+		id: 89,
+		properties: {},
+		widgets: [],
+		outputs: [],
+		[exports.PANEL_KEY]: {
+			library,
+			lastWorkflowQueueRequestedAt: 1000,
+			lastExecutionOutputs: [],
+			stageOutputEventRecordCount: 1,
+			stageOutputCacheProcessedIds: [],
+			stageOutputRecordSignature: "",
+		},
+	};
+	exports.__context.__testApp.graph._nodes = [node];
+	const entry = (id, updatedAt, prompt) => ({
+		execution_id: id,
+		updated_at: updatedAt,
+		status: "done",
+		prompt_text: prompt,
+		prompt_collection: prompt,
+		negative_prompt: "负面词",
+	});
+	const latest = entry("run-3", 1300, "第三批提示词");
+	assert.equal(exports.captureStageExecutionHistoryFromArgs(node, library, [{ qwen_te_stage_output: ["", latest.prompt_text, "", "{}", "负面词", latest.prompt_text, ""] }]), true);
+	// The simulated callback above increments the counter; reproduce ComfyUI's one-callback batch state.
+	node[exports.PANEL_KEY].stageOutputEventRecordCount = 1;
+	const recovered = exports.recordMissingStageExecutionHistoryFromCache(node, library, {
+		...latest,
+		execution_history: [latest, entry("run-2", 1200, "第二批提示词"), entry("run-1", 1100, "第一批提示词")],
+	}, { executionStartedAt: 1300 });
+	assert.equal(recovered, 2);
+	assert.deepEqual(Array.from(exports.getNodeHistory(node).map((item) => item.meta.stageOutput.promptText)), [
+		"第二批提示词",
+		"第一批提示词",
+		"第三批提示词",
+	]);
+	assert.equal(exports.recordMissingStageExecutionHistoryFromCache(node, library, {
+		...latest,
+		execution_history: [latest, entry("run-2", 1200, "第二批提示词"), entry("run-1", 1100, "第一批提示词")],
+	}, { executionStartedAt: 1300 }), 0);
+});
+
+test("single executed callback restores the full backend batch history", async () => {
+	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	const library = { slot_config: [], tag_library: {} };
+	const node = {
+		id: 90,
+		properties: {},
+		widgets: [],
+		outputs: [],
+		[exports.PANEL_KEY]: {
+			library,
+			lastWorkflowQueueRequestedAt: 1000,
+			lastExecutionOutputs: [],
+			stageOutputEventRecordCount: 0,
+			stageOutputCacheProcessedIds: [],
+			stageOutputRecordSignature: "",
+		},
+	};
+	exports.__context.__testApp.graph._nodes = [node];
+	const entry = (id, updatedAt, prompt) => ({
+		execution_id: id,
+		updated_at: updatedAt,
+		status: "done",
+		prompt_text: prompt,
+		prompt_collection: prompt,
+	});
+	const history = [entry("run-3", 1300, "第三批"), entry("run-2", 1200, "第二批"), entry("run-1", 1100, "第一批")];
+	const args = [{
+		qwen_te_stage_output: ["", "第三批", "", "{}", "", "第三批", ""],
+		qwen_te_stage_output_history: history,
+	}];
+	assert.deepEqual(Array.from(exports.extractStageExecutionHistoryFromArgs(args)), history);
+	assert.equal(exports.captureStageExecutionHistoryFromArgs(node, library, args), true);
+	assert.deepEqual(Array.from(exports.getNodeHistory(node).map((item) => item.meta.stageOutput.promptText)), ["第二批", "第一批", "第三批"]);
+});
+
+test("opening history reconciles batch outputs that arrived after the executed callback", async () => {
+	const entry = (id, updatedAt, prompt) => ({
+		execution_id: id,
+		updated_at: updatedAt,
+		status: "done",
+		prompt_text: prompt,
+		prompt_collection: prompt,
+	});
+	const latest = entry("run-3", 1300, "第三批");
+	const history = [latest, entry("run-2", 1200, "第二批"), entry("run-1", 1100, "第一批")];
+	const exports = await loadUiExports("http://127.0.0.1:8188/", {
+		fetch: async () => ({
+			ok: true,
+			json: async () => ({ ok: true, output: { ...latest, execution_history: history } }),
+		}),
+	});
+	const library = { slot_config: [], tag_library: {} };
+	const node = {
+		id: 91,
+		properties: {},
+		widgets: [],
+		outputs: [],
+		[exports.PANEL_KEY]: {
+			library,
+			lastWorkflowQueueRequestedAt: 1000,
+			lastExecutionOutputs: [],
+			stageOutputEventRecordCount: 1,
+			stageOutputCacheProcessedIds: [],
+			stageOutputRecordSignature: "",
+		},
+	};
+	exports.__context.__testApp.graph._nodes = [node];
+	exports.captureStageExecutionHistoryFromArgs(node, library, [{
+		qwen_te_stage_output: ["", latest.prompt_text, "", "{}", "", latest.prompt_text, ""],
+	}]);
+	node[exports.PANEL_KEY].stageOutputEventRecordCount = 1;
+
+	assert.equal(await exports.reconcileStageExecutionHistoryBeforeOpen(node, library), 2);
+	assert.equal(await exports.reconcileStageExecutionHistoryBeforeOpen(node, library), 0);
+	assert.deepEqual(Array.from(exports.getNodeHistory(node).map((item) => item.meta.stageOutput.promptText)), [
+		"第二批",
+		"第一批",
+		"第三批",
+	]);
+});
+
+test("opening history falls back to workflow history when the direct cache namespace misses", async () => {
+	const nodeId = 92;
+	const cacheNamespace = "node-workflow-history";
+	const stageOutput = (prompt) => ["", prompt, "", "{}", "", prompt, ""];
+	const historyEntry = (promptId, createdAt, prompt) => ({
+		prompt: [0, promptId, { [nodeId]: { inputs: {} } }, {
+			create_time: createdAt,
+			extra_pnginfo: { workflow: { nodes: [{ id: nodeId, properties: { qwen_te_cache_namespace_v1: cacheNamespace } }] } },
+		}],
+		outputs: { [nodeId]: { qwen_te_stage_output: stageOutput(prompt) } },
+	});
+	const workflowHistory = {
+		"prompt-1": historyEntry("prompt-1", 1100, "第一批"),
+		"prompt-2": historyEntry("prompt-2", 1200, "第二批"),
+		"prompt-3": historyEntry("prompt-3", 1300, "第三批"),
+	};
+	const exports = await loadUiExports("http://127.0.0.1:8188/", {
+		fetch: async (url) => String(url).includes("/history?")
+			? { ok: true, json: async () => workflowHistory }
+			: { ok: false, status: 404, json: async () => ({}) },
+	});
+	const library = { slot_config: [], tag_library: {} };
+	const node = {
+		id: nodeId,
+		properties: { [exports.NODE_CACHE_NAMESPACE_KEY]: cacheNamespace },
+		widgets: [],
+		outputs: [],
+		[exports.PANEL_KEY]: {
+			library,
+			lastWorkflowQueueRequestedAt: 1000,
+			lastExecutionOutputs: stageOutput("第三批"),
+			stageOutputEventRecordCount: 1,
+			stageOutputCacheProcessedIds: [],
+			stageOutputWorkflowProcessedIds: [],
+			stageOutputRecordSignature: "",
+		},
+	};
+	exports.__context.__testApp.graph._nodes = [node];
+	exports.captureStageExecutionHistoryFromArgs(node, library, [{ qwen_te_stage_output: stageOutput("第三批") }]);
+	node[exports.PANEL_KEY].stageOutputEventRecordCount = 1;
+
+	assert.equal(await exports.reconcileStageExecutionHistoryBeforeOpen(node, library), 2);
+	assert.equal(await exports.reconcileStageExecutionHistoryBeforeOpen(node, library), 0);
+	assert.deepEqual(Array.from(exports.getNodeHistory(node).map((item) => item.meta.stageOutput.promptText)), [
+		"第二批",
+		"第一批",
+		"第三批",
+	]);
+});
+
 test("terminal preview accepts cache written before delayed onExecuted event", async () => {
 	const exports = await loadUiExports("http://127.0.0.1:8188/");
 	const library = { slot_config: [], tag_library: {} };
@@ -2886,7 +3104,8 @@ test("queue workflow starts polling and defers capture until onExecuted", async 
 	const executedEnd = source.indexOf("bindSummaryRefresh(node, library)", executedStart);
 	const executedSource = source.slice(executedStart, executedEnd);
 	assert.ok(executedSource.indexOf("stopStageOutputPolling(node)") < executedSource.indexOf("scheduleStageExecutionOutputCapture(node"));
-	assert.doesNotMatch(executedSource, /stageOutputRecordSignature\s*=\s*""/u);
+	assert.match(executedSource, /stageOutputRecordSignature\s*=\s*""/u);
+	assert.ok(executedSource.indexOf("captureStageExecutionHistoryFromArgs(node") < executedSource.indexOf("scheduleStageExecutionOutputCapture(node"));
 	const prepareStart = source.indexOf("function prepareStageNodeForQueueCapture");
 	const prepareEnd = source.indexOf("function scheduleStageOutputCaptureForAllNodes", prepareStart);
 	assert.match(source.slice(prepareStart, prepareEnd), /stageOutputRecordSignature\s*=\s*""/u);
