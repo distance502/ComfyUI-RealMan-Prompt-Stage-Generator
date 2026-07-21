@@ -89,10 +89,32 @@ const CONTROL_WIDGET_NAMES = new Set([
 const ADVANCED_WIDGET_NAMES = new Set([
 	"主体类型",
 	"案例输出结构",
+	"风格隔离策略",
 	"输出模式",
 	"额外要求",
+	"智能文本匹配",
+	"智能文本输入",
+	"智能文本风格优先",
+	"图片反推生成",
+	"图片反推模式",
+	"图片反推最大边长",
 	"锁定标签白名单",
 	"随机排除标签",
+	"模型来源",
+	"内置模型系列",
+	"内置主模型",
+	"内置视觉投影mmproj",
+	"内置启用思考",
+	"内置上下文长度",
+	"内置GPU层数",
+	"内置KV缓存K类型",
+	"内置KV缓存V类型",
+	"API服务商",
+	"API地址",
+	"API密钥",
+	"API模型",
+	"API超时秒",
+	"API额外请求头",
 	"系统提示词覆盖",
 	"最大生成token",
 	"温度",
@@ -105,17 +127,25 @@ const ADVANCED_WIDGET_NAMES = new Set([
 	"输出think块",
 	"随机补充避重缓存",
 ]);
+const MINI_ALWAYS_HIDDEN_WIDGET_NAMES = new Set([
+	"随机补充避重缓存",
+	"连续生成避重缓存",
+	"运行时随机保护标签",
+	"运行时随机预览令牌",
+	"标签块编排启用",
+	"标签块编排JSON",
+]);
+const MINI_PRESERVED_WIDGET_NAMES = new Set([
+	"状态",
+	"摘要",
+	"qwen模型",
+	"参考图片",
+	"首条正向提示词",
+	MINI_TOOLBAR_WIDGET_NAME,
+	"qwen_te_tag_panel",
+]);
 
 let stylesInjected = false;
-
-function isMainStageUiEnabled() {
-	let forceMini = false;
-	try {
-		const href = String(globalThis?.location?.href ?? "");
-		forceMini = /(?:[?&])qwen_te_mini(?:=(?:1|true))?(?:[&#]|$)/iu.test(href);
-	} catch (_error) {}
-	return globalThis.__QWEN_TE_STAGE_MAIN_UI__ === true && !forceMini;
-}
 
 function hasStagePromptDisplayName(value) {
 	const text = String(value ?? "");
@@ -256,8 +286,20 @@ function collectRawTagWidgetNames(node) {
 
 function collectAdvancedWidgetNames(node) {
 	return (node?.widgets ?? [])
+		.filter((widget) => {
+			const name = String(widget?.name ?? "");
+			if (!name || RAW_TAG_REGEX.test(name) || name === CUSTOM_TAG_WIDGET) return false;
+			if (MINI_ALWAYS_HIDDEN_WIDGET_NAMES.has(name) || MINI_PRESERVED_WIDGET_NAMES.has(name)) return false;
+			if (widget?.__qwenStageFallbackWidget || widget?.__qwenStageMiniWidget) return false;
+			return CONTROL_WIDGET_NAMES.has(name) || ADVANCED_WIDGET_NAMES.has(name) || widget?.serialize !== false;
+		})
+		.map((widget) => String(widget?.name ?? ""));
+}
+
+function collectAlwaysHiddenWidgetNames(node) {
+	return (node?.widgets ?? [])
 		.map((widget) => String(widget?.name ?? ""))
-		.filter((name) => CONTROL_WIDGET_NAMES.has(name) || ADVANCED_WIDGET_NAMES.has(name));
+		.filter((name) => MINI_ALWAYS_HIDDEN_WIDGET_NAMES.has(name));
 }
 
 function buildSelectedTagsText(node) {
@@ -638,11 +680,6 @@ function ensureMiniToolbar(node) {
 		);
 		return;
 	}
-	if (isMainStageUiEnabled()) {
-		sendMiniDecisionProbe("skip_main_ui_enabled", node);
-		cleanupMiniToolbar(node);
-		return;
-	}
 	if (hasMainStagePanel(node)) {
 		sendMiniDecisionProbe("skip_has_main_panel", node);
 		cleanupMiniToolbar(node);
@@ -659,19 +696,17 @@ function ensureMiniToolbar(node) {
 
 	cleanupLegacyMiniWidgets(node);
 	injectStyles();
-	node[MINI_TOOLBAR_FLAG] = true;
-	if (typeof node.title === "string" && !node.title.endsWith(MINI_TITLE_SUFFIX)) {
-		node.title += MINI_TITLE_SUFFIX;
-	}
 
 	const rawTagWidgetNames = collectRawTagWidgetNames(node);
 	const advancedWidgetNames = collectAdvancedWidgetNames(node);
+	const alwaysHiddenWidgetNames = collectAlwaysHiddenWidgetNames(node);
 	const state = node[MINI_STATE_KEY] ?? { rawExpanded: false, advancedExpanded: false, initialized: false };
 	node[MINI_STATE_KEY] = state;
 
 	if (!state.initialized) {
 		setWidgetGroupCollapsed(node, rawTagWidgetNames, true, "MiniRaw");
 		setWidgetGroupCollapsed(node, advancedWidgetNames, true, "MiniAdvanced");
+		setWidgetGroupCollapsed(node, alwaysHiddenWidgetNames, true, "MiniInternal");
 		state.rawExpanded = false;
 		state.advancedExpanded = false;
 		state.initialized = true;
@@ -751,14 +786,31 @@ function ensureMiniToolbar(node) {
 
 	for (const button of Object.values(buttons)) grid.appendChild(button);
 
-	const domWidget = node.addDOMWidget(MINI_TOOLBAR_WIDGET_NAME, "div", root, {
-		serialize: false,
-		hideOnZoom: false,
-		getValue() {
-			return undefined;
-		},
-		setValue() {},
-	});
+	let domWidget = null;
+	try {
+		domWidget = node.addDOMWidget(MINI_TOOLBAR_WIDGET_NAME, "div", root, {
+			serialize: false,
+			hideOnZoom: false,
+			getValue() {
+				return undefined;
+			},
+			setValue() {},
+		}) ?? getWidget(node, MINI_TOOLBAR_WIDGET_NAME);
+	} catch (_error) {
+		domWidget = getWidget(node, MINI_TOOLBAR_WIDGET_NAME);
+	}
+	if (!domWidget) {
+		restoreStashedWidgets(node);
+		delete node[MINI_STATE_KEY];
+		root.remove?.();
+		sendMiniDecisionProbe("failed_addDOMWidget", node);
+		scheduleNodeLayout(node);
+		return false;
+	}
+	node[MINI_TOOLBAR_FLAG] = true;
+	if (typeof node.title === "string" && !node.title.endsWith(MINI_TITLE_SUFFIX)) {
+		node.title += MINI_TITLE_SUFFIX;
+	}
 	if (domWidget) {
 		domWidget.serialize = false;
 		domWidget.__qwenStageMiniWidget = true;
@@ -808,16 +860,10 @@ function clearMiniStartupScanTimer(expectedTimer = null) {
 
 function startMiniStartupScan() {
 	clearMiniStartupScanTimer();
-	if (isMainStageUiEnabled()) return null;
 	let scanCount = 0;
 	let timer = null;
 	timer = setInterval(() => {
 		if (globalThis[MINI_STARTUP_SCAN_TIMER_KEY] !== timer) return;
-		if (isMainStageUiEnabled()) {
-			enhanceExistingNodes();
-			clearMiniStartupScanTimer(timer);
-			return;
-		}
 		enhanceExistingNodes();
 		scanCount += 1;
 		if (scanCount >= MINI_STARTUP_SCAN_LIMIT) clearMiniStartupScanTimer(timer);
@@ -881,6 +927,7 @@ function sendFrontendProbe(marker) {
 }
 
 globalThis.__QWEN_TE_STAGE_CLEANUP_MINI_TOOLBAR__ = cleanupMiniToolbar;
+globalThis.__QWEN_TE_STAGE_ENSURE_MINI_TOOLBAR__ = ensureMiniToolbar;
 
 app.registerExtension({
 	name: "QwenTE.StagePromptGeneratorMiniToolbar",
@@ -896,7 +943,7 @@ app.registerExtension({
 		clearMiniStartupScanTimer();
 		enhanceExistingNodes();
 		installMiniGraphNodeAddedHook();
-		if (!isMainStageUiEnabled()) startMiniStartupScan();
+		startMiniStartupScan();
 	},
 	async nodeCreated(node) {
 		if (!isStagePromptNode(node)) return;

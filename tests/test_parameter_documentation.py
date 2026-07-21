@@ -32,6 +32,32 @@ class TestParameterDocumentation(unittest.TestCase):
         self.assertIn("## 参数快速开始", readme)
         self.assertIn("使用说明书：参数设置完整手册", readme)
 
+    def test_frontend_fallback_installation_guidance_and_routes_stay_in_sync(self) -> None:
+        manual = (ROOT / "使用说明书.md").read_text(encoding="utf-8")
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        init_source = (ROOT / "__init__.py").read_text(encoding="utf-8")
+
+        for text in (
+            "TE MINI CONSOLE",
+            "?qwen_te_mini=1",
+            "主体标签11-20",
+            "只保留一份本插件",
+        ):
+            with self.subTest(fallback_text=text):
+                self.assertIn(text, manual)
+        self.assertIn("TE MINI CONSOLE", readme)
+        self.assertIn("ComfyUI-RealMan-Prompt-Stage-Generator-main", readme)
+        for script_name in (
+            "stage_prompt_generator_ui.js",
+            "stage_prompt_generator_ui_v2.js",
+            "stage_prompt_generator_mini_toolbar.js",
+        ):
+            with self.subTest(script_name=script_name):
+                self.assertIn(
+                    f'/extensions/ComfyUI-RealMan-Prompt-Stage-Generator-main/{script_name}',
+                    init_source,
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

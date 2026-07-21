@@ -1,5 +1,6 @@
 import { app } from "/scripts/app.js";
 
+window.__QWEN_TE_STAGE_MAIN_UI_LOADED__ = true;
 window.__QWEN_TE_STAGE_MAIN_UI__ = true;
 
 const EXTENSION_NAME = "QwenTE.StagePromptGeneratorUI";
@@ -4500,9 +4501,10 @@ function disableFixUiRuntime() {
 	window.__QWEN_TE_DISABLE_FIX_UI__ = true;
 }
 
-function cleanupFixUiArtifacts(node) {
+function cleanupFixUiArtifacts(node, options = {}) {
 	disableFixUiRuntime();
 	if (!node) return;
+	const preserveMiniToolbar = options.preserveMiniToolbar === true;
 	const hadLegacyTitleArtifacts = !!(
 		node.__qwenFixLoaded ||
 		node.__qwenFixToolbarButtons ||
@@ -4511,7 +4513,9 @@ function cleanupFixUiArtifacts(node) {
 			(widget?.__qwenStageFallbackWidget && !STAGE_TOP_STATUS_WIDGET_NAMES.has(String(widget.name ?? "")))
 		))
 	);
-	try { window.__QWEN_TE_STAGE_CLEANUP_MINI_TOOLBAR__?.(node, { scheduleLayout: false }); } catch (_error) {}
+	if (!preserveMiniToolbar) {
+		try { window.__QWEN_TE_STAGE_CLEANUP_MINI_TOOLBAR__?.(node, { scheduleLayout: false }); } catch (_error) {}
+	}
 	let changed = false;
 	if (Array.isArray(node.widgets)) {
 		const keptTopStatusNames = new Set();
@@ -4525,7 +4529,7 @@ function cleanupFixUiArtifacts(node) {
 				else keptTopStatusNames.add(name);
 			}
 			if (widget?.name === "qwen_fix_toolbar") remove = true;
-			if (widget?.name === "qwen_te_mini_toolbar_dom" || widget?.__qwenStageMiniWidget) remove = true;
+			if (!preserveMiniToolbar && (widget?.name === "qwen_te_mini_toolbar_dom" || widget?.__qwenStageMiniWidget)) remove = true;
 			if (!node[PANEL_KEY] && widget?.name === "qwen_te_tag_panel") remove = true;
 			if (widget?.serialize === false && FIX_UI_WIDGET_NAMES.has(widget?.name) && !widget?.__qwenStageFallbackWidget) remove = true;
 			if (remove) widgetsToRemove.push(widget);
@@ -18709,7 +18713,7 @@ function ensureStagePromptTopStatusWidgets(node, library, summary) {
 
 function enhanceStagePromptNode(node, library) {
 	ensureNodeCacheNamespace(node);
-	cleanupFixUiArtifacts(node);
+	cleanupFixUiArtifacts(node, { preserveMiniToolbar: true });
 	compactStagePromptOutputs(node);
 	if (node[PANEL_KEY]) return;
 	if (shouldForceMiniToolbarMode()) return;
@@ -18778,11 +18782,12 @@ function enhanceStagePromptNode(node, library) {
 	const advancedToggleButton=registerPanelButton("toggleAdvanced", makeBtn(quickbar,"高级","ADV", async()=>{ hiddenState.showAdvanced=!hiddenState.showAdvanced; setWidgetGroupVisibility(node, [...CONTROL_WIDGET_NAMES, ...ADVANCED_WIDGET_NAMES], false, "Advanced"); const changed=setAdvancedPanelVisible(node, hiddenState.showAdvanced); setPanelToggleButtonState(advancedToggleButton, hiddenState.showAdvanced, "收高级", "高级"); setNodeStatusText(node, changed ? (hiddenState.showAdvanced ? "已展开高级设置面板。" : "已收起高级设置面板。") : "没有找到可展开的高级设置面板。"); },"qwen-te-panel__button--minor","显示或收起高级设置面板。"));
 	registerPanelButton("clearTags", makeBtn(quickbar,"清空","CLR", async(mutationRevision)=>{ const nextLibrary = await getFreshLibraryForUi(node, library, { mutationRevision }); if (!applyClearedNodeState(node, nextLibrary, { mutationRevision })) return; setNodeStatusText(node, "已清空当前标签、用户输入与终端预览；历史、模型配置和 NSFW 自定义库已保留。"); },"qwen-te-panel__button--danger","清空当前已选标签、用户输入与终端预览；不删除历史、模型配置和 NSFW 自定义库。"));
 	let panelWidget = null;
-	panelWidget = node.addDOMWidget("qwen_te_tag_panel","div",panel,{serialize:false,getValue(){return undefined;},setValue(){}});
+	panelWidget = node.addDOMWidget("qwen_te_tag_panel","div",panel,{serialize:false,getValue(){return undefined;},setValue(){}}) ?? getWidget(node, "qwen_te_tag_panel");
 	if (!panelWidget) {
 		panel.remove?.();
 		return false;
 	}
+	try { window.__QWEN_TE_STAGE_CLEANUP_MINI_TOOLBAR__?.(node, { scheduleLayout: false }); } catch (_error) {}
 	panelWidget.serialize=false;
 	panelWidget.computeSize=()=>[Math.max(560, Math.min(node.size[0], 720)), measurePanelContentHeight(panel, 228)];
 	const resizeObserver = attachPanelResizeObserver(node, panel);
@@ -18834,8 +18839,25 @@ function enhanceStagePromptNode(node, library) {
 	return true;
 }
 
+function rollbackStagePromptNodeEnhancement(node) {
+	const panelState = node?.[PANEL_KEY];
+	if (!panelState) {
+		const orphanPanelWidget = getWidget(node, "qwen_te_tag_panel");
+		return orphanPanelWidget ? removeNodeWidgetSafely(node, orphanPanelWidget) : false;
+	}
+	stopStageOutputPolling(node);
+	try { panelState.resizeObserver?.disconnect?.(); } catch (_error) {}
+	if (node.onExecuted === panelState.onExecutedWrapper) node.onExecuted = panelState.originalOnExecuted;
+	if (panelState.panelWidget && Array.isArray(node.widgets) && node.widgets.includes(panelState.panelWidget)) {
+		removeNodeWidgetSafely(node, panelState.panelWidget);
+	}
+	try { panelState.panel?.remove?.(); } catch (_error) {}
+	delete node[PANEL_KEY];
+	return true;
+}
+
 function scheduleEnhanceStagePromptNode(node) {
-	if (!node || node[NODE_REMOVED_KEY] || node[PANEL_KEY]) return;
+	if (!node || node[NODE_REMOVED_KEY] || node[PANEL_KEY] || shouldForceMiniToolbarMode()) return;
 	let state = node[NODE_ENHANCE_RETRY_STATE_KEY];
 	if (!state) {
 		state = { running: false, timer: null, tries: 0, cancelled: false, run: null };
@@ -18854,7 +18876,7 @@ function scheduleEnhanceStagePromptNode(node) {
 			state.timer?.unref?.();
 		};
 		state.run = async () => {
-			if (state.cancelled || node[NODE_REMOVED_KEY] || node[PANEL_KEY] || state.running) return;
+			if (state.cancelled || node[NODE_REMOVED_KEY] || node[PANEL_KEY] || state.running || shouldForceMiniToolbarMode()) return;
 			if (typeof node.addWidget !== "function" || typeof node.addDOMWidget !== "function") {
 				scheduleRetry();
 				return;
@@ -18871,6 +18893,8 @@ function scheduleEnhanceStagePromptNode(node) {
 				if (enhanced && node[PANEL_KEY]) clearStageNodeEnhanceRetry(node);
 				else scheduleRetry();
 			} catch (error) {
+				rollbackStagePromptNodeEnhancement(node);
+				try { window.__QWEN_TE_STAGE_ENSURE_MINI_TOOLBAR__?.(node); } catch (_error) {}
 				console.error("[QwenTE UI] enhanceStagePromptNode failed", error);
 				scheduleRetry();
 			} finally {
@@ -18932,7 +18956,7 @@ function enhanceExistingStagePromptNodes() {
 		for (const node of nodes) {
 			if (node?.[NODE_REMOVED_KEY]) continue;
 			if (isStagePromptNode(node)) {
-				cleanupFixUiArtifacts(node);
+				cleanupFixUiArtifacts(node, { preserveMiniToolbar: !node[PANEL_KEY] });
 				compactStagePromptOutputs(node);
 				const panelState = node[PANEL_KEY];
 				const topWidgetsHealthy =
@@ -18946,7 +18970,7 @@ function enhanceExistingStagePromptNodes() {
 					scheduleNodeLayoutUpdate(node);
 				}
 			}
-			if (isStagePromptNode(node) && !node[PANEL_KEY]) {
+			if (isStagePromptNode(node) && !node[PANEL_KEY] && !shouldForceMiniToolbarMode()) {
 				scheduleEnhanceStagePromptNode(node);
 			}
 		}

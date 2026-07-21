@@ -561,7 +561,7 @@ test("ensureMiniToolbar renders NSFW action and opens workspace bridge", async (
 	assert.equal(root.querySelector(".qwen-te-mini__meta").textContent, "已打开 NSFW 工作台。");
 });
 
-test("ensureMiniToolbar stays disabled when the main stage UI is active", async () => {
+test("main script load alone does not disable the per-node mini fallback", async () => {
 	const exports = await loadMiniToolbarExports();
 	exports.__context.__QWEN_TE_STAGE_MAIN_UI__ = true;
 	const addedWidgets = [];
@@ -589,7 +589,30 @@ test("ensureMiniToolbar stays disabled when the main stage UI is active", async 
 
 	exports.ensureMiniToolbar(node);
 
-	assert.equal(addedWidgets.length, 0);
+	assert.equal(addedWidgets.length, 1);
+	assert.equal(addedWidgets[0].name, "qwen_te_mini_toolbar_dom");
+	assert.equal(node.title.endsWith(" [TEmini]"), true);
+});
+
+test("a confirmed main panel remains authoritative when the main script is loaded", async () => {
+	const exports = await loadMiniToolbarExports();
+	exports.__context.__QWEN_TE_STAGE_MAIN_UI__ = true;
+	const addedWidgets = [];
+	const node = {
+		title: "阶段式提示词生成器",
+		comfyClass: "QwenTE_StagePromptGenerator",
+		size: [420, 280],
+		widgets: [{ name: "qwen_te_tag_panel", serialize: false }],
+		outputs: [],
+		addDOMWidget(name) {
+			addedWidgets.push(name);
+			return { name };
+		},
+	};
+
+	exports.ensureMiniToolbar(node);
+
+	assert.deepEqual(addedWidgets, []);
 	assert.equal(node.title.endsWith(" [TEmini]"), false);
 });
 
@@ -622,6 +645,109 @@ test("explicit mini mode remains available when the main script is loaded", asyn
 
 	assert.equal(addedWidgets.length, 1);
 	assert.equal(addedWidgets[0].name, "qwen_te_mini_toolbar_dom");
+});
+
+test("mini fallback collapses slots 11-20, future raw controls, and internal state", async () => {
+	const exports = await loadMiniToolbarExports();
+	exports.__context.__QWEN_TE_STAGE_MAIN_UI__ = true;
+	const makeWidget = (name, value = "") => ({
+		name,
+		value,
+		type: "combo",
+		serialize: true,
+		hidden: false,
+		options: { hidden: false },
+		computeSize: () => [240, 24],
+		inputEl: { style: {} },
+		element: { style: {} },
+	});
+	const tag11 = makeWidget("主体标签11", "无");
+	const tag20 = makeWidget("画面风格标签20", "无");
+	const styleIsolation = makeWidget("风格隔离策略", "平衡收敛");
+	const modelSource = makeWidget("模型来源", "仅Skill");
+	const futureControl = makeWidget("未来新增参数", "默认");
+	const internalCache = makeWidget("连续生成避重缓存", "内部值");
+	const addedWidgets = [];
+	const node = {
+		title: "阶段式提示词生成器",
+		comfyClass: "QwenTE_StagePromptGenerator",
+		size: [420, 280],
+		widgets: [
+			{ name: "qwen模型", value: "" },
+			{ name: "模板风格", value: "" },
+			{ name: "首条正向提示词", value: "" },
+			tag11,
+			tag20,
+			styleIsolation,
+			modelSource,
+			futureControl,
+			internalCache,
+		],
+		outputs: [],
+		computeSize: () => [420, 280],
+		setSize(size) { this.size = size; },
+		addDOMWidget(name, type, element, options) {
+			const widget = { name, type, element, options, serialize: false };
+			addedWidgets.push(widget);
+			return widget;
+		},
+	};
+
+	exports.ensureMiniToolbar(node);
+
+	for (const widget of [tag11, tag20, styleIsolation, modelSource, futureControl, internalCache]) {
+		assert.equal(widget.hidden, true, `${widget.name} should start collapsed`);
+		assert.equal(widget.inputEl.style.display, "none");
+	}
+	const root = addedWidgets[0].element;
+	const getButton = (label) => root.querySelectorAll("button").find((button) => button.textContent === label);
+	await getButton("高级").click();
+	for (const widget of [styleIsolation, modelSource, futureControl]) assert.equal(widget.hidden, false);
+	assert.equal(internalCache.hidden, true);
+	await getButton("槽位").click();
+	assert.equal(tag11.hidden, false);
+	assert.equal(tag20.hidden, false);
+});
+
+test("failed mini DOM registration restores native widgets and remains retryable", async () => {
+	const exports = await loadMiniToolbarExports();
+	const originalComputeSize = () => [240, 24];
+	const rawWidget = {
+		name: "主体标签20",
+		value: "无",
+		type: "combo",
+		serialize: true,
+		hidden: false,
+		options: { hidden: false },
+		computeSize: originalComputeSize,
+		inputEl: { style: { display: "grid" } },
+		element: { style: { display: "flex" } },
+	};
+	let addCalls = 0;
+	const node = {
+		title: "阶段式提示词生成器",
+		comfyClass: "QwenTE_StagePromptGenerator",
+		size: [420, 280],
+		widgets: [rawWidget],
+		outputs: [],
+		computeSize: () => [420, 280],
+		setSize(size) { this.size = size; },
+		addDOMWidget() {
+			addCalls += 1;
+			return null;
+		},
+	};
+
+	assert.equal(exports.ensureMiniToolbar(node), false);
+	assert.equal(exports.ensureMiniToolbar(node), false);
+
+	assert.equal(addCalls, 2);
+	assert.equal(node.title.endsWith(" [TEmini]"), false);
+	assert.equal(rawWidget.type, "combo");
+	assert.equal(rawWidget.computeSize, originalComputeSize);
+	assert.equal(rawWidget.hidden, false);
+	assert.equal(rawWidget.inputEl.style.display, "grid");
+	assert.equal(rawWidget.element.style.display, "flex");
 });
 
 test("mini cleanup restores every stashed native widget field", async () => {
@@ -791,7 +917,7 @@ test("clean main-panel nodes do not trigger repeated mini cleanup layouts", asyn
 	assert.equal(dirtyCalls, 0);
 });
 
-test("setup clears an old scan timer and does not start one under the main UI", async () => {
+test("setup keeps a bounded fallback scan even when the main script is loaded", async () => {
 	const exports = await loadMiniToolbarExports();
 	const cleared = [];
 	let started = 0;
@@ -803,8 +929,8 @@ test("setup clears an old scan timer and does not start one under the main UI", 
 	await exports.__extension.setup();
 
 	assert.deepEqual(cleared, [101]);
-	assert.equal(started, 0);
-	assert.equal(exports.__context[exports.MINI_STARTUP_SCAN_TIMER_KEY], null);
+	assert.equal(started, 1);
+	assert.equal(exports.__context[exports.MINI_STARTUP_SCAN_TIMER_KEY], 202);
 });
 
 test("setup keeps one bounded startup scan and graph hook across repeated setup", async () => {

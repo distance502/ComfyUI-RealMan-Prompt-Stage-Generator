@@ -774,6 +774,7 @@ test("stage panel keeps one compact quickbar and omits duplicate side deck", asy
 		assert.equal(source.includes(`addBottomWidget(node, "button", "${label}"`), false, `${label} must not return as a native fallback button`);
 	}
 	assert.equal(source.includes('"qwen_te_mini_toolbar_dom"'), true);
+	assert.equal(source.includes("window.__QWEN_TE_STAGE_MAIN_UI_LOADED__ = true"), true);
 	assert.equal(source.includes("window.__QWEN_TE_STAGE_MAIN_UI__ = true"), true);
 });
 
@@ -797,6 +798,22 @@ test("legacy native action buttons are removed while top status rows remain", as
 	assert.deepEqual(Array.from(node.widgets, (widget) => widget.name), ["状态", "摘要", "模板风格"]);
 	assert.equal(node.title, "阶段式提示词生成器");
 	assert.equal(miniCleanupCalls, 1);
+});
+
+test("main enhancement cleanup preserves the mini fallback until panel ownership succeeds", async () => {
+	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	let miniCleanupCalls = 0;
+	exports.__context.__QWEN_TE_STAGE_CLEANUP_MINI_TOOLBAR__ = () => { miniCleanupCalls += 1; return true; };
+	const miniWidget = { name: "qwen_te_mini_toolbar_dom", serialize: false, __qwenStageMiniWidget: true };
+	const node = { widgets: [miniWidget, { name: "模板风格", serialize: true }] };
+
+	exports.cleanupFixUiArtifacts(node, { preserveMiniToolbar: true });
+
+	assert.equal(miniCleanupCalls, 0);
+	assert.equal(node.widgets.includes(miniWidget), true);
+	exports.cleanupFixUiArtifacts(node);
+	assert.equal(miniCleanupCalls, 1);
+	assert.equal(node.widgets.includes(miniWidget), false);
 });
 
 test("cleanup preserves a user title ending in UI when no legacy title artifact exists", async () => {
@@ -6053,7 +6070,12 @@ test("stage node creation assigns a clone-safe cache namespace synchronously", a
 test("main panel does not commit lifecycle state when DOM widgets are unavailable", async () => {
 	const source = await fs.readFile(UI_PATH, "utf8");
 	assert.equal(source.includes('if (typeof node.addDOMWidget !== "function") return false;'), true);
+	assert.equal(source.includes("cleanupFixUiArtifacts(node, { preserveMiniToolbar: true })"), true);
+	assert.equal(source.includes('?? getWidget(node, "qwen_te_tag_panel")'), true);
 	assert.equal(source.includes("if (!panelWidget)"), true);
+	assert.equal(source.includes("__QWEN_TE_STAGE_CLEANUP_MINI_TOOLBAR__?.(node, { scheduleLayout: false })"), true);
+	assert.equal(source.includes("rollbackStagePromptNodeEnhancement(node)"), true);
+	assert.equal(source.includes("__QWEN_TE_STAGE_ENSURE_MINI_TOOLBAR__?.(node)"), true);
 	assert.equal(source.includes("else scheduleRetry();"), true);
 	assert.equal(source.includes("panelWidget,summaryEl:summary"), true);
 	assert.equal(source.includes("originalOnExecuted: null, onExecutedWrapper: null"), true);
