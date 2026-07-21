@@ -167,6 +167,7 @@ async function loadUiExports(href = "http://127.0.0.1:8188/", contextOverrides =
 const exportTail = `
 globalThis.__stagePromptUiTestExports = {
 	PANEL_KEY,
+	PANEL_READY_KEY,
 	STAGE_OUTPUT_INDEX,
 	STAGE_DISPLAY_MODES,
 	isStagePromptNode,
@@ -278,6 +279,7 @@ globalThis.__stagePromptUiTestExports = {
 	scheduleStageExecutionOutputCapture,
 	scheduleEnhanceStagePromptNode,
 	cleanupStagePromptNodeRuntime,
+	rollbackStagePromptNodeEnhancement,
 	enhanceExistingStagePromptNodes,
 	disposeModalOverlay,
 	markNodeWorkflowQueueRequested,
@@ -906,6 +908,7 @@ test("maintenance repairs missing top status rows without rebuilding the panel",
 		},
 	};
 	node[exports.PANEL_KEY] = {
+		ready: true,
 		library: { slot_config: [], tag_library: {} },
 		summaryEl: makeElement("div"),
 		lastPanelMessage: "",
@@ -2807,6 +2810,7 @@ test("rapid batch execution records every generated prompt before the next resul
 			stageOutputRecordSignature: "",
 		},
 	};
+	node[exports.PANEL_READY_KEY] = true;
 	exports.__context.__testApp.graph._nodes = [node];
 	const executedPayload = (prompt) => [{ qwen_te_stage_output: ["完整结果", prompt, "标签摘要", "{}", "负面词", prompt, ""] }];
 
@@ -6031,6 +6035,7 @@ test("stage cleanup restores onExecuted and disposes its panel widget exactly on
 		continuousRuntime: { running: false, token: 0 },
 		resizeObserver: { disconnect() { disconnectCount += 1; } },
 	};
+	node[exports.PANEL_READY_KEY] = true;
 
 	exports.cleanupStagePromptNodeRuntime(node);
 	exports.cleanupStagePromptNodeRuntime(node);
@@ -6040,6 +6045,7 @@ test("stage cleanup restores onExecuted and disposes its panel widget exactly on
 	assert.equal(disconnectCount, 1);
 	assert.equal(widgetRemoveCount, 1);
 	assert.equal(panelRemoveCount, 1);
+	assert.equal(node[exports.PANEL_READY_KEY], undefined);
 });
 
 test("stage node creation assigns a clone-safe cache namespace synchronously", async () => {
@@ -6075,6 +6081,10 @@ test("main panel does not commit lifecycle state when DOM widgets are unavailabl
 	assert.equal(source.includes("if (!panelWidget)"), true);
 	assert.equal(source.includes("__QWEN_TE_STAGE_CLEANUP_MINI_TOOLBAR__?.(node, { scheduleLayout: false })"), true);
 	assert.equal(source.includes("rollbackStagePromptNodeEnhancement(node)"), true);
+	assert.equal(source.includes('Symbol.for("qwen_te.stage_prompt.panel_ready")'), true);
+	assert.equal(source.includes("node[PANEL_KEY].ready = true"), true);
+	assert.equal(source.includes("node[PANEL_READY_KEY] = true"), true);
+	assert.equal(source.includes("__QWEN_TE_STAGE_ROLLBACK__"), true);
 	assert.equal(source.includes("__QWEN_TE_STAGE_ENSURE_MINI_TOOLBAR__?.(node)"), true);
 	assert.equal(source.includes("else scheduleRetry();"), true);
 	assert.equal(source.includes("panelWidget,summaryEl:summary"), true);

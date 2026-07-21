@@ -693,8 +693,20 @@ def _resolve_runtime_random_target_style(
         style_name: sum(1 for tag in all_tags if tag in family_tags)
         for style_name, family_tags in style_families.items()
     }
-    best_style = max(scores, key=scores.get)
-    return best_style if scores.get(best_style, 0) > 0 else ""
+    best_style = max(scores, key=scores.get) if scores else ""
+    if scores.get(best_style, 0) > 0:
+        return best_style
+
+    # Theme pools are allowed to choose the primary medium when the pool has
+    # not yet contributed a style tag (for example during an empty preview).
+    theme_pool = str(settings.get("随机主题池", "自动") or "自动").strip()
+    theme_defaults = {
+        "古风园林": "古风", "武侠江湖": "古风", "国风": "古风",
+        "洛可可宫廷": "神话感", "神话史诗": "神话感", "暗黑哥特": "神话感",
+        "赛博工业": "CG感", "东方赛博": "CG感", "机甲科幻": "CG感",
+        "废土荒原": "CG感", "复古插画": "插画感",
+    }
+    return theme_defaults.get(theme_pool, "真实感" if theme_pool not in {"", "自动"} else "")
 
 
 def _apply_runtime_random_style_isolation(
@@ -708,11 +720,6 @@ def _apply_runtime_random_style_isolation(
     remove_tag_from_state: TagRemoveFn,
     **_: Any,
 ) -> None:
-    if not bool(settings.get("运行时随机标签", False)):
-        return
-    if _style_isolation_mode(settings) == "允许风格漂移":
-        return
-
     all_tags = collect_all_tags(selected, custom_tags)
     target_style = _resolve_runtime_random_target_style(settings, context, all_tags)
     if not target_style:
@@ -736,7 +743,38 @@ def _apply_runtime_random_style_isolation(
         if style_name != target_style
         for tag in family_tags
     }
+    mode = _style_isolation_mode(settings)
     removable_terms = (blocked_terms | cross_style_terms) - target_family
+
+    # Balanced mode may retain one neutral texture bridge. Drift mode may
+    # retain one deliberate secondary style track, while every other track is
+    # still removed. This keeps the narrative medium coherent without making
+    # all mixed-media prompts impossible.
+    preserved_foreign: set[str] = set()
+    if mode == "平衡收敛":
+        bridge_hints = {
+            str(tag).strip()
+            for tag in context.get("style_bridge_hints", ("胶片感", "杂志感", "港风", "真实感", "照片级"))
+            if str(tag).strip()
+        }
+        preserved_foreign = next(
+            ({tag} for tag in all_tags if tag in cross_style_terms and tag in bridge_hints),
+            set(),
+        )
+    elif mode == "允许风格漂移":
+        secondary_scores = {
+            style_name: sum(1 for tag in all_tags if tag in family_tags)
+            for style_name, family_tags in style_families.items()
+            if style_name != target_style
+        }
+        secondary_style = max(secondary_scores, key=secondary_scores.get) if secondary_scores else ""
+        if secondary_scores.get(secondary_style, 0) > 0:
+            secondary_family = style_families.get(secondary_style, set())
+            preserved_foreign = next(
+                ({tag} for tag in all_tags if tag in secondary_family),
+                set(),
+            )
+    removable_terms -= preserved_foreign
     if not removable_terms:
         return
 
@@ -749,7 +787,7 @@ def _apply_runtime_random_style_isolation(
 
     if removed:
         notes.append(
-            f"运行随机风格隔离：当前按 {target_style} 轨道生成，移除跨风格污染词 {'、'.join(dict.fromkeys(removed))}。"
+            f"全局风格隔离（运行随机风格隔离兼容）：当前按 {target_style} 轨道生成，{mode}策略移除跨风格污染词 {'、'.join(dict.fromkeys(removed))}。"
         )
 
 
@@ -1090,8 +1128,8 @@ _STAGE_PROMPT_SKILLS: tuple[StagePromptSkill, ...] = (
     ),
     StagePromptSkill(
         name="runtime_random_style_isolation",
-        phase="early_normalize",
-        enabled=lambda settings, context: bool(settings.get("运行时随机标签", False)),
+        phase="final_normalize",
+        enabled=lambda settings, context: True,
         apply=_apply_runtime_random_style_isolation,
     ),
     StagePromptSkill(

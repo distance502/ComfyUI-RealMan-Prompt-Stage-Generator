@@ -598,6 +598,8 @@ test("a confirmed main panel remains authoritative when the main script is loade
 	const exports = await loadMiniToolbarExports();
 	exports.__context.__QWEN_TE_STAGE_MAIN_UI__ = true;
 	const addedWidgets = [];
+	const panelKey = Symbol.for("qwen_te.stage_prompt.panel");
+	const panelReadyKey = Symbol.for("qwen_te.stage_prompt.panel_ready");
 	const node = {
 		title: "阶段式提示词生成器",
 		comfyClass: "QwenTE_StagePromptGenerator",
@@ -609,11 +611,39 @@ test("a confirmed main panel remains authoritative when the main script is loade
 			return { name };
 		},
 	};
+	node[panelKey] = { ready: true };
+	node[panelReadyKey] = true;
 
 	exports.ensureMiniToolbar(node);
 
 	assert.deepEqual(addedWidgets, []);
 	assert.equal(node.title.endsWith(" [TEmini]"), false);
+});
+
+test("an orphan main panel cannot suppress the compact mini fallback", async () => {
+	const exports = await loadMiniToolbarExports();
+	const rawWidget = { name: "主体标签20", value: "无", type: "combo", options: {}, inputEl: { style: {} }, element: { style: {} } };
+	const node = {
+		title: "阶段式提示词生成器",
+		comfyClass: "QwenTE_StagePromptGenerator",
+		size: [420, 280],
+		widgets: [{ name: "qwen_te_tag_panel", serialize: false }, rawWidget],
+		outputs: [],
+		computeSize: () => [420, 280],
+		setSize(size) { this.size = size; },
+		addDOMWidget(name, type, element, options) {
+			const widget = { name, type, element, options, serialize: true };
+			this.widgets.push(widget);
+			return widget;
+		},
+	};
+
+	exports.ensureMiniToolbar(node);
+
+	assert.equal(node.widgets.some((widget) => widget.name === "qwen_te_tag_panel"), false);
+	assert.equal(node.widgets.some((widget) => widget.name === "qwen_te_mini_toolbar_dom"), true);
+	assert.equal(rawWidget.hidden, true);
+	assert.deepEqual(Array.from(rawWidget.computeSize()), [0, -4]);
 });
 
 test("explicit mini mode remains available when the main script is loaded", async () => {
@@ -841,6 +871,8 @@ test("ensureMiniToolbar removes stale DOM toolbar when main panel is present", a
 	assert.equal(node.title.endsWith(" [TEmini]"), true);
 
 	node.widgets.push({ name: "qwen_te_tag_panel", serialize: false });
+	node[Symbol.for("qwen_te.stage_prompt.panel")] = { ready: true };
+	node[Symbol.for("qwen_te.stage_prompt.panel_ready")] = true;
 	exports.ensureMiniToolbar(node);
 
 	assert.equal(wrapper.children.includes(root), false);
@@ -905,6 +937,8 @@ test("clean main-panel nodes do not trigger repeated mini cleanup layouts", asyn
 		computeSize: () => [420, 280],
 		setSize() { setSizeCalls += 1; },
 	};
+	node[Symbol.for("qwen_te.stage_prompt.panel")] = { ready: true };
+	node[Symbol.for("qwen_te.stage_prompt.panel_ready")] = true;
 	exports.__context.__testApp.graph = {
 		_nodes: [node],
 		setDirtyCanvas() { dirtyCalls += 1; },

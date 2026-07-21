@@ -1441,6 +1441,29 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertIn("俯视平铺", library["构图视角"]["构图方式"])
         self.assertIn("哑光陶瓷", library["技术画质"]["材质"])
 
+    def test_tag_library_enriches_landscape_and_tyndall_lighting_controls(self) -> None:
+        lighting = tag_library.展平标签分类("光影氛围")
+        scenery = tag_library.展平标签分类("场景背景")
+        self.assertIn("丁达尔光效", lighting)
+        self.assertIn("雾中体积光柱", lighting)
+        self.assertIn("云海山巅", scenery)
+        self.assertIn("海蚀拱门", scenery)
+        self.assertGreaterEqual(len(lighting), 300)
+        self.assertGreaterEqual(len(scenery), 550)
+
+    def test_nsfw_workspace_catalog_has_broad_structured_controls(self) -> None:
+        option_count = sum(len(values) for values in nsfw_presets.NSFW_WORKSPACE_OPTIONS.values())
+        self.assertGreaterEqual(option_count, 750)
+        self.assertGreaterEqual(len(nsfw_presets.NSFW_WORKSPACE_PRESETS), 16)
+        self.assertIn(
+            "成熟私房电影感，动作停在情绪峰值之前，保留开放结尾",
+            nsfw_presets.NSFW_WORKSPACE_OPTIONS["adult_action_style"],
+        )
+        self.assertIn(
+            "丁达尔光效，光束穿过水汽并指向人物动作",
+            nsfw_presets.NSFW_WORKSPACE_OPTIONS["light_type"],
+        )
+
     def test_tag_library_enriches_example_case_scene_and_colossus_tags(self) -> None:
         library = tag_library.当前标签库()
         self.assertIn("城市屋顶纪实", library["画面风格"]["现代摄影"])
@@ -6833,8 +6856,8 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertIn("只输出最终提示词正文", template)
         self.assertIn("真实但美", template)
         self.assertIn("不要强行改成写实摄影", template)
-        self.assertIn("700-1100", template)
-        self.assertIn("360-600", template)
+        self.assertIn("800-1200", template)
+        self.assertIn("420-560", template)
         self.assertIn("事件触发", template)
         self.assertIn("主体回应", template)
         self.assertIn("镜头定格", template)
@@ -9526,7 +9549,7 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertIn("最近输出避重", seed)
         self.assertIn("蒸汽浴室", seed)
         self.assertIn("湿身淋浴", seed)
-        self.assertIn("目标 700-1100 字", seed)
+        self.assertIn("800-1200 字", seed)
 
     def test_smart_text_seed_requests_prompt_first_and_not_tag_list(self) -> None:
         seed = smart_text.build_smart_text_seed(
@@ -9598,8 +9621,8 @@ class TestStagePromptModules(unittest.TestCase):
             selected_tags_text="",
             settings={"提示词语言": "英文提示词+中文说明"},
         )
-        self.assertIn("目标 700-1100 字", chinese_seed)
-        self.assertIn("360-600 words", english_seed)
+        self.assertIn("800-1200 字", chinese_seed)
+        self.assertIn("420-560 words", english_seed)
         self.assertIn("中文说明", bilingual_seed)
 
     def test_smart_text_settings_use_compact_fast_sampling(self) -> None:
@@ -9614,8 +9637,8 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertGreaterEqual(settings["重复惩罚"], 1.1)
         self.assertGreaterEqual(settings["频率惩罚"], 0.12)
         self.assertGreaterEqual(settings["存在惩罚"], 0.06)
-        self.assertIn("700-1100", settings["系统提示词覆盖"])
-        self.assertIn("360-600", settings["系统提示词覆盖"])
+        self.assertIn("800-1200", settings["系统提示词覆盖"])
+        self.assertIn("420-560", settings["系统提示词覆盖"])
         self.assertIn("不要标签清单", settings["系统提示词覆盖"])
         self.assertIn("不要用近义词反复堆叠", settings["系统提示词覆盖"])
         self.assertIn("事件触发 → 主体回应 → 情绪转折 → 环境与光线反馈 → 镜头定格", settings["系统提示词覆盖"])
@@ -10671,6 +10694,71 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertIn("OVA风", selected["画面风格"])
         self.assertNotIn("CG感", selected["画面风格"])
         self.assertNotIn("虚幻引擎", selected["画面风格"])
+
+    def test_final_normalize_style_isolation_runs_without_runtime_random(self) -> None:
+        selected = OrderedDict({"画面风格": ["真实感", "照片级", "CG感", "虚幻引擎", "水彩"]})
+        custom_tags = ["保留剧情线索"]
+        notes: list[str] = []
+        skills.apply_stage_prompt_skills(
+            selected,
+            custom_tags,
+            {
+                "模板风格": "商业摄影",
+                "随机主题池": "古风园林",
+                "运行时随机标签": False,
+                "风格隔离策略": "严格风格隔离",
+            },
+            notes,
+            phase="final_normalize",
+            collect_all_tags=collect_all_tags,
+            remove_tag_from_state=remove_tag_from_state,
+            append_tag_to_state=append_tag_to_state,
+            uniq=uniq,
+            context={
+                "runtime_style_isolation_families": {
+                    "真实感": {"真实感", "照片级"},
+                    "插画感": {"水彩"},
+                    "CG感": {"CG感", "虚幻引擎"},
+                    "古风": {"古风"},
+                },
+                "style_positive_exclusion_terms": {"真实感": ("水彩", "CG感", "虚幻引擎")},
+            },
+        )
+        self.assertEqual(selected["画面风格"], ["真实感", "照片级"])
+        self.assertEqual(custom_tags, ["保留剧情线索"])
+        self.assertTrue(any("全局风格隔离" in note for note in notes))
+
+    def test_style_isolation_modes_limit_secondary_media_tracks(self) -> None:
+        families = {
+            "真实感": {"真实感", "胶片感", "照片级"},
+            "插画感": {"插画感", "水彩"},
+            "CG感": {"CG感"},
+            "古风": {"古风"},
+        }
+
+        balanced = OrderedDict({"画面风格": ["古风", "胶片感", "照片级", "CG感"]})
+        skills._apply_runtime_random_style_isolation(
+            selected=balanced,
+            custom_tags=[],
+            settings={"模板风格": "古风", "运行时随机标签": False, "风格隔离策略": "平衡收敛"},
+            notes=[],
+            context={"runtime_style_isolation_families": families, "style_bridge_hints": {"胶片感"}},
+            collect_all_tags=collect_all_tags,
+            remove_tag_from_state=remove_tag_from_state,
+        )
+        self.assertEqual(balanced["画面风格"], ["古风", "胶片感"])
+
+        drift = OrderedDict({"画面风格": ["真实感", "插画感", "水彩", "CG感"]})
+        skills._apply_runtime_random_style_isolation(
+            selected=drift,
+            custom_tags=[],
+            settings={"模板风格": "真实感", "运行时随机标签": False, "风格隔离策略": "允许风格漂移"},
+            notes=[],
+            context={"runtime_style_isolation_families": families},
+            collect_all_tags=collect_all_tags,
+            remove_tag_from_state=remove_tag_from_state,
+        )
+        self.assertEqual(drift["画面风格"], ["真实感", "插画感"])
 
     def test_theme_profile_rotation_continues_after_full_cycle(self) -> None:
         module = load_stage_prompt_generator_for_integration_test()
@@ -13911,6 +13999,10 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertEqual(len({plan["signature"] for plan in plans}), 3)
         self.assertEqual(len({plan["arc_id"] for plan in plans}), 3)
         self.assertEqual(len({plan["emotion_zh"] for plan in plans}), 3)
+        self.assertGreaterEqual(len({plan["motive_zh"] for plan in plans}), 2)
+        self.assertGreaterEqual(len({plan["escalation_zh"] for plan in plans}), 2)
+        self.assertGreaterEqual(len({plan["feedback_zh"] for plan in plans}), 2)
+        self.assertGreaterEqual(len({plan["climax_zh"] for plan in plans}), 2)
         self.assertTrue(all(plan["ending_zh"] for plan in plans))
 
     def test_prompt_builder_outputs_long_causal_natural_language_for_every_item(self) -> None:
@@ -13956,7 +14048,8 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertEqual(len(set(prompts)), 3)
         self.assertEqual(len(settings["全局剧情规划"]), 3)
         for prompt in prompts:
-            self.assertGreaterEqual(len(prompt), 650, prompt)
+            self.assertGreaterEqual(len(prompt), 800, prompt)
+            self.assertLessEqual(len(prompt), 1200, prompt)
             self.assertIn("故事", prompt)
             self.assertIn("因此", prompt)
             self.assertIn("情绪", prompt)
@@ -14007,7 +14100,8 @@ class TestStagePromptModules(unittest.TestCase):
         second = module._run_stage(None, **settings)[1]
         self.assertNotEqual(first, second)
         for prompt in (first, second):
-            self.assertGreaterEqual(len(prompt), 650)
+            self.assertGreaterEqual(len(prompt), 800)
+            self.assertLessEqual(len(prompt), 1200)
             self.assertIn("因此", prompt)
             self.assertIn("情绪", prompt)
             self.assertIn("最终画面", prompt)
@@ -14021,6 +14115,7 @@ class TestStagePromptModules(unittest.TestCase):
         )
         self.assertIn("全局剧情与自然语言合同", resolved)
         self.assertIn("事件触发", resolved)
+        self.assertIn("800-1200", resolved)
         self.assertEqual(model_refiner._refiner_sampling_params({"最大生成token": 256})["max_tokens"], 256)
         self.assertEqual(
             model_refiner._refiner_sampling_params({"最大生成token": 256}, prompt_count=3)["max_tokens"],

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import math
+import sys
 import time
 import urllib.request
 import importlib.util
@@ -226,6 +227,11 @@ def resolve_workflow_path() -> Path:
     for fallback_path in WORKFLOW_FALLBACK_PATHS:
         if fallback_path.exists():
             return fallback_path
+    portable_comfyui_root = Path(sys.executable).resolve().parent.parent / "ComfyUI"
+    for filename in ("Z-IMAGE电影光影工作流 by.TE.json", "Kook_Zimage_瑶光.json"):
+        portable_fallback = portable_comfyui_root / "user" / "default" / "workflows" / filename
+        if portable_fallback.exists():
+            return portable_fallback
     raise FileNotFoundError(f"Missing workflow template: {WORKFLOW_PATH}")
 
 

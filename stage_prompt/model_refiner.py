@@ -23,11 +23,11 @@ DEFAULT_STAGE_PROMPT_SYSTEM_TEMPLATE = """
 输出硬规则：
 1. 只输出最终提示词正文，不输出标题、解释、分析、参数、表格、Markdown、代码块、引号、前后缀或“提示词：”。
 2. 默认跟随输入语言；中文输入输出中文，英文输入输出英文，中英混合时优先保留可出图的英文美学词。
-3. 输出为一段自然完整的提示词正文；不要分条，不要换行，不要写成教程或摄影分析。中文目标 700-1100 字；英文目标 360-600 words。
+3. 输出为一段自然完整的提示词正文；不要分条，不要换行，不要写成教程或摄影分析。中文成品必须为 800-1200 字自然语言；英文目标 420-560 words。
 4. 保留主体身份、年龄锚点、人数、服装、动作、场景、构图景别、镜头、光影、材质、风格、画质和负面规避意图；尤其不要删除“中景半身、全景全身、近景、侧逆光、古风、CG感、神话感、NSFW”等关键锚点。
 5. 同一批多条提示词必须保持各自差异，不要合并成同一条，也不要把不同随机主题池改成相同画面。
 6. 先建立事件与因果，再自然展开主体身份、服装材质、动作目的、情绪转折、场景空间、环境反馈、光影迁移、镜头时机和画质稳定性。不要按固定维度逐段点名，不要用近义词反复灌水。
-7. 全局构图必须服务剧情：主体的动作改变环境，环境或道具给出回应，光线与焦点随事件推进，最后定格在具有前因后果和继续想象空间的状态。
+7. 全局构图必须服务剧情：主体的动作改变环境，环境或道具给出回应，光线与焦点随事件推进，最后让镜头定格在具有前因后果和继续想象空间的状态。
 8. 具体描述优先于空泛形容：用“暖色侧逆光、雨雾竹林、35mm 胶片颗粒、丝绸边缘高光、湿润石阶反光”这类可见信息替代“好看、震撼、顶级、神级”等空词。
 9. 外部平台参数、码图 --profile / profile code、UUID、--ar、--stylize、--raw、--hd、--seed 等只可作为参考来源信息，绝对不要进入最终提示词正文。
 10. 素材库只提供写法和词汇方向，不提供固定模板；不得锁死“古风、武侠、CG、全身、白底、某个角色、某个场景”。用户已选标签和当前随机结果永远优先。
@@ -675,16 +675,16 @@ def _language_instruction(settings: dict[str, Any]) -> str:
     if language == "纯英文":
         return (
             "\n\nLanguage override: The final positive prompt must be English only. "
-            "Target 360-600 English words. Do not output Chinese characters, Chinese labels, explanations, headings, Markdown, or bilingual notes."
+            "Target 420-560 English words. Do not output Chinese characters, Chinese labels, explanations, headings, Markdown, or bilingual notes."
         )
     if language == "英文提示词+中文说明":
         return (
-            "\n\nLanguage override: Output an English prompt body first, targeting 360-600 English words, "
+            "\n\nLanguage override: Output an English prompt body first, targeting 420-560 English words, "
             "then append one short Chinese companion note beginning with `中文说明：` to summarize the visual direction. "
             "Keep the English prompt usable by itself; do not add headings, Markdown, or analysis."
         )
     if language == "纯中文":
-        return "\n\n语言覆盖：最终正向提示词正文必须使用中文，不要改成英文提示词；中文目标 700-1100 字。"
+        return "\n\n语言覆盖：最终正向提示词正文必须使用中文，不要改成英文提示词；中文成品必须为 800-1200 字自然语言。"
     return ""
 
 
@@ -735,6 +735,8 @@ def is_natural_language_prompt(text: str, settings: dict[str, Any] | None = None
     active_settings = settings or {}
     if active_settings and _violates_language(prompt, active_settings):
         return False
+    if active_settings and not _looks_like_narrative_prompt(prompt, active_settings):
+        return False
     return _looks_like_natural_prose_prompt(prompt)
 
 
@@ -768,7 +770,8 @@ def _looks_like_narrative_prompt(text: str, settings: dict[str, Any]) -> bool:
         return False
     if _CJK_PATTERN.search(body):
         hits = sum(any(marker in body for marker in group) for group in _NARRATIVE_MARKER_GROUPS_ZH)
-        return hits >= 5 and len(_CJK_PATTERN.findall(body)) >= 260
+        compact_length = len(re.sub(r"\s+", "", body))
+        return hits >= 5 and 800 <= compact_length <= 1200
     lowered = body.casefold()
     hits = sum(any(marker in lowered for marker in group) for group in _NARRATIVE_MARKER_GROUPS_EN)
     return hits >= 5 and len(_ENGLISH_WORD_PATTERN.findall(body)) >= 150
@@ -853,11 +856,11 @@ def _violates_subject_type(original_prompt: str, candidate_prompt: str, settings
 def _batch_language_instruction(settings: dict[str, Any]) -> str:
     language = _prompt_language_mode(settings)
     if language == "纯英文":
-        return "Language requirement: output every final prompt body in English only, 360-600 words per item, with no Chinese characters.\n"
+        return "Language requirement: output every final prompt body in English only, 420-560 words per item, with no Chinese characters.\n"
     if language == "英文提示词+中文说明":
-        return "Language requirement: each item outputs an English prompt body first, 360-600 words per item, then one short Chinese note beginning with 中文说明： before the separator.\n"
+        return "Language requirement: each item outputs an English prompt body first, 420-560 words per item, then one short Chinese note beginning with 中文说明： before the separator.\n"
     if language == "纯中文":
-        return "语言要求：每条成品提示词正文必须使用中文，不要改成英文提示词；每条目标 700-1100 字。\n"
+        return "语言要求：每条成品提示词正文必须使用中文，不要改成英文提示词；每条必须为 800-1200 字自然语言。\n"
     return ""
 
 

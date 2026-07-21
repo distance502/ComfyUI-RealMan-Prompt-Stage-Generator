@@ -18,6 +18,7 @@ const STAGE_OUTPUT_SIGNATURE_GROUPS = new Map([
 	["智能文本", "smart"], ["智能", "smart"],
 ]);
 const PANEL_KEY = Symbol.for("qwen_te.stage_prompt.panel");
+const PANEL_READY_KEY = Symbol.for("qwen_te.stage_prompt.panel_ready");
 const MODEL_LOADER_PANEL_KEY = Symbol.for("qwen_te.model_loader.panel");
 const HIDDEN_KEY = Symbol("qwen_te_hidden");
 const NAMED_STATE_KEY = "qwen_te_named_widget_state_v1";
@@ -18716,6 +18717,8 @@ function enhanceStagePromptNode(node, library) {
 	cleanupFixUiArtifacts(node, { preserveMiniToolbar: true });
 	compactStagePromptOutputs(node);
 	if (node[PANEL_KEY]) return;
+	// The mini toolbar must be allowed to take over while this panel is still being built.
+	node[PANEL_READY_KEY] = false;
 	if (shouldForceMiniToolbarMode()) return;
 	if (typeof node.addDOMWidget !== "function") return false;
 	const rawTagWidgetNames = getRawTagWidgetNames(library);
@@ -18791,7 +18794,7 @@ function enhanceStagePromptNode(node, library) {
 	panelWidget.serialize=false;
 	panelWidget.computeSize=()=>[Math.max(560, Math.min(node.size[0], 720)), measurePanelContentHeight(panel, 228)];
 	const resizeObserver = attachPanelResizeObserver(node, panel);
-	node[PANEL_KEY]={library,panel,panelWidget,summaryEl:summary,statusEl:null,refreshSummary:()=>refreshNodeSummary(node,node[PANEL_KEY]?.library ?? library), resizeObserver, rawTagWidgetNames, lastPanelMessage: "", lastExecutedAt: 0, lastExecutionOutputs: [], lastWorkflowQueueRequestedAt: 0, workflowOutputMeta: getNodeWorkflowOutputMeta(node), directStageOutputCache: null, directStageOutputCacheId: "", stageOutputPollTimer: null, stageOutputPollIdleCount: 0, stageOutputPollActiveCount: 0, stageOutputEventRecordCount: 0, stageOutputCacheProcessedIds: [], stageOutputWorkflowProcessedIds: [], autoNegativeSync: autoNegativeSyncState.enabled, continuousReportMeta: getNodeContinuousReportMeta(node), presetBatchState: getNodePresetBatchState(node), continuousBadgeEl: null, continuousReportSummaryEl: null, continuousRuntime: { running: false, token: 0, mode: "", step: 0, total: 0 }, heroCaptionEl: null, randomRuntimePillsEl: null, randomTrackHistoryEl: null, heroBadges: {}, themePoolQuickCardButtons, themePoolQuickStatusEl: null, controlSurface, slotPanel, advancedPanel, panelButtons, displayBodyEl: displayBody, displaySourceEl: displaySource, displayMode: STAGE_DISPLAY_MODES[0]?.key ?? "prompt", displayTabButtons, expandedDisplayOverlay: null, expandedDisplayBodyEl: null, expandedDisplaySourceEl: null, expandedDisplayTabButtons: null, expandedDisplayMetricsEl: null, expandedDisplayViewTabButtons: null, expandedDisplayViewMode: "readable", statusWidget: null, summaryWidget: null, originalOnExecuted: null, onExecutedWrapper: null};
+	node[PANEL_KEY]={ready:false,library,panel,panelWidget,summaryEl:summary,statusEl:null,refreshSummary:()=>refreshNodeSummary(node,node[PANEL_KEY]?.library ?? library), resizeObserver, rawTagWidgetNames, lastPanelMessage: "", lastExecutedAt: 0, lastExecutionOutputs: [], lastWorkflowQueueRequestedAt: 0, workflowOutputMeta: getNodeWorkflowOutputMeta(node), directStageOutputCache: null, directStageOutputCacheId: "", stageOutputPollTimer: null, stageOutputPollIdleCount: 0, stageOutputPollActiveCount: 0, stageOutputEventRecordCount: 0, stageOutputCacheProcessedIds: [], stageOutputWorkflowProcessedIds: [], autoNegativeSync: autoNegativeSyncState.enabled, continuousReportMeta: getNodeContinuousReportMeta(node), presetBatchState: getNodePresetBatchState(node), continuousBadgeEl: null, continuousReportSummaryEl: null, continuousRuntime: { running: false, token: 0, mode: "", step: 0, total: 0 }, heroCaptionEl: null, randomRuntimePillsEl: null, randomTrackHistoryEl: null, heroBadges: {}, themePoolQuickCardButtons, themePoolQuickStatusEl: null, controlSurface, slotPanel, advancedPanel, panelButtons, displayBodyEl: displayBody, displaySourceEl: displaySource, displayMode: STAGE_DISPLAY_MODES[0]?.key ?? "prompt", displayTabButtons, expandedDisplayOverlay: null, expandedDisplayBodyEl: null, expandedDisplaySourceEl: null, expandedDisplayTabButtons: null, expandedDisplayMetricsEl: null, expandedDisplayViewTabButtons: null, expandedDisplayViewMode: "readable", statusWidget: null, summaryWidget: null, originalOnExecuted: null, onExecutedWrapper: null};
 	ensureStagePromptTopStatusWidgets(node, library, summary);
 	const originalOnExecuted=node.onExecuted; const onExecutedWrapper=function(){
 		if (node[NODE_REMOVED_KEY]) return originalOnExecuted?.apply(this, arguments);
@@ -18835,15 +18838,22 @@ function enhanceStagePromptNode(node, library) {
 	node.onExecuted=onExecutedWrapper;
 	node[PANEL_KEY].originalOnExecuted=originalOnExecuted;
 	node[PANEL_KEY].onExecutedWrapper=onExecutedWrapper;
-	bindSummaryRefresh(node, library); syncRawWidgetOptions(node, library); const namedState=ensureNodeProperties(node)[NAMED_STATE_KEY]; if(!applyNamedWidgetState(node, namedState)) sanitizeStagePromptNode(node, library); sanitizeStagePromptNode(node, library); persistNamedWidgetState(node); setWidgetGroupVisibility(node, rawTagWidgetNames, false); setWidgetGroupVisibility(node, CONTROL_WIDGET_NAMES, false); setWidgetGroupVisibility(node, ADVANCED_WIDGET_NAMES, false); setWidgetGroupVisibility(node, ALWAYS_HIDDEN_WIDGET_NAMES, false); setSlotPanelVisible(node, false); setAdvancedPanelVisible(node, false); hydrateStageDisplayStateFromPersistedData(node); scheduleHydrateStageDisplayState(node, 8, 90); refreshNodeSummary(node, library); refreshControlSurface(node); refreshSlotPanel(node); refreshAdvancedPanel(node); refreshStageDisplay(node); void syncNodeStageOutputCache(node, { shouldCommit: () => !node[NODE_REMOVED_KEY] && !!node[PANEL_KEY] }).then((output)=>{ if (node[NODE_REMOVED_KEY] || !node[PANEL_KEY]) return; if (output) refreshStageDisplay(node); else if (!getStagePromptOutputText(node)) { if (!hydrateStageDisplayStateFromPersistedData(node)) { void syncNodeWorkflowOutputMetaFromHistory(node, { createdAfter: getNodeWorkflowHistorySearchAfter(node), shouldCommit: () => !node[NODE_REMOVED_KEY] && !!node[PANEL_KEY] }).then(() => { if (node[NODE_REMOVED_KEY] || !node[PANEL_KEY]) return; hydrateStageDisplayStateFromPersistedData(node); refreshStageDisplay(node); }).catch(() => {}); } else { refreshStageDisplay(node); } } }).catch(() => {}); requestAnimationFrame(()=>{ if (node[NODE_REMOVED_KEY] || !node[PANEL_KEY]) return; if (node.size[0] < 560) node.setSize([560, node.size[1]]); scheduleNodeLayoutUpdate(node); });
+	bindSummaryRefresh(node, library); syncRawWidgetOptions(node, library); const namedState=ensureNodeProperties(node)[NAMED_STATE_KEY]; if(!applyNamedWidgetState(node, namedState)) sanitizeStagePromptNode(node, library); sanitizeStagePromptNode(node, library); persistNamedWidgetState(node); setWidgetGroupVisibility(node, rawTagWidgetNames, false); setWidgetGroupVisibility(node, CONTROL_WIDGET_NAMES, false); setWidgetGroupVisibility(node, ADVANCED_WIDGET_NAMES, false); setWidgetGroupVisibility(node, ALWAYS_HIDDEN_WIDGET_NAMES, false); setSlotPanelVisible(node, false); setAdvancedPanelVisible(node, false); hydrateStageDisplayStateFromPersistedData(node); scheduleHydrateStageDisplayState(node, 8, 90); refreshNodeSummary(node, library); refreshControlSurface(node); refreshSlotPanel(node); refreshAdvancedPanel(node); refreshStageDisplay(node);
+	// Only expose a healthy main panel after native controls are compacted and display state is ready.
+	node[PANEL_KEY].ready = true;
+	node[PANEL_READY_KEY] = true;
+	void syncNodeStageOutputCache(node, { shouldCommit: () => !node[NODE_REMOVED_KEY] && !!node[PANEL_KEY] }).then((output)=>{ if (node[NODE_REMOVED_KEY] || !node[PANEL_KEY]) return; if (output) refreshStageDisplay(node); else if (!getStagePromptOutputText(node)) { if (!hydrateStageDisplayStateFromPersistedData(node)) { void syncNodeWorkflowOutputMetaFromHistory(node, { createdAfter: getNodeWorkflowHistorySearchAfter(node), shouldCommit: () => !node[NODE_REMOVED_KEY] && !!node[PANEL_KEY] }).then(() => { if (node[NODE_REMOVED_KEY] || !node[PANEL_KEY]) return; hydrateStageDisplayStateFromPersistedData(node); refreshStageDisplay(node); }).catch(() => {}); } else { refreshStageDisplay(node); } } }).catch(() => {}); requestAnimationFrame(()=>{ if (node[NODE_REMOVED_KEY] || !node[PANEL_KEY]) return; if (node.size[0] < 560) node.setSize([560, node.size[1]]); scheduleNodeLayoutUpdate(node); });
 	return true;
 }
 
 function rollbackStagePromptNodeEnhancement(node) {
+	node[PANEL_READY_KEY] = false;
 	const panelState = node?.[PANEL_KEY];
 	if (!panelState) {
 		const orphanPanelWidget = getWidget(node, "qwen_te_tag_panel");
-		return orphanPanelWidget ? removeNodeWidgetSafely(node, orphanPanelWidget) : false;
+		const removed = orphanPanelWidget ? removeNodeWidgetSafely(node, orphanPanelWidget) : false;
+		if (removed || !orphanPanelWidget) delete node[PANEL_READY_KEY];
+		return removed;
 	}
 	stopStageOutputPolling(node);
 	try { panelState.resizeObserver?.disconnect?.(); } catch (_error) {}
@@ -18853,6 +18863,7 @@ function rollbackStagePromptNodeEnhancement(node) {
 	}
 	try { panelState.panel?.remove?.(); } catch (_error) {}
 	delete node[PANEL_KEY];
+	delete node[PANEL_READY_KEY];
 	return true;
 }
 
@@ -18931,7 +18942,11 @@ function cleanupStagePromptNodeRuntime(node) {
 	node[NODE_LIBRARY_REFRESH_REVISION_KEY] = Math.max(0, Number(node[NODE_LIBRARY_REFRESH_REVISION_KEY] ?? 0) || 0) + 1;
 	node[NODE_QUALITY_AUDIT_REVISION_KEY] = Math.max(0, Number(node[NODE_QUALITY_AUDIT_REVISION_KEY] ?? 0) || 0) + 1;
 	const panelState = node[PANEL_KEY];
-	if (!panelState) return;
+	node[PANEL_READY_KEY] = false;
+	if (!panelState) {
+		delete node[PANEL_READY_KEY];
+		return;
+	}
 	panelState.stageOutputCaptureToken = `removed_${Date.now()}`;
 	if (panelState.continuousRuntime) {
 		panelState.continuousRuntime.token = Math.max(0, Number(panelState.continuousRuntime.token ?? 0) || 0) + 1;
@@ -18947,6 +18962,7 @@ function cleanupStagePromptNodeRuntime(node) {
 	}
 	try { panelState.panel?.remove?.(); } catch (_error) {}
 	delete node[PANEL_KEY];
+	delete node[PANEL_READY_KEY];
 }
 
 function enhanceExistingStagePromptNodes() {
@@ -18978,6 +18994,10 @@ function enhanceExistingStagePromptNodes() {
 }
 
 function registerStagePromptMiniBridge() {
+	window.__QWEN_TE_STAGE_ROLLBACK__ = (nodeOrId) => {
+		const targetNode = resolveStagePromptBridgeNode(nodeOrId);
+		return targetNode ? rollbackStagePromptNodeEnhancement(targetNode) : false;
+	};
 	window.__QWEN_TE_STAGE_OPEN_TAG_DIALOG__ = async (nodeOrId) => {
 		const targetNode = resolveStagePromptBridgeNode(nodeOrId);
 		if (!targetNode) return false;

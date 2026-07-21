@@ -20,6 +20,8 @@ const MINI_TOOLBAR_FLAG = "__qwenTeMiniToolbarLoaded";
 const MINI_TOOLBAR_WIDGET_NAME = "qwen_te_mini_toolbar_dom";
 const MINI_TITLE_SUFFIX = " [TEmini]";
 const MINI_WIDGET_STASH_KEY = Symbol.for("qwenTeMiniWidgetStash");
+const PANEL_KEY = Symbol.for("qwen_te.stage_prompt.panel");
+const PANEL_READY_KEY = Symbol.for("qwen_te.stage_prompt.panel_ready");
 const MINI_STATE_KEY = Symbol.for("qwenTeMiniState");
 const MINI_TOOLBAR_KEY = Symbol.for("qwenTeMiniToolbar");
 const MINI_STATUS_TEXT_KEY = Symbol.for("qwenTeMiniStatusText");
@@ -170,11 +172,37 @@ function isStagePromptNode(node) {
 }
 
 function hasMainStagePanel(node) {
-	return !!node?.widgets?.some((widget) => widget?.name === "qwen_te_tag_panel");
+	return node?.[PANEL_READY_KEY] === true && node?.[PANEL_KEY]?.ready === true && !!node?.widgets?.some((widget) => widget?.name === "qwen_te_tag_panel");
+}
+
+function cleanupIncompleteMainPanel(node) {
+	if (!node?.widgets?.some((widget) => widget?.name === "qwen_te_tag_panel")) return false;
+	if (hasMainStagePanel(node)) return false;
+	try {
+		if (window.__QWEN_TE_STAGE_ROLLBACK__?.(node)) return true;
+	} catch (_error) {}
+	const orphan = getWidget(node, "qwen_te_tag_panel");
+	return orphan ? removeNodeWidgetSafely(node, orphan) : false;
 }
 
 function getWidget(node, name) {
 	return node?.widgets?.find((widget) => widget?.name === name) ?? null;
+}
+
+function removeNodeWidgetSafely(node, widget) {
+	if (!node || !widget || !Array.isArray(node.widgets)) return false;
+	if (typeof node.removeWidget === "function") {
+		try {
+			node.removeWidget(widget);
+			if (!node.widgets.includes(widget)) return true;
+		} catch (_error) {}
+	}
+	const index = node.widgets.indexOf(widget);
+	if (index < 0) return false;
+	node.widgets.splice(index, 1);
+	try { widget.onRemove?.(); } catch (_error) {}
+	try { widget.element?.remove?.(); } catch (_error) {}
+	return true;
 }
 
 function setWidgetValue(node, name, value) {
@@ -685,6 +713,7 @@ function ensureMiniToolbar(node) {
 		cleanupMiniToolbar(node);
 		return;
 	}
+	cleanupIncompleteMainPanel(node);
 	if (node[MINI_TOOLBAR_FLAG]) {
 		sendMiniDecisionProbe("skip_already_loaded", node);
 		return;

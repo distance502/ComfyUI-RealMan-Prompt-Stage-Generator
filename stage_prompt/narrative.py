@@ -19,6 +19,14 @@ class NarrativePlan(TypedDict):
     trigger_en: str
     response_zh: str
     response_en: str
+    motive_zh: str
+    motive_en: str
+    escalation_zh: str
+    escalation_en: str
+    feedback_zh: str
+    feedback_en: str
+    climax_zh: str
+    climax_en: str
     turn_zh: str
     turn_en: str
     ending_zh: str
@@ -32,14 +40,19 @@ class NarrativePlan(TypedDict):
     organization: int
 
 
-GLOBAL_NARRATIVE_MODEL_CONTRACT = """
+CHINESE_NARRATIVE_LENGTH_CONTRACT = "中文成品必须为 800-1200 字自然语言"
+ENGLISH_NARRATIVE_LENGTH_CONTRACT = "English target 420-560 words"
+
+
+GLOBAL_NARRATIVE_MODEL_CONTRACT = f"""
 全局剧情与自然语言合同：
-- 每条输出都必须像一段可被摄影机捕捉的视觉叙事，而不是标签清单或固定六段模板。先确定正在发生的事件触发，再让动作、环境、光线和镜头围绕同一事件产生因果关系。
-- 正文必须交代：人物或主体为何处于此处、此刻发生了什么，并形成“事件触发、主体回应、情绪转折、环境与光线反馈、镜头定格”的清楚链路。
+- 每条输出都必须像一段可被摄影机捕捉的视觉叙事，而不是标签清单或固定六段模板。先建立地点、事件前提和行动动机，再让动作、环境、光线和镜头围绕同一事件产生因果关系。
+- 正文必须形成“处境与动机、事件触发、主体回应、局势升级、情绪转折、环境与光线反馈、视觉高潮、开放定格”的完整链路；即使是物体、机械、建筑或纯风景，也要用状态变化、功能响应或自然运动建立剧情，不得硬套人物情绪。
 - 用户标签是必须保留的事实锚点；剧情扩写只能连接锚点和补足未指定的可见细节，不得替换用户选定的主体、服装、场景、动作、构图、风格或成人属性。
-- 每次生成应重新选择叙事弧、动作目的、空间动线、环境反馈、镜头时机、情绪转折和结尾状态。批量各条至少在其中四项明显不同，不能只换同义词、开头或形容词。
+- 模板只决定媒介、渲染与成片质感，主题池只决定主体、事件和地点内容；每条只能有一个主模板轨道和一个主主题轨道。显式模板优先，主题不得注入冲突媒介；平衡模式最多保留一个兼容质感桥，严格模式不保留跨媒介词，漂移模式也只能有一个有意的次风格。
+- 每次生成应重新选择叙事弧、行动目的、升级方式、空间动线、环境反馈、视觉高潮、镜头时机、情绪转折和结尾状态。批量各条至少在其中四项明显不同，不能只换同义词、开头或形容词；最近历史只用于避重，不得成为下一条的素材来源。
 - 使用连续自然句和具体可见信息。少写“画面呈现、整体营造、高质量、氛围感”等空泛套话，多写动作造成的衣料变化、道具位移、视线方向、前中后景关系、光影迁移、空气与材质反馈。
-- 中文标准/详细输出以 700-1100 字为目标，英文以 360-600 words 为目标；简洁模式可以更短，但仍须保留事件、回应、转折和结尾。长度必须来自新信息和因果推进，禁止近义反复灌水。
+- {CHINESE_NARRATIVE_LENGTH_CONTRACT}；{ENGLISH_NARRATIVE_LENGTH_CONTRACT}。简洁档靠近下限，标准档建议 900-1050 字，详细档靠近上限，但所有中文成品仍须处于 800-1200 字范围。长度必须来自新信息、空间关系和事件推进，禁止近义反复灌水。
 """.strip()
 
 
@@ -164,6 +177,66 @@ _NARRATIVE_ARCS: tuple[dict[str, str], ...] = (
         "ending_zh": "镜头停在障碍被绕开、目标重新进入视线的时刻",
         "ending_en": "the camera holds when the obstacle is cleared and the goal comes back into view",
     },
+    {
+        "id": "exchange_misread",
+        "name_zh": "交换与误读",
+        "name_en": "exchange and misreading",
+        "opening_zh": "故事从一次看似普通的交换开始，主体原本以为双方已经理解彼此意图",
+        "opening_en": "The story begins with an apparently ordinary exchange, when the subject assumes the intention has been understood",
+        "trigger_zh": "对方或环境给出的回应与预期错开，暴露出关键信息被误读",
+        "trigger_en": "the answer arrives slightly off expectation and reveals that a crucial detail was misread",
+        "response_zh": "主体没有立即纠正，而是改变动作节奏，用一个更清楚的可见信号重新表达意图",
+        "response_en": "the subject does not correct it verbally, but changes the rhythm and offers a clearer visible signal",
+        "turn_zh": "情绪由短暂尴尬转为审慎坦率",
+        "turn_en": "the emotion turns from brief awkwardness to careful candor",
+        "ending_zh": "画面停在新的理解刚刚建立、双方尚未给出最终答案的片刻",
+        "ending_en": "the frame holds as a new understanding forms before either side gives a final answer",
+    },
+    {
+        "id": "rescue_cost",
+        "name_zh": "援助与代价",
+        "name_en": "aid and consequence",
+        "opening_zh": "故事从主体已经察觉某处失衡开始，时间与空间都不允许长久观望",
+        "opening_en": "The story begins when the subject recognizes an imbalance and the location no longer permits passive observation",
+        "trigger_zh": "一个正在扩大的变化让原本可以回避的问题变得必须处理",
+        "trigger_en": "an expanding change turns an avoidable problem into one that must be addressed",
+        "response_zh": "主体借助手边结构或道具介入，并承担位置、时间或安全感被改变的代价",
+        "response_en": "the subject intervenes through an available structure or prop and accepts a visible cost in position, time, or security",
+        "turn_zh": "情绪由克制评估转为专注承担",
+        "turn_en": "the emotion moves from restrained assessment to focused commitment",
+        "ending_zh": "危机暂时被控制，但留下的痕迹说明这次选择仍会继续影响下一刻",
+        "ending_en": "the immediate danger is contained, yet its traces show that the choice will shape the next moment",
+    },
+    {
+        "id": "threshold_choice",
+        "name_zh": "门槛与选择",
+        "name_en": "threshold and choice",
+        "opening_zh": "主体来到一个无法同时保留两种可能的边界位置，动作因此带着明显停顿",
+        "opening_en": "The subject reaches a threshold where two possibilities cannot both be kept, giving the movement a visible pause",
+        "trigger_zh": "来自身后或前方的变化缩短了继续犹豫的时间",
+        "trigger_en": "a change ahead or behind shortens the time available for hesitation",
+        "response_zh": "主体先确认最重要的锚点，再跨出或收回决定性的一步",
+        "response_en": "the subject confirms the most important anchor before taking or withdrawing one decisive step",
+        "turn_zh": "情绪由拉扯迟疑转为承担结果的平静",
+        "turn_en": "the emotion turns from divided hesitation to calm acceptance of consequence",
+        "ending_zh": "镜头定格在边界已被越过、原有空间仍清晰可见的位置",
+        "ending_en": "the camera holds after the boundary is crossed while the former space remains visibly present",
+    },
+    {
+        "id": "departure_return",
+        "name_zh": "离开与回返",
+        "name_en": "departure and return",
+        "opening_zh": "故事从主体已经开始离开时切入，空间中的细节正逐渐从近处退向背景",
+        "opening_en": "The story enters after departure has begun, as details of the place begin to recede into the background",
+        "trigger_zh": "一个被忽略的声音、反光或物件迫使主体重新看向来处",
+        "trigger_en": "an overlooked sound, reflection, or object forces the subject to look back",
+        "response_zh": "主体改变原有动线，以一次回返确认那个细节是否值得重新选择",
+        "response_en": "the subject reverses the route long enough to decide whether the detail deserves a different choice",
+        "turn_zh": "情绪由自我保护转为愿意面对未完成之事",
+        "turn_en": "the emotion shifts from self-protection to willingness to face what remains unfinished",
+        "ending_zh": "最终定格不说明主体会留下还是再次离开，只让回返的痕迹保持可见",
+        "ending_en": "the final frame does not say whether the subject will stay or leave again, only preserving the trace of return",
+    },
 )
 
 
@@ -190,6 +263,87 @@ _CAMERA_BEATS_EN = (
     "the camera behaves like a distant witness and only gives focus to expression and hands at the emotional turn",
     "the framing preserves space before and after the movement so the viewer can read where the subject came from and where it may go",
     "the exposure holds half a beat before the movement is complete, allowing fabric, dust, reflections, or hair to preserve its direction",
+)
+
+_MOTIVATION_BEATS_ZH = (
+    "这段行动有直接目标：在条件继续改变前确认异常来自哪里",
+    "主体来到这里并非偶然，而是要完成一项仍缺最后证据的任务",
+    "当前选择源于对某个承诺、关系或功能状态的维护",
+    "行动的目的不是展示外观，而是把一条中断的路线重新接续起来",
+    "主体需要在有限时间内判断眼前信号是否可信",
+    "这一刻承担着取回、交付、保护或放下某件事的明确意图",
+    "主体试图恢复空间原有秩序，却很快发现旧方法已经失效",
+    "当前动机来自一次未完成的确认，任何移动都会改变后续结果",
+)
+_MOTIVATION_BEATS_EN = (
+    "The immediate objective is to identify the source of the anomaly before conditions change again",
+    "The subject is here to complete a task that still lacks its final piece of evidence",
+    "The present choice comes from protecting a promise, relationship, or functional state",
+    "The action is meant to reconnect an interrupted route rather than merely display appearance",
+    "The subject must decide within limited time whether the visible signal can be trusted",
+    "The moment carries a clear intention to retrieve, deliver, protect, or release something",
+    "The subject attempts to restore the location's former order and discovers that the old method no longer works",
+    "The motive comes from unfinished confirmation, with every movement changing what can happen next",
+)
+_ESCALATION_BEATS_ZH = (
+    "原本局部的变化沿空间边缘扩散，迫使回应从观察升级为真正介入",
+    "第二个信号从画外出现，使主体刚做出的判断立即面临修正",
+    "环境节奏突然加快，留给动作完成的时间被明显压缩",
+    "关键道具发生位移或状态改变，让原有退路不再可靠",
+    "光线先于主体抵达新的位置，暴露出此前隐藏的空间关系",
+    "前景遮挡被打破，背景中的后果第一次进入清楚视线",
+    "主体的回应引发连锁反馈，使周围材质、空气与距离同时变化",
+    "局势并未立刻失控，却出现一个足以改变下一步优先级的新细节",
+)
+_ESCALATION_BEATS_EN = (
+    "The local disturbance spreads along the edge of the space, forcing observation to become intervention",
+    "A second signal enters from outside the frame and immediately challenges the subject's decision",
+    "The environmental rhythm accelerates and visibly shortens the time available to finish the movement",
+    "A key prop shifts position or state, making the former route of retreat unreliable",
+    "Light reaches the next position before the subject and exposes a previously hidden spatial relationship",
+    "A foreground obstruction breaks apart and the consequence in the background becomes readable for the first time",
+    "The response produces a chain reaction across material, air, and distance",
+    "The situation remains controlled but a new detail changes the priority of the next step",
+)
+_ENVIRONMENT_FEEDBACKS_ZH = (
+    "接触造成的细微振动沿地面或结构传开，近处尘粒、薄雾与反射依次响应",
+    "风向随动作改变，衣料、草木、烟雾或附着物共同标出运动路径",
+    "水面、玻璃或金属先映出变化，再把破碎高光送向背景深处",
+    "温度与湿度差让呼吸、水汽、凝露或热浪成为可见的时间证据",
+    "前景物体发生轻微位移，中景行动与远景结果因此被连成一条线",
+    "阴影边界缓慢越过主体与道具，说明事件仍在画外继续推进",
+    "空间回声与重复结构强化距离感，空处也保留刚发生过动作的痕迹",
+    "环境颜色不是静态滤镜，而随主光迁移从冷静逐步转向紧张或释然",
+)
+_ENVIRONMENT_FEEDBACKS_EN = (
+    "Fine vibration travels through the ground or structure, with dust, mist, and reflections answering in sequence",
+    "The movement changes the airflow, allowing fabric, vegetation, smoke, or surface attachments to trace its path",
+    "Water, glass, or metal registers the change first and sends fragmented highlights into the background",
+    "Differences in temperature and humidity make breath, condensation, vapor, or heat distortion visible evidence of time",
+    "A foreground object shifts slightly, linking the middle-ground action to its distant consequence",
+    "A shadow boundary crosses subject and prop slowly enough to show that the event continues outside the frame",
+    "Echo and repeating structure reinforce distance, while empty areas preserve the trace of recent movement",
+    "Environmental color behaves as moving light rather than a static filter, turning from calm toward tension or release",
+)
+_VISUAL_CLIMAXES_ZH = (
+    "视觉高潮落在主体、关键线索与背景后果短暂对齐的瞬间",
+    "最高张力来自动作将要完成却被第二个变化截住的半拍",
+    "画面最强的一刻不是夸张姿态，而是视线终于确认目标的微小改变",
+    "高潮由主光突然穿过空气层次并照亮决定性接触点形成",
+    "前中后景在一个动作方向上同时响应，构成清楚但不封闭的结果",
+    "最亮高光从道具移到主体，再停在仍未解决的远景信息上",
+    "静止与运动在同一帧交界，细小材质余势比大幅动作更有说服力",
+    "镜头在关系刚刚改变时收紧，让表情、结构或手部成为新的视觉中心",
+)
+_VISUAL_CLIMAXES_EN = (
+    "The visual climax occurs when subject, crucial clue, and background consequence align for one brief instant",
+    "Peak tension comes half a beat before completion, when a second change interrupts the movement",
+    "The strongest moment is not an exaggerated pose but the small shift that confirms the target",
+    "The climax forms when key light cuts through atmospheric depth and reaches the decisive contact point",
+    "Foreground, middle ground, and background answer along one direction, producing a clear but open result",
+    "The brightest highlight travels from prop to subject and settles on unresolved information in the distance",
+    "Stillness and motion meet in one frame, with material after-movement carrying more conviction than a broad gesture",
+    "The camera tightens as the relationship changes, making expression, structure, or hands the new visual center",
 )
 
 
@@ -253,10 +407,15 @@ def build_narrative_plan(
     arc_index = (number + index * 3 + history_step) % len(_NARRATIVE_ARCS)
     spatial_index = ((number >> 9) + index + history_step * 3) % len(_SPATIAL_PROGRESSIONS_ZH)
     camera_index = ((number >> 17) + index * 2 + history_step) % len(_CAMERA_BEATS_ZH)
+    motive_index = ((number >> 21) + index * 5 + history_step) % len(_MOTIVATION_BEATS_ZH)
+    escalation_index = ((number >> 29) + index * 3 + history_step * 2) % len(_ESCALATION_BEATS_ZH)
+    feedback_index = ((number >> 37) + index * 7 + history_step * 3) % len(_ENVIRONMENT_FEEDBACKS_ZH)
+    climax_index = ((number >> 45) + index * 2 + history_step * 5) % len(_VISUAL_CLIMAXES_ZH)
     organization = ((number >> 25) + index + history_step + history_number) % 4
     arc = _NARRATIVE_ARCS[arc_index]
     signature = (
-        f"{arc['id']}:{spatial_index}:{camera_index}:{organization}:{index}:"
+        f"{arc['id']}:{motive_index}:{escalation_index}:{feedback_index}:{climax_index}:"
+        f"{spatial_index}:{camera_index}:{organization}:{index}:"
         f"{number & 0xFFFF:04x}:{history_number & 0xFFFF:04x}"
     )
     return {
@@ -270,6 +429,14 @@ def build_narrative_plan(
         "trigger_en": arc["trigger_en"],
         "response_zh": arc["response_zh"],
         "response_en": arc["response_en"],
+        "motive_zh": _MOTIVATION_BEATS_ZH[motive_index],
+        "motive_en": _MOTIVATION_BEATS_EN[motive_index],
+        "escalation_zh": _ESCALATION_BEATS_ZH[escalation_index],
+        "escalation_en": _ESCALATION_BEATS_EN[escalation_index],
+        "feedback_zh": _ENVIRONMENT_FEEDBACKS_ZH[feedback_index],
+        "feedback_en": _ENVIRONMENT_FEEDBACKS_EN[feedback_index],
+        "climax_zh": _VISUAL_CLIMAXES_ZH[climax_index],
+        "climax_en": _VISUAL_CLIMAXES_EN[climax_index],
         "turn_zh": arc["turn_zh"],
         "turn_en": arc["turn_en"],
         "ending_zh": arc["ending_zh"],
@@ -287,12 +454,16 @@ def build_narrative_plan(
 def summarize_narrative_plan(plan: Mapping[str, Any], *, english: bool = False) -> str:
     if english:
         return (
-            f"arc={_clean(plan.get('arc_name_en'))}; emotional turn={_clean(plan.get('emotion_en'))}; "
+            f"arc={_clean(plan.get('arc_name_en'))}; motive={_clean(plan.get('motive_en'))}; "
+            f"escalation={_clean(plan.get('escalation_en'))}; climax={_clean(plan.get('climax_en'))}; "
+            f"emotional turn={_clean(plan.get('emotion_en'))}; "
             f"spatial path={_clean(plan.get('spatial_en'))}; ending={_clean(plan.get('ending_en'))}; "
             f"signature={_clean(plan.get('signature'))}"
         )
     return (
-        f"叙事弧={_clean(plan.get('arc_name_zh'))}；情绪转折={_clean(plan.get('emotion_zh'))}；"
+        f"叙事弧={_clean(plan.get('arc_name_zh'))}；行动动机={_clean(plan.get('motive_zh'))}；"
+        f"局势升级={_clean(plan.get('escalation_zh'))}；视觉高潮={_clean(plan.get('climax_zh'))}；"
+        f"情绪转折={_clean(plan.get('emotion_zh'))}；"
         f"空间动线={_clean(plan.get('spatial_zh'))}；结尾定格={_clean(plan.get('ending_zh'))}；"
         f"签名={_clean(plan.get('signature'))}"
     )
@@ -339,10 +510,10 @@ def _render_chinese(
         f"构图采用{composition}，所有已选视觉锚点被组织成同一时刻，而不是并列标签{adult_clause}。"
     )
     story_sentence = (
-        f"{_anchor(plan, 'opening_zh')}；随后，{props}成为推动事件的具体线索，"
+        f"{_anchor(plan, 'opening_zh')}。{_anchor(plan, 'motive_zh')}；随后，{props}成为推动事件的具体线索，"
         f"{_anchor(plan, 'trigger_zh')}，因此{subject}以{action}作出回应。"
         f"这次回应不是摆拍动作，而是有前因和目的的选择：{_anchor(plan, 'response_zh')}，"
-        f"并让{_anchor(plan, 'turn_zh')}。"
+        f"紧接着，{_anchor(plan, 'escalation_zh')}，并让{_anchor(plan, 'turn_zh')}。"
     )
     motion_details = "重量、接触点、结构边缘、活动关节与表面高光" if non_person else "重量、接触点、边缘、褶皱与高光"
     subject_sentence = (
@@ -354,7 +525,7 @@ def _render_chinese(
     space_sentence = (
         f"空间叙事遵循“{_anchor(plan, 'spatial_zh')}”的路径：前景提供可触摸的尺度和线索，"
         f"中景承接{subject}的行动，背景则保留事件来源或后果。环境并非静止布景，"
-        f"它会因为动作出现遮挡变化、空气扰动、表面反射或材质位移，使{scene}与主体形成清楚的因果联系。"
+        f"{_anchor(plan, 'feedback_zh')}，使{scene}与主体形成清楚的因果联系。"
     )
     camera_beat = _anchor(plan, "camera_zh")
     if non_person:
@@ -367,7 +538,7 @@ def _render_chinese(
         f"镜头执行“{camera_beat}”的拍摄时机，并严格保留{composition}的景别与透视。"
         f"{lighting}不只负责照亮主体，而会随着事件推进在{subject_surface}、{outfit}、{props}和背景之间迁移，"
         "主光说明行动方向，辅光保留暗部信息，轮廓光与环境反射把主体从空间中分离；"
-        "焦点由线索移动到回应动作，再落向能够承接结尾的背景位置。"
+        f"焦点由线索移动到回应动作，再落向能够承接结尾的背景位置；{_anchor(plan, 'climax_zh')}。"
     )
     detail_bits = []
     if custom:
@@ -453,9 +624,9 @@ def _render_english(
         f"the selected visual anchors belong to one continuous moment instead of a chain of keywords.{adult_clause}"
     )
     story_sentence = (
-        f"{_anchor(plan, 'opening_en')}. The selected story clue, {props}, becomes concrete when {_anchor(plan, 'trigger_en')}. "
+        f"{_anchor(plan, 'opening_en')}. {_anchor(plan, 'motive_en')}. The selected story clue, {props}, becomes concrete when {_anchor(plan, 'trigger_en')}. "
         f"Because of it, {subject} answers through {action}. This is not a display pose but a motivated choice: "
-        f"{_anchor(plan, 'response_en')}, and {_anchor(plan, 'turn_en')}."
+        f"{_anchor(plan, 'response_en')}. Then {_anchor(plan, 'escalation_en')}, and {_anchor(plan, 'turn_en')}."
     )
     motion_details = (
         "weight, contact points, structural edges, moving joints, and surface highlights"
@@ -470,7 +641,7 @@ def _render_english(
     )
     space_sentence = (
         f"Spatial storytelling follows this path: {_anchor(plan, 'spatial_en')}. Foreground information provides scale and a tangible clue, the middle ground carries the action, and the background retains the cause or consequence. "
-        f"The location is not passive scenery; overlap, disturbed air, reflections, and material displacement make {scene} visibly respond to the subject."
+        f"The location is not passive scenery; {_anchor(plan, 'feedback_en')}, making {scene} visibly respond to the subject."
     )
     camera_beat = _anchor(plan, "camera_en")
     if non_person:
@@ -481,7 +652,7 @@ def _render_english(
     subject_surface = "structural surfaces" if non_person else "the face and skin surfaces"
     camera_sentence = (
         f"The camera follows this timing: {camera_beat}, while preserving {composition}. {lighting} does more than illuminate the subject: it migrates across {subject_surface}, {outfit}, {props}, and the background as the event advances. "
-        "Key light explains movement, fill preserves readable shadow information, and rim light or environmental reflection separates the subject. Focus travels from clue to response and finally to the background element that carries the ending."
+        f"Key light explains movement, fill preserves readable shadow information, and rim light or environmental reflection separates the subject. Focus travels from clue to response and finally to the background element that carries the ending. {_anchor(plan, 'climax_en')}."
     )
     detail_parts = []
     if custom:
