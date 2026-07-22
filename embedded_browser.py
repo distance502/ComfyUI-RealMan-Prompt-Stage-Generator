@@ -36,6 +36,7 @@ EMBEDDED_BROWSER_FRAME_MAX_SCALE = 1.5
 EMBEDDED_BROWSER_FRAME_CACHE_SECONDS = 0.055
 EMBEDDED_BROWSER_TEXT_MAX_CHARS = 4096
 EMBEDDED_BROWSER_SESSION_TTL_SECONDS = 20 * 60.0
+EMBEDDED_BROWSER_EXPIRY_MIN_DELAY_SECONDS = 0.05
 EMBEDDED_BROWSER_DEBUG_PORT_WAIT_SECONDS = 4.0
 EMBEDDED_BROWSER_CDP_STARTUP_TIMEOUT_SECONDS = 4.0
 EMBEDDED_BROWSER_DIAGNOSTIC_MAX_CHARS = 1600
@@ -292,6 +293,7 @@ class _EmbeddedBrowserSession:
     last_frame_id: str = ""
     last_frame_captured_at: float = 0.0
     last_frame_size: tuple[int, int, int] = (0, 0, 0)
+    expiry_handle: asyncio.TimerHandle | None = None
 
 
 class EmbeddedBrowserManager:
@@ -312,6 +314,45 @@ class EmbeddedBrowserManager:
         self._start_lock = asyncio.Lock()
         self._start_times: list[float] = []
         atexit.register(self.close_processes_sync)
+
+    def _schedule_session_expiry(
+        self,
+        session: _EmbeddedBrowserSession,
+        delay: float | None = None,
+    ) -> None:
+        existing = getattr(session, "expiry_handle", None)
+        if existing is not None:
+            existing.cancel()
+        wait_seconds = EMBEDDED_BROWSER_SESSION_TTL_SECONDS if delay is None else float(delay)
+        loop = asyncio.get_running_loop()
+        handle: asyncio.TimerHandle | None = None
+
+        def expire() -> None:
+            if getattr(session, "expiry_handle", None) is handle:
+                session.expiry_handle = None
+            loop.create_task(self._expire_session_if_idle(session.session_id))
+
+        handle = loop.call_later(
+            max(EMBEDDED_BROWSER_EXPIRY_MIN_DELAY_SECONDS, wait_seconds),
+            expire,
+        )
+        session.expiry_handle = handle
+
+    async def _expire_session_if_idle(self, session_id: str) -> None:
+        session_to_close: _EmbeddedBrowserSession | None = None
+        async with self._sessions_lock:
+            session = self._sessions.get(session_id)
+            if session is None:
+                return
+            remaining = EMBEDDED_BROWSER_SESSION_TTL_SECONDS - (
+                self._monotonic() - session.last_used_at
+            )
+            if remaining > 0:
+                self._schedule_session_expiry(session, remaining)
+                return
+            session_to_close = self._sessions.pop(session_id, None)
+        if session_to_close is not None:
+            await self._close_session(session_to_close)
 
     def _reserve_start(self) -> None:
         now = self._monotonic()
@@ -589,6 +630,7 @@ class EmbeddedBrowserManager:
                 await self._configure_page(session)
                 async with self._sessions_lock:
                     self._sessions[session_id] = session
+                    self._schedule_session_expiry(session)
                 await connection.call("Page.navigate", {"url": str(url)})
                 return {
                     "session_id": session_id,
@@ -893,6 +935,10 @@ class EmbeddedBrowserManager:
             await self._close_session(session)
 
     async def _close_session(self, session: _EmbeddedBrowserSession) -> None:
+        expiry_handle = getattr(session, "expiry_handle", None)
+        if expiry_handle is not None:
+            expiry_handle.cancel()
+            session.expiry_handle = None
         try:
             await session.connection.close()
         except Exception:

@@ -6,6 +6,7 @@ import sys
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -255,6 +256,29 @@ class EmbeddedBrowserInputTests(unittest.IsolatedAsyncioTestCase):
         expression = next(params["expression"] for method, params in self.connection.calls if method == "Runtime.evaluate")
         self.assertIn("querySelectorAll('video')", expression)
         self.assertIn("!video.paused", expression)
+
+    async def test_abandoned_session_is_closed_after_idle_ttl(self):
+        import asyncio
+        import embedded_browser
+
+        manager = EmbeddedBrowserManager(
+            executable_finder=lambda: (None, "", ""),
+            profile_root=Path("browser-profile"),
+        )
+        session = SimpleNamespace(
+            session_id="idle-session",
+            last_used_at=manager._monotonic(),
+            expiry_handle=None,
+        )
+        manager._sessions[session.session_id] = session
+        manager._close_session = mock.AsyncMock()
+
+        with mock.patch.object(embedded_browser, "EMBEDDED_BROWSER_SESSION_TTL_SECONDS", 0.01):
+            manager._schedule_session_expiry(session)
+            await asyncio.sleep(0.08)
+
+        self.assertNotIn(session.session_id, manager._sessions)
+        manager._close_session.assert_awaited_once_with(session)
 
     def test_browser_process_keeps_media_running_in_headless_window(self):
         arguments = self.manager._build_arguments(Path("msedge.exe"), Path("browser-profile"), 1280, 720)

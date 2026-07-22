@@ -35,6 +35,7 @@ const MINI_STARTUP_SCAN_LIMIT = 8;
 const MINI_STARTUP_SCAN_INTERVAL_MS = 1200;
 const MINI_WIDGET_RECONCILE_LIMIT = 64;
 const MINI_WIDGET_RECONCILE_INTERVAL_MS = 160;
+const MINI_FRONTEND_PROBE_QUERY_PATTERN = /(?:^|[?&])qwen_te_probe=(?:1|true|on)(?:&|$)/iu;
 const MINI_CLEAR_CONFIRM_TIMEOUT_MS = 4000;
 const MINI_CLEAR_CONFIRM_MESSAGE = "再次点击“清空”以确认。";
 const MINI_NODE_MIN_WIDTH = 420;
@@ -938,6 +939,11 @@ function enhanceExistingNodes() {
 	}
 }
 
+function isFrontendProbeEnabled() {
+	if (globalThis.__QWEN_TE_FRONTEND_PROBE__ === true) return true;
+	return MINI_FRONTEND_PROBE_QUERY_PATTERN.test(String(globalThis.location?.search ?? ""));
+}
+
 function clearMiniStartupScanTimer(expectedTimer = null) {
 	const timer = globalThis[MINI_STARTUP_SCAN_TIMER_KEY];
 	if (expectedTimer != null && timer !== expectedTimer) return false;
@@ -1017,12 +1023,16 @@ function installMiniNodeLifecycleHooks(nodeType) {
 }
 
 function sendFrontendProbe(marker) {
+	if (!isFrontendProbeEnabled()) return false;
 	try {
 		fetch(`/qwen_te/frontend_probe?kind=mini_toolbar&marker=${encodeURIComponent(String(marker ?? ""))}`, {
 			method: "GET",
 			cache: "no-store",
 		}).catch(() => {});
-	} catch (_error) {}
+		return true;
+	} catch (_error) {
+		return false;
+	}
 }
 
 globalThis.__QWEN_TE_STAGE_CLEANUP_MINI_TOOLBAR__ = cleanupMiniToolbar;

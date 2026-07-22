@@ -130,6 +130,8 @@ globalThis.__miniToolbarTestExports = {
 	startMiniStartupScan,
 	installMiniGraphNodeAddedHook,
 	installMiniNodeLifecycleHooks,
+	isFrontendProbeEnabled,
+	sendFrontendProbe,
 	MINI_STARTUP_SCAN_TIMER_KEY,
 	MINI_STARTUP_SCAN_LIMIT,
 	MINI_WIDGET_RECONCILE_INTERVAL_MS,
@@ -220,6 +222,22 @@ test("isStagePromptNode recognizes raw widget-only stage nodes", async () => {
 		}),
 		true,
 	);
+});
+
+test("frontend diagnostics stay network-silent unless explicitly enabled", async () => {
+	const exports = await loadMiniToolbarExports();
+	const requests = [];
+	exports.__context.fetch = async (...args) => { requests.push(args); return {}; };
+	exports.__context.location = { search: "?qwen_te_mini=1" };
+	assert.equal(exports.isFrontendProbeEnabled(), false);
+	assert.equal(exports.sendFrontendProbe("default-off"), false);
+	assert.equal(requests.length, 0);
+
+	exports.__context.location.search = "?qwen_te_mini=1&qwen_te_probe=1";
+	assert.equal(exports.isFrontendProbeEnabled(), true);
+	assert.equal(exports.sendFrontendProbe("manual-on"), true);
+	assert.equal(requests.length, 1);
+	assert.match(String(requests[0][0]), /marker=manual-on/u);
 });
 
 test("isStagePromptNode rejects generic single outputs and keeps legacy output signatures", async () => {

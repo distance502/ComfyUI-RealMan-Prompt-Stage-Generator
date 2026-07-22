@@ -12,7 +12,6 @@ import re
 import sys
 import time
 import urllib.request
-from copy import deepcopy
 from pathlib import Path
 from typing import Any
 

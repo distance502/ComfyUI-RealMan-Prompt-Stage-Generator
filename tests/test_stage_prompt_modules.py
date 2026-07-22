@@ -16,6 +16,7 @@ import unittest
 from unittest import mock
 from collections import OrderedDict
 from copy import deepcopy
+from typing import Any
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -6675,6 +6676,7 @@ class TestStagePromptModules(unittest.TestCase):
             "冷白极简棚拍": "cold-white minimalist studio lighting",
             "暖褪色胶片": "warm faded film palette",
             "冷雾惊悚侧光": "cold-fog thriller sidelight",
+            "冷静": "cool composed aura",
             "扶剑而立": "standing with a sword in hand",
             "神谕石碑": "oracle stone stele",
             "偶像": "idol",

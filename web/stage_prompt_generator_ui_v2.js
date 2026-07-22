@@ -82,6 +82,9 @@ const NSFW_WORKSPACE_MAX_PROVENANCE_GROUPS = 64;
 const NSFW_WORKSPACE_MAX_PROVENANCE_TERMS = 256;
 const NSFW_WORKSPACE_MAX_PROVENANCE_GROUP_CHARS = 128;
 const UI_FETCH_DEFAULT_TIMEOUT_MS = 30000;
+const STAGE_EXTENSION_REGISTER_TIMER_KEY = "__qwenTeStagePromptRegisterTimer";
+const STAGE_EXTENSION_REGISTER_RETRY_LIMIT = 80;
+const STAGE_EXTENSION_REGISTER_RETRY_INTERVAL_MS = 300;
 const RANDOM_COMBO_HISTORY_LIMIT = 8;
 const USER_PRESET_STORAGE_KEY = "QwenTE.StagePromptGenerator.UserPresets";
 const NSFW_CUSTOM_FIELD_LIBRARY_STORAGE_KEY = "QwenTE.StagePromptGenerator.NsfwFieldLibrary";
@@ -19274,8 +19277,30 @@ const registerStagePromptExtension = () => {
 	return true;
 };
 
-if (!registerStagePromptExtension()) {
-	const waitTimer = setInterval(() => {
-		if (registerStagePromptExtension()) clearInterval(waitTimer);
-	}, 300);
+function clearStagePromptRegisterTimer(expectedTimer = null) {
+	const timer = window[STAGE_EXTENSION_REGISTER_TIMER_KEY];
+	if (expectedTimer != null && timer !== expectedTimer) return false;
+	if (timer == null) return false;
+	clearInterval(timer);
+	window[STAGE_EXTENSION_REGISTER_TIMER_KEY] = null;
+	return true;
 }
+
+function startStagePromptRegisterRetry() {
+	clearStagePromptRegisterTimer();
+	let retryCount = 0;
+	let timer = null;
+	timer = setInterval(() => {
+		if (window[STAGE_EXTENSION_REGISTER_TIMER_KEY] !== timer) return;
+		retryCount += 1;
+		if (registerStagePromptExtension() || retryCount >= STAGE_EXTENSION_REGISTER_RETRY_LIMIT) {
+			clearStagePromptRegisterTimer(timer);
+		}
+	}, STAGE_EXTENSION_REGISTER_RETRY_INTERVAL_MS);
+	window[STAGE_EXTENSION_REGISTER_TIMER_KEY] = timer;
+	timer?.unref?.();
+	return timer;
+}
+
+if (!registerStagePromptExtension()) startStagePromptRegisterRetry();
+else clearStagePromptRegisterTimer();

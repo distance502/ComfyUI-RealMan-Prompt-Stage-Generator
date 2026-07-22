@@ -2635,7 +2635,7 @@ def _register_tag_routes() -> bool:
                         limit=limit,
                     )
                     samples = cleaned_samples
-                except Exception as exc:
+                except Exception:
                     logging.exception("QwenTE 在线搜索标签提取阶段失败")
                     warning = ",".join(part for part in (warning, "extract:failed") if part)
                     _删除在线搜索样本缓存(_在线搜索样本缓存键(query, limit))

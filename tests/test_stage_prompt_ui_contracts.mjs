@@ -6198,6 +6198,9 @@ test("stage lifecycle source cancels stale async work and bounds startup scans",
 	assert.equal(source.includes("clearStageNodeEnhanceRetry(node)"), true);
 	assert.equal(source.includes("maintenancePasses >= 30"), true);
 	assert.equal(source.includes("clearInterval(window.__qwenTeStagePromptTimer)"), true);
+	assert.equal(source.includes("retryCount >= STAGE_EXTENSION_REGISTER_RETRY_LIMIT"), true);
+	assert.equal(source.includes("clearStagePromptRegisterTimer(timer)"), true);
+	assert.equal(source.includes("window[STAGE_EXTENSION_REGISTER_TIMER_KEY] = timer"), true);
 	assert.equal(source.includes("syncNodeStageOutputCache(node, { shouldCommit: isCaptureCurrent })"), true);
 	assert.equal(source.includes("if (!isCaptureCurrent()) return false;"), true);
 	assert.equal(source.includes('filterInput.addEventListener("input", () => { void render({ refresh: false }); });'), true);

@@ -92,7 +92,6 @@ def normalize_inference_state(
             notes.append("古风服装补锚：缺少明确朝代服装，自动补入“汉服”。")
 
         tags = tag_set()
-        ancient_scene_anchor_tags = set(context.get("ancient_scene_anchor_tags", set()))
         if {"宫殿", "回廊"} & tags and "古风建筑" not in tags:
             append_tag_to_state(normalized_selected, normalized_custom, "古风建筑")
             notes.append("古风场景补锚：宫殿/回廊语义偏泛，补入“古风建筑”防止西式宫廷漂移。")
