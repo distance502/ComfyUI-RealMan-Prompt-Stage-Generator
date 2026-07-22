@@ -124,12 +124,15 @@ globalThis.__miniToolbarTestExports = {
 	cleanupMiniToolbar,
 	cleanupLegacyMiniWidgets,
 	enhanceExistingNodes,
+	clearMiniWidgetReconcile,
+	startMiniWidgetReconcile,
 	clearMiniStartupScanTimer,
 	startMiniStartupScan,
 	installMiniGraphNodeAddedHook,
 	installMiniNodeLifecycleHooks,
 	MINI_STARTUP_SCAN_TIMER_KEY,
 	MINI_STARTUP_SCAN_LIMIT,
+	MINI_WIDGET_RECONCILE_INTERVAL_MS,
 	buildSelectedTagsText,
 	buildMiniBaseStatus,
 	applyMiniRandomAction,
@@ -789,6 +792,107 @@ test("mini fallback reconciles raw and advanced widgets inserted after initializ
 	assert.equal(lateRaw.hidden, false);
 	assert.equal(lateAdvanced.hidden, false);
 	assert.equal(lateInternal.hidden, true);
+});
+
+test("mini fallback independently reconciles widgets appended after nodeCreated", async () => {
+	const exports = await loadMiniToolbarExports();
+	const timers = new Map();
+	const cleared = [];
+	let nextTimerId = 700;
+	exports.__context.setInterval = (callback, intervalMs) => {
+		const timerId = ++nextTimerId;
+		timers.set(timerId, { callback, intervalMs });
+		return timerId;
+	};
+	exports.__context.clearInterval = (timerId) => {
+		cleared.push(timerId);
+		timers.delete(timerId);
+	};
+	const lateRaw = {
+		name: "主体标签15",
+		value: "无",
+		type: "combo",
+		serialize: true,
+		hidden: false,
+		options: { hidden: false },
+		computeSize: () => [240, 24],
+		inputEl: { style: {} },
+		element: { style: {} },
+	};
+	const node = {
+		title: "阶段式提示词生成器",
+		comfyClass: "QwenTE_StagePromptGenerator",
+		size: [420, 280],
+		widgets: [
+			{ name: "qwen模型", value: "" },
+			{ name: "模板风格", value: "自动" },
+			{ name: "首条正向提示词", value: "" },
+		],
+		outputs: [],
+		computeSize: () => [420, 280],
+		setSize(size) { this.size = size; },
+		addDOMWidget(name, type, element, options) {
+			return { name, type, element, options, serialize: false };
+		},
+	};
+
+	exports.ensureMiniToolbar(node);
+	node.widgets.push(lateRaw);
+	assert.equal(lateRaw.hidden, false);
+	assert.equal(timers.size, 1);
+	const [timerId, timer] = [...timers.entries()][0];
+	assert.equal(timer.intervalMs, exports.MINI_WIDGET_RECONCILE_INTERVAL_MS);
+	timer.callback();
+
+	assert.equal(lateRaw.hidden, true);
+	assert.equal(lateRaw.inputEl.style.display, "none");
+	assert.equal(exports.cleanupMiniToolbar(node, { scheduleLayout: false }), true);
+	assert.deepEqual(cleared, [timerId]);
+	assert.equal(timers.size, 0);
+});
+
+test("mini lifecycle hook immediately collapses widgets added through addWidget", async () => {
+	const exports = await loadMiniToolbarExports();
+	function StageNode() {}
+	StageNode.prototype.addWidget = function (_type, name, value) {
+		const widget = {
+			name,
+			value,
+			type: "combo",
+			serialize: true,
+			hidden: false,
+			options: { hidden: false },
+			computeSize: () => [240, 24],
+			inputEl: { style: {} },
+			element: { style: {} },
+		};
+		this.widgets.push(widget);
+		return widget;
+	};
+	await exports.__extension.beforeRegisterNodeDef(StageNode, { name: "QwenTE_StagePromptGenerator" });
+	const node = Object.assign(new StageNode(), {
+		title: "阶段式提示词生成器",
+		comfyClass: "QwenTE_StagePromptGenerator",
+		size: [420, 280],
+		widgets: [
+			{ name: "qwen模型", value: "" },
+			{ name: "模板风格", value: "自动" },
+			{ name: "首条正向提示词", value: "" },
+		],
+		outputs: [],
+		computeSize: () => [420, 280],
+		setSize(size) { this.size = size; },
+		addDOMWidget(name, type, element, options) {
+			return { name, type, element, options, serialize: false };
+		},
+	});
+	exports.ensureMiniToolbar(node);
+
+	const lateRaw = node.addWidget("combo", "主体标签16", "无");
+
+	assert.equal(lateRaw.hidden, true);
+	assert.equal(lateRaw.inputEl.style.display, "none");
+	exports.cleanupMiniToolbar(node, { scheduleLayout: false });
 });
 
 test("failed mini DOM registration restores native widgets and remains retryable", async () => {

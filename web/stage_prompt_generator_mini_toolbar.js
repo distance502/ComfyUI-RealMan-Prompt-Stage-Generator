@@ -33,6 +33,8 @@ const MINI_GRAPH_HOOK_KEY = Symbol.for("qwenTeMiniGraphHook");
 const MINI_STARTUP_SCAN_TIMER_KEY = "__qwenTeMiniToolbarStartupScanTimer";
 const MINI_STARTUP_SCAN_LIMIT = 8;
 const MINI_STARTUP_SCAN_INTERVAL_MS = 1200;
+const MINI_WIDGET_RECONCILE_LIMIT = 64;
+const MINI_WIDGET_RECONCILE_INTERVAL_MS = 160;
 const MINI_CLEAR_CONFIRM_TIMEOUT_MS = 4000;
 const MINI_CLEAR_CONFIRM_MESSAGE = "再次点击“清空”以确认。";
 const MINI_NODE_MIN_WIDTH = 420;
@@ -346,6 +348,41 @@ function reconcileLateMiniWidgets(node, state) {
 	applyUntracked(collectAlwaysHiddenWidgetNames(node), true, "MiniInternal");
 	if (changed) scheduleNodeLayout(node);
 	return changed;
+}
+
+function clearMiniWidgetReconcile(node, expectedTimer = null) {
+	const state = node?.[MINI_STATE_KEY];
+	const timer = state?.reconcileTimer;
+	if (expectedTimer != null && timer !== expectedTimer) return false;
+	if (timer == null) return false;
+	clearInterval(timer);
+	state.reconcileTimer = null;
+	state.reconcilePassCount = 0;
+	return true;
+}
+
+function startMiniWidgetReconcile(node, state = node?.[MINI_STATE_KEY]) {
+	if (!node || !state?.initialized || state.reconcileTimer != null) return state?.reconcileTimer ?? null;
+	state.reconcilePassCount = 0;
+	let timer = null;
+	timer = setInterval(() => {
+		if (state.reconcileTimer !== timer) return;
+		if (
+			node[MINI_NODE_REMOVED_KEY]
+			|| node[MINI_STATE_KEY] !== state
+			|| !node[MINI_TOOLBAR_FLAG]
+			|| hasMainStagePanel(node)
+		) {
+			clearMiniWidgetReconcile(node, timer);
+			return;
+		}
+		reconcileLateMiniWidgets(node, state);
+		state.reconcilePassCount = Math.max(0, Number(state.reconcilePassCount ?? 0) || 0) + 1;
+		if (state.reconcilePassCount >= MINI_WIDGET_RECONCILE_LIMIT) clearMiniWidgetReconcile(node, timer);
+	}, MINI_WIDGET_RECONCILE_INTERVAL_MS);
+	state.reconcileTimer = timer;
+	timer?.unref?.();
+	return timer;
 }
 
 function buildSelectedTagsText(node) {
@@ -678,6 +715,7 @@ function cleanupMiniToolbar(node, options = {}) {
 	);
 	if (!hasState) return false;
 	cancelMiniClearConfirmation(node, { refresh: false });
+	clearMiniWidgetReconcile(node);
 	let layoutChanged = hasLegacyWidgets || hasTitleSuffix;
 	try {
 		toolbar?.resizeObserver?.disconnect?.();
@@ -734,6 +772,7 @@ function ensureMiniToolbar(node) {
 	cleanupIncompleteMainPanel(node);
 	if (node[MINI_TOOLBAR_FLAG]) {
 		reconcileLateMiniWidgets(node, node[MINI_STATE_KEY]);
+		startMiniWidgetReconcile(node, node[MINI_STATE_KEY]);
 		sendMiniDecisionProbe("skip_already_loaded", node);
 		return true;
 	}
@@ -881,6 +920,7 @@ function ensureMiniToolbar(node) {
 		buttons,
 		resizeObserver,
 	};
+	startMiniWidgetReconcile(node, state);
 	sendMiniDecisionProbe("created", node);
 	refreshMiniToolbar(node);
 	scheduleNodeLayout(node);
@@ -946,6 +986,16 @@ function installMiniNodeLifecycleHooks(nodeType) {
 	if (!prototype || prototype[MINI_NODE_DEF_HOOK_KEY]) return false;
 	const originalOnNodeCreated = prototype.onNodeCreated;
 	const originalOnRemoved = prototype.onRemoved;
+	const originalAddWidget = prototype.addWidget;
+	if (typeof originalAddWidget === "function") {
+		prototype.addWidget = function () {
+			const result = originalAddWidget.apply(this, arguments);
+			if (this[MINI_TOOLBAR_FLAG] && !this[MINI_NODE_REMOVED_KEY] && !hasMainStagePanel(this)) {
+				reconcileLateMiniWidgets(this, this[MINI_STATE_KEY]);
+			}
+			return result;
+		};
+	}
 	prototype.onNodeCreated = function () {
 		delete this[MINI_NODE_REMOVED_KEY];
 		const result = originalOnNodeCreated?.apply(this, arguments);

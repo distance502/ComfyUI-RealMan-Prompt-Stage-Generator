@@ -217,6 +217,7 @@ globalThis.__stagePromptUiTestExports = {
 	searchOnlinePrompts,
 	openOnlinePromptSearchDialog,
 	setWidgetGroupVisibility,
+	reconcileStagePanelNativeWidgets,
 	toggleWidget,
 	scheduleNodeLayoutUpdate,
 	getStageDisplayPayload,
@@ -4478,6 +4479,7 @@ test("slot and advanced widget groups restore widgets and request layout refresh
 	assert.deepEqual(Array.from(widget.computeSize()), [0, -4]);
 	assert.equal(widget.inputEl.style.display, "none");
 	assert.equal(widget.element.style.display, "none");
+	assert.equal(widget.options.hidden, true);
 
 	assert.equal(exports.setWidgetGroupVisibility(node, ["主体标签1"], true, "Advanced"), 1);
 	assert.equal(widget.hidden, false);
@@ -4485,8 +4487,50 @@ test("slot and advanced widget groups restore widgets and request layout refresh
 	assert.equal(widget.computeSize, originalComputeSize);
 	assert.equal(widget.inputEl.style.display, "");
 	assert.equal(widget.element.style.display, "");
+	assert.equal(Object.prototype.hasOwnProperty.call(widget.options, "hidden"), false);
 	assert.deepEqual(Array.from(node.size), [360, 180]);
 	assert.equal(dirtyCalls.length > 0, true);
+});
+
+test("main panel reconciles native widgets inserted after panel initialization", async () => {
+	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	const makeWidget = (name) => ({
+		name,
+		type: "combo",
+		value: "无",
+		options: {},
+		hidden: false,
+		computeSize: () => [180, 24],
+		inputEl: { style: {} },
+		element: { style: {} },
+	});
+	const lateRaw = makeWidget("主体标签15");
+	const lateAdvanced = makeWidget("模型来源");
+	const preserved = makeWidget("首条正向提示词");
+	const node = {
+		widgets: [lateRaw, lateAdvanced, preserved],
+		size: [560, 240],
+		computeSize: () => [560, 240],
+		setSize(size) { this.size = size; },
+	};
+	node[exports.PANEL_KEY] = {
+		ready: true,
+		library: { slot_config: [{ name: "主体", slots: 20 }] },
+		rawTagWidgetNames: Array.from({ length: 20 }, (_, index) => `主体标签${index + 1}`),
+	};
+
+	assert.equal(exports.reconcileStagePanelNativeWidgets(node), 2);
+	for (const widget of [lateRaw, lateAdvanced]) {
+		assert.equal(widget.hidden, true);
+		assert.equal(widget.options.hidden, true);
+		assert.equal(widget.inputEl.style.display, "none");
+		assert.deepEqual(Array.from(widget.computeSize()), [0, -4]);
+	}
+	assert.equal(preserved.hidden, false);
+	assert.equal(exports.reconcileStagePanelNativeWidgets(node), 0);
+	const source = await fs.readFile(UI_PATH, "utf8");
+	assert.match(source, /if \(panelState\) reconcileStagePanelNativeWidgets\(node\);/u);
+	assert.match(source, /if \(this\[PANEL_KEY\]\?\.ready && !this\[NODE_REMOVED_KEY\]\) reconcileStagePanelNativeWidgets\(this\);/u);
 });
 
 test("quickbar slot toggle uses compact slot panel instead of raw widget stack", async () => {

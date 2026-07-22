@@ -5244,6 +5244,10 @@ function toggleWidget(node, widget, show = false, suffix = "") {
 	if (!widget) return;
 	if (!widget[HIDDEN_KEY]) widget[HIDDEN_KEY] = {};
 	if (!isHiddenWidgetType(widget.type)) widget[HIDDEN_KEY].type = widget.type;
+	if (!("hadOptionsHidden" in widget[HIDDEN_KEY])) {
+		widget[HIDDEN_KEY].hadOptionsHidden = !!widget.options && Object.prototype.hasOwnProperty.call(widget.options, "hidden");
+		widget[HIDDEN_KEY].optionsHidden = widget.options?.hidden;
+	}
 	if (typeof widget.computeSize === "function" && !isHiddenWidgetSize(widget.computeSize)) {
 		widget[HIDDEN_KEY].computeSize = widget.computeSize;
 	}
@@ -5256,6 +5260,10 @@ function toggleWidget(node, widget, show = false, suffix = "") {
 		widget.computeSize = () => [0, -4];
 	}
 	widget.hidden = !show;
+	widget.options = widget.options ?? {};
+	if (!show) widget.options.hidden = true;
+	else if (widget[HIDDEN_KEY].hadOptionsHidden) widget.options.hidden = widget[HIDDEN_KEY].optionsHidden;
+	else delete widget.options.hidden;
 	if (widget.inputEl) widget.inputEl.style.display = show ? "" : "none";
 	if (widget.element) widget.element.style.display = show ? "" : "none";
 }
@@ -18708,6 +18716,35 @@ function getRawTagWidgetNames(library) {
 		.concat(["自定义补充标签"]);
 }
 
+function reconcileStagePanelNativeWidgets(node) {
+	const panelState = node?.[PANEL_KEY];
+	if (!panelState?.ready) return 0;
+	const suffixByName = new Map();
+	for (const name of panelState.rawTagWidgetNames ?? getRawTagWidgetNames(panelState.library)) suffixByName.set(name, "Raw");
+	for (const name of CONTROL_WIDGET_NAMES) suffixByName.set(name, "Control");
+	for (const name of ADVANCED_WIDGET_NAMES) suffixByName.set(name, "Advanced");
+	for (const name of ALWAYS_HIDDEN_WIDGET_NAMES) suffixByName.set(name, "Internal");
+	let changed = 0;
+	for (const widget of node.widgets ?? []) {
+		const suffix = suffixByName.get(String(widget?.name ?? ""));
+		if (!suffix) continue;
+		const collapsed = widget.hidden === true
+			&& isHiddenWidgetType(widget.type)
+			&& isHiddenWidgetSize(widget.computeSize)
+			&& widget.options?.hidden === true
+			&& (!widget.inputEl || widget.inputEl.style?.display === "none")
+			&& (!widget.element || widget.element.style?.display === "none");
+		if (collapsed) continue;
+		toggleWidget(node, widget, false, suffix);
+		changed += 1;
+	}
+	if (changed) {
+		bindSummaryRefresh(node, panelState.library ?? { slot_config: [] });
+		scheduleNodeLayoutUpdate(node);
+	}
+	return changed;
+}
+
 function bindSummaryRefresh(node, library) {
 	const names = new Set([...PRESET_SETTING_NAMES, ...getRawTagWidgetNames(library)]);
 	for (const widget of node.widgets ?? []) {
@@ -19071,6 +19108,7 @@ function enhanceExistingStagePromptNodes() {
 					ensureStagePromptTopStatusWidgets(node, panelState.library ?? { slot_config: [], tag_library: {} }, panelState.summaryEl ?? { textContent: "" });
 					scheduleNodeLayoutUpdate(node);
 				}
+				if (panelState) reconcileStagePanelNativeWidgets(node);
 			}
 			if (isStagePromptNode(node) && !node[PANEL_KEY] && !shouldForceMiniToolbarMode()) {
 				scheduleEnhanceStagePromptNode(node);
@@ -19172,6 +19210,14 @@ const registerStagePromptExtension = () => {
 				return normalizeSerializedNodePayload(this, serialized);
 			};
 			const originalOnNodeCreated = nodeType.prototype.onNodeCreated;
+			const originalAddWidget = nodeType.prototype.addWidget;
+			if (typeof originalAddWidget === "function") {
+				nodeType.prototype.addWidget = function () {
+					const result = originalAddWidget.apply(this, arguments);
+					if (this[PANEL_KEY]?.ready && !this[NODE_REMOVED_KEY]) reconcileStagePanelNativeWidgets(this);
+					return result;
+				};
+			}
 			nodeType.prototype.onNodeCreated = function () {
 				const result = originalOnNodeCreated?.apply(this, arguments);
 				delete this[NODE_REMOVED_KEY];
