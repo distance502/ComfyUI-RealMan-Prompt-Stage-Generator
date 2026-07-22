@@ -175,6 +175,7 @@ globalThis.__stagePromptUiTestExports = {
 	hasStagePromptDisplayName,
 	registerStagePromptMiniBridge,
 	getPromptLibrary,
+	buildNativePromptLibraryFallback,
 	fetchWithTimeout,
 	fetchJsonWithTimeout,
 	abortOwnedRequest,
@@ -4094,6 +4095,27 @@ test("smart terminal preview renders readable brief lines for structured output"
 	assert.match(formatted, /场景：/u);
 	assert.match(formatted, /镜头：/u);
 	assert.match(formatted, /光影：/u);
+});
+
+test("main stage UI avoids lookbehind syntax and derives a native fallback library", async () => {
+	const source = await fs.readFile(UI_PATH, "utf8");
+	assert.equal(source.includes("(?<!"), false);
+	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	const node = {
+		widgets: [
+			{ name: "主体标签1", value: "成年女性", options: { values: ["无", "成年女性", "成年男性"] } },
+			{ name: "主体标签20", value: "无", options: { values: ["无", "成年女性", "成年男性"] } },
+			{ name: "场景背景标签1", value: "雨夜站台", options: { values: ["无", "雨夜站台"] } },
+		],
+	};
+	const library = exports.buildNativePromptLibraryFallback(node);
+	assert.equal(JSON.stringify(library.slot_config), JSON.stringify([
+		{ name: "主体", slots: 20 },
+		{ name: "场景背景", slots: 1 },
+	]));
+	assert.equal(JSON.stringify(library.tag_library["主体"]["当前节点"]), JSON.stringify(["成年女性", "成年男性"]));
+	assert.equal(JSON.stringify(library.tag_library["场景背景"]["当前节点"]), JSON.stringify(["雨夜站台"]));
+	assert.equal(library.__native_fallback, true);
 });
 
 test("history summary prefers saved prompt text over tag summary when stage output exists", async () => {

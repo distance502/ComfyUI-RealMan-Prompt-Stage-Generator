@@ -2212,6 +2212,37 @@ function createEmptyPromptLibrary() {
 	return { slot_config: [], tag_library: {}, custom_tag_library: {}, custom_tag_rules: {}, custom_tag_stats: {}, quick_presets: {} };
 }
 
+function buildNativePromptLibraryFallback(node) {
+	const groupSlots = new Map();
+	const groupTags = new Map();
+	for (const widget of node?.widgets ?? []) {
+		const match = /^(.+?)标签(\d+)$/u.exec(String(widget?.name ?? ""));
+		if (!match) continue;
+		const groupName = String(match[1] ?? "").trim();
+		const slotIndex = Math.max(0, Number(match[2] ?? 0) || 0);
+		if (!groupName || slotIndex <= 0) continue;
+		groupSlots.set(groupName, Math.min(32, Math.max(groupSlots.get(groupName) ?? 0, slotIndex)));
+		const tags = groupTags.get(groupName) ?? [];
+		const optionValues = Array.isArray(widget?.options?.values) ? widget.options.values : [];
+		for (const value of [...optionValues, widget?.value]) {
+			const tag = String(value ?? "").trim();
+			if (!tag || tag === "无" || tags.includes(tag)) continue;
+			tags.push(tag);
+		}
+		groupTags.set(groupName, tags);
+	}
+	if (!groupSlots.size) return createEmptyPromptLibrary();
+	return {
+		slot_config: [...groupSlots].map(([name, slots]) => ({ name, slots })),
+		tag_library: Object.fromEntries([...groupSlots.keys()].map((name) => [name, { "当前节点": groupTags.get(name) ?? [] }])),
+		custom_tag_library: {},
+		custom_tag_rules: {},
+		custom_tag_stats: {},
+		quick_presets: {},
+		__native_fallback: true,
+	};
+}
+
 function isUsablePromptLibrary(value) {
 	return !!value
 		&& typeof value === "object"
@@ -7124,11 +7155,11 @@ function formatStageOutputForReading(text, modeKey) {
 	let next = raw.replace(/\r\n/gu, "\n");
 	if (modeKey === "smart") {
 		next = next
-			.replace(/(?<!\n)(?:主体|场景|动作|光影|镜头|画质|构图|服装|表情|氛围|提示词)\s*[:：]/gu, "\n$&")
-			.replace(/(?<!\n)(?:成年女性|年轻成年女性|人物主体|书店里的年轻成年女性|杂志感人像)/gu, "\n$&")
-			.replace(/(?<!\n)(?:近景|中景半身|全身|面部聚焦|镜头近距离|85mm人像镜头|35mm镜头)/gu, "\n$&")
-			.replace(/(?<!\n)(?:杂志感|电影感|封面感|高细节|柔和高光|霓虹夜色|浴室蒸汽|湿发)/gu, "\n$&")
-			.replace(/(?<!\n)(?:，)(?=\s*(?:成年女性|年轻成年女性|人物主体|杂志感人像|近景|中景半身|全身|面部聚焦|镜头近距离|85mm人像镜头|35mm镜头|霓虹夜色|浴室蒸汽|湿发))/gu, "，\n");
+			.replace(/(^|[^\n])((?:主体|场景|动作|光影|镜头|画质|构图|服装|表情|氛围|提示词)\s*[:：])/gu, "$1\n$2")
+			.replace(/(^|[^\n])((?:成年女性|年轻成年女性|人物主体|书店里的年轻成年女性|杂志感人像))/gu, "$1\n$2")
+			.replace(/(^|[^\n])((?:近景|中景半身|全身|面部聚焦|镜头近距离|85mm人像镜头|35mm镜头))/gu, "$1\n$2")
+			.replace(/(^|[^\n])((?:杂志感|电影感|封面感|高细节|柔和高光|霓虹夜色|浴室蒸汽|湿发))/gu, "$1\n$2")
+			.replace(/，(?=\s*(?:成年女性|年轻成年女性|人物主体|杂志感人像|近景|中景半身|全身|面部聚焦|镜头近距离|85mm人像镜头|35mm镜头|霓虹夜色|浴室蒸汽|湿发))/gu, "，\n");
 	}
 	if (modeKey === "prompt" || modeKey === "negative" || modeKey === "smart") {
 		next = next
@@ -7139,7 +7170,7 @@ function formatStageOutputForReading(text, modeKey) {
 	}
 	if (modeKey === "tags") {
 		next = next
-			.replace(/(?<!\n)(模板风格：|主体类型：|案例输出结构：|请求生成数量：|实际生成数量：|运行时随机标签：|运行时随机模式：|核心标签锁定数量：|运行时随机强度：|优先柔和肤质：|抑制文字伪影：|锁定标签白名单：|随机排除标签：|推荐负面词：)/gu, "\n$1")
+			.replace(/(^|[^\n])(模板风格：|主体类型：|案例输出结构：|请求生成数量：|实际生成数量：|运行时随机标签：|运行时随机模式：|核心标签锁定数量：|运行时随机强度：|优先柔和肤质：|抑制文字伪影：|锁定标签白名单：|随机排除标签：|推荐负面词：)/gu, "$1\n$2")
 			.replace(/\n{3,}/gu, "\n\n");
 	}
 	return next.trim();
@@ -18900,11 +18931,14 @@ function scheduleEnhanceStagePromptNode(node) {
 			}
 			state.running = true;
 			try {
-				const library = await getPromptLibrary();
+				let library = await getPromptLibrary();
 				if (state.cancelled || node[NODE_REMOVED_KEY] || node[PANEL_KEY]) return;
 				if (!hasPromptLibraryContent(library)) {
-					scheduleRetry();
-					return;
+					library = buildNativePromptLibraryFallback(node);
+					if (!hasPromptLibraryContent(library)) {
+						scheduleRetry();
+						return;
+					}
 				}
 				const enhanced = enhanceStagePromptNode(node, library);
 				if (enhanced && node[PANEL_KEY]) clearStageNodeEnhanceRetry(node);

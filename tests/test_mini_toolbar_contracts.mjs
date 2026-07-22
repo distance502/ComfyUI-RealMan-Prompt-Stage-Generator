@@ -739,6 +739,58 @@ test("mini fallback collapses slots 11-20, future raw controls, and internal sta
 	assert.equal(tag20.hidden, false);
 });
 
+test("mini fallback reconciles raw and advanced widgets inserted after initialization", async () => {
+	const exports = await loadMiniToolbarExports();
+	const makeWidget = (name, value = "") => ({
+		name,
+		value,
+		type: "combo",
+		serialize: true,
+		hidden: false,
+		options: { hidden: false },
+		computeSize: () => [240, 24],
+		inputEl: { style: {} },
+		element: { style: {} },
+	});
+	const addedWidgets = [];
+	const node = {
+		title: "阶段式提示词生成器",
+		comfyClass: "QwenTE_StagePromptGenerator",
+		size: [420, 280],
+		widgets: [
+			{ name: "qwen模型", value: "" },
+			{ name: "模板风格", value: "自动" },
+			{ name: "首条正向提示词", value: "" },
+		],
+		outputs: [],
+		computeSize: () => [420, 280],
+		setSize(size) { this.size = size; },
+		addDOMWidget(name, type, element, options) {
+			const widget = { name, type, element, options, serialize: false };
+			addedWidgets.push(widget);
+			return widget;
+		},
+	};
+
+	exports.ensureMiniToolbar(node);
+	const lateRaw = makeWidget("场景背景标签20", "无");
+	const lateAdvanced = makeWidget("模型来源", "仅Skill");
+	const lateInternal = makeWidget("标签块编排JSON", "{}");
+	node.widgets.push(lateRaw, lateAdvanced, lateInternal);
+	exports.ensureMiniToolbar(node);
+
+	for (const widget of [lateRaw, lateAdvanced, lateInternal]) {
+		assert.equal(widget.hidden, true, `${widget.name} should be reconciled as collapsed`);
+		assert.equal(widget.inputEl.style.display, "none");
+	}
+	const buttons = addedWidgets[0].element.querySelectorAll("button");
+	await buttons.find((button) => button.textContent === "槽位").click();
+	await buttons.find((button) => button.textContent === "高级").click();
+	assert.equal(lateRaw.hidden, false);
+	assert.equal(lateAdvanced.hidden, false);
+	assert.equal(lateInternal.hidden, true);
+});
+
 test("failed mini DOM registration restores native widgets and remains retryable", async () => {
 	const exports = await loadMiniToolbarExports();
 	const originalComputeSize = () => [240, 24];

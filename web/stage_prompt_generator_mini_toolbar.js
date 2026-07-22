@@ -330,6 +330,24 @@ function collectAlwaysHiddenWidgetNames(node) {
 		.filter((name) => MINI_ALWAYS_HIDDEN_WIDGET_NAMES.has(name));
 }
 
+function reconcileLateMiniWidgets(node, state) {
+	if (!node || !state?.initialized) return false;
+	let changed = false;
+	const applyUntracked = (names, collapsed, suffix) => {
+		for (const name of names) {
+			const widget = getWidget(node, name);
+			if (!widget || widget[MINI_WIDGET_STASH_KEY]) continue;
+			setWidgetCollapsed(widget, collapsed, suffix);
+			changed = true;
+		}
+	};
+	applyUntracked(collectRawTagWidgetNames(node), !state.rawExpanded, "MiniRaw");
+	applyUntracked(collectAdvancedWidgetNames(node), !state.advancedExpanded, "MiniAdvanced");
+	applyUntracked(collectAlwaysHiddenWidgetNames(node), true, "MiniInternal");
+	if (changed) scheduleNodeLayout(node);
+	return changed;
+}
+
 function buildSelectedTagsText(node) {
 	const tags = [];
 	for (const widget of node.widgets ?? []) {
@@ -715,8 +733,9 @@ function ensureMiniToolbar(node) {
 	}
 	cleanupIncompleteMainPanel(node);
 	if (node[MINI_TOOLBAR_FLAG]) {
+		reconcileLateMiniWidgets(node, node[MINI_STATE_KEY]);
 		sendMiniDecisionProbe("skip_already_loaded", node);
-		return;
+		return true;
 	}
 	if (typeof node.addDOMWidget !== "function") {
 		sendMiniDecisionProbe("skip_no_addDOMWidget", node);
@@ -790,13 +809,14 @@ function ensureMiniToolbar(node) {
 		}),
 		raw: makeActionButton("槽位", "", async () => {
 			state.rawExpanded = !state.rawExpanded;
-			setWidgetGroupCollapsed(node, rawTagWidgetNames, !state.rawExpanded, "MiniRaw");
+			setWidgetGroupCollapsed(node, collectRawTagWidgetNames(node), !state.rawExpanded, "MiniRaw");
 			clearMiniStatus(node);
 			refreshMiniToolbar(node);
 		}),
 		advanced: makeActionButton("高级", "", async () => {
 			state.advancedExpanded = !state.advancedExpanded;
-			setWidgetGroupCollapsed(node, advancedWidgetNames, !state.advancedExpanded, "MiniAdvanced");
+			setWidgetGroupCollapsed(node, collectAdvancedWidgetNames(node), !state.advancedExpanded, "MiniAdvanced");
+			setWidgetGroupCollapsed(node, collectAlwaysHiddenWidgetNames(node), true, "MiniInternal");
 			clearMiniStatus(node);
 			refreshMiniToolbar(node);
 		}),
@@ -809,7 +829,7 @@ function ensureMiniToolbar(node) {
 				return;
 			}
 			cancelMiniClearConfirmation(node, { refresh: false });
-			setMiniStatus(node, await clearMiniSelectionAction(node, rawTagWidgetNames, { forceConfirmed: true }));
+			setMiniStatus(node, await clearMiniSelectionAction(node, collectRawTagWidgetNames(node), { forceConfirmed: true }));
 		}),
 	};
 
