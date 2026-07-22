@@ -532,9 +532,14 @@ const MODEL_KV_BUTTONS = [
 ];
 const MODEL_SOURCE_BUTTONS = [
 	{ value: "仅Skill", label: "Skill", hint: "离线规则模式：只用节点内 Skill、标签库和模板，不联网、不调用模型。" },
-	{ value: "本地GGUF", label: "本地", hint: "本地模型模式：从 ComfyUI/models/LLM 加载 GGUF，适合离线润色和反推。" },
-	{ value: "API接口", label: "API", hint: "API 模式：用下方服务商、Key 和模型名调用云端或本地兼容接口。" },
+	{ value: "本地模型", label: "本地", hint: "本地模型模式：可连接任意兼容模型对象；未连接时从 ComfyUI/models/LLM 加载内置 GGUF。" },
+	{ value: "API接口", label: "API", hint: "API 模式：用下方服务商、Key 和模型名调用云端、Ollama、LM Studio 或其他兼容接口。" },
 ];
+
+function normalizeModelSourceValue(value) {
+	const source = String(value ?? "").trim() || "仅Skill";
+	return source === "本地GGUF" ? "本地模型" : source;
+}
 const MODEL_API_PROVIDER_BUTTONS = [
 	{ value: "OpenAI兼容", label: "兼容", baseUrl: "", model: "", keyRef: "", hint: "自定义 OpenAI 兼容接口：填写 Base URL、Key 和模型名。" },
 	{ value: "OpenAI", label: "OpenAI", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini", keyRef: "env:OPENAI_API_KEY" },
@@ -3501,7 +3506,7 @@ function getNodeWorkflowHistorySearchAfter(node, fallbackWindowMs = 120000) {
 function markNodeWorkflowQueueRequested(node, at = Date.now()) {
 	if (!node?.[PANEL_KEY]) return;
 	node[PANEL_KEY].lastWorkflowQueueRequestedAt = Number(at ?? Date.now()) || Date.now();
-	const modelSource = String(getModelWidget(node, "模型来源")?.value ?? "仅Skill").trim() || "仅Skill";
+	const modelSource = normalizeModelSourceValue(getModelWidget(node, "模型来源")?.value);
 	const apiConfig = modelSource === "API接口" ? getModelApiEffectiveConfig(node) : null;
 	const apiReady = !!apiConfig?.baseUrl && !!apiConfig?.model && !getModelApiConfigValidationError(node);
 	node[PANEL_KEY].pendingModelApiConfigSignature = apiReady ? buildModelApiConfigSignature(node) : "";
@@ -5133,6 +5138,7 @@ function attachPanelResizeObserver(node, panel) {
 }
 
 function normalizeStageWidgetValue(name, value) {
+	if (name === "模型来源") return normalizeModelSourceValue(value);
 	if (name === "标签反推模式") {
 		const normalized = LEGACY_REVERSE_MODE_ALIASES[String(value ?? "").trim()];
 		if (normalized) return normalized;
@@ -5414,7 +5420,7 @@ function getModelApiPresetKeyRequirement(provider, baseUrl) {
 }
 
 function getModelLoaderSummary(node) {
-	const source = String(getModelWidget(node, "模型来源")?.value ?? "仅Skill").trim() || "仅Skill";
+	const source = normalizeModelSourceValue(getModelWidget(node, "模型来源")?.value);
 	if (source === "仅Skill") return "Skill 离线 · 不调用模型";
 	if (source === "API接口") {
 		const config = getModelApiEffectiveConfig(node);
@@ -5434,11 +5440,11 @@ function getModelLoaderSummary(node) {
 	const ctx = String(getModelWidget(node, "上下文长度")?.value ?? "");
 	const shortModel = model.length > 30 ? `${model.slice(0, 27)}...` : model;
 	const incomplete = !model || model === "未选择" || model.startsWith("（请把模型放到");
-	return `${family} · ${shortModel || "未选择模型"} · ctx ${ctx || "?"}${mmproj && mmproj !== "无" ? " · VL" : ""}${incomplete ? " · 未完整会回退Skill" : ""}`;
+	return `本地模型 · ${family} · ${shortModel || "外接输入/未选择"} · ctx ${ctx || "?"}${mmproj && mmproj !== "无" ? " · VL" : ""}${incomplete ? " · 无外接输入时需选择内置GGUF" : ""}`;
 }
 
 function getModelRuntimeStatusSummary(node) {
-	const source = String(getModelWidget(node, "模型来源")?.value ?? "仅Skill").trim() || "仅Skill";
+	const source = normalizeModelSourceValue(getModelWidget(node, "模型来源")?.value);
 	if (source === "仅Skill") {
 		return { tone: "muted", text: "API 未启用：当前运行只使用 Skill，不会发送模型请求。" };
 	}
@@ -5503,7 +5509,7 @@ function getModelRuntimeStatusSummary(node) {
 }
 function refreshModelLoaderDeck(deck, node) {
 	if (!deck?.panel) return;
-	const source = String(getModelWidget(node, "模型来源")?.value ?? "仅Skill").trim() || "仅Skill";
+	const source = normalizeModelSourceValue(getModelWidget(node, "模型来源")?.value);
 	const family = String(getModelWidget(node, "模型系列")?.value ?? "");
 	const ctx = Number(getModelWidget(node, "上下文长度")?.value ?? 0);
 	const gpu = Number(getModelWidget(node, "GPU层数")?.value ?? -1);
@@ -5601,7 +5607,7 @@ function refreshModelLoaderDeck(deck, node) {
 		if (widget && document.activeElement !== input) input.value = String(widget.value ?? "");
 	}
 	for (const section of deck.localSections ?? []) {
-		section.hidden = source !== "本地GGUF";
+		section.hidden = source !== "本地模型";
 	}
 	for (const section of deck.apiSections ?? []) {
 		section.hidden = source !== "API接口";
@@ -5931,7 +5937,7 @@ function openStageModelDialog(stageNode) {
 	titleWrap.appendChild(title);
 	const subtitle = document.createElement("div");
 	subtitle.className = "qwen-te-modal__subtitle";
-	subtitle.textContent = "选择提示词增强方式：Skill 离线规则、本地 GGUF 或 API。配置不完整时会自动回退 Skill，不会中断节点。";
+	subtitle.textContent = "选择提示词增强方式：Skill、本地模型或 API。本地模型支持外接兼容对象，未连接时使用内置 GGUF；不完整时自动回退 Skill。";
 	titleWrap.appendChild(subtitle);
 	const closeButton = document.createElement("button");
 	closeButton.className = "qwen-te-modal__footer-button";
@@ -18774,7 +18780,7 @@ function enhanceStagePromptNode(node, library) {
 	registerPanelButton("randomRun", makeBtn(quickbar,"随机跑","RUN", async(mutationRevision)=>{ const nextLibrary = await getFreshLibraryForUi(node, library, { mutationRevision }); if (!isNodeStateMutationCurrent(node, mutationRevision)) return; const applied = await buildAndApplyRandomState(node, nextLibrary, { mutationRevision }); if (!applied) return; const queued=await queueWorkflowFromNode(node); if (!isNodeStateMutationCurrent(node, mutationRevision)) return; setNodeStatusText(node, queued ? "随机已应用并加入队列。" : "随机已应用，但没能自动加入队列。"); },"qwen-te-panel__button--run qwen-te-panel__button--primary","随机后自动入队执行。"));
 	registerPanelButton("smartMatch", makeBtn(quickbar,"匹配启用","AI", async()=>{ await runSmartTextMatch(node); },"qwen-te-panel__button--cool","输入一句描述，自动匹配标签并启用智能文本；NSFW 开启时会自动切到成人向成熟策略。"));
 	registerPanelButton("tagBlocks", makeBtn(quickbar,"编排","BLK", async()=>{ if (!node[PANEL_KEY]) return; node[PANEL_KEY].displayMode = "blocks"; refreshStageDisplay(node); openStageOutputDialog(node); },"qwen-te-panel__button--cool","打开标签块编排，可拖拽排序、删词、插入文字并按顺序生成。"));
-	registerPanelButton("model", makeBtn(quickbar,"模型","MDL", async()=>{ openStageModelDialog(node); },"qwen-te-panel__button--cool","打开模型面板，可选择本地 GGUF、API 接口或仅 Skill。"));
+	registerPanelButton("model", makeBtn(quickbar,"模型","MDL", async()=>{ openStageModelDialog(node); },"qwen-te-panel__button--cool","打开模型面板，可选择本地模型、API 接口或仅 Skill；本地模型支持外接对象和内置 GGUF。"));
 	registerPanelButton("characterSheet", makeBtn(quickbar,"设定图","CS", async(mutationRevision)=>{ const nextLibrary = await getFreshLibraryForUi(node, library, { mutationRevision }); if (isNodeStateMutationCurrent(node, mutationRevision)) openCharacterSheetDialog(node, nextLibrary); },"qwen-te-panel__button--accent","生成头像特写、正面、侧面、背面组合的角色设定图提示词。"));
 	registerPanelButton("random", makeBtn(quickbar,"随机","RD", async(mutationRevision)=>{ const nextLibrary = await getFreshLibraryForUi(node, library, { mutationRevision }); if (!isNodeStateMutationCurrent(node, mutationRevision)) return; await buildAndApplyRandomState(node, nextLibrary, { mutationRevision }); },"qwen-te-panel__button--warm","按当前规则随机重排标签。"));
 	registerPanelButton("example", makeBtn(quickbar,"示例","EX", async(mutationRevision)=>{ const nextLibrary = await getFreshLibraryForUi(node, library, { mutationRevision }); if (isNodeStateMutationCurrent(node, mutationRevision)) openExampleDialog(node, nextLibrary); },"qwen-te-panel__button--accent","打开少量风格锚点，用于定调和选路。"));

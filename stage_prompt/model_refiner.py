@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from collections import Counter
+import inspect
 import json
 import os
 import re
@@ -91,6 +92,33 @@ _ANALYSIS_MARKERS = (
     "画面阅读顺序依次为",
     "块顺序摘要",
     "请把这些块自然织入",
+)
+_MODEL_REASONING_BLOCK_PATTERN = re.compile(
+    r"<(?:think|analysis|reasoning)\b[^>]*>.*?</(?:think|analysis|reasoning)>",
+    flags=re.DOTALL | re.IGNORECASE,
+)
+_MODEL_REASONING_CLOSE_PATTERN = re.compile(
+    r"</(?:think|analysis|reasoning)>\s*",
+    flags=re.IGNORECASE,
+)
+_MODEL_REASONING_OPEN_PATTERN = re.compile(
+    r"<(?:think|analysis|reasoning)\b[^>]*>\s*",
+    flags=re.IGNORECASE,
+)
+_MODEL_FINAL_SECTION_PATTERN = re.compile(
+    r"(?:^|\n)\s*(?:#{1,6}\s*)?(?:\*{1,2})?\s*"
+    r"(?:最终(?:正向)?提示词|成品提示词|最终正文|最终答案|图像提示词|"
+    r"final\s+(?:image\s+)?prompt|final\s+answer|answer)\s*"
+    r"(?:\*{1,2})?\s*[:：]\s*",
+    flags=re.IGNORECASE,
+)
+_MODEL_ECHO_BODY_PATTERN = re.compile(
+    r"(?:^|\n)\s*(?:待整理提示词正文|待改写提示词|prompt\s+to\s+(?:refine|rewrite))\s*[:：]\s*",
+    flags=re.IGNORECASE,
+)
+_MODEL_SPECIAL_TOKEN_PATTERN = re.compile(
+    r"<\|/?(?:assistant|final|analysis|reasoning|im_start|im_end)[^>]*\|?>",
+    flags=re.IGNORECASE,
 )
 _NUMBERED_ANALYSIS_LINE_PATTERN = re.compile(r"^\s*\d+[.、]\s*")
 _FRAGMENT_SPLIT_PATTERN = re.compile(r"[\n\r\t,，;；、|]+")
@@ -233,19 +261,31 @@ _SEMANTIC_REPEAT_FAMILIES: tuple[tuple[str, int, tuple[str, ...]], ...] = (
 )
 
 
-def _extract_content_text(content: Any) -> str:
+def _extract_content_text(content: Any, *, _depth: int = 0) -> str:
+    if _depth > 6:
+        return ""
     if isinstance(content, str):
         return content
+    if isinstance(content, dict):
+        for key in ("text", "output_text", "generated_text", "content", "prompt", "final_prompt", "completion"):
+            if key not in content:
+                continue
+            text = _extract_content_text(content.get(key), _depth=_depth + 1)
+            if text:
+                return text
+        return ""
     if not isinstance(content, (list, tuple)):
         return ""
+    assistant_blocks = [
+        block
+        for block in content
+        if isinstance(block, dict) and str(block.get("role") or "").strip().casefold() == "assistant"
+    ]
+    if assistant_blocks:
+        content = assistant_blocks[-1:]
     parts: list[str] = []
     for block in content:
-        if isinstance(block, str):
-            text = block.strip()
-        elif isinstance(block, dict) and isinstance(block.get("text"), str):
-            text = str(block.get("text") or "").strip()
-        else:
-            text = ""
+        text = _extract_content_text(block, _depth=_depth + 1).strip()
         if text:
             parts.append(text)
     return "\n".join(parts)
@@ -256,6 +296,8 @@ def extract_text(response: Any) -> str:
         return ""
     if isinstance(response, str):
         return response
+    if isinstance(response, (list, tuple)):
+        return _extract_content_text(response)
     if isinstance(response, dict):
         error = response.get("error")
         if error:
@@ -264,7 +306,10 @@ def extract_text(response: Any) -> str:
             else:
                 reason = error
             raise RuntimeError(f"模型 API 返回错误：{reason}")
-        for key in ("text", "output_text", "response"):
+        for key in (
+            "text", "output_text", "generated_text", "response", "answer", "content", "result", "output",
+            "prompt", "final_prompt", "completion",
+        ):
             text = _extract_content_text(response.get(key))
             if text:
                 return text
@@ -280,7 +325,7 @@ def extract_text(response: Any) -> str:
             if text:
                 return text
         return ""
-    for attribute in ("text", "output_text", "content"):
+    for attribute in ("text", "output_text", "generated_text", "content", "response", "answer", "completion"):
         text = _extract_content_text(getattr(response, attribute, None))
         if text:
             return text
@@ -546,6 +591,197 @@ def _looks_like_broken_prompt(text: str) -> bool:
         if diversity < 0.45:
             return True
     return False
+
+
+def _prepare_model_response_text(text: str) -> tuple[str, bool]:
+    """Extract a final prompt from common local-model reasoning and wrapper formats."""
+
+    source = str(text or "").strip()
+    if not source:
+        return "", False
+    recovered = False
+
+    if source[:1] in {"{", "["}:
+        try:
+            decoded = json.loads(source)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            decoded = None
+        if decoded is not None:
+            extracted = str(extract_text(decoded) or "").strip()
+            if extracted and extracted != source:
+                source = extracted
+                recovered = True
+
+    stripped = _MODEL_REASONING_BLOCK_PATTERN.sub("", source)
+    if stripped != source:
+        source = stripped
+        recovered = True
+    close_matches = list(_MODEL_REASONING_CLOSE_PATTERN.finditer(source))
+    if close_matches:
+        source = source[close_matches[-1].end() :]
+        recovered = True
+    open_stripped = _MODEL_REASONING_OPEN_PATTERN.sub("", source)
+    if open_stripped != source:
+        source = open_stripped
+        recovered = True
+    special_stripped = _MODEL_SPECIAL_TOKEN_PATTERN.sub("", source)
+    if special_stripped != source:
+        source = special_stripped
+        recovered = True
+
+    final_matches = list(_MODEL_FINAL_SECTION_PATTERN.finditer(source))
+    if final_matches:
+        source = source[final_matches[-1].end() :]
+        recovered = True
+    elif any(marker in source for marker in _ANALYSIS_MARKERS):
+        echo_matches = list(_MODEL_ECHO_BODY_PATTERN.finditer(source))
+        if echo_matches:
+            source = source[echo_matches[-1].end() :]
+            recovered = True
+
+    cleaned_lines: list[str] = []
+    analysis_preamble = any(marker in source for marker in _ANALYSIS_MARKERS) or bool(
+        re.search(r"(?:^|\n)\s*(?:分析|思考|推理|reasoning|analysis)\s*[:：]", source, flags=re.IGNORECASE)
+    )
+    prompt_body_started = not analysis_preamble
+    for raw_line in source.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        line = raw_line.strip()
+        if not line:
+            continue
+        plain = line.strip("#* ")
+        if any(marker in plain for marker in _ANALYSIS_MARKERS) and len(plain) <= 180:
+            recovered = True
+            continue
+        if re.match(r"^(?:分析|思考|推理|reasoning|analysis)\s*[:：]", plain, flags=re.IGNORECASE):
+            recovered = True
+            continue
+        if not prompt_body_started:
+            looks_like_body = _looks_like_natural_prose_prompt(plain) or (
+                len(_CJK_PATTERN.findall(plain)) >= 24 and bool(re.search(r"[。！？]", plain))
+            )
+            if not looks_like_body:
+                recovered = True
+                continue
+            prompt_body_started = True
+        cleaned_lines.append(line.replace("**", ""))
+    return "\n".join(cleaned_lines).strip(), recovered
+
+
+def _split_prompt_sentences(text: str) -> list[str]:
+    source = str(text or "").strip()
+    if not source:
+        return []
+    units = [match.group(0).strip() for match in _NATURAL_SENTENCE_PATTERN.finditer(source)]
+    return [unit for unit in units if unit]
+
+
+def _bounded_cjk_excerpt(text: str, max_chars: int) -> str:
+    budget = max(0, int(max_chars or 0))
+    if budget < 24:
+        return ""
+    pieces: list[str] = []
+    used = 0
+    for unit in _split_prompt_sentences(text):
+        compact = re.sub(r"\s+", "", unit)
+        if not compact:
+            continue
+        if used + len(compact) <= budget:
+            pieces.append(unit)
+            used += len(compact)
+            continue
+        remaining = budget - used
+        if remaining < 24:
+            break
+        body = unit.rstrip("。！？.!?")
+        clauses = [item.strip() for item in re.split(r"(?<=[，,；;])", body) if item.strip()]
+        partial = ""
+        for clause in clauses:
+            clause_length = len(re.sub(r"\s+", "", clause))
+            if len(re.sub(r"\s+", "", partial)) + clause_length > remaining:
+                break
+            partial += clause
+        if len(re.sub(r"\s+", "", partial)) >= 24:
+            pieces.append(partial.rstrip("，,；;") + "。")
+        break
+    return "".join(pieces).strip()
+
+
+def _blend_model_draft_with_skill_prompt(original_prompt: str, model_prompt: str, settings: dict[str, Any]) -> str:
+    """Keep the valid Skill story spine while adopting useful detail from a shorter model draft."""
+
+    original = str(original_prompt or "").strip()
+    candidate = str(model_prompt or "").strip()
+    if not original or not candidate or not _CJK_PATTERN.search(original):
+        return original
+    if not _looks_like_natural_prose_prompt(candidate) or _looks_like_tag_chain_prompt(candidate):
+        return original
+
+    original_key = _normalize_for_compare(original)
+    candidate_units = [
+        unit
+        for unit in _split_prompt_sentences(candidate)
+        if _normalize_for_compare(unit) and _normalize_for_compare(unit) not in original_key
+    ]
+    if not candidate_units:
+        return original
+    candidate_text = "".join(candidate_units)
+    original_units = _split_prompt_sentences(original)
+    if len(original_units) < 3:
+        return original
+
+    original_length = len(re.sub(r"\s+", "", original))
+    insert_budget = min(260, max(0, 1200 - original_length))
+    excerpt = _bounded_cjk_excerpt(candidate_text, insert_budget)
+    insert_at = max(1, len(original_units) - 1)
+    if excerpt:
+        original_units.insert(insert_at, excerpt)
+    else:
+        protected = ("故事", "事件", "因此", "于是", "因为", "情绪", "镜头", "最终画面", "最后一帧", "结尾", "定格")
+        replace_candidates = [
+            (index, unit)
+            for index, unit in enumerate(original_units[1:-1], start=1)
+            if not any(marker in unit for marker in protected)
+        ]
+        if not replace_candidates:
+            return original
+        replace_index, replace_unit = max(replace_candidates, key=lambda item: len(item[1]))
+        replace_budget = min(260, max(24, 1200 - original_length + len(re.sub(r"\s+", "", replace_unit))))
+        excerpt = _bounded_cjk_excerpt(candidate_text, replace_budget)
+        if not excerpt:
+            return original
+        original_units[replace_index] = excerpt
+
+    blended = _postprocess_natural_prompt_text("".join(original_units))
+    blended = _restore_composition_anchors(original, blended)
+    blended = _restore_mode_literal_guards(original, blended)
+    if blended == original or _violates_language(blended, settings) or _violates_subject_type(original, blended, settings):
+        return original
+    return blended if _looks_like_narrative_prompt(blended, settings) else original
+
+
+def _resolve_model_prompt_candidate(
+    original_prompt: str,
+    raw_text: str,
+    settings: dict[str, Any],
+) -> tuple[str, str, str]:
+    prepared, recovered = _prepare_model_response_text(raw_text)
+    if not prepared or _looks_like_broken_prompt(prepared):
+        return original_prompt, "rejected", "模型响应清洗后仍只有分析、占位符、标签串或不可用正文。"
+    cleaned = _postprocess_prompt_text(prepared)
+    cleaned = _restore_composition_anchors(original_prompt, cleaned)
+    cleaned = _restore_mode_literal_guards(original_prompt, cleaned)
+    if not cleaned or _looks_like_broken_prompt(cleaned):
+        return original_prompt, "rejected", "模型响应清洗后没有可用提示词正文。"
+    if _violates_language(cleaned, settings):
+        return original_prompt, "rejected", "模型响应未遵守当前提示词语言。"
+    if _violates_subject_type(original_prompt, cleaned, settings):
+        return original_prompt, "rejected", "模型响应改变了当前主体类型。"
+    if not _looks_like_narrative_prompt(cleaned, settings):
+        blended = _blend_model_draft_with_skill_prompt(original_prompt, cleaned, settings)
+        if blended != str(original_prompt or "").strip():
+            return blended, "blended", ""
+        return original_prompt, "rejected", "模型正文可读，但缺少完整剧情链或未达到当前 800-1200 字合同。"
+    return cleaned, ("cleaned" if recovered else "direct"), ""
 
 
 def _normalize_for_compare(text: str) -> str:
@@ -1296,10 +1532,16 @@ def _refresh_model_runtime_status(settings: dict[str, Any]) -> None:
 
     if active_fallback_count:
         if success_count:
-            settings["模型调用状态"] = (
-                f"部分采用：{success_count} 次成功，{failure_count} 次失败；"
-                f"最终仍有 {active_fallback_count} 条回退 Skill，采纳 {adopted_count} 次"
-            )
+            if adopted_count:
+                settings["模型调用状态"] = (
+                    f"部分采用：{success_count} 次成功，{failure_count} 次失败；"
+                    f"最终仍有 {active_fallback_count} 条回退 Skill，采纳 {adopted_count} 次"
+                )
+            else:
+                settings["模型调用状态"] = (
+                    f"调用成功但输出未采用：{success_count} 次；"
+                    f"最终仍有 {active_fallback_count} 条回退 Skill"
+                )
         else:
             settings["模型调用状态"] = (
                 f"调用失败：{failure_count} 次；最终仍有 {active_fallback_count} 条回退 Skill"
@@ -1442,6 +1684,71 @@ def _finalize_batch_retry_status(
         settings["模型回退说明"] = ""
         _append_model_runtime_note(settings, "批量响应格式异常，但逐条重试已恢复，最终无输出回退。")
     _refresh_model_runtime_status(settings)
+
+
+_MODEL_TEXT_METHOD_NAMES = (
+    "create_chat_completion",
+    "invoke",
+    "generate_content",
+    "complete",
+    "predict",
+    "chat",
+)
+
+
+def _supports_model_text_call(candidate: Any) -> bool:
+    if candidate is None:
+        return False
+    for name in _MODEL_TEXT_METHOD_NAMES:
+        try:
+            if callable(getattr(candidate, name, None)):
+                return True
+        except Exception:
+            continue
+    return callable(candidate) and not isinstance(candidate, (str, bytes, dict, list, tuple, set))
+
+
+def _resolve_model_backend(model: Any) -> Any:
+    """Unwrap common ComfyUI, LangChain and local-pipeline model containers."""
+
+    queue = [model]
+    seen: set[int] = set()
+    fallback = model
+    while queue:
+        candidate = queue.pop(0)
+        if candidate is None or id(candidate) in seen:
+            continue
+        seen.add(id(candidate))
+        fallback = candidate
+        if _supports_model_text_call(candidate):
+            return candidate
+        if isinstance(candidate, dict):
+            queue.extend(candidate.get(key) for key in ("llm", "model", "client", "pipeline", "generator") if key in candidate)
+            continue
+        if isinstance(candidate, (list, tuple)):
+            queue.extend(candidate[:8])
+            continue
+        for attribute in ("llm", "model", "client", "pipeline", "generator"):
+            try:
+                nested = getattr(candidate, attribute, None)
+            except Exception:
+                nested = None
+            if nested is not None and nested is not candidate:
+                queue.append(nested)
+    return fallback
+
+
+def _call_flexible_model_method(method: Callable[..., Any], *, prompt: str, messages: list[dict[str, str]]) -> Any:
+    try:
+        signature = inspect.signature(method)
+    except (TypeError, ValueError):
+        signature = None
+    parameters = signature.parameters if signature is not None else {}
+    if "messages" in parameters:
+        return method(messages=messages)
+    return method(prompt)
+
+
 def _call_model_text(
     llm: Any,
     prompt: str,
@@ -1451,29 +1758,51 @@ def _call_model_text(
     clean_think_text: Callable[[str], str],
     prompt_count: int = 1,
 ) -> str:
-    if hasattr(llm, "create_chat_completion"):
+    llm = _resolve_model_backend(llm)
+    system_prompt = _resolve_system_prompt(settings)
+    user_prompt = _compose_model_user_prompt(prompt, settings)
+    messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
+    combined_prompt = f"{system_prompt}\n\n{user_prompt}".strip()
+    if callable(getattr(llm, "create_chat_completion", None)):
         response = chat_completion(
             llm,
-            messages=[{"role": "system", "content": _resolve_system_prompt(settings)}, {"role": "user", "content": _compose_model_user_prompt(prompt, settings)}],
+            messages=messages,
             params=_refiner_sampling_params(settings, prompt_count=prompt_count),
         )
         text = str(extract_text(response) or "").strip()
         if not text:
             raise RuntimeError("模型 API 返回空文本。")
         return clean_think_text(text)
-    if hasattr(llm, "invoke"):
-        response = llm.invoke(_compose_model_user_prompt(prompt, settings))
+    if callable(getattr(llm, "invoke", None)):
+        response = llm.invoke(combined_prompt)
         text = str(extract_text(response) or "").strip()
         if not text:
             raise RuntimeError("模型返回空文本。")
         return clean_think_text(text)
-    if hasattr(llm, "generate_content"):
-        response = llm.generate_content(_compose_model_user_prompt(prompt, settings))
+    if callable(getattr(llm, "generate_content", None)):
+        response = llm.generate_content(combined_prompt)
         text = str(extract_text(response) or "").strip()
         if not text:
             raise RuntimeError("模型返回空文本。")
         return clean_think_text(text)
-    raise RuntimeError("当前模型对象不支持 create_chat_completion、invoke 或 generate_content。")
+    for method_name in ("complete", "predict", "chat"):
+        method = getattr(llm, method_name, None)
+        if not callable(method):
+            continue
+        response = _call_flexible_model_method(method, prompt=combined_prompt, messages=messages)
+        text = str(extract_text(response) or "").strip()
+        if not text:
+            raise RuntimeError(f"模型 {method_name} 返回空文本。")
+        return clean_think_text(text)
+    if callable(llm):
+        response = llm(combined_prompt)
+        text = str(extract_text(response) or "").strip()
+        if not text:
+            raise RuntimeError("可调用模型返回空文本。")
+        return clean_think_text(text)
+    raise RuntimeError(
+        "当前模型对象不支持 create_chat_completion、invoke、generate_content、complete、predict、chat 或可调用文本接口。"
+    )
 
 
 _TRANSIENT_MODEL_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
@@ -1564,7 +1893,7 @@ def maybe_model_refine(
     chat_completion: Callable[..., Any],
     clean_think_text: Callable[[str], str],
 ) -> str:
-    llm = getattr(model, "llm", None) or model
+    llm = _resolve_model_backend(model)
     if llm is None:
         return prompt
     try:
@@ -1579,30 +1908,22 @@ def maybe_model_refine(
     except Exception as exc:
         _record_model_call_result(settings, outcome="failure", reason=exc)
         return prompt
-    if _looks_like_broken_prompt(raw_text):
-        _record_model_call_result(settings, outcome="failure", reason="模型响应包含分析、占位符或不可用正文。")
-        return prompt
-    cleaned = _postprocess_prompt_text(raw_text)
-    cleaned = _restore_composition_anchors(prompt, cleaned)
-    cleaned = _restore_mode_literal_guards(prompt, cleaned)
-    if not cleaned or _looks_like_broken_prompt(cleaned):
-        _record_model_call_result(settings, outcome="failure", reason="模型响应清洗后没有可用提示词正文。")
-        return prompt
-    if _violates_language(cleaned, settings):
-        _record_model_call_result(settings, outcome="failure", reason="模型响应未遵守当前提示词语言。")
-        return prompt
-    if _violates_subject_type(prompt, cleaned, settings):
-        _record_model_call_result(settings, outcome="failure", reason="模型响应改变了当前主体类型。")
-        return prompt
-    if not _looks_like_narrative_prompt(cleaned, settings):
+    resolved, mode, reason = _resolve_model_prompt_candidate(prompt, raw_text, settings)
+    if mode == "rejected":
         _record_model_call_result(
             settings,
-            outcome="failure",
-            reason="模型响应缺少完整的事件触发、主体回应、情绪转折、环境反馈或结尾定格。",
+            outcome="partial",
+            fallback_outputs=1,
+            output_count=1,
+            reason=reason,
         )
         return prompt
-    _record_model_call_result(settings, outcome="success", changed=cleaned != str(prompt or "").strip())
-    return cleaned
+    if mode == "cleaned":
+        _append_model_runtime_note(settings, "模型响应中的思考、分析或包装字段已清洗，仅采用最终提示词正文。")
+    elif mode == "blended":
+        _append_model_runtime_note(settings, "模型返回了可用短草稿，已融入 Skill 的 800-1200 字剧情骨架，未触发输出回退。")
+    _record_model_call_result(settings, outcome="success", changed=resolved != str(prompt or "").strip())
+    return resolved
 
 
 def maybe_model_refine_batch(
@@ -1619,7 +1940,7 @@ def maybe_model_refine_batch(
     if len(clean_prompts) == 1:
         return [maybe_model_refine(model, clean_prompts[0], settings, chat_completion=chat_completion, clean_think_text=clean_think_text)]
 
-    llm = getattr(model, "llm", None) or model
+    llm = _resolve_model_backend(model)
     if llm is None:
         return list(clean_prompts)
 
@@ -1695,48 +2016,47 @@ def maybe_model_refine_batch(
     resolved: list[str] = []
     seen_keys: set[str] = set()
     rejected_count = 0
+    rejection_reasons: list[str] = []
+    resolution_modes: set[str] = set()
     for original_prompt, part in zip(clean_prompts, parts):
-        if _looks_like_broken_prompt(part):
+        candidate, mode, reason = _resolve_model_prompt_candidate(original_prompt, part, settings)
+        if mode == "rejected":
             resolved.append(original_prompt)
             seen_keys.add(_normalize_for_compare(original_prompt))
             rejected_count += 1
+            if reason and reason not in rejection_reasons:
+                rejection_reasons.append(reason)
             continue
+        resolution_modes.add(mode)
         rejected = False
-        cleaned = _postprocess_prompt_text(part)
-        cleaned = _restore_composition_anchors(original_prompt, cleaned)
-        cleaned = _restore_mode_literal_guards(original_prompt, cleaned)
-        candidate = (
-            cleaned
-            if (
-                cleaned
-                and not _looks_like_broken_prompt(cleaned)
-                and not _violates_language(cleaned, settings)
-                and not _violates_subject_type(original_prompt, cleaned, settings)
-                and _looks_like_narrative_prompt(cleaned, settings)
-            )
-            else original_prompt
-        )
-        if candidate == original_prompt:
-            rejected = True
         candidate_key = _normalize_for_compare(candidate)
         if candidate_key in seen_keys:
             candidate = original_prompt
             candidate_key = _normalize_for_compare(candidate)
             rejected = True
+            if "模型批量响应与前一条重复，未采用重复候选。" not in rejection_reasons:
+                rejection_reasons.append("模型批量响应与前一条重复，未采用重复候选。")
         resolved.append(candidate)
         seen_keys.add(candidate_key)
         if rejected:
             rejected_count += 1
+    if "cleaned" in resolution_modes:
+        _append_model_runtime_note(settings, "批量模型响应中的思考、分析或包装字段已清洗，仅采用最终提示词正文。")
+    if "blended" in resolution_modes:
+        _append_model_runtime_note(settings, "批量模型短草稿已分别融入 Skill 的 800-1200 字剧情骨架，未将可用草稿误判为调用失败。")
     changed = any(candidate != original for candidate, original in zip(resolved, clean_prompts))
     if rejected_count:
         _record_model_call_result(
             settings,
-            outcome="partial" if changed else "failure",
+            outcome="partial",
             changed=changed,
-            adopted_outputs=len(clean_prompts) - rejected_count,
+            adopted_outputs=sum(candidate != original for candidate, original in zip(resolved, clean_prompts)),
             fallback_outputs=rejected_count,
             output_count=len(clean_prompts),
-            reason=f"批量响应有 {rejected_count} 条未通过正文、语言、主体或重复校验。",
+            reason=(
+                f"批量响应有 {rejected_count} 条未通过正文、语言、主体或重复校验。"
+                + (f" {'；'.join(rejection_reasons[:2])}" if rejection_reasons else "")
+            ),
         )
     else:
         _record_model_call_result(

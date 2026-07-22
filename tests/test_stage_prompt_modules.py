@@ -148,6 +148,28 @@ randomizer = load_module("stage_prompt/randomizer.py", "stage_prompt_randomizer_
 formatter = load_module("stage_prompt/formatter.py", "stage_prompt_formatter_test")
 model_refiner = load_module("stage_prompt/model_refiner.py", "stage_prompt_model_refiner_test")
 smart_text = load_module("stage_prompt/smart_text.py", "stage_prompt_smart_text_test")
+
+
+def build_long_test_skill_prompt() -> str:
+    anchors = {
+        "subject": "成年女性",
+        "identity": "旅行摄影师",
+        "style": "电影写实",
+        "scene": "雨夜站台",
+        "action": "停步回望",
+        "lighting": "青蓝霓虹逆光",
+        "props": "旧车票",
+        "composition": "全景全身",
+        "outfit": "深色风衣",
+        "quality": "高细节",
+    }
+    plan = narrative.build_narrative_plan(anchors, seed=42)
+    return narrative.render_narrative_prompt(
+        anchors,
+        plan,
+        language="纯中文",
+        detail_level="标准",
+    )
 tag_block_composer = load_module("stage_prompt/tag_block_composer.py", "stage_prompt_tag_block_composer_test")
 tag_library = load_module("prompt_tag_library.py", "prompt_tag_library_test")
 state_builder = load_module("stage_prompt/state_builder.py", "stage_prompt_state_builder_test")
@@ -7065,10 +7087,14 @@ class TestStagePromptModules(unittest.TestCase):
         node_class = getattr(module, "QwenTE阶段式提示词生成器")
         input_types = node_class.INPUT_TYPES()
         self.assertEqual(module.SETTING_DEFAULTS["模型来源"], "仅Skill")
+        self.assertEqual(module._normalize_stage_model_source("本地GGUF"), "本地模型")
         self.assertEqual(input_types["required"]["模型来源"][1]["default"], "仅Skill")
         self.assertEqual(input_types["required"]["内置主模型"][1]["default"], input_types["required"]["内置主模型"][0][0])
         self.assertNotIn("qwen模型", input_types["required"])
         self.assertIn("qwen模型", input_types["optional"])
+        self.assertEqual(str(input_types["optional"]["qwen模型"][0]), "*")
+        self.assertIn("本地模型", input_types["required"]["模型来源"][0])
+        self.assertIn("本地GGUF", input_types["required"]["模型来源"][0])
         for name in (
             "模型来源",
             "内置模型系列",
@@ -7087,6 +7113,31 @@ class TestStagePromptModules(unittest.TestCase):
             "API额外请求头",
         ):
             self.assertIn(name, input_types["required"])
+
+    def test_universal_stage_node_keeps_external_local_model_connected(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        external_model = object()
+        captured: dict[str, Any] = {}
+
+        def fake_run_stage(model, **settings):
+            captured["model"] = model
+            captured["settings"] = dict(settings)
+            return ("full", "prompt", "tags", "{}", "negative", "collection", "smart")
+
+        with mock.patch.object(module, "_run_stage", side_effect=fake_run_stage), mock.patch.object(
+            module,
+            "获取阶段节点输出缓存",
+            return_value={},
+        ):
+            result = module.QwenTE通用模型阶段式提示词生成器().run(
+                external_model,
+                unique_id="external-local-model",
+            )
+
+        self.assertIs(captured["model"], external_model)
+        self.assertEqual(captured["settings"]["模型来源"], "本地模型")
+        self.assertEqual(captured["settings"]["模型来源实际"], "外接本地模型")
+        self.assertEqual(result["result"][1], "prompt")
 
     def test_stage_api_model_uses_openai_compatible_chat_completion(self) -> None:
         module = load_stage_prompt_generator_for_integration_test()
@@ -7167,6 +7218,13 @@ class TestStagePromptModules(unittest.TestCase):
             content = [{"text": "object content"}]
 
         self.assertEqual(model_refiner.extract_text(AiMessage()), "object content")
+        self.assertEqual(
+            model_refiner.extract_text(
+                [{"generated_text": [{"role": "user", "content": "echo"}, {"role": "assistant", "content": "pipeline output"}]}]
+            ),
+            "pipeline output",
+        )
+        self.assertEqual(model_refiner.extract_text({"final_prompt": "json final"}), "json final")
         self.assertEqual(model_refiner.extract_text({"unexpected": {"value": "not prompt text"}}), "")
         with self.assertRaisesRegex(RuntimeError, "token rejected"):
             model_refiner.extract_text({"error": {"message": "token rejected"}})
@@ -8011,14 +8069,69 @@ class TestStagePromptModules(unittest.TestCase):
         refined = model_refiner.maybe_model_refine(
             DummyLlm(),
             "base prompt",
-            {"系统提示词覆盖": "", "最大生成token": 256, "温度": 0.7, "top_p": 0.9, "模型来源": "本地GGUF"},
+            {"系统提示词覆盖": "", "最大生成token": 256, "温度": 0.7, "top_p": 0.9, "模型来源": "本地模型"},
             chat_completion=lambda *args, **kwargs: None,
             clean_think_text=lambda text: text.replace(" refined", "++"),
         )
         self.assertEqual(refined, "base prompt++")
         self.assertIn("Skill前置上下文", captured["prompt"])
-        self.assertIn("模型来源：本地GGUF", captured["prompt"])
+        self.assertIn("模型来源：本地模型", captured["prompt"])
         self.assertIn("待整理提示词正文", captured["prompt"])
+
+    def test_model_refiner_supports_wrapped_callable_local_pipeline(self) -> None:
+        class LocalPipeline:
+            def __call__(self, _prompt):
+                return [{"generated_text": [{"role": "assistant", "content": "A cinematic subject moves through rain while the camera holds on the changing light."}]}]
+
+        wrapped = {"pipeline": LocalPipeline()}
+        settings = {"系统提示词覆盖": "", "模型来源": "本地模型"}
+        refined = model_refiner.maybe_model_refine(
+            wrapped,
+            "base prompt",
+            settings,
+            chat_completion=lambda *_args, **_kwargs: None,
+            clean_think_text=lambda value: value,
+        )
+        self.assertIn("cinematic subject", refined)
+        self.assertEqual(settings["模型调用失败次数"], 0)
+        self.assertEqual(settings["模型来源实际"], "本地模型")
+
+    def test_model_refiner_extracts_final_text_after_local_reasoning(self) -> None:
+        class LocalModel:
+            def complete(self, _prompt):
+                return {
+                    "output_text": (
+                        "<analysis>分析用户请求，先规划画面结构。</analysis>\n"
+                        "最终提示词：\n"
+                        "成年女性站在雨夜站台，远处列车鸣笛打破等待，她因此停下脚步并回望。"
+                        "情绪由疲惫转为警觉，环境中的霓虹反射随动作掠过风衣和湿地面，"
+                        "镜头最终定格在列车尚未进入画面的瞬间。"
+                    )
+                }
+
+        original = build_long_test_skill_prompt()
+        settings = {
+            "提示词语言": "纯中文",
+            "主体类型": "人物角色",
+            "主体类型解析结果": "人物角色",
+            "模型来源": "本地模型",
+            "模型调用基础来源": "本地模型",
+            "全局剧情规划": ["叙事弧=等待与信号"],
+        }
+        refined = model_refiner.maybe_model_refine(
+            LocalModel(),
+            original,
+            settings,
+            chat_completion=lambda *_args, **_kwargs: None,
+            clean_think_text=lambda value: value,
+        )
+        self.assertNotEqual(refined, original)
+        self.assertGreaterEqual(len(refined), 800)
+        self.assertLessEqual(len(refined), 1200)
+        self.assertNotIn("分析用户请求", refined)
+        self.assertEqual(settings.get("模型活动回退数量", 0), 0)
+        self.assertEqual(settings.get("模型来源实际"), "本地模型")
+        self.assertTrue(any("短草稿" in note for note in settings.get("推理纠偏说明", [])))
 
     def test_model_refiner_removes_placeholder_fragments_from_api_output(self) -> None:
         class DummyChatLlm:
@@ -8047,14 +8160,27 @@ class TestStagePromptModules(unittest.TestCase):
                 return None
 
         original = "完整画面，环境人像，全景全身，高细节"
+        settings = {
+            "系统提示词覆盖": "",
+            "最大生成token": 256,
+            "温度": 0.7,
+            "top_p": 0.9,
+            "模型来源": "本地模型",
+            "模型调用基础来源": "本地模型",
+        }
         refined = model_refiner.maybe_model_refine(
             DummyChatLlm(),
             original,
-            {"系统提示词覆盖": "", "最大生成token": 256, "温度": 0.7, "top_p": 0.9},
+            settings,
             chat_completion=lambda *args, **kwargs: {"text": "[]"},
             clean_think_text=lambda text: text,
         )
         self.assertEqual(refined, original)
+        self.assertEqual(settings["模型调用失败次数"], 0)
+        self.assertEqual(settings["模型调用成功次数"], 1)
+        self.assertIn("调用成功但输出未采用", settings["模型调用状态"])
+        self.assertIn("模型输出回退", settings["模型回退说明"])
+        self.assertNotIn("模型调用回退", settings["模型回退说明"])
 
     def test_model_refiner_strips_prompt_wrappers(self) -> None:
         class DummyChatLlm:
@@ -13537,7 +13663,7 @@ class TestStagePromptModules(unittest.TestCase):
             return list(prompts)
 
         with mock.patch.object(module, "_maybe_model_refine_batch_impl", side_effect=capture_refinement):
-            for source in ("仅Skill", "本地GGUF", "API接口"):
+            for source in ("仅Skill", "本地模型", "API接口"):
                 result = module._run_stage(
                     None,
                     **{
@@ -13553,7 +13679,7 @@ class TestStagePromptModules(unittest.TestCase):
                     },
                 )
                 self.assertIn("漆原智志", result[1])
-        self.assertEqual([source for source, _prompt in captured], ["仅Skill", "本地GGUF", "API接口"])
+        self.assertEqual([source for source, _prompt in captured], ["仅Skill", "本地模型", "API接口"])
         self.assertTrue(all("漆原智志" in prompt for _source, prompt in captured))
 
     def test_fantasy_styles_survive_runtime_smart_text_tag_blocks_and_model_guards(self) -> None:
@@ -13690,7 +13816,7 @@ class TestStagePromptModules(unittest.TestCase):
 
     def test_concise_prompt_mode_is_natural_language_for_all_model_sources(self) -> None:
         module = load_stage_prompt_generator_for_integration_test()
-        for source in ("仅Skill", "本地GGUF", "API接口"):
+        for source in ("仅Skill", "本地模型", "API接口"):
             with self.subTest(source=source):
                 result = module._run_stage(
                     None,
@@ -14126,16 +14252,12 @@ class TestStagePromptModules(unittest.TestCase):
             256,
         )
 
-    def test_model_refiner_keeps_skill_story_when_model_removes_narrative_chain(self) -> None:
+    def test_model_refiner_blends_usable_short_draft_into_skill_story(self) -> None:
         class DummyLLM:
             def create_chat_completion(self, *args, **kwargs):
                 return None
 
-        original = (
-            "电影写实画面以成年女性为叙事中心。故事从她抵达雨夜站台开始，远处的列车声打破平静，"
-            "因此她停下脚步回望，情绪由疲惫转为警觉。环境中的霓虹反射沿湿地面移动，"
-            "镜头最终定格在列车尚未进入画面的瞬间。" * 4
-        )
+        original = build_long_test_skill_prompt()
         flat_model_text = (
             "电影写实成年女性位于雨夜站台，穿着剪裁利落的深色长款风衣，衣领与袖口具有细密织物纹理。"
             "全景全身构图保留完整身体比例，低角度取景强调站台顶棚与轨道的透视延伸。"
@@ -14160,8 +14282,13 @@ class TestStagePromptModules(unittest.TestCase):
             },
             clean_think_text=lambda value: value,
         )
-        self.assertEqual(refined, original)
-        self.assertIn("缺少完整的事件触发", settings.get("模型回退说明", ""))
+        self.assertNotEqual(refined, original)
+        self.assertIn("深色长款风衣", refined)
+        self.assertGreaterEqual(len(refined), 800)
+        self.assertLessEqual(len(refined), 1200)
+        self.assertEqual(settings.get("模型活动回退数量", 0), 0)
+        self.assertEqual(settings.get("模型来源实际"), "API接口")
+        self.assertTrue(any("短草稿" in note for note in settings.get("推理纠偏说明", [])))
 
     def test_model_refiner_retries_transient_timeout_and_recovers_without_skill_fallback(self) -> None:
         class FlakyLLM:

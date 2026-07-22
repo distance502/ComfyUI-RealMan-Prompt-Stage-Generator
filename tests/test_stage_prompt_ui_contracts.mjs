@@ -1554,6 +1554,8 @@ test("stage model dialog exposes compact controls without taking over external l
 	assert.equal(source.includes("STAGE_EMBEDDED_MODEL_WIDGET_NAMES"), true);
 	assert.equal(source.includes("STAGE_EMBEDDED_API_MODEL_WIDGET_NAMES"), true);
 	assert.equal(source.includes("MODEL_SOURCE_BUTTONS"), true);
+	assert.equal(source.includes('{ value: "本地模型", label: "本地"'), true);
+	assert.equal(source.includes('return source === "本地GGUF" ? "本地模型" : source;'), true);
 	assert.equal(source.includes("MODEL_API_PROVIDER_BUTTONS"), true);
 	assert.equal(source.includes("内置主模型"), true);
 	assert.equal(source.includes("API服务商"), true);
@@ -1569,7 +1571,7 @@ test("stage model dialog exposes compact controls without taking over external l
 	}
 	assert.equal(source.includes('setWidgetValue(node, resolveModelWidgetName(node, "API地址"), String(item.baseUrl ?? ""));'), true);
 	assert.equal(source.includes('setWidgetValue(node, resolveModelWidgetName(node, "API模型"), String(item.model ?? ""));'), true);
-	assert.equal(source.includes("选择提示词增强方式：Skill 离线规则、本地 GGUF 或 API。配置不完整时会自动回退 Skill，不会中断节点。"), true);
+	assert.equal(source.includes("选择提示词增强方式：Skill、本地模型或 API。本地模型支持外接兼容对象，未连接时使用内置 GGUF；不完整时自动回退 Skill。"), true);
 	assert.equal(source.includes("未完整会回退Skill"), true);
 	assert.equal(source.includes("若模型名或本地文件缺失，运行时会回退 Skill 并在标签摘要里提示原因。"), true);
 	assert.equal(source.includes('createModelLoaderButton(node, "底层"'), false);
@@ -2441,7 +2443,7 @@ test("stage sanitize repairs embedded model and image reverse stale values", asy
 	const node = {
 		properties: {},
 		widgets: [
-			{ name: "模型来源", value: "本地GGUF", options: { values: ["仅Skill", "本地GGUF", "API接口"] } },
+			{ name: "模型来源", value: "本地GGUF", options: { values: ["仅Skill", "本地模型", "API接口", "本地GGUF"] } },
 			{ name: "内置模型系列", value: "旧系列", options: { values: ["Qwen3.5-VL", "通用GGUF"] } },
 			{ name: "内置主模型", value: "", options: { values: ["Qwen3.6-35B-A3B-IQ2_M.gguf"] } },
 			{ name: "内置视觉投影mmproj", value: "旧mmproj", options: { values: ["无", "mmproj-Qwen3.6-35B-A3B-f16.gguf"] } },
@@ -2455,7 +2457,7 @@ test("stage sanitize repairs embedded model and image reverse stale values", asy
 		],
 	};
 	exports.sanitizeStagePromptNode(node, { slot_config: [] });
-	assert.equal(node.widgets[0].value, "本地GGUF");
+	assert.equal(node.widgets[0].value, "本地模型");
 	assert.equal(node.widgets[1].value, "Qwen3.5-VL");
 	assert.equal(node.widgets[2].value, "Qwen3.6-35B-A3B-IQ2_M.gguf");
 	assert.equal(node.widgets[3].value, "无");
