@@ -133,6 +133,23 @@ def normalize_embedded_browser_coordinate(value: Any, maximum: int) -> float:
     return max(0.0, min(float(max(0, int(maximum))), number))
 
 
+def embedded_browser_viewport_origin(metrics: Any) -> tuple[float, float]:
+    if not isinstance(metrics, dict):
+        return 0.0, 0.0
+    for key in ("cssVisualViewport", "visualViewport", "cssLayoutViewport", "layoutViewport"):
+        viewport = metrics.get(key)
+        if not isinstance(viewport, dict):
+            continue
+        try:
+            page_x = float(viewport.get("pageX"))
+            page_y = float(viewport.get("pageY"))
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(page_x) and math.isfinite(page_y):
+            return max(0.0, page_x), max(0.0, page_y)
+    return 0.0, 0.0
+
+
 def normalize_embedded_browser_integer(value: Any, minimum: int, maximum: int, field_name: str) -> int:
     try:
         number = int(value)
@@ -786,6 +803,11 @@ class EmbeddedBrowserManager:
                 frame_height / float(session.height),
             )
             scale = max(0.1, scale)
+            try:
+                layout_metrics = await session.connection.call("Page.getLayoutMetrics", timeout=1.0)
+            except Exception:
+                layout_metrics = {}
+            viewport_x, viewport_y = embedded_browser_viewport_origin(layout_metrics)
             result = await session.connection.call(
                 "Page.captureScreenshot",
                 {
@@ -795,8 +817,8 @@ class EmbeddedBrowserManager:
                     "captureBeyondViewport": False,
                     "optimizeForSpeed": True,
                     "clip": {
-                        "x": 0,
-                        "y": 0,
+                        "x": viewport_x,
+                        "y": viewport_y,
                         "width": session.width,
                         "height": session.height,
                         "scale": scale,

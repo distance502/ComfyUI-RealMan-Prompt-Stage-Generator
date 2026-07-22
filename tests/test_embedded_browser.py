@@ -15,6 +15,7 @@ from embedded_browser import (
     EmbeddedBrowserManager,
     EmbeddedBrowserUnavailable,
     embedded_browser_history_index,
+    embedded_browser_viewport_origin,
     embedded_browser_virtual_key_code,
     normalize_embedded_browser_coordinate,
     normalize_embedded_browser_frame_size,
@@ -25,10 +26,13 @@ from embedded_browser import (
 class _RecordingConnection:
     def __init__(self):
         self.calls = []
+        self.errors = {}
         self.responses = {}
 
     async def call(self, method, params=None, **_kwargs):
         self.calls.append((method, params or {}))
+        if method in self.errors:
+            raise self.errors[method]
         return dict(self.responses.get(method, {}))
 
 
@@ -65,6 +69,27 @@ class EmbeddedBrowserHelperTests(unittest.TestCase):
         self.assertEqual(embedded_browser_virtual_key_code("a"), 65)
         self.assertEqual(embedded_browser_virtual_key_code("Enter"), 13)
         self.assertEqual(embedded_browser_virtual_key_code("", "F12"), 123)
+
+    def test_viewport_origin_prefers_css_metrics_and_rejects_invalid_values(self):
+        self.assertEqual(
+            embedded_browser_viewport_origin(
+                {
+                    "cssVisualViewport": {"pageX": 18.5, "pageY": 920.25},
+                    "visualViewport": {"pageX": 1, "pageY": 2},
+                }
+            ),
+            (18.5, 920.25),
+        )
+        self.assertEqual(
+            embedded_browser_viewport_origin(
+                {
+                    "cssVisualViewport": {"pageX": "nan", "pageY": 500},
+                    "layoutViewport": {"pageX": -12, "pageY": 640},
+                }
+            ),
+            (0.0, 640.0),
+        )
+        self.assertEqual(embedded_browser_viewport_origin(None), (0.0, 0.0))
 
     def test_launch_arguments_keep_debugging_loopback_and_security_defaults(self):
         manager = EmbeddedBrowserManager(
@@ -208,6 +233,42 @@ class EmbeddedBrowserInputTests(unittest.IsolatedAsyncioTestCase):
         capture_params = next(params for method, params in self.connection.calls if method == "Page.captureScreenshot")
         self.assertEqual(capture_params["quality"], 90)
         self.assertAlmostEqual(capture_params["clip"]["scale"], 1.5)
+
+    async def test_scrolled_viewport_origin_is_used_for_frame_capture(self):
+        frame = b"scrolled-jpeg-frame-content"
+        self.connection.responses["Page.getLayoutMetrics"] = {
+            "cssVisualViewport": {"pageX": 24.5, "pageY": 1680.25},
+        }
+        self.connection.responses["Page.captureScreenshot"] = {
+            "data": base64.b64encode(frame).decode("ascii"),
+        }
+
+        captured, _frame_id = await self.manager.capture_frame(
+            "session", max_width=1120, max_height=630, quality=64
+        )
+
+        self.assertEqual(captured, frame)
+        methods = [method for method, _params in self.connection.calls]
+        self.assertLess(methods.index("Page.getLayoutMetrics"), methods.index("Page.captureScreenshot"))
+        capture_params = next(params for method, params in self.connection.calls if method == "Page.captureScreenshot")
+        self.assertEqual(capture_params["clip"]["x"], 24.5)
+        self.assertEqual(capture_params["clip"]["y"], 1680.25)
+        self.assertEqual(capture_params["clip"]["width"], 1360)
+        self.assertEqual(capture_params["clip"]["height"], 760)
+
+    async def test_layout_metrics_failure_falls_back_to_page_origin(self):
+        frame = b"fallback-jpeg-frame-content"
+        self.connection.errors["Page.getLayoutMetrics"] = RuntimeError("metrics unavailable")
+        self.connection.responses["Page.captureScreenshot"] = {
+            "data": base64.b64encode(frame).decode("ascii"),
+        }
+
+        captured, _frame_id = await self.manager.capture_frame("session")
+
+        self.assertEqual(captured, frame)
+        capture_params = next(params for method, params in self.connection.calls if method == "Page.captureScreenshot")
+        self.assertEqual(capture_params["clip"]["x"], 0.0)
+        self.assertEqual(capture_params["clip"]["y"], 0.0)
 
     async def test_resize_updates_device_metrics_and_invalidates_frame_cache(self):
         session = self.manager._sessions["session"]
