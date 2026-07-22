@@ -5607,6 +5607,19 @@ class QwenTE阶段式提示词生成器:
         for name, tooltip in _阶段输入参数说明.items():
             if name in required:
                 required[name][1].setdefault("tooltip", tooltip)
+        native_visible_names = {
+            "模板风格",
+            "运行时随机标签",
+            "运行时随机模式",
+            "随机主题池",
+            "生成数量",
+            "提示词语言",
+            "详细度",
+            "输出模式",
+        }
+        for name, input_spec in required.items():
+            if name not in native_visible_names:
+                input_spec[1].setdefault("advanced", True)
         return {
             "required": required,
             "optional": {"qwen模型": (_STAGE_MODEL_ANY_TYPE,), "参考图片": ("IMAGE",)},

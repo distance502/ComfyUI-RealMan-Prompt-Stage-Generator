@@ -1049,6 +1049,11 @@ class TestStagePromptModules(unittest.TestCase):
         input_types = node_class.INPUT_TYPES()
         self.assertIn("required", input_types)
         self.assertIn("模板风格", input_types["required"])
+        self.assertNotIn("advanced", input_types["required"]["模板风格"][1])
+        self.assertTrue(input_types["required"]["主体标签20"][1]["advanced"])
+        self.assertTrue(input_types["required"]["画面风格标签20"][1]["advanced"])
+        self.assertTrue(input_types["required"]["模型来源"][1]["advanced"])
+        self.assertTrue(input_types["required"]["随机补充避重缓存"][1]["advanced"])
         self.assertIsNone(module._规范化随机种子("-1"))
         self.assertEqual(module._清洗think块文本("<think>skip</think>正向提示词"), "正向提示词")
 
@@ -8760,8 +8765,9 @@ class TestStagePromptModules(unittest.TestCase):
         for group_name in ("主体", "画面风格", "成人向表达", "光影氛围", "构图视角", "动作姿态", "服装造型", "场景背景", "道具世界观", "技术画质"):
             first_slot = input_types["required"][f"{group_name}标签1"]
             last_slot = input_types["required"][f"{group_name}标签20"]
-            self.assertEqual(first_slot, ("STRING", {"default": "无", "multiline": False}))
-            self.assertEqual(last_slot, ("STRING", {"default": "无", "multiline": False}))
+            expected_slot = ("STRING", {"default": "无", "multiline": False, "advanced": True})
+            self.assertEqual(first_slot, expected_slot)
+            self.assertEqual(last_slot, expected_slot)
             self.assertNotIn(f"{group_name}标签21", input_types["required"])
 
         serialized = json.dumps(input_types, ensure_ascii=False).encode("utf-8")

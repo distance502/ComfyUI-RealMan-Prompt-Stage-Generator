@@ -51,6 +51,7 @@ class TestParameterDocumentation(unittest.TestCase):
             "stage_prompt_generator_ui.js",
             "stage_prompt_generator_ui_v2.js",
             "stage_prompt_generator_mini_toolbar.js",
+            "00_stage_prompt_generator_preflight_v1.js",
         ):
             with self.subTest(script_name=script_name):
                 self.assertIn(

@@ -672,12 +672,15 @@ function refreshMiniToolbar(node) {
 	if (toolbar.metaEl instanceof HTMLElement) {
 		toolbar.metaEl.textContent = buildToolbarStatus(node, state);
 	}
+	if (toolbar.statusWidget) {
+		toolbar.statusWidget.value = buildToolbarStatus(node, state);
+	}
 	const randomEnabled = !!getWidget(node, RANDOM_TOGGLE_WIDGET)?.value;
-	toolbar.buttons.raw?.classList.toggle("is-active", state.rawExpanded);
-	toolbar.buttons.advanced?.classList.toggle("is-active", state.advancedExpanded);
-	toolbar.buttons.random?.classList.toggle("is-active", randomEnabled);
+	toolbar.buttons.raw?.classList?.toggle("is-active", state.rawExpanded);
+	toolbar.buttons.advanced?.classList?.toggle("is-active", state.advancedExpanded);
+	toolbar.buttons.random?.classList?.toggle("is-active", randomEnabled);
 	const clearConfirmPending = isMiniClearConfirmationPending(node);
-	if (toolbar.buttons.clear) {
+	if (toolbar.buttons.clear instanceof HTMLElement) {
 		toolbar.buttons.clear.textContent = clearConfirmPending ? "确认清空" : "清空";
 		toolbar.buttons.clear.classList.toggle("is-active", clearConfirmPending);
 		toolbar.buttons.clear.setAttribute("aria-pressed", clearConfirmPending ? "true" : "false");
@@ -697,6 +700,110 @@ function createMiniButton(label, variant, handler) {
 		await handler();
 	});
 	return button;
+}
+
+function buildMiniActionHandlers(node, state) {
+	const wrap = (handler) => async () => {
+		cancelMiniClearConfirmation(node, { refresh: false });
+		await handler();
+	};
+	return {
+		tag: wrap(async () => {
+			const openTagDialog = globalThis.__QWEN_TE_STAGE_OPEN_TAG_DIALOG__;
+			if (typeof openTagDialog === "function") await openTagDialog(node);
+			else setMiniStatus(node, "完整标签面板暂不可用，可先展开槽位设置。");
+			if (typeof openTagDialog === "function") clearMiniStatus(node);
+		}),
+		random: wrap(async () => {
+			setMiniStatus(node, await applyMiniRandomAction(node));
+		}),
+		queue: wrap(async () => {
+			const ok = queueWorkflow();
+			setMiniStatus(node, ok ? "已加入队列。" : "入队失败，请检查队列按钮。");
+		}),
+		raw: wrap(async () => {
+			state.rawExpanded = !state.rawExpanded;
+			setWidgetGroupCollapsed(node, collectRawTagWidgetNames(node), !state.rawExpanded, "MiniRaw");
+			clearMiniStatus(node);
+			refreshMiniToolbar(node);
+		}),
+		advanced: wrap(async () => {
+			state.advancedExpanded = !state.advancedExpanded;
+			setWidgetGroupCollapsed(node, collectAdvancedWidgetNames(node), !state.advancedExpanded, "MiniAdvanced");
+			setWidgetGroupCollapsed(node, collectAlwaysHiddenWidgetNames(node), true, "MiniInternal");
+			clearMiniStatus(node);
+			refreshMiniToolbar(node);
+		}),
+		nsfw: wrap(async () => {
+			setMiniStatus(node, await openMiniNsfwWorkspaceAction(node));
+		}),
+		clear: async () => {
+			if (!isMiniClearConfirmationPending(node)) {
+				beginMiniClearConfirmation(node);
+				return;
+			}
+			cancelMiniClearConfirmation(node, { refresh: false });
+			setMiniStatus(node, await clearMiniSelectionAction(node, collectRawTagWidgetNames(node), { forceConfirmed: true }));
+		},
+	};
+}
+
+function createCanvasMiniToolbar(node, actionHandlers) {
+	if (typeof node?.addWidget !== "function") return null;
+	const buttons = {};
+	const definitions = [
+		["tag", "标签"],
+		["random", "随机"],
+		["queue", "入队"],
+		["raw", "槽位"],
+		["advanced", "高级"],
+		["nsfw", "NSFW"],
+		["clear", "清空"],
+	];
+	for (const [key, label] of definitions) {
+		let widget = null;
+		try {
+			widget = node.addWidget("button", label, label, () => { void actionHandlers[key]?.(); }, { serialize: false });
+		} catch (_error) {}
+		if (!widget) continue;
+		widget.serialize = false;
+		widget.__qwenStageMiniWidget = true;
+		buttons[key] = widget;
+	}
+	if (!Object.keys(buttons).length) return null;
+	let statusWidget = null;
+	try {
+		statusWidget = node.addWidget("text", "TE·状态", "兼容模式已启用", null, {
+			serialize: false,
+			readonly: true,
+		});
+	} catch (_error) {}
+	if (statusWidget) {
+		statusWidget.serialize = false;
+		statusWidget.__qwenStageMiniWidget = true;
+	}
+	return {
+		mode: "canvas",
+		root: null,
+		domWidget: null,
+		metaEl: null,
+		buttons,
+		statusWidget,
+		resizeObserver: null,
+	};
+}
+
+function activateMiniToolbar(node, state, toolbar, marker) {
+	node[MINI_TOOLBAR_FLAG] = true;
+	if (typeof node.title === "string" && !node.title.endsWith(MINI_TITLE_SUFFIX)) {
+		node.title += MINI_TITLE_SUFFIX;
+	}
+	node[MINI_TOOLBAR_KEY] = toolbar;
+	startMiniWidgetReconcile(node, state);
+	sendMiniDecisionProbe(marker, node);
+	refreshMiniToolbar(node);
+	scheduleNodeLayout(node);
+	return true;
 }
 
 function cleanupMiniToolbar(node, options = {}) {
@@ -777,13 +884,7 @@ function ensureMiniToolbar(node) {
 		sendMiniDecisionProbe("skip_already_loaded", node);
 		return true;
 	}
-	if (typeof node.addDOMWidget !== "function") {
-		sendMiniDecisionProbe("skip_no_addDOMWidget", node);
-		return;
-	}
-
 	cleanupLegacyMiniWidgets(node);
-	injectStyles();
 
 	const rawTagWidgetNames = collectRawTagWidgetNames(node);
 	const advancedWidgetNames = collectAdvancedWidgetNames(node);
@@ -799,6 +900,16 @@ function ensureMiniToolbar(node) {
 		state.advancedExpanded = false;
 		state.initialized = true;
 	}
+	const actionHandlers = buildMiniActionHandlers(node, state);
+	if (typeof node.addDOMWidget !== "function") {
+		const canvasToolbar = createCanvasMiniToolbar(node, actionHandlers);
+		if (canvasToolbar) return activateMiniToolbar(node, state, canvasToolbar, "created_canvas_fallback");
+		sendMiniDecisionProbe("compact_only_no_widget_api", node);
+		scheduleNodeLayout(node);
+		return true;
+	}
+
+	injectStyles();
 
 	const root = document.createElement("div");
 	root.className = "qwen-te-mini";
@@ -829,48 +940,14 @@ function ensureMiniToolbar(node) {
 	grid.className = "qwen-te-mini__grid";
 	shell.appendChild(grid);
 
-	const makeActionButton = (label, variant, handler) => createMiniButton(label, variant, async () => {
-		cancelMiniClearConfirmation(node, { refresh: false });
-		await handler();
-	});
-
 	const buttons = {
-		tag: makeActionButton("标签", "primary", async () => {
-			const openTagDialog = globalThis.__QWEN_TE_STAGE_OPEN_TAG_DIALOG__;
-			if (typeof openTagDialog === "function") await openTagDialog(node);
-			clearMiniStatus(node);
-		}),
-		random: makeActionButton("随机", "warm", async () => {
-			setMiniStatus(node, await applyMiniRandomAction(node));
-		}),
-		queue: makeActionButton("入队", "primary", async () => {
-			const ok = queueWorkflow();
-			setMiniStatus(node, ok ? "已加入队列。" : "入队失败，请检查队列按钮。");
-		}),
-		raw: makeActionButton("槽位", "", async () => {
-			state.rawExpanded = !state.rawExpanded;
-			setWidgetGroupCollapsed(node, collectRawTagWidgetNames(node), !state.rawExpanded, "MiniRaw");
-			clearMiniStatus(node);
-			refreshMiniToolbar(node);
-		}),
-		advanced: makeActionButton("高级", "", async () => {
-			state.advancedExpanded = !state.advancedExpanded;
-			setWidgetGroupCollapsed(node, collectAdvancedWidgetNames(node), !state.advancedExpanded, "MiniAdvanced");
-			setWidgetGroupCollapsed(node, collectAlwaysHiddenWidgetNames(node), true, "MiniInternal");
-			clearMiniStatus(node);
-			refreshMiniToolbar(node);
-		}),
-		nsfw: makeActionButton("NSFW", "warm", async () => {
-			setMiniStatus(node, await openMiniNsfwWorkspaceAction(node));
-		}),
-		clear: createMiniButton("清空", "danger", async () => {
-			if (!isMiniClearConfirmationPending(node)) {
-				beginMiniClearConfirmation(node);
-				return;
-			}
-			cancelMiniClearConfirmation(node, { refresh: false });
-			setMiniStatus(node, await clearMiniSelectionAction(node, collectRawTagWidgetNames(node), { forceConfirmed: true }));
-		}),
+		tag: createMiniButton("标签", "primary", actionHandlers.tag),
+		random: createMiniButton("随机", "warm", actionHandlers.random),
+		queue: createMiniButton("入队", "primary", actionHandlers.queue),
+		raw: createMiniButton("槽位", "", actionHandlers.raw),
+		advanced: createMiniButton("高级", "", actionHandlers.advanced),
+		nsfw: createMiniButton("NSFW", "warm", actionHandlers.nsfw),
+		clear: createMiniButton("清空", "danger", actionHandlers.clear),
 	};
 
 	for (const button of Object.values(buttons)) grid.appendChild(button);
@@ -889,16 +966,12 @@ function ensureMiniToolbar(node) {
 		domWidget = getWidget(node, MINI_TOOLBAR_WIDGET_NAME);
 	}
 	if (!domWidget) {
-		restoreStashedWidgets(node);
-		delete node[MINI_STATE_KEY];
 		root.remove?.();
-		sendMiniDecisionProbe("failed_addDOMWidget", node);
+		const canvasToolbar = createCanvasMiniToolbar(node, actionHandlers);
+		if (canvasToolbar) return activateMiniToolbar(node, state, canvasToolbar, "created_canvas_after_dom_failure");
+		sendMiniDecisionProbe("compact_only_after_dom_failure", node);
 		scheduleNodeLayout(node);
-		return false;
-	}
-	node[MINI_TOOLBAR_FLAG] = true;
-	if (typeof node.title === "string" && !node.title.endsWith(MINI_TITLE_SUFFIX)) {
-		node.title += MINI_TITLE_SUFFIX;
+		return true;
 	}
 	if (domWidget) {
 		domWidget.serialize = false;
@@ -914,17 +987,16 @@ function ensureMiniToolbar(node) {
 		resizeObserver?.observe(root);
 	} catch (_error) {}
 
-	node[MINI_TOOLBAR_KEY] = {
+	const toolbar = {
+		mode: "dom",
 		root,
 		domWidget,
 		metaEl: meta,
 		buttons,
+		statusWidget: null,
 		resizeObserver,
 	};
-	startMiniWidgetReconcile(node, state);
-	sendMiniDecisionProbe("created", node);
-	refreshMiniToolbar(node);
-	scheduleNodeLayout(node);
+	return activateMiniToolbar(node, state, toolbar, "created");
 }
 
 function enhanceExistingNodes() {

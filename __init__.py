@@ -2910,6 +2910,16 @@ def _register_tag_routes() -> bool:
             raise web.HTTPNotFound(text="stage_prompt_generator_mini_toolbar.js 不存在。")
         return _no_store_file_response(script_path)
 
+    @routes.get("/extensions/comfyUI-qwen3_5-llama-TE/00_stage_prompt_generator_preflight_v1.js")
+    @routes.get("/extensions/ComfyUI-RealMan-Prompt-Stage-Generator/00_stage_prompt_generator_preflight_v1.js")
+    @routes.get("/extensions/ComfyUI-RealMan-Prompt-Stage-Generator-main/00_stage_prompt_generator_preflight_v1.js")
+    @routes.get("/extensions/ComfyUI-RealMan-Prompt-Stage-Generator-master/00_stage_prompt_generator_preflight_v1.js")
+    async def _get_stage_prompt_generator_preflight(_request):
+        script_path = Path(__file__).with_name("web") / "00_stage_prompt_generator_preflight_v1.js"
+        if not script_path.exists():
+            raise web.HTTPNotFound(text="00_stage_prompt_generator_preflight_v1.js 不存在。")
+        return _no_store_file_response(script_path)
+
     @routes.get("/qwen_te/stage_output/{node_id}")
     async def _get_stage_output(request):
         node_id = str(request.match_info.get("node_id", "") or "").strip()
