@@ -199,6 +199,7 @@ globalThis.__stagePromptUiTestExports = {
 	mapEmbeddedBrowserPointerPoint,
 	resolveEmbeddedBrowserViewport,
 	getEmbeddedBrowserFrameCaptureProfile,
+	getEmbeddedBrowserFramePollDelay,
 	openPromptBrowserExternal,
 	launchPromptCompanionBrowser,
 	getModelRuntimeStatusSummary,
@@ -1319,6 +1320,15 @@ test("embedded browser frame profile switches from responsive preview to sharp s
 	assert.equal(loading.maxHeight, 900);
 	assert.equal(loading.quality, 76);
 	assert.equal(loading.profile, "fast");
+	const motion = exports.getEmbeddedBrowserFrameCaptureProfile(rect, { mediaActive: true, fast: false, hasFrame: true, pageReady: true, pixelRatio: 2 });
+	assert.equal(motion.maxWidth, 1280);
+	assert.equal(motion.maxHeight, 720);
+	assert.equal(motion.quality, 60);
+	assert.equal(motion.profile, "motion");
+	assert.equal(motion.pixelRatio, 1);
+	assert.equal(exports.getEmbeddedBrowserFramePollDelay({ mediaActive: true }), 64);
+	assert.equal(exports.getEmbeddedBrowserFramePollDelay({ hidden: true, mediaActive: true }), 4000);
+	assert.equal(exports.getEmbeddedBrowserFramePollDelay({ pageReady: true, hasFrame: true, unchangedFrameCount: 4 }), 1600);
 });
 
 test("embedded prompt browser maps object-fit image coordinates to the CDP viewport", async () => {
@@ -1410,10 +1420,18 @@ test("online prompt search keeps prompt tools inside a real dual-mode web browse
 	assert.equal(dialogSource.includes("getEmbeddedPointerPoint"), true);
 	assert.equal(dialogSource.includes("webFrame.naturalWidth"), true);
 	assert.equal(dialogSource.includes("embeddedLastFrameId"), true);
-	assert.equal(dialogSource.includes("embeddedUnchangedFrameCount >= 4"), true);
+	assert.equal(dialogSource.includes("getEmbeddedBrowserFramePollDelay"), true);
+	assert.equal(dialogSource.includes("isEmbeddedMotionActive"), true);
+	assert.equal(dialogSource.includes("embeddedMotionHintUntil = Math.max(embeddedMotionHintUntil, Date.now() + 1500)"), true);
+	assert.equal(source.includes("Number(options.unchangedFrameCount) >= 4"), true);
+	assert.equal(source.includes("options.mediaActive) return 64"), true);
 	assert.equal(dialogSource.includes("document.hidden"), true);
 	assert.equal(dialogSource.includes("getEmbeddedFrameCaptureOptions"), true);
 	assert.equal(dialogSource.includes("maxWidth: frameCapture.maxWidth"), true);
+	assert.equal(dialogSource.includes('if (!message && webFrameOverlay.classList.contains("qwen-te-hidden")) return;'), true);
+	assert.equal(dialogSource.includes("if (revokeTimer != null) clearTimeout(revokeTimer);"), true);
+	assert.equal(dialogSource.includes("searchInput.value !== reportedUrl"), true);
+	assert.equal(source.includes('webFrame.decoding = "async"'), true);
 	assert.equal(dialogSource.includes("copySelectedPrompts"), true);
 	assert.equal(dialogSource.includes("const startViewport = resolveEmbeddedBrowserViewport"), true);
 	assert.equal(dialogSource.includes("queueEmbeddedBrowserWheel"), true);

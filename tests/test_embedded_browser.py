@@ -150,6 +150,7 @@ class EmbeddedBrowserInputTests(unittest.IsolatedAsyncioTestCase):
         )
         self.manager._sessions["session"] = SimpleNamespace(
             session_id="session",
+            browser="Microsoft Edge",
             process=_RunningProcess(),
             last_used_at=10.0,
             width=1360,
@@ -232,6 +233,37 @@ class EmbeddedBrowserInputTests(unittest.IsolatedAsyncioTestCase):
             {"type": "mouseUp", "x": 80, "y": 40, "button": "left", "buttons": 0},
         )
         self.assertEqual(session.last_frame_captured_at, 0.0)
+
+    async def test_status_reports_active_visible_video_for_adaptive_frame_mode(self):
+        self.connection.responses["Runtime.evaluate"] = {
+            "result": {
+                "value": {
+                    "url": "https://example.com/watch",
+                    "title": "Video",
+                    "readyState": "complete",
+                    "mediaActive": True,
+                    "videoCount": 2,
+                }
+            }
+        }
+        self.connection.responses["Page.getNavigationHistory"] = {"currentIndex": 0, "entries": [{"id": 1}]}
+
+        status = await self.manager.status("session")
+
+        self.assertTrue(status["media_active"])
+        self.assertEqual(status["video_count"], 2)
+        expression = next(params["expression"] for method, params in self.connection.calls if method == "Runtime.evaluate")
+        self.assertIn("querySelectorAll('video')", expression)
+        self.assertIn("!video.paused", expression)
+
+    def test_browser_process_keeps_media_running_in_headless_window(self):
+        arguments = self.manager._build_arguments(Path("msedge.exe"), Path("browser-profile"), 1280, 720)
+        self.assertIn("--disable-background-media-suspend", arguments)
+        self.assertIn("--disable-sync", arguments)
+        self.assertIn("--disable-default-apps", arguments)
+        self.assertIn("--disable-extensions", arguments)
+        self.assertIn("--metrics-recording-only", arguments)
+        self.assertIn("--no-pings", arguments)
 
     async def test_invalid_numeric_input_is_rejected_as_browser_error(self):
         with self.assertRaises(EmbeddedBrowserError):

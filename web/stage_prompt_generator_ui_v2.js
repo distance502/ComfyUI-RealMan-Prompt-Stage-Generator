@@ -2757,15 +2757,24 @@ function resolveEmbeddedBrowserViewport(rect, options = {}) {
 function getEmbeddedBrowserFrameCaptureProfile(rect, options = {}) {
 	const fast = !!options.fast;
 	const hasFrame = !!options.hasFrame;
-	const settled = !!options.pageReady && hasFrame && !fast;
-	const viewport = resolveEmbeddedBrowserViewport(rect, {
+	const mediaActive = !!options.mediaActive;
+	const settled = !!options.pageReady && hasFrame && !fast && !mediaActive;
+	const viewportOptions = mediaActive ? {
+		minWidth: 640,
+		minHeight: 360,
+		maxWidth: 1280,
+		maxHeight: 720,
+		fallbackWidth: 1280,
+		fallbackHeight: 720,
+	} : {
 		minWidth: 640,
 		minHeight: 360,
 		maxWidth: 1920,
 		maxHeight: 1080,
 		fallbackWidth: 1440,
 		fallbackHeight: 810,
-	});
+	};
+	const viewport = resolveEmbeddedBrowserViewport(rect, viewportOptions);
 	const requestedPixelRatio = Number(options.pixelRatio ?? globalThis.devicePixelRatio ?? 1);
 	const pixelRatio = settled && Number.isFinite(requestedPixelRatio)
 		? Math.max(1, Math.min(1.5, requestedPixelRatio))
@@ -2773,10 +2782,18 @@ function getEmbeddedBrowserFrameCaptureProfile(rect, options = {}) {
 	return {
 		maxWidth: Math.min(2880, Math.round(viewport.width * pixelRatio)),
 		maxHeight: Math.min(1620, Math.round(viewport.height * pixelRatio)),
-		quality: settled ? 90 : (hasFrame ? 72 : 76),
-		profile: settled ? "sharp" : "fast",
+		quality: mediaActive ? 60 : (settled ? 90 : (hasFrame ? 72 : 76)),
+		profile: mediaActive ? "motion" : (settled ? "sharp" : "fast"),
 		pixelRatio,
 	};
+}
+function getEmbeddedBrowserFramePollDelay(options = {}) {
+	if (options.hidden) return 4000;
+	if (options.mediaActive) return 64;
+	if (options.fast) return 72;
+	if (!options.pageReady || !options.hasFrame) return 120;
+	if (Number(options.unchangedFrameCount) >= 4) return 1600;
+	return 420;
 }
 function mapEmbeddedBrowserPointerPoint(clientX, clientY, rect, frameWidth, frameHeight, viewportWidth, viewportHeight) {
 	const box = rect ?? {};
@@ -15778,6 +15795,7 @@ function openOnlinePromptSearchDialog(node, library) {
 	webFrame.className = "qwen-te-online-search__web-frame";
 	webFrame.alt = "内嵌浏览器实时画面";
 	webFrame.title = "点击网页后可直接操作；键盘输入会发送到当前网页焦点。";
+	webFrame.decoding = "async";
 	webFrame.draggable = false;
 	webFrame.tabIndex = 0;
 	webFrameShell.appendChild(webFrame);
@@ -15838,6 +15856,8 @@ function openOnlinePromptSearchDialog(node, library) {
 	let embeddedUnchangedFrameCount = 0;
 	let embeddedFrameFastUntil = 0;
 	let embeddedPageReady = false;
+	let embeddedMediaActive = false;
+	let embeddedMotionHintUntil = 0;
 	let embeddedPointerDown = false;
 	let embeddedPointerButton = "left";
 	let embeddedPointerButtons = 0;
@@ -15954,14 +15974,21 @@ const getEffectiveSelectionCounts = () => {
 		try { return new URL(String(location?.href ?? "")).origin; } catch (_error) { return ""; }
 	};
 	const setWebStatus = (text) => {
-		webStatusEl.textContent = String(text ?? "");
-		webStatusEl.title = webStatusEl.textContent;
+		const message = String(text ?? "");
+		if (webStatusEl.textContent === message && webStatusEl.title === message) return;
+		webStatusEl.textContent = message;
+		webStatusEl.title = message;
 	};
 	const setWebFrameOverlay = (text, options = {}) => {
 		const message = String(text ?? "").trim();
+		if (!message && webFrameOverlay.classList.contains("qwen-te-hidden")) return;
+		const passive = !!options.passive && !!message;
+		if (message && webFrameOverlay.textContent === message
+			&& !webFrameOverlay.classList.contains("qwen-te-hidden")
+			&& webFrameOverlay.classList.contains("is-passive") === passive) return;
 		webFrameOverlay.textContent = message;
 		webFrameOverlay.classList.toggle("qwen-te-hidden", !message);
-		webFrameOverlay.classList.toggle("is-passive", !!options.passive && !!message);
+		webFrameOverlay.classList.toggle("is-passive", passive);
 	};
 	const revokeEmbeddedFrameObjectUrl = () => {
 		if (!embeddedFrameObjectUrl) return;
@@ -15985,6 +16012,7 @@ const getEffectiveSelectionCounts = () => {
 	};
 	const applyEmbeddedBrowserStatus = (payload, options = {}) => {
 		if (!payload || typeof payload !== "object") return;
+		const previousMediaActive = embeddedMediaActive;
 		embeddedBrowserWidth = Math.max(1, Number(payload.width ?? embeddedBrowserWidth) || embeddedBrowserWidth);
 		embeddedBrowserHeight = Math.max(1, Number(payload.height ?? embeddedBrowserHeight) || embeddedBrowserHeight);
 		embeddedCanGoBack = !!payload.can_go_back;
@@ -15993,36 +16021,44 @@ const getEffectiveSelectionCounts = () => {
 		if (/^https?:\/\//iu.test(reportedUrl)) {
 			currentWebUrl = reportedUrl;
 			webAddressDraft = reportedUrl;
-			if (activeBrowserMode === "web" && document.activeElement !== searchInput) searchInput.value = reportedUrl;
+			if (activeBrowserMode === "web" && document.activeElement !== searchInput && searchInput.value !== reportedUrl) searchInput.value = reportedUrl;
 		}
 		embeddedPageReady = String(payload.ready_state ?? "") === "complete";
+		embeddedMediaActive = !!payload.media_active;
 		if (options.updateMessage !== false) {
 			setWebStatus(`${payload.browser || "内嵌浏览器"} · ${embeddedPageReady ? "页面已就绪" : "页面加载中"}${reportedUrl ? ` · ${reportedUrl}` : ""}`);
 		}
+		if (previousMediaActive !== embeddedMediaActive) {
+			embeddedUnchangedFrameCount = 0;
+			scheduleEmbeddedFramePoll(0);
+		}
 		syncActionButtons();
 	};
+	const isEmbeddedMotionActive = () => embeddedMediaActive || Date.now() < embeddedMotionHintUntil;
 	const getEmbeddedFrameCaptureOptions = () => getEmbeddedBrowserFrameCaptureProfile(
 		webFrameShell.getBoundingClientRect?.(),
 		{
 			fast: Date.now() < embeddedFrameFastUntil,
 			hasFrame: !!embeddedFrameObjectUrl,
 			pageReady: embeddedPageReady,
+			mediaActive: isEmbeddedMotionActive(),
 			pixelRatio: globalThis.devicePixelRatio,
 		},
 	);
-	const getEmbeddedFramePollDelay = () => {
-		if (typeof document !== "undefined" && document.hidden) return 4000;
-		if (Date.now() < embeddedFrameFastUntil) return 72;
-		if (!embeddedPageReady || !embeddedFrameObjectUrl) return 120;
-		if (embeddedUnchangedFrameCount >= 4) return 1600;
-		return 420;
-	};
+	const getEmbeddedFramePollDelay = () => getEmbeddedBrowserFramePollDelay({
+		hidden: typeof document !== "undefined" && document.hidden,
+		mediaActive: isEmbeddedMotionActive(),
+		fast: Date.now() < embeddedFrameFastUntil,
+		pageReady: embeddedPageReady,
+		hasFrame: !!embeddedFrameObjectUrl,
+		unchangedFrameCount: embeddedUnchangedFrameCount,
+	});
 	const scheduleEmbeddedFramePoll = (delay = null) => {
 		if (overlay.__qwenDisposed || !embeddedBrowserSessionId || activeBrowserMode !== "web") return;
 		if (embeddedFrameTimer != null) clearTimeout(embeddedFrameTimer);
 		const resolvedDelay = delay == null ? getEmbeddedFramePollDelay() : Number(delay);
 		const normalizedDelay = Number.isFinite(resolvedDelay) ? resolvedDelay : 120;
-		embeddedFrameTimer = setTimeout(() => { embeddedFrameTimer = null; void pollEmbeddedBrowserFrame(); }, Math.max(48, normalizedDelay));
+		embeddedFrameTimer = setTimeout(() => { embeddedFrameTimer = null; void pollEmbeddedBrowserFrame(); }, Math.max(16, normalizedDelay));
 		embeddedFrameTimer?.unref?.();
 	};
 	const markEmbeddedBrowserActivity = (durationMs = 1800) => {
@@ -16039,6 +16075,7 @@ const getEffectiveSelectionCounts = () => {
 	const pollEmbeddedBrowserFrame = async () => {
 		if (embeddedFrameBusy || overlay.__qwenDisposed || !embeddedBrowserSessionId || activeBrowserMode !== "web") return;
 		embeddedFrameBusy = true;
+		const pollStartedAt = performance.now();
 		const sessionId = embeddedBrowserSessionId;
 		try {
 			const frameCapture = getEmbeddedFrameCaptureOptions();
@@ -16058,19 +16095,23 @@ const getEffectiveSelectionCounts = () => {
 				return;
 			}
 			embeddedUnchangedFrameCount = 0;
+			embeddedMotionHintUntil = Math.max(embeddedMotionHintUntil, Date.now() + 1500);
 			if (frameResult.frameId) embeddedLastFrameId = frameResult.frameId;
 			const nextUrl = URL.createObjectURL(frameResult.blob);
 			const previousUrl = embeddedFrameObjectUrl;
 			embeddedFrameObjectUrl = nextUrl;
 			if (previousUrl) {
 				let revoked = false;
+				let revokeTimer = null;
 				const revokePrevious = () => {
 					if (revoked) return;
 					revoked = true;
+					if (revokeTimer != null) clearTimeout(revokeTimer);
 					try { URL.revokeObjectURL(previousUrl); } catch (_error) {}
 				};
 				webFrame.addEventListener("load", revokePrevious, { once: true });
-				setTimeout(revokePrevious, 5000)?.unref?.();
+				revokeTimer = setTimeout(revokePrevious, 5000);
+				revokeTimer?.unref?.();
 			}
 			webFrame.src = nextUrl;
 			setWebFrameOverlay("");
@@ -16080,7 +16121,10 @@ const getEffectiveSelectionCounts = () => {
 			if ([404, 503].includes(Number(error?.status ?? 0))) embeddedBrowserSessionId = "";
 		} finally {
 			embeddedFrameBusy = false;
-			if (embeddedBrowserSessionId) scheduleEmbeddedFramePoll();
+			if (embeddedBrowserSessionId) {
+				const elapsed = Math.max(0, performance.now() - pollStartedAt);
+				scheduleEmbeddedFramePoll(Math.max(0, getEmbeddedFramePollDelay() - elapsed));
+			}
 		}
 	};
 	const pollEmbeddedBrowserStatus = async () => {
@@ -16167,6 +16211,8 @@ const getEffectiveSelectionCounts = () => {
 		embeddedUnchangedFrameCount = 0;
 		embeddedFrameFastUntil = 0;
 		embeddedPageReady = false;
+		embeddedMediaActive = false;
+		embeddedMotionHintUntil = 0;
 		embeddedPointerDown = false;
 		embeddedPointerButtons = 0;
 		embeddedPointerMovePayload = null;

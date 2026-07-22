@@ -346,9 +346,15 @@ class EmbeddedBrowserManager:
             f"--user-data-dir={profile}",
             "--no-first-run",
             "--no-default-browser-check",
+            "--disable-default-apps",
+            "--disable-extensions",
+            "--disable-sync",
             "--disable-component-update",
             "--disable-background-timer-throttling",
             "--disable-renderer-backgrounding",
+            "--disable-background-media-suspend",
+            "--metrics-recording-only",
+            "--no-pings",
             "--disable-breakpad",
             "--disable-crash-reporter",
             f"--window-size={width},{height}",
@@ -629,7 +635,13 @@ class EmbeddedBrowserManager:
         evaluated = await session.connection.call(
             "Runtime.evaluate",
             {
-                "expression": "({url:String(location.href),title:String(document.title),readyState:String(document.readyState)})",
+                "expression": (
+                    "(()=>{const videos=Array.from(document.querySelectorAll('video'));"
+                    "return {url:String(location.href),title:String(document.title),"
+                    "readyState:String(document.readyState),mediaActive:videos.some((video)=>"
+                    "!video.paused&&!video.ended&&video.readyState>=2&&video.offsetWidth>0&&video.offsetHeight>0),"
+                    "videoCount:videos.length};})()"
+                ),
                 "returnByValue": True,
             },
         )
@@ -645,6 +657,8 @@ class EmbeddedBrowserManager:
             "url": str(value.get("url") or ""),
             "title": str(value.get("title") or "")[:300],
             "ready_state": str(value.get("readyState") or ""),
+            "media_active": bool(value.get("mediaActive", False)),
+            "video_count": max(0, int(value.get("videoCount", 0) or 0)),
             "can_go_back": current_index > 0,
             "can_go_forward": current_index >= 0 and current_index < len(entries) - 1,
         }
