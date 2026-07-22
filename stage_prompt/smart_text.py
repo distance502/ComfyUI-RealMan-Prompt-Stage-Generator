@@ -37,7 +37,7 @@ SMART_TEXT_SYSTEM_TEMPLATE = """
 4. 成人成熟模式只表达明确成年主体、成熟写真氛围、服装与光影；若出现女孩/少女/校园语义，改写为年轻成年女性、青春感成年女性、学院风穿搭或大学场景。
 5. 优先吸收已匹配入槽位的成熟标签，把它们融合成句子，不要一条一条列出来。
 6. 默认使用全景全身或完整人物入镜；只有用户明确写近景、特写、半身、头像时，才切换到对应景别。
-7. 不要把风格、景别、场景或主体写死；用户输入与已选标签优先，默认项只是兜底。
+7. 不要用素材库默认项把风格、景别、场景或主体永久写死；用户输入与已选标签优先。若上下文已经给出本次全局创作主线，则必须保留本次已解析的媒介、场景和事实锚点，只变化未锁定维度。
 8. 每个维度只保留一条主方向：一种主风格、一种主场景、一种主景别、一种主情绪、一组主光线；其余元素作为细节融入，不要重复叠加。
 9. 只输出提示词正文；不要标题、解释、Markdown、分析过程、参数或“以下是为您优化”等话术。
 10. 不要只输出“成年女性”“CG感”“真实感”这类单点结论；必须把主体、外观、服装、场景、动作、镜头、光线、材质和质量控制组织成完整画面。
@@ -1367,6 +1367,7 @@ def build_smart_text_seed(
     runtime_mode = str(settings.get("运行时随机模式解析结果", "") or settings.get("运行时随机模式", "") or "").strip()
     runtime_intensity = str(settings.get("运行时随机强度", "") or "").strip()
     isolation_mode = str(settings.get("风格隔离策略", "") or "").strip()
+    creative_spine_context = _normalize_text(str(settings.get("全局创作主线摘要", "") or ""))
     nsfw_context = _normalize_text(str(settings.get("NSFW工作台标签摘要", "") or ""))
     dynamic_strategy = _normalize_text(str(settings.get("Skill动态变化策略", "") or ""))
     recent_context = _normalize_text(
@@ -1403,6 +1404,7 @@ def build_smart_text_seed(
             f"当前轨道：{_normalize_text(style_track)}",
             f"运行时随机：{_normalize_text(runtime_mode)} / {_normalize_text(runtime_intensity)}",
             f"风格隔离：{_normalize_text(isolation_mode)}",
+            f"全局创作主线：{creative_spine_context or '由当前基础提示词与最终归一化标签确定'}",
             f"NSFW工作台摘要：{nsfw_context or '未启用或无工作台标签'}",
             f"Skill动态变化策略：{dynamic_strategy or '无'}",
             f"最近输出避重：{recent_context or '无'}",

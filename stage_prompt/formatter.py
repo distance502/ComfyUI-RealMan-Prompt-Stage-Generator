@@ -232,6 +232,8 @@ def build_json_payload(
         "runtime_random_intensity": str(settings["运行时随机强度"]),
         "runtime_random_theme_pool": str(settings.get("随机主题池", "自动")),
         "style_isolation_mode": str(settings.get("风格隔离策略", "平衡收敛") or "平衡收敛"),
+        "global_creative_spine": dict(settings.get("全局创作主线合同", {}) or {}),
+        "global_creative_spine_summary": str(settings.get("全局创作主线摘要", "") or ""),
         "model_source": str(settings.get("模型来源", "仅Skill") or "仅Skill"),
         "model_source_effective": str(settings.get("模型来源实际", settings.get("模型来源", "仅Skill")) or "仅Skill"),
         "model_fallback_note": str(settings.get("模型回退说明", "") or ""),

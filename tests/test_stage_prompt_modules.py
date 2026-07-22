@@ -14631,6 +14631,205 @@ class TestStagePromptModules(unittest.TestCase):
             256,
         )
 
+    def test_model_refiner_rejects_conflicting_style_and_scene_drift(self) -> None:
+        original = build_long_test_skill_prompt()
+        contract = model_refiner.build_global_creative_spine_contract(
+            {
+                "主体": ["成年女性"],
+                "画面风格": ["电影写实"],
+                "服装造型": ["深色风衣"],
+                "场景背景": ["雨夜站台"],
+                "动作姿态": ["停步回望"],
+                "光影氛围": ["青蓝霓虹逆光"],
+                "构图视角": ["全景全身"],
+            },
+            [],
+            {"模板风格": "真实感", "随机主题池": "都市雨夜", "风格隔离策略": "严格风格隔离"},
+            template_style="真实感",
+            subject_type="人物角色",
+            layout_mode=narrative.VISUAL_LAYOUT_SINGLE_PERSON,
+            primary_style_family="真实感",
+        )
+        candidate = original.replace(
+            "高完成度图像",
+            "整幅作品改用水彩插画与纸张晕染表现，高完成度图像",
+            1,
+        ).replace(
+            "最终画面",
+            "古代宫殿深处的最终画面",
+            1,
+        )
+        refined, outcome, reason = model_refiner._resolve_model_prompt_candidate(
+            original,
+            candidate,
+            {
+                "提示词语言": "纯中文",
+                "主体类型": "人物角色",
+                "主体类型解析结果": "人物角色",
+                "画面结构模式解析结果": narrative.VISUAL_LAYOUT_SINGLE_PERSON,
+                "全局创作主线合同": contract,
+            },
+        )
+        self.assertEqual(refined, original)
+        self.assertEqual(outcome, "rejected")
+        self.assertIn("当前创作主线", reason)
+
+    def test_model_refiner_accepts_same_spine_detail_refinement(self) -> None:
+        original = build_long_test_skill_prompt()
+        contract = model_refiner.build_global_creative_spine_contract(
+            {
+                "主体": ["成年女性"],
+                "画面风格": ["电影写实"],
+                "服装造型": ["深色风衣"],
+                "场景背景": ["雨夜站台"],
+                "动作姿态": ["停步回望"],
+            },
+            [],
+            {"模板风格": "真实感", "随机主题池": "都市雨夜", "风格隔离策略": "平衡收敛"},
+            template_style="真实感",
+            subject_type="人物角色",
+            layout_mode=narrative.VISUAL_LAYOUT_SINGLE_PERSON,
+            primary_style_family="真实感",
+        )
+        candidate = original.replace("旧车票", "边角浸湿的泛黄旧车票")
+        refined, outcome, reason = model_refiner._resolve_model_prompt_candidate(
+            original,
+            candidate,
+            {
+                "提示词语言": "纯中文",
+                "主体类型": "人物角色",
+                "主体类型解析结果": "人物角色",
+                "画面结构模式解析结果": narrative.VISUAL_LAYOUT_SINGLE_PERSON,
+                "全局创作主线合同": contract,
+            },
+        )
+        self.assertEqual(refined, candidate)
+        self.assertEqual(outcome, "direct")
+        self.assertEqual(reason, "")
+
+        themed_original = original.replace("雨夜站台", "古风建筑中的雨夜回廊")
+        themed_contract = model_refiner.build_global_creative_spine_contract(
+            {
+                "主体": ["成年女性"],
+                "画面风格": ["电影写实"],
+                "服装造型": ["深色风衣"],
+                "场景背景": ["古风建筑中的雨夜回廊"],
+                "动作姿态": ["停步回望"],
+            },
+            [],
+            {"模板风格": "商业摄影", "随机主题池": "古风园林", "风格隔离策略": "严格风格隔离"},
+            template_style="商业摄影",
+            subject_type="人物角色",
+            layout_mode=narrative.VISUAL_LAYOUT_SINGLE_PERSON,
+            primary_style_family="真实感",
+        )
+        themed_candidate = themed_original.replace("旧车票", "边角浸湿的泛黄旧车票")
+        themed_refined, themed_outcome, themed_reason = model_refiner._resolve_model_prompt_candidate(
+            themed_original,
+            themed_candidate,
+            {
+                "提示词语言": "纯中文",
+                "主体类型": "人物角色",
+                "主体类型解析结果": "人物角色",
+                "画面结构模式解析结果": narrative.VISUAL_LAYOUT_SINGLE_PERSON,
+                "全局创作主线合同": themed_contract,
+            },
+        )
+        self.assertEqual(themed_refined, themed_candidate)
+        self.assertEqual(themed_outcome, "direct")
+        self.assertEqual(themed_reason, "")
+
+    def test_global_creative_spine_reaches_model_smart_text_and_json(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        module._CACHE.clear()
+        captured_settings: list[dict[str, Any]] = []
+        original_refine = module._maybe_model_refine_batch_impl
+
+        def capture_refine(_model, prompt_list, settings, **_kwargs):
+            captured_settings.append(dict(settings))
+            return list(prompt_list)
+
+        module._maybe_model_refine_batch_impl = capture_refine
+        try:
+            result = module._run_stage(
+                None,
+                **{
+                    "unique_id": "global-creative-spine-contract",
+                    "主体标签1": "成年女性",
+                    "画面风格标签1": "真实感",
+                    "服装造型标签1": "长款风衣",
+                    "场景背景标签1": "雨夜站台",
+                    "动作姿态标签1": "回眸",
+                    "光影氛围标签1": "青蓝冷光",
+                    "构图视角标签1": "全景全身",
+                    "模板风格": "商业摄影",
+                    "随机主题池": "古风园林",
+                    "风格隔离策略": "严格风格隔离",
+                    "智能文本匹配": True,
+                    "智能文本输入": "成年女性在雨夜站台听见列车接近后回眸",
+                    "生成数量": 1,
+                    "提示词语言": "纯中文",
+                    "运行时随机标签": False,
+                    "模型来源": "仅Skill",
+                },
+            )
+            block_payload = {
+                "enabled": True,
+                "blocks": [
+                    {"type": "tag_group", "group": "主体", "label": "主体", "tags": ["成年女性"]},
+                    {"type": "tag_group", "group": "场景背景", "label": "场景", "tags": ["雨夜站台"]},
+                    {"type": "tag_group", "group": "动作姿态", "label": "动作", "tags": ["回眸"]},
+                ],
+            }
+            block_result = module._run_stage(
+                None,
+                **{
+                    "unique_id": "global-creative-spine-tag-block",
+                    "主体标签1": "成年女性",
+                    "画面风格标签1": "真实感",
+                    "服装造型标签1": "长款风衣",
+                    "场景背景标签1": "雨夜站台",
+                    "动作姿态标签1": "回眸",
+                    "构图视角标签1": "全景全身",
+                    "标签块编排启用": True,
+                    "标签块编排JSON": json.dumps(block_payload, ensure_ascii=False),
+                    "模板风格": "商业摄影",
+                    "风格隔离策略": "严格风格隔离",
+                    "生成数量": 1,
+                    "提示词语言": "纯中文",
+                    "运行时随机标签": False,
+                    "模型来源": "仅Skill",
+                },
+            )
+        finally:
+            module._maybe_model_refine_batch_impl = original_refine
+        self.assertEqual(len(captured_settings), 2)
+        contract = captured_settings[0].get("全局创作主线合同")
+        self.assertIsInstance(contract, dict)
+        self.assertEqual(contract.get("primary_style_family"), "真实感")
+        self.assertEqual(contract.get("groups", {}).get("场景背景", [])[0], "雨夜站台")
+        model_context = model_refiner._skill_context_for_model(captured_settings[0])
+        self.assertIn("本次全局创作主线", model_context)
+        self.assertIn("雨夜站台", model_context)
+        smart_seed = smart_text.build_smart_text_seed(
+            user_text="成年女性在雨夜站台听见列车接近后回眸",
+            primary_prompt=result[1],
+            selected_tags_text=result[2],
+            settings=captured_settings[0],
+        )
+        self.assertIn("全局创作主线", smart_seed)
+        self.assertIn("雨夜站台", smart_seed)
+        payload = json.loads(result[3])
+        self.assertEqual(payload["global_creative_spine"]["primary_style_family"], "真实感")
+        self.assertIn("雨夜站台", payload["global_creative_spine_summary"])
+        block_contract = captured_settings[1].get("全局创作主线合同")
+        self.assertEqual(block_contract.get("groups", {}).get("场景背景", [])[0], "雨夜站台")
+        self.assertIn("雨夜站台", block_result[1])
+        self.assertGreaterEqual(len(block_result[1]), 800)
+        self.assertLessEqual(len(block_result[1]), 1200)
+        self.assertGreaterEqual(len(result[1]), 800)
+        self.assertLessEqual(len(result[1]), 1200)
+
     def test_model_refiner_blends_usable_short_draft_into_skill_story(self) -> None:
         class DummyLLM:
             def create_chat_completion(self, *args, **kwargs):

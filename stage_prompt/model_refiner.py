@@ -203,6 +203,80 @@ _COMMAND_STYLE_PREFIX_PATTERN = re.compile(
     r"^\s*(?:create|keep|use|finish|make|ensure|preserve|organize|add)\b",
     flags=re.IGNORECASE,
 )
+_CREATIVE_SPINE_GROUP_LIMITS: tuple[tuple[str, int], ...] = (
+    ("主体", 6),
+    ("画面风格", 5),
+    ("服装造型", 5),
+    ("场景背景", 5),
+    ("动作姿态", 4),
+    ("光影氛围", 5),
+    ("构图视角", 5),
+    ("道具世界观", 4),
+    ("技术画质", 4),
+    ("成人向表达", 4),
+)
+_CREATIVE_SPINE_REQUIRED_ANCHOR_GROUPS = ("主体", "服装造型", "场景背景", "动作姿态")
+_CREATIVE_SPINE_STYLE_FAMILIES: dict[str, tuple[str, ...]] = {
+    "真实感": (
+        "照片级", "写实摄影", "摄影写实", "电影写实", "纪实抓拍", "商业摄影", "杂志摄影",
+        "photorealistic", "photographic", "documentary photography", "editorial photography", "raw photo",
+        "胶片感", "胶片摄影", "film photography",
+    ),
+    "插画感": (
+        "插画", "水彩", "油画", "厚涂", "手绘", "动漫", "二次元", "赛璐璐", "OVA风", "绘本",
+        "illustration", "watercolor", "oil painting", "anime", "cel-shaded", "storybook",
+    ),
+    "CG感": (
+        "电影级CG", "3D渲染", "PBR渲染", "Octane渲染", "虚幻引擎", "概念设计稿", "赛博朋克",
+        "机能赛博", "全息投影", "photorealistic 3d", "3d render", "pbr render", "octane render",
+        "unreal engine", "cyberpunk",
+    ),
+    "古风": (
+        "古风", "国风", "古装", "武侠", "仙侠", "工笔", "水墨写意", "宋韵", "唐风", "明制",
+        "ancient chinese", "wuxia", "xianxia", "gongbi", "ink wash",
+    ),
+    "神话感": (
+        "神话", "神圣史诗", "暗黑奇幻", "高等奇幻", "剑与魔法", "哥特奇幻", "精灵幻想",
+        "mythic", "mythological", "epic fantasy", "dark fantasy", "high fantasy", "sword and sorcery",
+    ),
+}
+_CREATIVE_SPINE_SCENE_FAMILIES: dict[str, tuple[str, ...]] = {
+    "古代人文": (
+        "宫殿", "宫道", "古城", "古街", "古镇", "庭院", "回廊", "水榭", "月洞门", "书院", "客栈",
+        "ancient palace", "ancient city", "old town", "courtyard", "covered corridor",
+    ),
+    "私密室内": (
+        "卧室", "酒店套房", "浴室", "浴缸", "淋浴", "温泉", "更衣室", "床边", "落地窗夜景",
+        "bedroom", "hotel suite", "bathroom", "bathtub", "shower room", "dressing room",
+    ),
+    "都市空间": (
+        "城市街道", "城市街边", "街头", "街巷", "小巷", "站台", "车站", "地铁", "天台", "停车场",
+        "办公室", "咖啡厅", "便利店", "酒吧", "夜店", "urban street", "city street", "alley", "station",
+        "subway", "rooftop", "parking garage", "office", "cafe", "bar",
+    ),
+    "工业科幻": (
+        "机库", "维修舱", "太空船", "飞船", "工业废墟", "未来都市", "霓虹街区", "机械舱", "轨道空间站",
+        "hangar", "maintenance bay", "spaceship", "spacecraft", "industrial ruin", "futuristic city",
+        "mechanical bay", "orbital station",
+    ),
+    "自然荒野": (
+        "森林", "竹林", "山谷", "草原", "草甸", "沙漠", "荒野", "海滩", "海岸", "湖畔", "溪流", "瀑布",
+        "forest", "bamboo grove", "valley", "grassland", "meadow", "desert", "wilderness", "beach",
+        "coast", "lakeside", "stream", "waterfall",
+    ),
+    "神圣场所": (
+        "神殿", "祭坛", "教堂", "圣所", "寺庙", "神社", "宗教空间", "throne temple", "temple", "altar",
+        "church", "cathedral", "sanctuary", "shrine",
+    ),
+    "影棚极简": (
+        "摄影棚", "影棚", "白棚", "纯色背景", "无缝背景", "极简背景", "白色背景", "studio",
+        "seamless backdrop", "plain background", "minimal background", "white background",
+    ),
+}
+_CREATIVE_SPINE_NEGATION_PATTERN = re.compile(
+    r"(?:不要|避免|禁止|并非|不是|没有|无|非|no|not|without|avoid|exclude)\s*$",
+    flags=re.IGNORECASE,
+)
 _SEMANTIC_REPEAT_FAMILIES: tuple[tuple[str, int, tuple[str, ...]], ...] = (
     (
         "composition_full_body",
@@ -771,6 +845,23 @@ def _blend_model_draft_with_skill_prompt(original_prompt: str, model_prompt: str
     return blended if _looks_like_narrative_prompt(blended, settings) else original
 
 
+def _validated_model_blend(
+    original_prompt: str,
+    model_prompt: str,
+    settings: dict[str, Any],
+    *,
+    layout_mode: str,
+) -> str:
+    blended = _blend_model_draft_with_skill_prompt(original_prompt, model_prompt, settings)
+    if blended == str(original_prompt or "").strip():
+        return str(original_prompt or "").strip()
+    if layout_mode and not prompt_preserves_visual_layout(blended, layout_mode):
+        return str(original_prompt or "").strip()
+    if _creative_spine_violation(original_prompt, blended, settings):
+        return str(original_prompt or "").strip()
+    return blended
+
+
 def _resolve_model_prompt_candidate(
     original_prompt: str,
     raw_text: str,
@@ -790,12 +881,18 @@ def _resolve_model_prompt_candidate(
         return original_prompt, "rejected", "模型响应改变了当前主体类型。"
     layout_mode = str(settings.get("画面结构模式解析结果", "") or "").strip()
     if layout_mode and not prompt_preserves_visual_layout(cleaned, layout_mode):
-        blended = _blend_model_draft_with_skill_prompt(original_prompt, cleaned, settings)
-        if blended != str(original_prompt or "").strip() and prompt_preserves_visual_layout(blended, layout_mode):
+        blended = _validated_model_blend(original_prompt, cleaned, settings, layout_mode=layout_mode)
+        if blended != str(original_prompt or "").strip():
             return blended, "blended", ""
         return original_prompt, "rejected", "模型响应未保留当前单帧、人数或多视图画面结构合同。"
+    spine_violation = _creative_spine_violation(original_prompt, cleaned, settings)
+    if spine_violation:
+        blended = _validated_model_blend(original_prompt, cleaned, settings, layout_mode=layout_mode)
+        if blended != str(original_prompt or "").strip():
+            return blended, "blended", ""
+        return original_prompt, "rejected", spine_violation
     if not _looks_like_narrative_prompt(cleaned, settings):
-        blended = _blend_model_draft_with_skill_prompt(original_prompt, cleaned, settings)
+        blended = _validated_model_blend(original_prompt, cleaned, settings, layout_mode=layout_mode)
         if blended != str(original_prompt or "").strip():
             return blended, "blended", ""
         return original_prompt, "rejected", "模型正文可读，但缺少完整剧情链或未达到当前 800-1200 字合同。"
@@ -1010,6 +1107,154 @@ _NARRATIVE_MARKER_GROUPS_ZH = (
     ("环境", "空间", "光线", "反射", "阴影", "空气", "材质"),
     ("镜头", "定格", "最后一帧", "结尾", "画面停在", "最终画面"),
 )
+
+
+def _bounded_creative_spine_values(values: Any, limit: int) -> list[str]:
+    if isinstance(values, str):
+        values = [values]
+    if not isinstance(values, (list, tuple, set)):
+        return []
+    result: list[str] = []
+    for value in values:
+        text = " ".join(str(value or "").strip().split()).strip("，,；; ")
+        if not text or text in {"自动", "无", "未启用"} or text in result:
+            continue
+        result.append(text[:96])
+        if len(result) >= limit:
+            break
+    return result
+
+
+def build_global_creative_spine_contract(
+    selected: dict[str, Any],
+    custom_tags: list[str],
+    settings: dict[str, Any],
+    *,
+    template_style: str,
+    subject_type: str,
+    layout_mode: str,
+    primary_style_family: str,
+) -> dict[str, Any]:
+    """Freeze the normalized visual mainline shared by Skill, smart text and model refiners."""
+
+    groups: dict[str, list[str]] = {}
+    for group_name, limit in _CREATIVE_SPINE_GROUP_LIMITS:
+        values = _bounded_creative_spine_values(selected.get(group_name, []), limit)
+        if values:
+            groups[group_name] = values
+    custom = _bounded_creative_spine_values(custom_tags, 6)
+    if custom:
+        groups["自定义补充"] = custom
+    return {
+        "version": 1,
+        "template": str(template_style or settings.get("模板风格", "自动") or "自动").strip(),
+        "theme_pool": str(settings.get("随机主题池", "自动") or "自动").strip(),
+        "style_isolation": str(settings.get("风格隔离策略", "平衡收敛") or "平衡收敛").strip(),
+        "primary_style_family": str(primary_style_family or "").strip(),
+        "subject_type": str(subject_type or settings.get("主体类型", "自动") or "自动").strip(),
+        "layout": str(layout_mode or settings.get("画面结构模式解析结果", "") or "").strip(),
+        "groups": groups,
+    }
+
+
+def summarize_global_creative_spine_contract(contract: Any) -> str:
+    if not isinstance(contract, dict):
+        return ""
+    parts = [
+        f"模板={contract.get('template', '自动')}",
+        f"主题池={contract.get('theme_pool', '自动')}",
+        f"主风格族={contract.get('primary_style_family', '') or '自动'}",
+        f"隔离={contract.get('style_isolation', '平衡收敛')}",
+        f"画面结构={contract.get('layout', '') or '自动'}",
+    ]
+    groups = contract.get("groups")
+    if isinstance(groups, dict):
+        for group_name, _limit in _CREATIVE_SPINE_GROUP_LIMITS:
+            values = _bounded_creative_spine_values(groups.get(group_name, []), 5)
+            if values:
+                parts.append(f"{group_name}={'、'.join(values)}")
+        custom = _bounded_creative_spine_values(groups.get("自定义补充", []), 4)
+        if custom:
+            parts.append(f"自定义补充={'、'.join(custom)}")
+    return "；".join(parts)
+
+
+def _positive_creative_marker_present(text: str, marker: str) -> bool:
+    source = str(text or "")
+    needle = str(marker or "").strip()
+    if not source or not needle:
+        return False
+    source_key = source.casefold()
+    needle_key = needle.casefold()
+    if needle_key.isascii() and re.fullmatch(r"[a-z0-9][a-z0-9 ._-]*", needle_key):
+        pattern = re.compile(rf"(?<![a-z0-9]){re.escape(needle_key)}(?![a-z0-9])", flags=re.IGNORECASE)
+        matches = pattern.finditer(source_key)
+    else:
+        matches = (match for match in re.finditer(re.escape(needle_key), source_key))
+    for match in matches:
+        prefix = source_key[max(0, match.start() - 12) : match.start()]
+        if not _CREATIVE_SPINE_NEGATION_PATTERN.search(prefix):
+            return True
+    return False
+
+
+def _creative_family_hits(text: str, families: dict[str, tuple[str, ...]]) -> dict[str, list[str]]:
+    hits: dict[str, list[str]] = {}
+    for family_name, markers in families.items():
+        matched = [marker for marker in markers if _positive_creative_marker_present(text, marker)]
+        if matched:
+            hits[family_name] = matched
+    return hits
+
+
+def _creative_spine_violation(original_prompt: str, candidate_prompt: str, settings: dict[str, Any]) -> str:
+    contract = settings.get("全局创作主线合同")
+    if not isinstance(contract, dict):
+        return ""
+    groups = contract.get("groups")
+    if not isinstance(groups, dict):
+        groups = {}
+    original = str(original_prompt or "")
+    candidate = str(candidate_prompt or "")
+    language = str(settings.get("提示词语言", "纯中文") or "纯中文").strip()
+    if language not in {"纯英文", "英文提示词+中文说明"}:
+        original_key = original.casefold()
+        candidate_key = candidate.casefold()
+        for group_name in _CREATIVE_SPINE_REQUIRED_ANCHOR_GROUPS:
+            for anchor in _bounded_creative_spine_values(groups.get(group_name, []), 6):
+                anchor_key = anchor.casefold()
+                if anchor_key in original_key and anchor_key not in candidate_key:
+                    return f"模型响应改变了当前创作主线：缺少{group_name}锚点“{anchor}”。"
+
+    allowed_style_values = [str(contract.get("template", "") or "")]
+    for group_values in groups.values():
+        allowed_style_values.extend(_bounded_creative_spine_values(group_values, 8))
+    allowed_style_text = "，".join(allowed_style_values)
+    primary_style_family = str(contract.get("primary_style_family", "") or "").strip()
+    candidate_style_hits = _creative_family_hits(candidate, _CREATIVE_SPINE_STYLE_FAMILIES)
+    allowed_style_hits = _creative_family_hits(allowed_style_text, _CREATIVE_SPINE_STYLE_FAMILIES)
+    for family_name, markers in candidate_style_hits.items():
+        if family_name == primary_style_family:
+            continue
+        disallowed_markers = [
+            marker
+            for marker in markers
+            if not _positive_creative_marker_present(allowed_style_text, marker)
+        ]
+        if primary_style_family and disallowed_markers:
+            return f"模型响应改变了当前创作主线：引入冲突风格“{disallowed_markers[0]}”。"
+        if not primary_style_family and family_name not in allowed_style_hits:
+            return f"模型响应改变了当前创作主线：引入未选择的风格族“{family_name}”。"
+
+    allowed_scene_text = "，".join(str(item) for item in list(groups.get("场景背景", []) or []))
+    allowed_scene_hits = _creative_family_hits(allowed_scene_text, _CREATIVE_SPINE_SCENE_FAMILIES)
+    if allowed_scene_hits:
+        candidate_scene_hits = _creative_family_hits(candidate, _CREATIVE_SPINE_SCENE_FAMILIES)
+        for family_name, markers in candidate_scene_hits.items():
+            if family_name in allowed_scene_hits:
+                continue
+            return f"模型响应改变了当前创作主线：引入冲突场景“{markers[0]}”。"
+    return ""
 _NARRATIVE_MARKER_GROUPS_EN = (
     ("story", "event", "begins", "opens", "then", "during"),
     ("because", "therefore", "forces", "interrupts", "breaks", "trigger"),
@@ -1267,6 +1512,9 @@ def _skill_context_for_model(settings: dict[str, Any]) -> str:
     nsfw_context = str(settings.get("NSFW工作台标签摘要", "") or "").strip()
     tag_block_context = str(settings.get("标签块编排摘要", "") or "").strip()
     danbooru_context = str(settings.get("Danbooru通用视觉标签摘要", "") or "").strip()
+    creative_spine_context = str(settings.get("全局创作主线摘要", "") or "").strip()
+    if not creative_spine_context:
+        creative_spine_context = summarize_global_creative_spine_contract(settings.get("全局创作主线合同"))
     dynamic_strategy = str(settings.get("Skill动态变化策略", "") or "").strip()
     narrative_plans = [
         str(item).strip()
@@ -1329,6 +1577,11 @@ def _skill_context_for_model(settings: dict[str, Any]) -> str:
         extra_lines.append(
             "Danbooru通用视觉词：" + danbooru_context
             + "。这些词只描述画面结构与视觉属性，润色时必须保留其具体镜头、构图、光影或媒介含义。"
+        )
+    if creative_spine_context:
+        extra_lines.append(
+            "本次全局创作主线：" + creative_spine_context
+            + "。这是所有生成渠道共用的已解析合同；只能补全未指定细节，不得另起媒介、场景、服装或动作主线。"
         )
     if dynamic_strategy:
         extra_lines.append(f"Skill动态变化策略：{dynamic_strategy}")

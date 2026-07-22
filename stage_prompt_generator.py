@@ -160,6 +160,7 @@ from .stage_prompt.formatter import (
 from .stage_prompt.model_refiner import (
     DEFAULT_STAGE_PROMPT_SYSTEM_TEMPLATE,
     _record_model_call_result as _record_model_call_result_impl,
+    build_global_creative_spine_contract as _build_global_creative_spine_contract_impl,
     extract_text as _extract_model_response_text_impl,
     is_natural_language_prompt as _is_natural_language_prompt_impl,
     maybe_model_refine as _maybe_model_refine_impl,
@@ -167,6 +168,7 @@ from .stage_prompt.model_refiner import (
     reconcile_model_output_fallback as _reconcile_model_output_fallback_impl,
     sanitize_model_error as _sanitize_model_error_impl,
     stabilize_prompt_output as _stabilize_prompt_output_impl,
+    summarize_global_creative_spine_contract as _summarize_global_creative_spine_contract_impl,
 )
 from .stage_prompt.character_sheet_skill import (
     apply_character_sheet_strategy as _apply_character_sheet_strategy_impl,
@@ -4196,6 +4198,17 @@ def _run_stage_impl(
     template_style = biased_template_style if str(settings.get("随机主题池", "自动")).strip() != "自动" else _infer_template_style(tags, str(settings["模板风格"]))
     subject_type = _infer_subject_type(tags, str(settings["主体类型"]))
     output_structure = _infer_output_structure(subject_type, str(settings["案例输出结构"]))
+    creative_spine_contract = _build_global_creative_spine_contract_impl(
+        selected,
+        custom_tags,
+        settings,
+        template_style=template_style,
+        subject_type=subject_type,
+        layout_mode=str(settings.get("画面结构模式解析结果", "") or ""),
+        primary_style_family=_base_template_style(template_style),
+    )
+    settings["全局创作主线合同"] = creative_spine_contract
+    settings["全局创作主线摘要"] = _summarize_global_creative_spine_contract_impl(creative_spine_contract)
     scene_group = _main_scene_group(tags, template_style)
     identity = _main_identity(tags)
     adult_subpool = _adult_subpool(tags) if bool(set(tags) & 成人向标签关键词) else ""
