@@ -32,6 +32,17 @@ _NEGATIVE_SAFETY_DISPLAY_MARKERS = (
 )
 
 
+def _normalize_model_source_label(value: Any) -> str:
+    source = str(value or "").strip()
+    if not source:
+        return "仅Skill"
+    if source.startswith("本地"):
+        suffix_index = source.find("（")
+        suffix = source[suffix_index:] if suffix_index >= 0 else ""
+        return f"本地模型{suffix}"
+    return source
+
+
 def _split_negative_terms(negative_prompt: str) -> tuple[list[str], str]:
     if "、" in negative_prompt:
         return [part.strip() for part in negative_prompt.split("、")], "、"
@@ -65,7 +76,7 @@ def summarize_negative_prompt_for_display(negative_prompt: str) -> str:
 
 
 def _model_skill_pipeline_label(settings: dict[str, Any]) -> str:
-    source = str(settings.get("模型来源", "仅Skill") or "仅Skill").strip()
+    source = _normalize_model_source_label(settings.get("模型来源", "仅Skill"))
     fallback_note = str(settings.get("模型回退说明", "") or "").strip()
     call_status = str(settings.get("模型调用状态", "") or "").strip()
     if fallback_note:
@@ -117,7 +128,7 @@ def _safe_model_api_base_url(raw_url: Any) -> str:
 
 
 def _model_api_config_meta(settings: dict[str, Any]) -> tuple[str, str, str, str]:
-    source = str(settings.get("模型来源", "仅Skill") or "仅Skill").strip()
+    source = _normalize_model_source_label(settings.get("模型来源", "仅Skill"))
     if source != "API接口":
         return "", "", "", ""
     provider = str(settings.get("API服务商有效", settings.get("API服务商", "")) or "").strip()
@@ -157,6 +168,10 @@ def build_selected_tags_text(
     format_grouped_summary: Callable[[OrderedDict[str, list[str]], list[str]], str],
 ) -> str:
     display_negative_prompt = summarize_negative_prompt_for_display(negative_prompt)
+    model_source = _normalize_model_source_label(settings.get("模型来源", "仅Skill"))
+    model_source_effective = _normalize_model_source_label(
+        settings.get("模型来源实际", model_source) or model_source
+    )
     return "\n".join(
         [
             f"模板风格：{template_style}",
@@ -171,8 +186,8 @@ def build_selected_tags_text(
             f"标签反推模式：{settings['标签反推模式']}",
             f"NSFW策略状态：{'开启' if settings.get('NSFW策略启用', False) else '关闭'} / {settings.get('NSFW策略来源', '') or '无'}",
             f"风格隔离策略：{settings.get('风格隔离策略', '平衡收敛')}",
-            f"模型来源：{settings.get('模型来源', '仅Skill')}",
-            f"模型实际来源：{settings.get('模型来源实际', settings.get('模型来源', '仅Skill'))}",
+            f"模型来源：{model_source}",
+            f"模型实际来源：{model_source_effective}",
             f"模型调用状态：{settings.get('模型调用状态', '未记录')}",
             f"图片反推状态：{settings.get('图片反推状态', '未启用')}",
             f"模型与Skill链路：{_model_skill_pipeline_label(settings)}",
@@ -214,6 +229,10 @@ def build_json_payload(
 ) -> dict[str, Any]:
     display_negative_prompt = summarize_negative_prompt_for_display(negative_prompt)
     model_api_provider, model_api_base_url, model_api_model, model_config_signature = _model_api_config_meta(settings)
+    model_source = _normalize_model_source_label(settings.get("模型来源", "仅Skill"))
+    model_source_effective = _normalize_model_source_label(
+        settings.get("模型来源实际", model_source) or model_source
+    )
     return {
         "full_text": full_text,
         "prompt_text": prompt_only,
@@ -234,8 +253,8 @@ def build_json_payload(
         "style_isolation_mode": str(settings.get("风格隔离策略", "平衡收敛") or "平衡收敛"),
         "global_creative_spine": dict(settings.get("全局创作主线合同", {}) or {}),
         "global_creative_spine_summary": str(settings.get("全局创作主线摘要", "") or ""),
-        "model_source": str(settings.get("模型来源", "仅Skill") or "仅Skill"),
-        "model_source_effective": str(settings.get("模型来源实际", settings.get("模型来源", "仅Skill")) or "仅Skill"),
+        "model_source": model_source,
+        "model_source_effective": model_source_effective,
         "model_fallback_note": str(settings.get("模型回退说明", "") or ""),
         "model_call_status": str(settings.get("模型调用状态", "") or ""),
         "model_call_attempt_count": int(settings.get("模型调用尝试次数", 0) or 0),

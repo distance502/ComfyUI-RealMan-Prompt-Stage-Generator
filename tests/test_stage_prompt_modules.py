@@ -7217,6 +7217,8 @@ class TestStagePromptModules(unittest.TestCase):
         input_types = node_class.INPUT_TYPES()
         self.assertEqual(module.SETTING_DEFAULTS["模型来源"], "仅Skill")
         self.assertEqual(module._normalize_stage_model_source("本地GGUF"), "本地模型")
+        self.assertEqual(module._normalize_stage_model_source("本地Transformers"), "本地模型")
+        self.assertEqual(module._normalize_stage_model_source("外接本地模型"), "本地模型")
         self.assertEqual(input_types["required"]["模型来源"][1]["default"], "仅Skill")
         self.assertEqual(input_types["required"]["内置主模型"][1]["default"], input_types["required"]["内置主模型"][0][0])
         self.assertNotIn("qwen模型", input_types["required"])
@@ -8261,6 +8263,69 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertEqual(settings.get("模型活动回退数量", 0), 0)
         self.assertEqual(settings.get("模型来源实际"), "本地模型")
         self.assertTrue(any("短草稿" in note for note in settings.get("推理纠偏说明", [])))
+
+    def test_model_refiner_extracts_assistant_continuation_from_full_text_pipeline(self) -> None:
+        class FullTextPipeline:
+            def __call__(self, rendered_prompt):
+                return [{
+                    "generated_text": (
+                        f"{rendered_prompt}\n<|im_start|>assistant\n"
+                        "<analysis>先分析主体、场景与镜头，再组织最终正文。</analysis>\n"
+                        "最终提示词：\n"
+                        "成年女性站在雨夜站台，列车鸣笛打破等待，她因此停步回望。"
+                        "情绪由疲惫转为警觉，霓虹反光随着动作掠过风衣与湿地面，"
+                        "镜头最终定格在列车尚未进入画面的瞬间。<|im_end|>"
+                    )
+                }]
+
+        original = build_long_test_skill_prompt()
+        settings = {
+            "提示词语言": "纯中文",
+            "主体类型": "人物角色",
+            "主体类型解析结果": "人物角色",
+            "模型来源": "本地Transformers",
+            "模型调用基础来源": "本地Transformers",
+            "全局剧情规划": ["叙事弧=等待与信号"],
+        }
+        refined = model_refiner.maybe_model_refine(
+            FullTextPipeline(),
+            original,
+            settings,
+            chat_completion=lambda *_args, **_kwargs: None,
+            clean_think_text=lambda value: value,
+        )
+        self.assertNotEqual(refined, original)
+        self.assertIn("列车鸣笛", refined)
+        self.assertNotIn("Skill前置上下文", refined)
+        self.assertNotIn("分析主体", refined)
+        self.assertEqual(settings.get("模型活动回退数量", 0), 0)
+        self.assertEqual(settings.get("模型来源实际"), "本地模型")
+
+    def test_legacy_local_source_is_normalized_in_context_and_status(self) -> None:
+        self.assertEqual(model_refiner._normalize_model_source_label("本地GGUF"), "本地模型")
+        self.assertEqual(model_refiner._normalize_model_source_label("本地Transformers"), "本地模型")
+        self.assertEqual(formatter._normalize_model_source_label("本地GGUF（部分回退）"), "本地模型（部分回退）")
+
+        settings = {
+            "模型来源": "本地GGUF",
+            "模型调用基础来源": "本地Transformers",
+            "提示词语言": "纯中文",
+        }
+        context = model_refiner._skill_context_for_model(settings)
+        self.assertIn("模型来源：本地模型", context)
+        self.assertNotIn("本地GGUF", context)
+        self.assertNotIn("本地Transformers", context)
+
+        model_refiner._record_model_call_result(
+            settings,
+            outcome="partial",
+            fallback_outputs=1,
+            output_count=1,
+            reason="正文不可用",
+        )
+        self.assertEqual(settings["模型来源实际"], "仅Skill回退")
+        self.assertIn("模型输出回退：本地模型", settings["模型回退说明"])
+        self.assertNotIn("本地GGUF", settings["模型回退说明"])
 
     def test_model_refiner_removes_placeholder_fragments_from_api_output(self) -> None:
         class DummyChatLlm:

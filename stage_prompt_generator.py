@@ -762,7 +762,7 @@ _RUNTIME_RANDOM_HISTORY_GENERIC_SUBJECTS = {
 
 def _normalize_stage_model_source(source: Any) -> str:
     value = str(source or "").strip()
-    if value == 旧本地模型来源:
+    if value == 旧本地模型来源 or value.startswith("本地") or value.startswith("外接本地"):
         return 本地模型来源
     return value if value in {"仅Skill", 本地模型来源, "API接口"} else (value or "仅Skill")
 API服务商选项 = [

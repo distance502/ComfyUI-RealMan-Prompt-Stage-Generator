@@ -128,8 +128,14 @@ _MODEL_ECHO_BODY_PATTERN = re.compile(
     r"(?:^|\n)\s*(?:待整理提示词正文|待改写提示词|prompt\s+to\s+(?:refine|rewrite))\s*[:：]\s*",
     flags=re.IGNORECASE,
 )
+_MODEL_ASSISTANT_BOUNDARY_PATTERN = re.compile(
+    r"(?:<\|im_start\|>\s*assistant\b|"
+    r"<\|start_header_id\|>\s*assistant\s*<\|end_header_id\|>|"
+    r"<\|assistant\|>|(?:^|\n)\s*(?:#{1,6}\s*)?assistant\s*[:：]\s*)",
+    flags=re.IGNORECASE,
+)
 _MODEL_SPECIAL_TOKEN_PATTERN = re.compile(
-    r"<\|/?(?:assistant|final|analysis|reasoning|im_start|im_end)[^>]*\|?>",
+    r"<\|/?(?:assistant|final|analysis|reasoning|im_start|im_end|start_header_id|end_header_id|eot_id)[^>]*\|?>",
     flags=re.IGNORECASE,
 )
 _NUMBERED_ANALYSIS_LINE_PATTERN = re.compile(r"^\s*\d+[.、]\s*")
@@ -277,6 +283,21 @@ _CREATIVE_SPINE_NEGATION_PATTERN = re.compile(
     r"(?:不要|避免|禁止|并非|不是|没有|无|非|no|not|without|avoid|exclude)\s*$",
     flags=re.IGNORECASE,
 )
+
+
+def _normalize_model_source_label(value: Any) -> str:
+    """Collapse legacy or backend-specific local labels into the public local-model source."""
+
+    source = str(value or "").strip()
+    if not source:
+        return "仅Skill"
+    if source.startswith("本地"):
+        suffix_index = source.find("（")
+        suffix = source[suffix_index:] if suffix_index >= 0 else ""
+        return f"本地模型{suffix}"
+    return source
+
+
 _SEMANTIC_REPEAT_FAMILIES: tuple[tuple[str, int, tuple[str, ...]], ...] = (
     (
         "composition_full_body",
@@ -697,6 +718,13 @@ def _prepare_model_response_text(text: str) -> tuple[str, bool]:
             if extracted and extracted != source:
                 source = extracted
                 recovered = True
+
+    # Text-generation pipelines often return the complete rendered chat prompt
+    # followed by the assistant continuation. Only the continuation is model output.
+    assistant_matches = list(_MODEL_ASSISTANT_BOUNDARY_PATTERN.finditer(source))
+    if assistant_matches:
+        source = source[assistant_matches[-1].end() :]
+        recovered = True
 
     stripped = _MODEL_REASONING_BLOCK_PATTERN.sub("", source)
     if stripped != source:
@@ -1505,8 +1533,8 @@ def _summarize_recent_prompt_history(items: list[str]) -> str:
 def _skill_context_for_model(settings: dict[str, Any]) -> str:
     notes = [str(note).strip() for note in settings.get("推理纠偏说明", []) if str(note).strip()]
     compact_notes = " | ".join(notes[:8]) if notes else "无"
-    model_source = str(settings.get("模型来源", "仅Skill") or "仅Skill").strip()
-    model_source_effective = str(settings.get("模型来源实际", model_source) or model_source).strip()
+    model_source = _normalize_model_source_label(settings.get("模型来源", "仅Skill"))
+    model_source_effective = _normalize_model_source_label(settings.get("模型来源实际", model_source) or model_source)
     model_fallback_note = str(settings.get("模型回退说明", "") or "").strip()
     post_context = str(settings.get("模型后置素材摘要", "") or "").strip()
     nsfw_context = str(settings.get("NSFW工作台标签摘要", "") or "").strip()
@@ -1800,12 +1828,12 @@ def _append_model_runtime_note(settings: dict[str, Any], note: str) -> None:
 
 
 def _runtime_base_source(settings: dict[str, Any]) -> str:
-    return str(
+    return _normalize_model_source_label(
         settings.get("模型调用基础来源")
         or settings.get("模型来源")
         or settings.get("模型来源实际")
         or "仅Skill"
-    ).strip()
+    )
 
 
 def _refresh_model_runtime_status(settings: dict[str, Any]) -> None:
@@ -1905,7 +1933,7 @@ def _record_model_call_result(
         settings["模型调用错误"] = errors[-4:]
         if report_fallback:
             settings["模型活动回退数量"] = max(0, int(settings.get("模型活动回退数量", 0) or 0)) + fallback_output_count
-            configured_source = str(settings.get("模型来源", "仅Skill") or "仅Skill").strip()
+            configured_source = _normalize_model_source_label(settings.get("模型来源", "仅Skill"))
             if fallback_outputs:
                 fallback_note = (
                     f"模型输出回退：{configured_source} 返回结果中有 {fallback_output_count}/{total_outputs} 条"
