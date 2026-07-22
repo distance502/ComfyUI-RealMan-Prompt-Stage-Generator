@@ -1670,6 +1670,34 @@ def _looks_like_rich_narrative_prompt(text: str, *, english: bool = False) -> bo
     return cjk_count >= 420 and sum(marker in source for marker in markers) >= 3
 
 
+_SMART_CHINESE_NARRATIVE_TARGET_CHARS = 1188
+_SMART_CHINESE_COMPACTION_MARKERS = (
+    "近处可见真实的表面纹理",
+    "近处保留",
+    "这个唯一定格",
+    "色彩和材质变化跟随",
+    "这些前因凝结",
+)
+
+
+def _fit_chinese_smart_narrative(primary: str, bridge: str) -> str:
+    """Make room for the user's intent by removing only complete optional sentences."""
+
+    merged = f"{primary}{bridge}"
+    if len(merged) <= _SMART_CHINESE_NARRATIVE_TARGET_CHARS:
+        return merged
+    sentences = [match.group(0) for match in re.finditer(r"[^。！？]*[。！？]|[^。！？]+$", primary) if match.group(0)]
+    for marker in _SMART_CHINESE_COMPACTION_MARKERS:
+        sentence_index = next((index for index, sentence in enumerate(sentences) if marker in sentence), None)
+        if sentence_index is None:
+            continue
+        del sentences[sentence_index]
+        merged = f"{''.join(sentences)}{bridge}"
+        if len(merged) <= _SMART_CHINESE_NARRATIVE_TARGET_CHARS:
+            return merged
+    return merged
+
+
 def _merge_smart_text_into_rich_narrative(
     *,
     user_text: str,
@@ -1701,7 +1729,7 @@ def _merge_smart_text_into_rich_narrative(
         f"其中，{visible}成为同一事件里的补充动机或具体线索，它会改变主体的注意方向与下一步动作，"
         "并让附近的光线、材质或空间出现可见回应，而不是另起一串互不相关的标签。"
     )
-    return f"{primary}{bridge}"
+    return _fit_chinese_smart_narrative(primary, bridge)
 
 
 def _fallback_smart_text_chinese(

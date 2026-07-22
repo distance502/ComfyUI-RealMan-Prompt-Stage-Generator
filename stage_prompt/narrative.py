@@ -806,6 +806,35 @@ def _anchor(anchors: Mapping[str, Any], key: str, fallback: str = "") -> str:
     return _clean(anchors.get(key)) or fallback
 
 
+_CHINESE_NARRATIVE_MAX_CHARS = 1200
+
+
+def _fit_chinese_narrative_sections(
+    sections: list[str],
+    replacements: list[tuple[str, str]],
+) -> str:
+    """Compact optional prose by whole sentence while preserving the narrative spine."""
+
+    fitted = list(sections)
+
+    def render() -> str:
+        return "".join(section.strip() for section in fitted if section.strip())
+
+    prompt = render()
+    if len(prompt) <= _CHINESE_NARRATIVE_MAX_CHARS:
+        return prompt
+    for full, compact in replacements:
+        try:
+            index = fitted.index(full)
+        except ValueError:
+            continue
+        fitted[index] = compact
+        prompt = render()
+        if len(prompt) <= _CHINESE_NARRATIVE_MAX_CHARS:
+            return prompt
+    return prompt
+
+
 def _render_chinese(
     anchors: Mapping[str, Any],
     plan: Mapping[str, Any],
@@ -896,9 +925,42 @@ def _render_chinese(
         + f"{close_details}，中远处用空气层次、色温差和景深逐级收束；"
         + f"最终保持{quality}，同时维持{stability_details}，背景表面与画面边缘干净清晰。"
     )
-    ending_sentence = (
+    compact_detail_parts = []
+    if custom:
+        compact_detail_parts.append(f"补充要求{custom}融入同一事件")
+    if residual:
+        compact_detail_parts.append(f"其余细节{residual}仅作为身份、材质或空间证据")
+    compact_detail_prefix = "；".join(compact_detail_parts)
+    compact_detail_sentence = (
+        (compact_detail_prefix + "。" if compact_detail_prefix else "")
+        + f"近处保留{quality}、真实纹理与接触阴影，中远景以空气层次、色温差和景深收束；"
+        + f"同时维持{stability_details}及干净画面边缘。"
+    )
+    compact_space_sentence = (
+        f"空间沿“{_anchor(plan, 'spatial_zh')}”推进，前景交代尺度，中景承接{subject}的行动，"
+        f"背景保留事件后果；{_anchor(plan, 'feedback_zh')}，使{scene}对当前动作形成可见回应。"
+    )
+    compact_camera_sentence = (
+        f"镜头按“{camera_beat}”截取决定性时机并保持{composition}；{lighting}在{subject_surface}、"
+        f"{outfit}、{props}与背景之间建立层级，焦点锁定主体和动作；{_anchor(plan, 'climax_zh')}。"
+    )
+    compact_subject_sentence = (
+        f"{'主体结构与外观' if non_person else '人物造型'}以{outfit}为核心，{motion_details}随{action}产生可信变化；"
+        f"{'结构朝向与功能部件' if non_person else '视线、肩颈、手部与身体重心'}共同指向当前事件与下一步意图。"
+    )
+    compact_story_sentence = (
+        f"{_anchor(plan, 'opening_zh')}，{_anchor(plan, 'motive_zh')}；{_anchor(plan, 'trigger_zh')}，"
+        f"因此{subject}以{action}回应。{_anchor(plan, 'escalation_zh')}，情绪随之{_anchor(plan, 'turn_zh')}，"
+        "因果最终落在当前姿态、表情与环境结果中。"
+    )
+    ending_resolution_sentence = (
         f"最终画面在视觉上完成一次清楚的剧情推进，同时保留开放结果：{_anchor(plan, 'ending_zh')}。"
-        "这个唯一定格把动作余势、环境反馈与情绪余韵都压进当前时刻，形成一张能够暗示过去与未来的真实电影剧照。"
+    )
+    ending_aftertone_sentence = "这个唯一定格把动作余势、环境反馈与情绪余韵都压进当前时刻，形成一张能够暗示过去与未来的真实电影剧照。"
+    ending_sentence = ending_resolution_sentence + ending_aftertone_sentence
+    detailed_sentence = (
+        "色彩和材质变化跟随情绪转折逐步展开，亮部不靠过曝制造刺激，暗部保留可读层次，局部对比只用于引导视线；"
+        "每一个新增细节都应回答主体是谁、事件为何发生或空间如何回应，避免用近义形容词重复扩字数。"
     )
 
     level = _clean(detail_level)
@@ -915,11 +977,19 @@ def _render_chinese(
             middle = [subject_sentence, camera_sentence, space_sentence]
         sections = [anchor_sentence, story_sentence, *middle, detail_sentence, ending_sentence]
         if level == "详细":
-            sections.insert(
-                -1,
-                "色彩和材质变化跟随情绪转折逐步展开，亮部不靠过曝制造刺激，暗部保留可读层次，局部对比只用于引导视线；每一个新增细节都应回答主体是谁、事件为何发生或空间如何回应，避免用近义形容词重复扩字数。",
-            )
-    return "".join(section.strip() for section in sections if section.strip())
+            sections.insert(-1, detailed_sentence)
+    return _fit_chinese_narrative_sections(
+        sections,
+        [
+            (ending_sentence, ending_resolution_sentence),
+            (detailed_sentence, ""),
+            (detail_sentence, compact_detail_sentence),
+            (space_sentence, compact_space_sentence),
+            (camera_sentence, compact_camera_sentence),
+            (subject_sentence, compact_subject_sentence),
+            (story_sentence, compact_story_sentence),
+        ],
+    )
 
 
 def _render_english(

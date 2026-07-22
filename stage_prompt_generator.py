@@ -2108,22 +2108,46 @@ def _all_tag_groups() -> list[tuple[str, int, list[str]]]:
     return [(str(group["name"]), int(group["slots"]), _group_tags(str(group["name"]))) for group in 分组配置]
 
 
-def _tag_group_index() -> dict[str, str]:
+def _tag_group_index_from_groups(tag_groups: list[tuple[str, int, list[str]]]) -> dict[str, str]:
     mapping: dict[str, str] = {}
-    for name, _, tags in _all_tag_groups():
+    for name, _, tags in tag_groups:
         for tag in tags:
             if tag != 无标签 and tag not in mapping:
                 mapping[tag] = name
     return mapping
 
 
+def _tag_group_index() -> dict[str, str]:
+    return _tag_group_index_from_groups(_all_tag_groups())
+
+
+def _tag_catalog_snapshot() -> tuple[
+    list[tuple[str, int, list[str]]],
+    dict[str, str],
+    dict[str, frozenset[str]],
+]:
+    """Build one internally consistent tag catalog for a single execution."""
+
+    groups = _all_tag_groups()
+    index = _tag_group_index_from_groups(groups)
+    memberships = {
+        group_name: frozenset(tag for tag in tags if tag != 无标签)
+        for group_name, _slot_count, tags in groups
+    }
+    return groups, index, memberships
+
+
 def _pick(rng: random.Random, items: list[str]) -> str | None:
     return rng.choice(items) if items else None
 
 
-def _collect_selected(kwargs: dict[str, Any]) -> tuple[OrderedDict[str, list[str]], list[str]]:
+def _collect_selected(
+    kwargs: dict[str, Any],
+    *,
+    tag_groups: list[tuple[str, int, list[str]]] | None = None,
+) -> tuple[OrderedDict[str, list[str]], list[str]]:
     selected: OrderedDict[str, list[str]] = OrderedDict()
-    for group_name, slot_count, _ in _all_tag_groups():
+    for group_name, slot_count, _ in tag_groups if tag_groups is not None else _all_tag_groups():
         items: list[str] = []
         for index in range(1, slot_count + 1):
             raw_value = kwargs.get(f"{group_name}标签{index}", "")
@@ -2159,6 +2183,8 @@ def _append_tag_to_state(
     tag: str,
     *,
     preferred_group: str | None = None,
+    tag_group_index: dict[str, str] | None = None,
+    tag_group_memberships: dict[str, frozenset[str]] | None = None,
 ) -> None:
     text = str(tag).strip()
     if not text:
@@ -2166,11 +2192,17 @@ def _append_tag_to_state(
     current_tags = _collect_all_tags(selected, custom_tags)
     if text in current_tags:
         return
-    indexed_group = _tag_group_index().get(text)
+    resolved_index = tag_group_index if tag_group_index is not None else _tag_group_index()
+    indexed_group = resolved_index.get(text)
+    preferred_tags = (
+        tag_group_memberships.get(preferred_group, frozenset())
+        if preferred_group and tag_group_memberships is not None
+        else frozenset(_group_tags(preferred_group)) if preferred_group else frozenset()
+    )
     preferred_is_valid = bool(
         preferred_group
         and preferred_group in selected
-        and text in _group_tags(preferred_group)
+        and text in preferred_tags
     )
     group_name = preferred_group if preferred_is_valid else indexed_group
     if group_name and group_name in selected:
@@ -2186,6 +2218,9 @@ def _normalize_inference_state(
     selected: OrderedDict[str, list[str]],
     custom_tags: list[str],
     settings: dict[str, Any],
+    *,
+    tag_group_index: dict[str, str] | None = None,
+    tag_group_memberships: dict[str, frozenset[str]] | None = None,
 ) -> tuple[OrderedDict[str, list[str]], list[str], list[str]]:
     return _normalize_inference_state_impl(
         selected,
@@ -2193,7 +2228,13 @@ def _normalize_inference_state(
         settings,
         collect_all_tags=_collect_all_tags,
         remove_tag_from_state=_remove_tag_from_state,
-        append_tag_to_state=lambda next_selected, next_custom_tags, tag: _append_tag_to_state(next_selected, next_custom_tags, tag),
+        append_tag_to_state=lambda next_selected, next_custom_tags, tag: _append_tag_to_state(
+            next_selected,
+            next_custom_tags,
+            tag,
+            tag_group_index=tag_group_index,
+            tag_group_memberships=tag_group_memberships,
+        ),
         uniq=_uniq,
         context={
             "ancient_modern_conflicts": _古风现代冲突标签集合,
@@ -2385,6 +2426,9 @@ def _apply_random_theme_pool_bias(
     selected: OrderedDict[str, list[str]],
     custom_tags: list[str],
     settings: dict[str, Any],
+    *,
+    tag_group_index: dict[str, str] | None = None,
+    tag_group_memberships: dict[str, frozenset[str]] | None = None,
 ) -> tuple[str, OrderedDict[str, list[str]], list[str]]:
     pool = str(settings.get("随机主题池", "自动") or "自动").strip()
     if pool == "自动":
@@ -2394,7 +2438,14 @@ def _apply_random_theme_pool_bias(
     next_custom = list(custom_tags)
 
     def add_tag(tag: str, preferred_group: str | None = None) -> None:
-        _append_tag_to_state(next_selected, next_custom, tag, preferred_group=preferred_group)
+        _append_tag_to_state(
+            next_selected,
+            next_custom,
+            tag,
+            preferred_group=preferred_group,
+            tag_group_index=tag_group_index,
+            tag_group_memberships=tag_group_memberships,
+        )
 
     explicit_template_style = str(settings.get("模板风格", "自动") or "自动").strip()
 
@@ -2615,6 +2666,9 @@ def _apply_template_style_profile_bias(
     selected: OrderedDict[str, list[str]],
     custom_tags: list[str],
     settings: dict[str, Any],
+    *,
+    tag_group_index: dict[str, str] | None = None,
+    tag_group_memberships: dict[str, frozenset[str]] | None = None,
 ) -> tuple[OrderedDict[str, list[str]], list[str]]:
     configured_style = str(settings.get("模板风格", "自动") or "自动").strip()
     runtime_random_enabled = bool(settings.get("运行时随机标签", False))
@@ -2765,7 +2819,14 @@ def _apply_template_style_profile_bias(
             or any(marker in cleaned_tag for marker in _非人物模板档案禁用词)
         ):
             continue
-        _append_tag_to_state(next_selected, next_custom, cleaned_tag, preferred_group=cleaned_group)
+        _append_tag_to_state(
+            next_selected,
+            next_custom,
+            cleaned_tag,
+            preferred_group=cleaned_group,
+            tag_group_index=tag_group_index,
+            tag_group_memberships=tag_group_memberships,
+        )
         markers.append(f"styletag:{cleaned_tag}")
     settings["模板风格档案标记"] = markers
     return next_selected, next_custom
@@ -2902,8 +2963,12 @@ def _runtime_random_history_markers(node_key: str) -> list[str]:
         return list((_cache_bucket_unlocked(node_key) or {}).get("recent_runtime_markers", []))
 
 
-def _runtime_random_markers_from_tags(tags: list[str]) -> list[str]:
-    tag_index = _tag_group_index()
+def _runtime_random_markers_from_tags(
+    tags: list[str],
+    *,
+    tag_group_index: dict[str, str] | None = None,
+) -> list[str]:
+    tag_index = tag_group_index if tag_group_index is not None else _tag_group_index()
     markers: list[str] = []
     for raw_tag in tags:
         tag = str(raw_tag).strip()
@@ -2917,13 +2982,19 @@ def _runtime_random_markers_from_tags(tags: list[str]) -> list[str]:
     return _uniq(markers)
 
 
-def _runtime_random_markers_from_prompt(prompt_list: list[str]) -> list[str]:
+def _runtime_random_markers_from_prompt(
+    prompt_list: list[str],
+    *,
+    tag_groups: list[tuple[str, int, list[str]]] | None = None,
+) -> list[str]:
     prompt_text = "\n".join(str(prompt or "") for prompt in prompt_list if str(prompt or "").strip())
     if not prompt_text:
         return []
+    group_values = {name: tags for name, _slot_count, tags in tag_groups or []}
     markers: list[str] = []
     for group_name, prefix in _RUNTIME_RANDOM_HISTORY_GROUP_PREFIX.items():
-        for tag in _group_tags(group_name):
+        group_tags = group_values[group_name] if group_name in group_values else _group_tags(group_name)
+        for tag in group_tags:
             tag = str(tag).strip()
             if (
                 not tag
@@ -2946,21 +3017,26 @@ def _update_runtime_random_history(
     generated: list[str],
     prompt_list: list[str],
     extra_markers: list[str] | None = None,
+    tag_group_index: dict[str, str] | None = None,
+    tag_groups: list[tuple[str, int, list[str]]] | None = None,
 ) -> list[str]:
     if not str(node_key or "").strip():
         return []
     state_tags: list[str] = []
     for group_name in _RUNTIME_RANDOM_HISTORY_GROUP_PREFIX:
         state_tags.extend(str(tag).strip() for tag in selected.get(group_name, []) if str(tag).strip())
-    state_markers = _runtime_random_markers_from_tags(state_tags)
-    generated_markers = _runtime_random_markers_from_tags(generated)
+    state_markers = _runtime_random_markers_from_tags(state_tags, tag_group_index=tag_group_index)
+    generated_markers = _runtime_random_markers_from_tags(generated, tag_group_index=tag_group_index)
     identity_tags = [
         tag
         for tag in _collect_all_tags(selected, custom_tags)
         if tag in 职业持物身份集合 or tag in 强设定身份锚点集合
     ]
-    identity_markers = _runtime_random_markers_from_tags(identity_tags)
-    prompt_markers = _runtime_random_markers_from_prompt(prompt_list)
+    identity_markers = _runtime_random_markers_from_tags(identity_tags, tag_group_index=tag_group_index)
+    prompt_markers = _runtime_random_markers_from_prompt(
+        prompt_list,
+        tag_groups=tag_groups,
+    )
     additional_markers = [str(marker).strip() for marker in (extra_markers or []) if str(marker).strip()]
     markers = _uniq([*additional_markers, *state_markers, *generated_markers, *identity_markers, *prompt_markers])
     if not markers:
@@ -3085,10 +3161,11 @@ def 应用NSFW工作台到阶段状态(
     selected: OrderedDict[str, list[str]],
     custom_tags: list[str],
     allowed_tags: set[str] | None = None,
+    tag_group_index: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     mapped = _map_nsfw_workspace_to_stage_state_impl(
         workspace,
-        tag_group_index=_tag_group_index(),
+        tag_group_index=tag_group_index if tag_group_index is not None else _tag_group_index(),
         group_slot_limits=_分组槽位上限,
     )
     if allowed_tags is not None:
@@ -3132,27 +3209,50 @@ def 应用NSFW工作台到阶段状态(
     }
 
 
-def _build_state_from_kwargs(kwargs: dict[str, Any]) -> tuple[OrderedDict[str, list[str]], list[str], dict[str, Any], str]:
+def _build_state_from_kwargs(
+    kwargs: dict[str, Any],
+    *,
+    tag_groups: list[tuple[str, int, list[str]]] | None = None,
+    tag_group_index: dict[str, str] | None = None,
+    tag_group_memberships: dict[str, frozenset[str]] | None = None,
+) -> tuple[OrderedDict[str, list[str]], list[str], dict[str, Any], str]:
+    resolved_groups = tag_groups if tag_groups is not None else _all_tag_groups()
+    resolved_index = tag_group_index if tag_group_index is not None else _tag_group_index_from_groups(resolved_groups)
     return _build_state_from_kwargs_impl(
         kwargs,
-        collect_selected=_collect_selected,
-        tag_group_index=_tag_group_index,
+        collect_selected=lambda values: _collect_selected(values, tag_groups=resolved_groups),
+        tag_group_index=lambda: resolved_index,
         group_slot_limits=_分组槽位上限,
         setting_defaults=SETTING_DEFAULTS,
         safe_int=_safe_int,
         safe_float=_safe_float,
-        normalize_inference_state=_normalize_inference_state,
+        normalize_inference_state=lambda next_selected, next_custom_tags, next_settings: _normalize_inference_state(
+            next_selected,
+            next_custom_tags,
+            next_settings,
+            tag_group_index=resolved_index,
+            tag_group_memberships=tag_group_memberships,
+        ),
         collect_all_tags=_collect_all_tags,
     )
 
 
-def _build_runtime_tags(selected: OrderedDict[str, list[str]], custom_tags: list[str], settings: dict[str, Any]) -> tuple[OrderedDict[str, list[str]], list[str], list[str]]:
+def _build_runtime_tags(
+    selected: OrderedDict[str, list[str]],
+    custom_tags: list[str],
+    settings: dict[str, Any],
+    *,
+    tag_groups: list[tuple[str, int, list[str]]] | None = None,
+    tag_group_index: dict[str, str] | None = None,
+) -> tuple[OrderedDict[str, list[str]], list[str], list[str]]:
+    resolved_groups = tag_groups if tag_groups is not None else _all_tag_groups()
+    resolved_index = tag_group_index if tag_group_index is not None else _tag_group_index_from_groups(resolved_groups)
     return _build_runtime_tags_impl(
         selected,
         custom_tags,
         settings,
-        all_tag_groups=_all_tag_groups,
-        tag_group_index=_tag_group_index,
+        all_tag_groups=lambda: resolved_groups,
+        tag_group_index=lambda: resolved_index,
         parse_tags=_parse_tags,
         uniq=_uniq,
         seed_normalizer=_规范化随机种子,
@@ -4046,7 +4146,13 @@ def _run_stage_impl(
     cache_transaction: _StageCacheTransaction,
     **kwargs: Any,
 ) -> tuple[str, str, str, str, str, str, str]:
-    selected, custom_tags, settings, all_tags_text = _build_state_from_kwargs(kwargs)
+    tag_groups, tag_group_index, tag_group_memberships = _tag_catalog_snapshot()
+    selected, custom_tags, settings, all_tags_text = _build_state_from_kwargs(
+        kwargs,
+        tag_groups=tag_groups,
+        tag_group_index=tag_group_index,
+        tag_group_memberships=tag_group_memberships,
+    )
     settings["模型来源"] = _normalize_stage_model_source(settings.get("模型来源"))
     _apply_adult_reverse_profile(settings)
     reference_image = kwargs.get("参考图片")
@@ -4085,6 +4191,7 @@ def _run_stage_impl(
             nsfw_workspace,
             selected=selected,
             custom_tags=custom_tags,
+            tag_group_index=tag_group_index,
         )
         selected = nsfw_output["selected"]
         custom_tags = nsfw_output["custom_tags"]
@@ -4097,7 +4204,13 @@ def _run_stage_impl(
         settings,
     ) if runtime_random_enabled else ""
     if runtime_random_enabled and preview_marker is None:
-        selected, custom_tags, generated = _build_runtime_tags(selected, custom_tags, settings)
+        selected, custom_tags, generated = _build_runtime_tags(
+            selected,
+            custom_tags,
+            settings,
+            tag_groups=tag_groups,
+            tag_group_index=tag_group_index,
+        )
         settings["运行时随机模式解析结果"] = resolved_runtime_mode
         settings["运行时随机预览已消费"] = False
     elif runtime_random_enabled:
@@ -4129,24 +4242,35 @@ def _run_stage_impl(
             selected,
             custom_tags,
             settings,
+            tag_group_index=tag_group_index,
+            tag_group_memberships=tag_group_memberships,
         )
         selected, custom_tags = _apply_template_style_profile_bias(
             biased_template_style,
             selected,
             custom_tags,
             settings,
+            tag_group_index=tag_group_index,
+            tag_group_memberships=tag_group_memberships,
         )
     smart_text_input = str(settings.get("智能文本输入") or settings.get("额外要求") or "").strip()
     smart_text_enabled = bool(settings.get("智能文本匹配", False)) and bool(smart_text_input)
     if smart_text_enabled:
+        available_tag_names = set(tag_group_index)
         selected, custom_tags, smart_text_notes = _apply_smart_text_to_state_impl(
             selected,
             custom_tags,
             settings,
             text=smart_text_input,
-            available_tags=set(_tag_group_index().keys()),
-            tag_group_index=_tag_group_index(),
-            append_tag_to_state=lambda next_selected, next_custom_tags, tag: _append_tag_to_state(next_selected, next_custom_tags, tag),
+            available_tags=available_tag_names,
+            tag_group_index=tag_group_index,
+            append_tag_to_state=lambda next_selected, next_custom_tags, tag: _append_tag_to_state(
+                next_selected,
+                next_custom_tags,
+                tag,
+                tag_group_index=tag_group_index,
+                tag_group_memberships=tag_group_memberships,
+            ),
         )
         if smart_text_notes:
             existing_notes = [str(note).strip() for note in settings.get("推理纠偏说明", []) if str(note).strip()]
@@ -4159,6 +4283,8 @@ def _run_stage_impl(
         selected,
         custom_tags,
         settings,
+        tag_group_index=tag_group_index,
+        tag_group_memberships=tag_group_memberships,
     )
     if runtime_normalization_notes:
         _merge_inference_notes(settings, runtime_normalization_notes)
@@ -4169,6 +4295,7 @@ def _run_stage_impl(
             selected=selected,
             custom_tags=custom_tags,
             allowed_tags=normalized_active_tags,
+            tag_group_index=tag_group_index,
         )
         selected = nsfw_output["selected"]
         custom_tags = nsfw_output["custom_tags"]
@@ -4329,6 +4456,8 @@ def _run_stage_impl(
                 *profile_markers,
                 *list(settings.get("运行时随机档案标记", []) or []),
             ],
+            tag_group_index=tag_group_index,
+            tag_groups=tag_groups,
         )
     grouped_summary = _format_grouped_summary(selected, custom_tags)
     full_text, prompt_only = _format_sections_impl(prompt_list, grouped_summary, settings=settings)
@@ -5296,6 +5425,7 @@ def _enforce_natural_prompt_list_outputs(
 
 def 构建运行时随机预览状态(payload: dict[str, Any]) -> dict[str, Any]:
     state = payload if isinstance(payload, dict) else {}
+    tag_groups, tag_group_index, tag_group_memberships = _tag_catalog_snapshot()
     raw_settings = state.get("settings") if isinstance(state.get("settings"), dict) else {}
     settings = _bounded_runtime_preview_settings(raw_settings)
     settings["运行时随机标签"] = bool(settings.get("运行时随机标签", SETTING_DEFAULTS["运行时随机标签"]))
@@ -5335,7 +5465,7 @@ def 构建运行时随机预览状态(payload: dict[str, Any]) -> dict[str, Any]
 
     raw_selected = state.get("selected") if isinstance(state.get("selected"), dict) else {}
     selected = OrderedDict()
-    for group_name, slot_count, _ in _all_tag_groups():
+    for group_name, slot_count, _ in tag_groups:
         values = raw_selected.get(group_name, [])
         selected[group_name] = _bounded_runtime_preview_tags(
             values if isinstance(values, (list, tuple)) else [],
@@ -5345,7 +5475,13 @@ def 构建运行时随机预览状态(payload: dict[str, Any]) -> dict[str, Any]
     raw_custom_tags = state.get("customTags")
     custom_tags = _bounded_runtime_preview_tags(raw_custom_tags)
 
-    selected, custom_tags, initial_notes = _normalize_inference_state(selected, custom_tags, settings)
+    selected, custom_tags, initial_notes = _normalize_inference_state(
+        selected,
+        custom_tags,
+        settings,
+        tag_group_index=tag_group_index,
+        tag_group_memberships=tag_group_memberships,
+    )
     if initial_notes:
         _merge_inference_notes(settings, initial_notes)
 
@@ -5363,6 +5499,7 @@ def 构建运行时随机预览状态(payload: dict[str, Any]) -> dict[str, Any]
             nsfw_workspace,
             selected=selected,
             custom_tags=custom_tags,
+            tag_group_index=tag_group_index,
         )
         selected = nsfw_output["selected"]
         custom_tags = nsfw_output["custom_tags"]
@@ -5382,7 +5519,13 @@ def 构建运行时随机预览状态(payload: dict[str, Any]) -> dict[str, Any]
             selected,
             settings,
         )
-        selected, custom_tags, generated = _build_runtime_tags(selected, custom_tags, settings)
+        selected, custom_tags, generated = _build_runtime_tags(
+            selected,
+            custom_tags,
+            settings,
+            tag_groups=tag_groups,
+            tag_group_index=tag_group_index,
+        )
         effective_seed = int(settings.get("运行时随机有效种子", effective_seed) or effective_seed)
         settings["seed"] = requested_seed
     preview_template_style = _infer_template_style(_collect_all_tags(selected, custom_tags), str(settings["模板风格"]))
@@ -5391,14 +5534,24 @@ def 构建运行时随机预览状态(payload: dict[str, Any]) -> dict[str, Any]
         selected,
         custom_tags,
         settings,
+        tag_group_index=tag_group_index,
+        tag_group_memberships=tag_group_memberships,
     )
     selected, custom_tags = _apply_template_style_profile_bias(
         _biased_style,
         selected,
         custom_tags,
         settings,
+        tag_group_index=tag_group_index,
+        tag_group_memberships=tag_group_memberships,
     )
-    selected, custom_tags, final_notes = _normalize_inference_state(selected, custom_tags, settings)
+    selected, custom_tags, final_notes = _normalize_inference_state(
+        selected,
+        custom_tags,
+        settings,
+        tag_group_index=tag_group_index,
+        tag_group_memberships=tag_group_memberships,
+    )
     if final_notes:
         _merge_inference_notes(settings, final_notes)
     if nsfw_enabled and nsfw_workspace is not None:
@@ -5408,12 +5561,13 @@ def 构建运行时随机预览状态(payload: dict[str, Any]) -> dict[str, Any]
             selected=selected,
             custom_tags=custom_tags,
             allowed_tags=normalized_active_tags,
+            tag_group_index=tag_group_index,
         )
         selected = nsfw_output["selected"]
         custom_tags = nsfw_output["custom_tags"]
         settings["运行时随机保护标签"] = ",".join(nsfw_output.get("protected_tags", []))
         _merge_inference_notes(settings, ["NSFW工作台锚点保护：仅保留最终归一化后仍有效的工作台显式选择。"])
-    for group_name, slot_count, _ in _all_tag_groups():
+    for group_name, slot_count, _ in tag_groups:
         selected[group_name] = _bounded_runtime_preview_tags(
             selected.get(group_name, []),
             max_items=max(32, int(slot_count)),

@@ -5877,7 +5877,7 @@ class TestStagePromptModules(unittest.TestCase):
     def test_preview_state_runs_skill_after_runtime_random_tags(self) -> None:
         module = load_stage_prompt_generator_for_integration_test()
 
-        def random_stub(selected, custom_tags, settings):
+        def random_stub(selected, custom_tags, settings, **_kwargs):
             next_selected = OrderedDict((name, list(tags)) for name, tags in selected.items())
             next_selected["画面风格"] = ["自然写实图像", "真实感", "照片级", "杂志编辑摄影"]
             next_selected["构图视角"] = ["全景全身", "人物完整入镜", "全身"]
@@ -11102,19 +11102,19 @@ class TestStagePromptModules(unittest.TestCase):
         original_theme = module._apply_random_theme_pool_bias
         original_style = module._apply_template_style_profile_bias
 
-        def normalize_stub(selected, custom_tags, settings):
+        def normalize_stub(selected, custom_tags, settings, **_kwargs):
             calls.append("normalize")
             return selected, custom_tags, []
 
-        def random_stub(selected, custom_tags, settings):
+        def random_stub(selected, custom_tags, settings, **_kwargs):
             calls.append("random")
             return selected, custom_tags, []
 
-        def theme_stub(template_style, selected, custom_tags, settings):
+        def theme_stub(template_style, selected, custom_tags, settings, **_kwargs):
             calls.append("theme")
             return template_style, selected, custom_tags
 
-        def style_stub(template_style, selected, custom_tags, settings):
+        def style_stub(template_style, selected, custom_tags, settings, **_kwargs):
             calls.append("style")
             return selected, custom_tags
 
@@ -11855,7 +11855,7 @@ class TestStagePromptModules(unittest.TestCase):
         calls: list[str] = []
         original_random = module._build_runtime_tags
 
-        def random_stub(selected, custom_tags, settings):
+        def random_stub(selected, custom_tags, settings, **_kwargs):
             calls.append(str(settings.get("unique_id")))
             return selected, custom_tags, []
 
@@ -12776,17 +12776,17 @@ class TestStagePromptModules(unittest.TestCase):
         original_theme = module._apply_random_theme_pool_bias
         original_style = module._apply_template_style_profile_bias
 
-        def random_stub(selected, custom_tags, settings):
+        def random_stub(selected, custom_tags, settings, **_kwargs):
             calls.append("random")
             return selected, custom_tags, []
 
         module._build_runtime_tags = random_stub
 
-        def theme_stub(template_style, selected, custom_tags, settings):
+        def theme_stub(template_style, selected, custom_tags, settings, **_kwargs):
             calls.append("theme")
             return template_style, selected, custom_tags
 
-        def style_stub(template_style, selected, custom_tags, settings):
+        def style_stub(template_style, selected, custom_tags, settings, **_kwargs):
             calls.append("style")
             return selected, custom_tags
 
@@ -12819,7 +12819,7 @@ class TestStagePromptModules(unittest.TestCase):
         captured: list[str] = []
         original_random = module._build_runtime_tags
 
-        def random_stub(selected, custom_tags, settings):
+        def random_stub(selected, custom_tags, settings, **_kwargs):
             captured.append(str(settings.get("运行时随机保护标签", "")))
             return selected, custom_tags, []
 
@@ -14259,6 +14259,114 @@ class TestStagePromptModules(unittest.TestCase):
             model_refiner.is_natural_language_prompt(result[1], {"提示词语言": "纯中文"}),
             result[1],
         )
+
+    def test_stage_execution_builds_one_tag_catalog_snapshot(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        module._CACHE.clear()
+        original_snapshot = module._tag_catalog_snapshot
+        original_groups = module._all_tag_groups
+        with (
+            mock.patch.object(module, "_tag_catalog_snapshot", wraps=original_snapshot) as snapshot,
+            mock.patch.object(module, "_all_tag_groups", wraps=original_groups) as groups,
+        ):
+            result = module._run_stage(
+                None,
+                **{
+                    "unique_id": "single-tag-catalog-snapshot",
+                    "主体标签1": "成年女性",
+                    "画面风格标签1": "电影写实",
+                    "场景背景标签1": "雨夜街头",
+                    "生成数量": 1,
+                    "提示词语言": "纯中文",
+                    "运行时随机标签": False,
+                    "模型来源": "仅Skill",
+                    "seed": 20260723,
+                },
+            )
+        self.assertEqual(snapshot.call_count, 1)
+        self.assertEqual(groups.call_count, 1)
+        self.assertIn("成年女性", result[1])
+
+    def test_runtime_preview_builds_one_tag_catalog_snapshot(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        original_snapshot = module._tag_catalog_snapshot
+        original_groups = module._all_tag_groups
+        with (
+            mock.patch.object(module, "_tag_catalog_snapshot", wraps=original_snapshot) as snapshot,
+            mock.patch.object(module, "_all_tag_groups", wraps=original_groups) as groups,
+        ):
+            preview = module.构建运行时随机预览状态(
+                {
+                    "selected": {"主体": ["成年女性"], "场景背景": ["雨夜街头"]},
+                    "customTags": [],
+                    "settings": {
+                        "运行时随机标签": True,
+                        "运行时随机模式": "保留已选核心标签",
+                        "随机主题池": "夜场电影感",
+                        "seed": 20260723,
+                    },
+                }
+            )
+        self.assertEqual(snapshot.call_count, 1)
+        self.assertEqual(groups.call_count, 1)
+        self.assertIn("selected", preview)
+
+    def test_tag_catalog_snapshot_refreshes_between_executions(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        catalog = {
+            "groups": [("主体", 1, [module.无标签, "成年女性"])],
+        }
+
+        def current_groups():
+            return [(name, slots, list(tags)) for name, slots, tags in catalog["groups"]]
+
+        with mock.patch.object(module, "_all_tag_groups", side_effect=current_groups):
+            first_groups, first_index, first_memberships = module._tag_catalog_snapshot()
+            catalog["groups"] = [("主体", 1, [module.无标签, "成年女性", "成年剑客"])]
+            second_groups, second_index, second_memberships = module._tag_catalog_snapshot()
+
+        self.assertNotIn("成年剑客", first_index)
+        self.assertNotIn("成年剑客", first_memberships["主体"])
+        self.assertIn("成年剑客", second_index)
+        self.assertIn("成年剑客", second_memberships["主体"])
+        self.assertNotEqual(first_groups, second_groups)
+
+    def test_smart_random_template_prompts_stay_natural_and_within_chinese_contract(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        for seed in (1, 2, 3, 20260723):
+            with self.subTest(seed=seed):
+                module._CACHE.clear()
+                result = module._run_stage(
+                    None,
+                    **{
+                        "unique_id": f"smart-random-template-contract-{seed}",
+                        "主体标签1": "成年女性",
+                        "画面风格标签1": "真实感",
+                        "场景背景标签1": "雨夜站台",
+                        "智能文本匹配": True,
+                        "智能文本输入": "成年女性在雨夜站台听见远处列车接近，于是停步回望并握紧手中的旧车票",
+                        "运行时随机标签": True,
+                        "运行时随机模式": "保留已选核心标签",
+                        "随机主题池": "夜场电影感",
+                        "模板风格": "商业摄影",
+                        "风格隔离策略": "严格风格隔离",
+                        "生成数量": 1,
+                        "提示词语言": "纯中文",
+                        "模型来源": "仅Skill",
+                        "seed": seed,
+                    },
+                )
+                main_prompt = result[1]
+                smart_prompt = result[6]
+                contract = {"提示词语言": "纯中文", "全局叙事合同启用": True}
+                for prompt in (main_prompt, smart_prompt):
+                    self.assertGreaterEqual(len(prompt), 800, prompt)
+                    self.assertLessEqual(len(prompt), 1200, prompt)
+                    self.assertTrue(model_refiner.is_natural_language_prompt(prompt, contract), prompt)
+                    self.assertFalse(model_refiner._looks_like_tag_chain_prompt(prompt), prompt)
+                    self.assertIn("雨夜站台", prompt)
+                    self.assertIn("最终画面", prompt)
+                self.assertIn("旧车票", smart_prompt)
 
     def test_global_narrative_planner_creates_distinct_batch_story_arcs(self) -> None:
         anchors = {
