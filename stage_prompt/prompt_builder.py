@@ -12,11 +12,17 @@ except Exception:  # pragma: no cover - exercised by direct import tests
     from stage_prompt_skills_test import resolve_base_template_style  # type: ignore
 
 try:
-    from .narrative import build_narrative_plan, render_narrative_prompt, summarize_narrative_plan
+    from .narrative import (
+        build_narrative_plan,
+        render_narrative_prompt,
+        resolve_visual_layout_mode,
+        summarize_narrative_plan,
+    )
 except Exception:  # pragma: no cover - exercised by direct import tests
     from stage_prompt_narrative_test import (  # type: ignore
         build_narrative_plan,
         render_narrative_prompt,
+        resolve_visual_layout_mode,
         summarize_narrative_plan,
     )
 
@@ -4456,6 +4462,11 @@ def _build_concise_chinese_prompt(
     lead = _clean_fragment(fragments[0] if fragments else "高完成度图像")
     non_person = _is_non_person_subject(settings)
     adult_mode = bool(settings.get("NSFW工作台启用", False)) or str(settings.get("标签反推模式", "")).strip() == "成人向成熟"
+    layout_mode = resolve_visual_layout_mode(
+        [tag for group_tags in selected.values() for tag in group_tags] + list(custom_tags),
+        settings,
+        non_person=non_person,
+    )
     fragment_keys = {_fragment_key(fragment) for fragment in fragments}
     subject_values = _nonempty_group_values_from_fragments(selected, "主体", fragments)
     context_identity = _clean_fragment(context.get("identity"))
@@ -4522,6 +4533,7 @@ def _build_concise_chinese_prompt(
         "residual": residual,
         "quality": quality,
         "style_track": context.get("style_track", ""),
+        "layout_mode": layout_mode,
     }
     recent_history = [
         *list(context.get("recent_tracks", [])),
@@ -4543,6 +4555,7 @@ def _build_concise_chinese_prompt(
         detail_level=str(settings.get("详细度", "标准") or "标准"),
         non_person=non_person,
         adult_mode=adult_mode,
+        layout_mode=layout_mode,
     )
 
 
@@ -4556,6 +4569,11 @@ def _build_concise_english_prompt(
     lead = _clean_fragment(fragments[0] if fragments else "highly finished image")
     non_person = _is_non_person_subject(settings)
     adult_mode = bool(settings.get("NSFW工作台启用", False)) or str(settings.get("标签反推模式", "")).strip() == "成人向成熟"
+    layout_mode = resolve_visual_layout_mode(
+        [tag for group_tags in selected.values() for tag in group_tags] + list(custom_tags),
+        settings,
+        non_person=non_person,
+    )
     fragment_keys = {_fragment_key(fragment) for fragment in fragments}
     subject_values = _nonempty_group_values_from_fragments(selected, "主体", fragments, english=True)
     context_identity = _translate_prompt_fragment(context.get("identity"))
@@ -4625,6 +4643,7 @@ def _build_concise_english_prompt(
         "residual": residual,
         "quality": quality,
         "style_track": context.get("style_track", ""),
+        "layout_mode": layout_mode,
     }
     recent_history = [
         *list(context.get("recent_tracks", [])),
@@ -4646,6 +4665,7 @@ def _build_concise_english_prompt(
         detail_level=str(settings.get("详细度", "标准") or "标准"),
         non_person=non_person,
         adult_mode=adult_mode,
+        layout_mode=layout_mode,
     )
 
 
@@ -5506,6 +5526,11 @@ def build_prompt_list(
     style = infer_template_style(tags, str(settings["模板风格"]))
     subject = infer_subject_type(tags, str(settings["主体类型"]))
     settings["主体类型解析结果"] = subject
+    settings["画面结构模式解析结果"] = resolve_visual_layout_mode(
+        tags,
+        settings,
+        non_person=subject == "非人物主体",
+    )
     _ = infer_output_structure(subject, str(settings["案例输出结构"]))
     mode = str(settings["标签反推模式"])
     order_map = {

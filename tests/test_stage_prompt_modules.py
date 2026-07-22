@@ -2240,6 +2240,103 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertNotIn("解剖错误", negative)
         self.assertIsNone(re.search(r"[\u4e00-\u9fff]", negative))
 
+    def test_negative_builder_applies_subject_aware_single_frame_guards(self) -> None:
+        def build(selected: OrderedDict[str, list[str]], settings: dict[str, object]) -> str:
+            return negative_builder.build_negative_prompt_from_state(
+                selected,
+                [],
+                settings,
+                uniq=uniq,
+                adult_tag_keywords=set(),
+                adult_low_cover_tags=set(),
+                template_negative_zh={"真实感": []},
+                template_negative_en={"真实感": []},
+                adult_negative_zh=[],
+                adult_negative_en=[],
+                low_cover_negative_zh=[],
+                low_cover_negative_en=[],
+                composition_negative_zh=[],
+                composition_negative_en=[],
+                soft_skin_terms=[],
+                text_artifact_terms=[],
+                single_frame_negative_zh=["上下重复画面", "故事板分镜"],
+                single_frame_negative_en=["vertical duplicate", "storyboard"],
+                duplicate_subject_negative_zh=["重复脸", "克隆主体"],
+                duplicate_subject_negative_en=["duplicate face", "cloned subject"],
+                single_subject_negative_zh=["误入第二人物"],
+                single_subject_negative_en=["accidental second person"],
+                multi_subject_negative_zh=["人物身份互换"],
+                multi_subject_negative_en=["swapped identities"],
+                multi_view_negative_zh=["跨视图身份漂移"],
+                multi_view_negative_en=["identity drift across views"],
+            )
+
+        solo_settings: dict[str, object] = {"模板风格": "真实感", "提示词语言": "纯中文"}
+        solo = build(OrderedDict({"主体": ["成年女性"]}), solo_settings)
+        self.assertIn("上下重复画面", solo)
+        self.assertIn("重复脸", solo)
+        self.assertIn("误入第二人物", solo)
+        self.assertEqual(solo_settings["画面结构模式解析结果"], narrative.VISUAL_LAYOUT_SINGLE_PERSON)
+
+        duo_settings: dict[str, object] = {"模板风格": "真实感", "提示词语言": "纯中文"}
+        duo = build(OrderedDict({"主体": ["成年情侣"], "动作姿态": ["双人互动"]}), duo_settings)
+        self.assertIn("上下重复画面", duo)
+        self.assertIn("重复脸", duo)
+        self.assertIn("人物身份互换", duo)
+        self.assertNotIn("误入第二人物", duo)
+        self.assertEqual(duo_settings["画面结构模式解析结果"], narrative.VISUAL_LAYOUT_MULTI_SUBJECT)
+
+        sheet_settings: dict[str, object] = {"模板风格": "CG感", "提示词语言": "纯中文"}
+        sheet = build(OrderedDict({"主体": ["角色设定图"], "构图视角": ["角色三视图"]}), sheet_settings)
+        self.assertIn("跨视图身份漂移", sheet)
+        self.assertNotIn("上下重复画面", sheet)
+        self.assertNotIn("重复脸", sheet)
+        self.assertEqual(sheet_settings["画面结构模式解析结果"], narrative.VISUAL_LAYOUT_MULTI_VIEW)
+
+    def test_stage_negative_output_uses_global_layout_guards(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        common = {
+            "生成数量": 1,
+            "提示词语言": "纯中文",
+            "运行时随机标签": False,
+            "模型来源": "仅Skill",
+            "模板风格": "真实感",
+            "seed": 220726,
+        }
+        solo = module._run_stage(
+            None,
+            **{**common, "unique_id": "layout-negative-solo", "主体标签1": "成年女性"},
+        )[4]
+        self.assertIn("上下重复画面", solo)
+        self.assertIn("重复脸", solo)
+        self.assertIn("单人图误入第二人物", solo)
+
+        duo = module._run_stage(
+            None,
+            **{
+                **common,
+                "unique_id": "layout-negative-duo",
+                "主体标签1": "成年情侣",
+                "动作姿态标签1": "双人互动",
+            },
+        )[4]
+        self.assertIn("上下重复画面", duo)
+        self.assertIn("人物身份互换", duo)
+        self.assertNotIn("单人图误入第二人物", duo)
+
+        sheet = module._run_stage(
+            None,
+            **{
+                **common,
+                "unique_id": "layout-negative-sheet",
+                "模板风格": "CG感",
+                "主体标签1": "角色设定图",
+                "构图视角标签1": "角色三视图",
+            },
+        )[4]
+        self.assertIn("跨视图身份漂移", sheet)
+        self.assertNotIn("上下重复画面", sheet)
+
     def test_prompt_builder_appends_extra_requirement(self) -> None:
         selected = OrderedDict({"主体": ["成年女性"], "画面风格": ["真实感"], "构图视角": ["中景"]})
         custom_tags = ["压抑"]
@@ -8624,7 +8721,7 @@ class TestStagePromptModules(unittest.TestCase):
             self.assertTrue(any(required in option for option in catalog["options"]["outfit"]))
         for required in ("欲念张力", "禁忌诱惑", "支配感", "强烈感官氛围"):
             self.assertTrue(any(required in option for option in catalog["options"]["mood"]))
-        for required in ("360度环绕", "低角度慢扫", "快速变焦"):
+        for required in ("三分之二侧面全身定格", "低机位全身定格", "长焦压缩定格"):
             self.assertTrue(any(required in option for option in catalog["options"]["camera_movement"]))
         for required in ("粉紫霓虹光", "彩色渐变光"):
             self.assertTrue(any(required in option for option in catalog["options"]["light_source"]))
@@ -14184,6 +14281,129 @@ class TestStagePromptModules(unittest.TestCase):
             self.assertIn("雨夜竹林", prompt)
             self.assertIn("持剑回身", prompt)
             self.assertFalse(model_refiner._looks_like_tag_chain_prompt(prompt), prompt)
+
+    def test_global_layout_contract_preserves_duos_and_character_sheets(self) -> None:
+        def render(selected: OrderedDict[str, list[str]], *, style: str = "真实感") -> tuple[str, dict[str, object]]:
+            settings: dict[str, object] = {
+                "模板风格": style,
+                "主体类型": "人物角色",
+                "案例输出结构": "案例长段版",
+                "标签反推模式": "自动平衡",
+                "运行时随机标签": False,
+                "提示词语言": "纯中文",
+                "详细度": "标准",
+                "生成数量": 1,
+                "额外要求": "",
+                "seed": 20260722,
+            }
+            prompt = prompt_builder.build_prompt_list(
+                selected,
+                [],
+                settings,
+                uniq=uniq,
+                infer_template_style=lambda _tags, explicit: explicit,
+                infer_subject_type=lambda _tags, explicit: explicit,
+                infer_output_structure=lambda _subject, explicit: explicit,
+            )[0]
+            return prompt, settings
+
+        solo, solo_settings = render(
+            OrderedDict(
+                {
+                    "主体": ["成年女性"],
+                    "场景背景": ["雨夜街头"],
+                    "动作姿态": ["停步回望"],
+                    "构图视角": ["全景全身"],
+                }
+            )
+        )
+        self.assertIn("同一人物只出现一次", solo)
+        self.assertIn("一个清晰头部和一张脸", solo)
+        self.assertEqual(solo_settings["画面结构模式解析结果"], narrative.VISUAL_LAYOUT_SINGLE_PERSON)
+
+        duo, duo_settings = render(
+            OrderedDict(
+                {
+                    "主体": ["成年情侣"],
+                    "场景背景": ["爵士酒廊"],
+                    "动作姿态": ["双人互动"],
+                    "构图视角": ["双人横向同框"],
+                }
+            )
+        )
+        self.assertIn("每人只出现一次", duo)
+        self.assertNotIn("同一人物只出现一次", duo)
+        self.assertEqual(duo_settings["画面结构模式解析结果"], narrative.VISUAL_LAYOUT_MULTI_SUBJECT)
+
+        sheet, sheet_settings = render(
+            OrderedDict(
+                {
+                    "主体": ["角色设定图", "成年女性"],
+                    "画面风格": ["电影级CG"],
+                    "构图视角": ["角色三视图", "正面视图", "侧面视图", "背面视图"],
+                }
+            ),
+            style="CG感",
+        )
+        self.assertIn("各视图身份、服装和脸部一致", sheet)
+        self.assertNotIn("同一人物只出现一次", sheet)
+        self.assertEqual(sheet_settings["画面结构模式解析结果"], narrative.VISUAL_LAYOUT_MULTI_VIEW)
+        for prompt in (solo, duo, sheet):
+            self.assertGreaterEqual(len(prompt), 800, prompt)
+            self.assertLessEqual(len(prompt), 1200, prompt)
+            self.assertNotIn("故事背景由故事", prompt)
+
+    def test_non_person_template_profile_does_not_inject_portrait_only_tags(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        result = module._run_stage(
+            None,
+            **{
+                "生成数量": 1,
+                "提示词语言": "纯中文",
+                "运行时随机标签": False,
+                "模型来源": "仅Skill",
+                "模板风格": "真实感",
+                "主体类型": "非人物主体",
+                "主体标签1": "古老灯塔",
+                "场景背景标签1": "海岸悬崖",
+                "动作姿态标签1": "风暴中的灯光扫过海面",
+                "seed": 20260722,
+                "unique_id": "non-person-template-profile",
+            },
+        )
+        prompt = result[1]
+        selected_text = result[2]
+        self.assertIn("非人物主主体只出现一次", prompt)
+        self.assertNotIn("牛仔景别", prompt)
+        self.assertNotIn("牛仔景别", selected_text)
+        self.assertNotIn("半身", selected_text)
+        self.assertNotIn("全身", selected_text)
+        self.assertGreaterEqual(len(prompt), 800, prompt)
+        self.assertLessEqual(len(prompt), 1200, prompt)
+
+    def test_skill_smart_text_local_and_api_share_layout_contract(self) -> None:
+        base_settings = {
+            "提示词语言": "纯中文",
+            "主体类型": "人物角色",
+            "主体类型解析结果": "人物角色",
+            "画面结构模式解析结果": narrative.VISUAL_LAYOUT_MULTI_SUBJECT,
+        }
+        for source in ("仅Skill", "本地GGUF", "本地Transformers", "API接口"):
+            settings = {**base_settings, "模型来源": source}
+            system_prompt = model_refiner._resolve_system_prompt(settings)
+            model_context = model_refiner._skill_context_for_model(settings)
+            self.assertIn("每人只出现一次", system_prompt)
+            self.assertIn("每人只出现一次", model_context)
+
+        smart_settings = dict(base_settings)
+        seed = smart_text.build_smart_text_seed(
+            user_text="成年情侣在爵士酒廊交换视线",
+            primary_prompt="单张电影剧照，双人同框",
+            selected_tags_text="成年情侣、双人互动、爵士酒廊",
+            settings=smart_settings,
+        )
+        self.assertIn("每人只出现一次", seed)
+        self.assertEqual(smart_settings["画面结构模式解析结果"], narrative.VISUAL_LAYOUT_MULTI_SUBJECT)
 
     def test_narrative_plan_changes_when_recent_output_history_changes(self) -> None:
         anchors = {"subject": "成年女性", "scene": "城市天台", "action": "回眸"}

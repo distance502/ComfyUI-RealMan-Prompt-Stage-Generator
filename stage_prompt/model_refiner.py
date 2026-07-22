@@ -12,9 +12,19 @@ import time
 from typing import Any, Callable
 
 try:
-    from .narrative import GLOBAL_NARRATIVE_MODEL_CONTRACT
+    from .narrative import (
+        GLOBAL_NARRATIVE_MODEL_CONTRACT,
+        prompt_preserves_visual_layout,
+        resolve_visual_layout_mode,
+        visual_layout_contract,
+    )
 except Exception:  # pragma: no cover - exercised by direct import tests
-    from stage_prompt_narrative_test import GLOBAL_NARRATIVE_MODEL_CONTRACT  # type: ignore
+    from stage_prompt_narrative_test import (  # type: ignore
+        GLOBAL_NARRATIVE_MODEL_CONTRACT,
+        prompt_preserves_visual_layout,
+        resolve_visual_layout_mode,
+        visual_layout_contract,
+    )
 
 DEFAULT_STAGE_PROMPT_SYSTEM_TEMPLATE = """
 你是 Qwen TE 阶段式提示词生成器的默认图像提示词整理模板，兼具资深视觉艺术总监、电影摄影指导、高端人像修图审美和生成式图像 Prompt 工程能力。
@@ -37,6 +47,7 @@ DEFAULT_STAGE_PROMPT_SYSTEM_TEMPLATE = """
 13. 不要复用固定开头、固定段落或固定模板句。每次必须依据当前按钮、标签、随机结果、NSFW 工作台和智能文本输入重新组织画面主线；相同语义只写一次，禁止用近义句反复扩字数。
 14. API、本地模型和 Skill-only 都必须遵守同一套全局 Skill 判断：先读当前节点选择、随机运行时解析、智能文本解析、NSFW 工作台摘要、标签块编排顺序和高级按钮设置，再决定主体、场景、服装、动作、光影、道具和风格；不得把未选择的固定素材塞回输出。
 15. 批量生成、运行时随机、智能文本连续匹配或 API 连续调用时，每一条都要形成独立视觉档案：主体身份、环境、服装、动作、持物、光影、色彩、镜头组织中至少三个核心维度明确变化；最近输出只用于避让，不是可复写素材，不要把上一条输出的主体/场景/动作/配色机械复制到下一条。
+16. 剧情链只用于确定因果，最终图只显示一个决定性时刻。默认同一人物仅出现一次且只有一个清晰头部和一张脸；显式双人或群像保留人数但每人只出现一次；仅显式角色设定图、三视图、四联画或镜中视图允许多视图。禁止模型自行添加上下重复、分屏、拼贴、故事板、堆叠肖像、复制倒影或时间切片。
 
 美学方向：
 - 真实感/摄影向：强调真实存在感、自然脸型、非网红脸、非塑料 AI 皮肤；保留真实毛孔、细微肤色差、绒毛、唇纹、眼下细纹、鼻翼微油光等“真实但美”的肌肤细节；使用自然镜头透视、轻微抓拍感、浅景深、电影光影、真实环境曝光。
@@ -776,6 +787,12 @@ def _resolve_model_prompt_candidate(
         return original_prompt, "rejected", "模型响应未遵守当前提示词语言。"
     if _violates_subject_type(original_prompt, cleaned, settings):
         return original_prompt, "rejected", "模型响应改变了当前主体类型。"
+    layout_mode = str(settings.get("画面结构模式解析结果", "") or "").strip()
+    if layout_mode and not prompt_preserves_visual_layout(cleaned, layout_mode):
+        blended = _blend_model_draft_with_skill_prompt(original_prompt, cleaned, settings)
+        if blended != str(original_prompt or "").strip() and prompt_preserves_visual_layout(blended, layout_mode):
+            return blended, "blended", ""
+        return original_prompt, "rejected", "模型响应未保留当前单帧、人数或多视图画面结构合同。"
     if not _looks_like_narrative_prompt(cleaned, settings):
         blended = _blend_model_draft_with_skill_prompt(original_prompt, cleaned, settings)
         if blended != str(original_prompt or "").strip():
@@ -927,7 +944,12 @@ def _language_instruction(settings: dict[str, Any]) -> str:
 def _resolve_system_prompt(settings: dict[str, Any]) -> str:
     base_prompt = str(settings.get("系统提示词覆盖") or _DEFAULT_IMAGE_REFINER_SYSTEM)
     narrative_contract = "" if GLOBAL_NARRATIVE_MODEL_CONTRACT in base_prompt else f"\n\n{GLOBAL_NARRATIVE_MODEL_CONTRACT}"
-    return f"{base_prompt}{narrative_contract}{_language_instruction(settings)}"
+    layout_mode = resolve_visual_layout_mode(settings=settings)
+    layout_contract = visual_layout_contract(
+        layout_mode,
+        english=_prompt_language_mode(settings) in {"纯英文", "英文提示词+中文说明"},
+    )
+    return f"{base_prompt}{narrative_contract}\n\n当前画面结构硬约束：{layout_contract}{_language_instruction(settings)}"
 
 
 def _violates_language(text: str, settings: dict[str, Any]) -> bool:
@@ -972,6 +994,9 @@ def is_natural_language_prompt(text: str, settings: dict[str, Any] | None = None
     if active_settings and _violates_language(prompt, active_settings):
         return False
     if active_settings and not _looks_like_narrative_prompt(prompt, active_settings):
+        return False
+    layout_mode = str(active_settings.get("画面结构模式解析结果", "") or "").strip()
+    if layout_mode and not prompt_preserves_visual_layout(prompt, layout_mode):
         return False
     return _looks_like_natural_prose_prompt(prompt)
 
@@ -1278,8 +1303,15 @@ def _skill_context_for_model(settings: dict[str, Any]) -> str:
     if not active_modes:
         active_modes.append("常规标签与模板")
 
+    layout_mode = resolve_visual_layout_mode(settings=settings)
+    layout_policy = visual_layout_contract(
+        layout_mode,
+        english=str(settings.get("提示词语言", "纯中文") or "纯中文").strip() in {"纯英文", "英文提示词+中文说明"},
+    )
+
     extra_lines = [
         f"当前激活模式：{'、'.join(dict.fromkeys(active_modes))}。",
+        f"当前画面结构：{layout_mode}；硬约束：{layout_policy}",
         (
             "模式合并优先级：用户显式输入与锁定标签 > 角色设定图或图片反推的可见事实 > "
             "标签块顺序与锁定块 > NSFW 保护锚点 > 运行时随机、主题池和模板档案 > 模型补充细节。"

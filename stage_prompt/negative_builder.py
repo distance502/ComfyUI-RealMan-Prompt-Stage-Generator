@@ -6,6 +6,21 @@ from __future__ import annotations
 from collections import OrderedDict
 from typing import Any, Callable
 
+try:
+    from .narrative import (
+        VISUAL_LAYOUT_MULTI_SUBJECT,
+        VISUAL_LAYOUT_MULTI_VIEW,
+        VISUAL_LAYOUT_SINGLE_PERSON,
+        resolve_visual_layout_mode,
+    )
+except Exception:  # pragma: no cover - direct file loading in focused tests
+    from stage_prompt_narrative_test import (  # type: ignore
+        VISUAL_LAYOUT_MULTI_SUBJECT,
+        VISUAL_LAYOUT_MULTI_VIEW,
+        VISUAL_LAYOUT_SINGLE_PERSON,
+        resolve_visual_layout_mode,
+    )
+
 
 _NEGATIVE_FRAGMENT_TRANSLATION_MAP = {
     "过度锐化": "over-sharpening",
@@ -76,12 +91,24 @@ def build_negative_prompt_from_tags(
     composition_negative_en: list[str],
     soft_skin_terms: list[str],
     text_artifact_terms: list[str],
+    single_frame_negative_zh: list[str] | None = None,
+    single_frame_negative_en: list[str] | None = None,
+    duplicate_subject_negative_zh: list[str] | None = None,
+    duplicate_subject_negative_en: list[str] | None = None,
+    single_subject_negative_zh: list[str] | None = None,
+    single_subject_negative_en: list[str] | None = None,
+    multi_subject_negative_zh: list[str] | None = None,
+    multi_subject_negative_en: list[str] | None = None,
+    multi_view_negative_zh: list[str] | None = None,
+    multi_view_negative_en: list[str] | None = None,
     separator: str = "、",
 ) -> str:
     language = str(settings.get("提示词语言", "纯中文"))
     use_english_negative = language in {"纯英文", "英文提示词+中文说明"}
     adult = bool(set(tags) & adult_tag_keywords or set(tags) & adult_low_cover_tags)
     neg: list[str] = []
+    layout_mode = resolve_visual_layout_mode(tags, settings)
+    settings["画面结构模式解析结果"] = layout_mode
     template_key = _template_negative_key(settings)
     if use_english_negative:
         neg.extend(template_negative_en.get(template_key, []))
@@ -89,12 +116,32 @@ def build_negative_prompt_from_tags(
             neg.extend(adult_negative_en)
             neg.extend(low_cover_negative_en)
             neg.extend(composition_negative_en)
+        if layout_mode == VISUAL_LAYOUT_MULTI_VIEW:
+            neg.extend(multi_view_negative_en or [])
+        else:
+            neg.extend(single_frame_negative_en or [])
+            if layout_mode in {VISUAL_LAYOUT_SINGLE_PERSON, VISUAL_LAYOUT_MULTI_SUBJECT}:
+                neg.extend(duplicate_subject_negative_en or [])
+            if layout_mode == VISUAL_LAYOUT_SINGLE_PERSON:
+                neg.extend(single_subject_negative_en or [])
+            elif layout_mode == VISUAL_LAYOUT_MULTI_SUBJECT:
+                neg.extend(multi_subject_negative_en or [])
     else:
         neg.extend(template_negative_zh.get(template_key, []))
         if adult:
             neg.extend(adult_negative_zh)
             neg.extend(low_cover_negative_zh)
             neg.extend(composition_negative_zh)
+        if layout_mode == VISUAL_LAYOUT_MULTI_VIEW:
+            neg.extend(multi_view_negative_zh or [])
+        else:
+            neg.extend(single_frame_negative_zh or [])
+            if layout_mode in {VISUAL_LAYOUT_SINGLE_PERSON, VISUAL_LAYOUT_MULTI_SUBJECT}:
+                neg.extend(duplicate_subject_negative_zh or [])
+            if layout_mode == VISUAL_LAYOUT_SINGLE_PERSON:
+                neg.extend(single_subject_negative_zh or [])
+            elif layout_mode == VISUAL_LAYOUT_MULTI_SUBJECT:
+                neg.extend(multi_subject_negative_zh or [])
     if bool(settings.get("优先柔和肤质")):
         neg.extend(_localize_negative_terms(soft_skin_terms, use_english=use_english_negative))
     if bool(settings.get("抑制文字伪影")):
@@ -120,6 +167,16 @@ def build_negative_prompt_from_state(
     composition_negative_en: list[str],
     soft_skin_terms: list[str],
     text_artifact_terms: list[str],
+    single_frame_negative_zh: list[str] | None = None,
+    single_frame_negative_en: list[str] | None = None,
+    duplicate_subject_negative_zh: list[str] | None = None,
+    duplicate_subject_negative_en: list[str] | None = None,
+    single_subject_negative_zh: list[str] | None = None,
+    single_subject_negative_en: list[str] | None = None,
+    multi_subject_negative_zh: list[str] | None = None,
+    multi_subject_negative_en: list[str] | None = None,
+    multi_view_negative_zh: list[str] | None = None,
+    multi_view_negative_en: list[str] | None = None,
     separator: str = "、",
 ) -> str:
     tags = [tag for group_tags in selected.values() for tag in group_tags] + list(custom_tags)
@@ -139,5 +196,15 @@ def build_negative_prompt_from_state(
         composition_negative_en=composition_negative_en,
         soft_skin_terms=soft_skin_terms,
         text_artifact_terms=text_artifact_terms,
+        single_frame_negative_zh=single_frame_negative_zh,
+        single_frame_negative_en=single_frame_negative_en,
+        duplicate_subject_negative_zh=duplicate_subject_negative_zh,
+        duplicate_subject_negative_en=duplicate_subject_negative_en,
+        single_subject_negative_zh=single_subject_negative_zh,
+        single_subject_negative_en=single_subject_negative_en,
+        multi_subject_negative_zh=multi_subject_negative_zh,
+        multi_subject_negative_en=multi_subject_negative_en,
+        multi_view_negative_zh=multi_view_negative_zh,
+        multi_view_negative_en=multi_view_negative_en,
         separator=separator,
     )

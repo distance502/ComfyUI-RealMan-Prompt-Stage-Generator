@@ -101,6 +101,80 @@ from __future__ import annotations
 ]
 全身构图附加负面词_ZH = ["截断双腿", "截断脚部", "局部裁切身体"]
 全身构图附加负面词_EN = ["cropped legs", "cropped feet", "partial body crop"]
+全局单帧附加负面词_ZH = [
+    "上下重复画面",
+    "纵向分屏",
+    "横向分屏",
+    "双联画",
+    "三联画",
+    "拼贴画",
+    "故事板分镜",
+    "漫画分格",
+    "照片联系表",
+    "堆叠肖像",
+    "平铺重复图像",
+    "画中画",
+    "多场景并列",
+    "时间切片",
+]
+全局单帧附加负面词_EN = [
+    "vertically duplicated image",
+    "vertical split screen",
+    "horizontal split screen",
+    "diptych",
+    "triptych",
+    "collage",
+    "storyboard panels",
+    "comic panels",
+    "contact sheet",
+    "stacked portraits",
+    "tiled repeated image",
+    "picture-in-picture",
+    "multiple scenes in one image",
+    "time slicing",
+]
+主体复制附加负面词_ZH = [
+    "同一人物重复出现",
+    "复制人物",
+    "克隆主体",
+    "重复脸",
+    "重复头部",
+    "额外头部",
+    "一人多脸",
+    "双重面孔",
+    "镜像复制主体",
+    "倒影变成第二人物",
+]
+主体复制附加负面词_EN = [
+    "same person repeated",
+    "duplicated person",
+    "cloned subject",
+    "repeated face",
+    "duplicate head",
+    "extra head",
+    "multiple faces on one person",
+    "double face",
+    "mirror-cloned subject",
+    "reflection becoming a second person",
+]
+多视图一致性附加负面词_ZH = [
+    "同一视图重复",
+    "无意义重复角度",
+    "跨视图身份漂移",
+    "跨视图服装变化",
+    "单个视图出现多张脸",
+    "设定图混入无关人物",
+    "叙事时间切片混入设定图",
+]
+多视图一致性附加负面词_EN = [
+    "duplicated identical view",
+    "redundant camera angle",
+    "identity drift across views",
+    "wardrobe drift across views",
+    "multiple faces inside one view",
+    "unrelated person in character sheet",
+    "narrative time slice inside character sheet",
+]
 多主体构图附加负面词_ZH = [
     "单人前景过大压缩另一人",
     "一人清晰另一人模糊失焦",
@@ -110,6 +184,10 @@ from __future__ import annotations
     "只剩单人主体可读",
     "前景人物腰臀抢镜",
     "双人站位断裂",
+    "多人脸部融合",
+    "人物身份互换",
+    "同一人克隆成群像",
+    "额外未指定人物",
 ]
 多主体构图附加负面词_EN = [
     "one subject oversized in foreground overpowering the other",
@@ -120,6 +198,10 @@ from __future__ import annotations
     "only one readable subject in a supposed duo shot",
     "foreground torso or hips stealing focus in duo composition",
     "disconnected duo staging",
+    "fused faces in a group",
+    "swapped identities between subjects",
+    "one person cloned into a group",
+    "extra unspecified person",
 ]
 年龄一致性附加负面词_ZH = [
     "年轻脸老手同框",
@@ -146,6 +228,9 @@ from __future__ import annotations
     "大件前景家具抢镜",
     "环境物件成为第二视觉中心",
     "场景元素过满挤压主体",
+    "单人主体出现两张脸",
+    "单人主体出现额外头部",
+    "单人主体被复制",
 ]
 单人构图附加负面词_EN = [
     "background bystander intruding into a single-subject shot",
@@ -154,6 +239,9 @@ from __future__ import annotations
     "large foreground furniture stealing focus",
     "environment props becoming a second visual center",
     "overloaded scene elements squeezing the subject",
+    "two faces on one solo subject",
+    "extra head on a solo subject",
+    "duplicated solo subject",
 ]
 手部构图附加负面词_ZH = [
     "前景大手抢镜",

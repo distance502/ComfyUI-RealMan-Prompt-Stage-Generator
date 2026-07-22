@@ -13,9 +13,17 @@ except ImportError:  # Standalone module tests load skills under this compatibil
     from stage_prompt_skills_test import resolve_base_template_style  # type: ignore
 
 try:
-    from .narrative import GLOBAL_NARRATIVE_MODEL_CONTRACT
+    from .narrative import (
+        GLOBAL_NARRATIVE_MODEL_CONTRACT,
+        resolve_visual_layout_mode,
+        visual_layout_contract,
+    )
 except Exception:  # pragma: no cover - standalone module tests
-    from stage_prompt_narrative_test import GLOBAL_NARRATIVE_MODEL_CONTRACT  # type: ignore
+    from stage_prompt_narrative_test import (  # type: ignore
+        GLOBAL_NARRATIVE_MODEL_CONTRACT,
+        resolve_visual_layout_mode,
+        visual_layout_contract,
+    )
 
 
 SMART_TEXT_SYSTEM_TEMPLATE = """
@@ -1346,6 +1354,16 @@ def build_smart_text_seed(
     language = str(settings.get("提示词语言", "纯中文") or "纯中文")
     adult_mode = str(settings.get("标签反推模式", "") or "").strip() == "成人向成熟"
     non_person = str(settings.get("主体类型解析结果", "") or settings.get("主体类型", "自动") or "自动").strip() == "非人物主体"
+    layout_mode = resolve_visual_layout_mode(
+        [user_text, primary_prompt, selected_tags_text],
+        settings,
+        non_person=non_person,
+    )
+    settings["画面结构模式解析结果"] = layout_mode
+    layout_instruction = visual_layout_contract(
+        layout_mode,
+        english=language in {"纯英文", "英文提示词+中文说明"},
+    )
     runtime_mode = str(settings.get("运行时随机模式解析结果", "") or settings.get("运行时随机模式", "") or "").strip()
     runtime_intensity = str(settings.get("运行时随机强度", "") or "").strip()
     isolation_mode = str(settings.get("风格隔离策略", "") or "").strip()
@@ -1380,6 +1398,7 @@ def build_smart_text_seed(
             language_instruction,
             adult_instruction,
             f"主体类型：{'非人物主体' if non_person else str(settings.get('主体类型解析结果', '') or settings.get('主体类型', '自动'))}",
+            f"画面结构合同：{layout_instruction}",
             f"用户：{_normalize_text(user_text)}",
             f"当前轨道：{_normalize_text(style_track)}",
             f"运行时随机：{_normalize_text(runtime_mode)} / {_normalize_text(runtime_intensity)}",

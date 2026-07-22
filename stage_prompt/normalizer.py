@@ -11,6 +11,34 @@ try:  # Keep direct file loading in tests working when the package context is ab
 except Exception:  # pragma: no cover - exercised by direct import tests
     from stage_prompt_skills_test import apply_stage_prompt_skills, resolve_base_template_style  # type: ignore
 
+try:
+    from .narrative import VISUAL_LAYOUT_MULTI_VIEW, resolve_visual_layout_mode
+except Exception:  # pragma: no cover - exercised by direct import tests
+    from stage_prompt_narrative_test import VISUAL_LAYOUT_MULTI_VIEW, resolve_visual_layout_mode  # type: ignore
+
+
+_SINGLE_FRAME_TAG_REWRITES = {
+    "从全身到半身，先交代服装轮廓再收束表情": "单一中景全身关系，服装轮廓与表情同时可读",
+    "环绕式展示服装轮廓，保持单一主体比例": "三分之二侧面全身定格，服装轮廓与主体比例稳定",
+    "镜前反射切换，主体与镜像关系清楚": "镜前斜侧定格，真实主体为主，镜像边界清楚",
+    "低机位上摇至面部，强调腿部到肩颈线条": "低机位全身定格，腿部到肩颈比例连贯",
+    "微距掠过材质，随后回到人物整体": "中近景定格，材质细节与人物整体同时可读",
+    "快速推进至局部细节，随后回到全身关系": "中景全身定格，局部细节与完整身体关系同时可读",
+    "360度环绕，捕捉全身轮廓与服装材质": "三分之二侧面全身定格，轮廓与服装材质清楚",
+    "低角度慢扫，从脚踝到腰线，节奏渐强": "低机位全身定格，脚踝到腰线比例自然",
+    "动态放大后拉远，强调身体曲线与空间": "中景全身定格，身体曲线与空间同时可读",
+    "动态局部镜头，随后回到主体整体": "中景主体整体，局部材质仍然清楚可读",
+    "快速场景切换，挑逗氛围定场": "单一场景情绪峰值定格，氛围集中",
+    "从空间建立镜头缓慢推近，在视线相遇时停止": "环境中景定格，视线相遇成为唯一动作峰值",
+    "沿人物移动方向侧向跟随，最后停在手部接触点": "侧向中景定格，移动方向与手部接触点同时可读",
+    "先拍道具线索再移焦到人物回应，形成清楚因果": "道具位于前景线索位，人物回应保持唯一焦点",
+    "从镜面反射平稳摇向真实主体，不产生人物复制": "镜后斜侧定格，真实主体为主且反射边界清楚",
+    "低速环绕半圈，交代双人距离变化后回到眼平视角": "三分之二眼平定格，双人距离与脸部同时可读",
+    "从门外长焦观察再缓慢靠近，保持私密但不窥视的距离": "门外长焦定格，保持私密但不窥视的观看距离",
+    "跟随衣摆与脚步上移至表情，动作方向连续": "低机位全身定格，衣摆、脚步与表情在同一时刻可读",
+    "亲密动作结束后轻微拉远，让环境承担开放结尾": "环境中景定格，亲密动作余势与开放结尾同框",
+}
+
 
 def normalize_inference_state(
     selected: OrderedDict[str, list[str]],
@@ -135,10 +163,33 @@ def normalize_inference_state(
             notes.append(f"景别修正：半身镜头与 {'、'.join(full_body_action_hits[:3])} 冲突，自动调整为中景。")
 
     tags = tag_set()
-    if "纵向叙事分镜" in tags and not ({"四联画构图", "镜中倒影"} & tags):
+    subject_type = str(settings.get("主体类型解析结果", "") or settings.get("主体类型", "自动") or "自动").strip()
+    layout_mode = resolve_visual_layout_mode(
+        collect_all_tags(normalized_selected, normalized_custom),
+        settings,
+        non_person=subject_type == "非人物主体",
+    )
+    settings["画面结构模式解析结果"] = layout_mode
+    if "纵向叙事分镜" in tags and layout_mode != VISUAL_LAYOUT_MULTI_VIEW:
         remove_tag_from_state(normalized_selected, normalized_custom, "纵向叙事分镜")
         append_tag_to_state(normalized_selected, normalized_custom, "海报主视觉")
         notes.append("构图修正：单张图语境下将“纵向叙事分镜”收敛为“海报主视觉”。")
+
+    if layout_mode != VISUAL_LAYOUT_MULTI_VIEW:
+        rewritten_motion_tags: list[str] = []
+        for source_tag, target_tag in _SINGLE_FRAME_TAG_REWRITES.items():
+            if source_tag not in tag_set():
+                continue
+            remove_tag_from_state(normalized_selected, normalized_custom, source_tag)
+            append_tag_to_state(normalized_selected, normalized_custom, target_tag)
+            rewritten_motion_tags.append(source_tag)
+        if rewritten_motion_tags:
+            notes.append(
+                "单帧镜头收敛：将带时间顺序的运镜改为同一决定性时刻的静态构图，避免上下重复与人物复制："
+                + "、".join(rewritten_motion_tags[:6])
+                + ("等" if len(rewritten_motion_tags) > 6 else "")
+                + "。"
+            )
 
     tags = tag_set()
     strong_identity_tags = set(context.get("strong_identity_tags", set()))

@@ -124,6 +124,16 @@ from .prompt_rule_config import (
     成人向构图附加负面词_EN,
     成人向附加负面词_ZH,
     成人向附加负面词_EN,
+    主体复制附加负面词_ZH,
+    主体复制附加负面词_EN,
+    全局单帧附加负面词_ZH,
+    全局单帧附加负面词_EN,
+    单人构图附加负面词_ZH,
+    单人构图附加负面词_EN,
+    多主体构图附加负面词_ZH,
+    多主体构图附加负面词_EN,
+    多视图一致性附加负面词_ZH,
+    多视图一致性附加负面词_EN,
     模板附加负面词_ZH,
     模板附加负面词_EN,
 )
@@ -2579,6 +2589,23 @@ def _apply_random_theme_pool_bias(
     return template_style, next_selected, next_custom
 
 
+_非人物模板档案禁用分组 = {"成人向表达", "服装造型", "动作姿态"}
+_非人物模板档案禁用词 = (
+    "人像",
+    "肖像",
+    "人物",
+    "牛仔景别",
+    "半身",
+    "全身",
+    "发丝",
+    "发髻",
+    "皮肤",
+    "身材",
+    "手部",
+    "解剖",
+)
+
+
 def _apply_template_style_profile_bias(
     template_style: str,
     selected: OrderedDict[str, list[str]],
@@ -2719,12 +2746,22 @@ def _apply_template_style_profile_bias(
 
     next_selected = OrderedDict((group_name, list(tags)) for group_name, tags in selected.items())
     next_custom = list(custom_tags)
+    subject_type = _infer_subject_type(
+        _collect_all_tags(next_selected, next_custom),
+        str(settings.get("主体类型", "自动") or "自动").strip(),
+    )
     markers = [f"stylevariantcursor:{style}:{variant_index}", f"stylevariant:{variant_signature(variant)}"]
     for tag, group_name in variant.get("tags", []):
         cleaned_tag = str(tag).strip()
         if not cleaned_tag:
             continue
-        _append_tag_to_state(next_selected, next_custom, cleaned_tag, preferred_group=str(group_name))
+        cleaned_group = str(group_name).strip()
+        if subject_type == "非人物主体" and (
+            cleaned_group in _非人物模板档案禁用分组
+            or any(marker in cleaned_tag for marker in _非人物模板档案禁用词)
+        ):
+            continue
+        _append_tag_to_state(next_selected, next_custom, cleaned_tag, preferred_group=cleaned_group)
         markers.append(f"styletag:{cleaned_tag}")
     settings["模板风格档案标记"] = markers
     return next_selected, next_custom
@@ -3161,6 +3198,16 @@ def _build_negative_prompt(selected: OrderedDict[str, list[str]], custom_tags: l
         composition_negative_en=成人向构图附加负面词_EN,
         soft_skin_terms=["过度锐化", "硬光打脸", "法令纹过深", "眼周纹理过重"],
         text_artifact_terms=["文字", "水印", "logo", "铭文", "符文", "字样"],
+        single_frame_negative_zh=全局单帧附加负面词_ZH,
+        single_frame_negative_en=全局单帧附加负面词_EN,
+        duplicate_subject_negative_zh=主体复制附加负面词_ZH,
+        duplicate_subject_negative_en=主体复制附加负面词_EN,
+        single_subject_negative_zh=单人构图附加负面词_ZH,
+        single_subject_negative_en=单人构图附加负面词_EN,
+        multi_subject_negative_zh=多主体构图附加负面词_ZH,
+        multi_subject_negative_en=多主体构图附加负面词_EN,
+        multi_view_negative_zh=多视图一致性附加负面词_ZH,
+        multi_view_negative_en=多视图一致性附加负面词_EN,
         separator=negative_separator,
     )
 

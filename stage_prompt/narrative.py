@@ -43,6 +43,180 @@ class NarrativePlan(TypedDict):
 CHINESE_NARRATIVE_LENGTH_CONTRACT = "中文成品必须为 800-1200 字自然语言"
 ENGLISH_NARRATIVE_LENGTH_CONTRACT = "English target 420-560 words"
 
+VISUAL_LAYOUT_SINGLE_PERSON = "single_person"
+VISUAL_LAYOUT_SINGLE_NON_PERSON = "single_non_person"
+VISUAL_LAYOUT_MULTI_SUBJECT = "multi_subject"
+VISUAL_LAYOUT_MULTI_VIEW = "multi_view"
+
+_MULTI_VIEW_MARKERS = (
+    "角色设定图",
+    "角色三视图",
+    "多视角角色展示",
+    "四联画构图",
+    "正面视图",
+    "侧面视图",
+    "背面视图",
+    "镜中倒影",
+    "character sheet",
+    "character-sheet",
+    "character turnaround",
+    "turnaround",
+    "multi-view",
+    "multi-view character",
+    "four-panel composition",
+)
+_MULTI_SUBJECT_MARKERS = (
+    "双人",
+    "双女性",
+    "双成年男性",
+    "两人",
+    "二人",
+    "三人",
+    "情侣",
+    "伴侣",
+    "夫妇",
+    "男女配对",
+    "多女性",
+    "多人",
+    "群像",
+    "团队",
+    "队伍",
+    "小队",
+    "duo",
+    "couple",
+    "two people",
+    "two women",
+    "two men",
+    "group portrait",
+    "ensemble cast",
+)
+_NEGATED_LAYOUT_PREFIXES = ("避免", "禁止", "不要", "无", "排除", "no ", "without ")
+
+
+def _layout_sources(tags: Sequence[Any] | str | None, settings: Mapping[str, Any] | None) -> list[str]:
+    if isinstance(tags, str):
+        values: list[Any] = [tags]
+    else:
+        values = list(tags or [])
+    active_settings = settings or {}
+    values.extend(
+        active_settings.get(key, "")
+        for key in (
+            "额外要求",
+            "智能文本输入",
+            "NSFW工作台标签摘要",
+            "角色设定图内部策略",
+        )
+    )
+    return [str(value or "").strip() for value in values if str(value or "").strip()]
+
+
+def _has_positive_layout_marker(sources: Sequence[str], markers: Sequence[str]) -> bool:
+    for source in sources:
+        lowered = source.casefold()
+        stripped = lowered.lstrip(" ，,;；:：")
+        if any(stripped.startswith(prefix) for prefix in _NEGATED_LAYOUT_PREFIXES):
+            continue
+        if any(marker.casefold() in lowered for marker in markers):
+            return True
+    return False
+
+
+def resolve_visual_layout_mode(
+    tags: Sequence[Any] | str | None = None,
+    settings: Mapping[str, Any] | None = None,
+    *,
+    non_person: bool | None = None,
+) -> str:
+    """Resolve one global subject/layout contract without overriding explicit modes."""
+
+    active_settings = settings or {}
+    configured = str(active_settings.get("画面结构模式解析结果", "") or "").strip()
+    if configured in {
+        VISUAL_LAYOUT_SINGLE_PERSON,
+        VISUAL_LAYOUT_SINGLE_NON_PERSON,
+        VISUAL_LAYOUT_MULTI_SUBJECT,
+        VISUAL_LAYOUT_MULTI_VIEW,
+    }:
+        return configured
+    sources = _layout_sources(tags, active_settings)
+    if _has_positive_layout_marker(sources, _MULTI_VIEW_MARKERS):
+        return VISUAL_LAYOUT_MULTI_VIEW
+    if _has_positive_layout_marker(sources, _MULTI_SUBJECT_MARKERS):
+        return VISUAL_LAYOUT_MULTI_SUBJECT
+    if non_person is None:
+        subject_type = str(
+            active_settings.get("主体类型解析结果", "")
+            or active_settings.get("主体类型", "")
+            or ""
+        ).strip()
+        non_person = subject_type == "非人物主体"
+    return VISUAL_LAYOUT_SINGLE_NON_PERSON if non_person else VISUAL_LAYOUT_SINGLE_PERSON
+
+
+def visual_layout_contract(mode: str, *, english: bool = False) -> str:
+    resolved = str(mode or VISUAL_LAYOUT_SINGLE_PERSON).strip()
+    if english:
+        if resolved == VISUAL_LAYOUT_MULTI_VIEW:
+            return (
+                "Honor the explicitly selected character-sheet, turnaround, panel, or mirror-view structure; "
+                "keep one identity consistent across the requested views, make every view purposeful and distinct, "
+                "and add no extra angle, cloned face, unrelated person, or narrative time slice."
+            )
+        if resolved == VISUAL_LAYOUT_MULTI_SUBJECT:
+            return (
+                "Use one continuous image at one decisive instant; keep every explicitly selected person in that same frame, "
+                "show each person exactly once with one readable face and a clear position, and do not create clones, repeated portraits, panels, or time slices."
+            )
+        if resolved == VISUAL_LAYOUT_SINGLE_NON_PERSON:
+            return (
+                "Use one continuous image at one decisive instant; show the main non-human subject once with one stable silhouette, "
+                "while backstory remains visible only through traces in materials and the environment, never through panels, repeated views, or time slices."
+            )
+        return (
+            "Use one continuous image at one decisive instant; show the same person exactly once with one readable head and one face, "
+            "while past and future are implied only by pose, props, and environmental traces, never by panels, stacked portraits, reflections that clone the subject, or time slices."
+        )
+    if resolved == VISUAL_LAYOUT_MULTI_VIEW:
+        return (
+            "服从显式角色设定图、三视图、分区或镜中视图；各视图身份、服装和脸部一致、用途明确且不重复，"
+            "不添加多余角度、复制脸、无关人物或叙事时间切片。"
+        )
+    if resolved == VISUAL_LAYOUT_MULTI_SUBJECT:
+        return (
+            "单张连续画面只截取同一决定性时刻；所有显式人物同处一景，每人只出现一次、各有一张清晰脸和明确站位，"
+            "不克隆人物，不作分屏、拼贴、故事板或时间切片。"
+        )
+    if resolved == VISUAL_LAYOUT_SINGLE_NON_PERSON:
+        return (
+            "单张连续画面只截取同一决定性时刻；非人物主主体只出现一次并保持稳定轮廓，前因后果由材质和环境痕迹暗示，"
+            "不作分屏、拼贴、重复视图或时间切片。"
+        )
+    return (
+        "单张连续画面只截取同一决定性时刻；同一人物只出现一次，仅有一个清晰头部和一张脸；"
+        "前因后果由姿态和环境痕迹暗示，不作上下分屏、拼贴、分镜、堆叠肖像、复制倒影或时间切片。"
+    )
+
+
+def prompt_preserves_visual_layout(text: str, mode: str) -> bool:
+    source = str(text or "").casefold()
+    resolved = str(mode or "").strip()
+    if not source or not resolved:
+        return False
+    if resolved == VISUAL_LAYOUT_MULTI_VIEW:
+        return any(marker.casefold() in source for marker in _MULTI_VIEW_MARKERS)
+    if resolved == VISUAL_LAYOUT_MULTI_SUBJECT:
+        return any(
+            marker in source
+            for marker in ("每人只出现一次", "每位人物只出现一次", "同一决定性时刻", "each person exactly once", "one decisive instant")
+        )
+    if resolved == VISUAL_LAYOUT_SINGLE_NON_PERSON:
+        return any(marker in source for marker in ("非人物主主体只出现一次", "同一决定性时刻", "main non-human subject once", "one decisive instant"))
+    return any(
+        marker in source
+        for marker in ("同一人物只出现一次", "一个清晰可读的头部", "同一决定性时刻", "same person exactly once", "one readable head", "one decisive instant")
+    )
+
 
 GLOBAL_NARRATIVE_MODEL_CONTRACT = f"""
 全局剧情与自然语言合同：
@@ -52,6 +226,8 @@ GLOBAL_NARRATIVE_MODEL_CONTRACT = f"""
 - 模板只决定媒介、渲染与成片质感，主题池只决定主体、事件和地点内容；每条只能有一个主模板轨道和一个主主题轨道。显式模板优先，主题不得注入冲突媒介；平衡模式最多保留一个兼容质感桥，严格模式不保留跨媒介词，漂移模式也只能有一个有意的次风格。
 - 每次生成应重新选择叙事弧、行动目的、升级方式、空间动线、环境反馈、视觉高潮、镜头时机、情绪转折和结尾状态。批量各条至少在其中四项明显不同，不能只换同义词、开头或形容词；最近历史只用于避重，不得成为下一条的素材来源。
 - 使用连续自然句和具体可见信息。少写“画面呈现、整体营造、高质量、氛围感”等空泛套话，多写动作造成的衣料变化、道具位移、视线方向、前中后景关系、光影迁移、空气与材质反馈。
+- 所有渠道共用同一画面结构合同：默认人物模式是一张连续画面、一个决定性时刻、同一人物仅出现一次且只有一个清晰头部和一张脸；显式双人/群像保留用户人数，但每人只出现一次且站位可读；只有显式角色设定图、三视图、四联画或镜中视图允许多视图。除显式多视图外，禁止上下/左右分屏、双联画、三联画、拼贴、故事板、漫画分格、堆叠肖像、画中画、复制倒影和时间切片。
+- 剧情链是创作推理，不是要求模型同时画出开端、经过和结尾。最终画面只显示最有信息量的当前瞬间；此前与此后的事件只能通过姿态余势、道具状态、衣料变化、环境痕迹、视线和光线结果暗示，不能让同一主体以多个姿势、多个年龄或多个镜头重复出现。
 - {CHINESE_NARRATIVE_LENGTH_CONTRACT}；{ENGLISH_NARRATIVE_LENGTH_CONTRACT}。简洁档靠近下限，标准档建议 900-1050 字，详细档靠近上限，但所有中文成品仍须处于 800-1200 字范围。长度必须来自新信息、空间关系和事件推进，禁止近义反复灌水。
 """.strip()
 
@@ -480,6 +656,7 @@ def _render_chinese(
     detail_level: str,
     non_person: bool,
     adult_mode: bool,
+    layout_mode: str,
 ) -> str:
     lead = _anchor(anchors, "lead", "高完成度图像")
     subject = _anchor(anchors, "subject", "非人物主体" if non_person else "人物主体")
@@ -495,6 +672,7 @@ def _render_chinese(
     custom = _anchor(anchors, "custom")
     residual = _anchor(anchors, "residual")
     quality = _anchor(anchors, "quality", "高细节、清晰对焦与稳定结构")
+    layout_clause = visual_layout_contract(layout_mode, english=False)
 
     style_clause = f"，以{style}作为统一媒介语言" if style else ""
     if style_bridge:
@@ -507,20 +685,20 @@ def _render_chinese(
 
     anchor_sentence = (
         f"{lead}，画面以{subject}为{'非人物主题的' if non_person else ''}叙事中心{style_clause}。故事发生在{scene}，"
-        f"构图采用{composition}，所有已选视觉锚点被组织成同一时刻，而不是并列标签{adult_clause}。"
+        f"构图采用{composition}，全部视觉锚点服从同一时刻{adult_clause}。{layout_clause}"
     )
     story_sentence = (
-        f"{_anchor(plan, 'opening_zh')}。{_anchor(plan, 'motive_zh')}；随后，{props}成为推动事件的具体线索，"
-        f"{_anchor(plan, 'trigger_zh')}，因此{subject}以{action}作出回应。"
-        f"这次回应不是摆拍动作，而是有前因和目的的选择：{_anchor(plan, 'response_zh')}，"
-        f"紧接着，{_anchor(plan, 'escalation_zh')}，并让{_anchor(plan, 'turn_zh')}。"
+        f"{_anchor(plan, 'opening_zh')}；{_anchor(plan, 'motive_zh')}。这些前因只解释当前动作，不另占画面。"
+        f"当前镜头只截取回应瞬间：{props}已成线索，{_anchor(plan, 'trigger_zh')}，"
+        f"因此{subject}正以{action}回应；{_anchor(plan, 'response_zh')}。"
+        f"{_anchor(plan, 'escalation_zh')}，与此同时{_anchor(plan, 'turn_zh')}；这些因果只留在同一姿态、表情和环境结果里，不另画第二个动作阶段。"
     )
     motion_details = "重量、接触点、结构边缘、活动关节与表面高光" if non_person else "重量、接触点、边缘、褶皱与高光"
     subject_sentence = (
         f"{'主体结构与外观' if non_person else '人物造型'}围绕{outfit}展开，动作发生时，"
         f"{motion_details}都顺着{action}产生细微变化；"
-        f"{'结构朝向与功能部件' if non_person else '视线、肩颈、手部与身体重心'}共同指向正在发生的事件，"
-        "让观者能够从姿态读出犹豫、判断和下一步意图，而不是看到僵硬陈列。"
+        f"{'结构朝向与功能部件' if non_person else '视线、肩颈、手部与身体重心'}共同指向当前事件，"
+        "使姿态传达犹豫、判断和下一步意图，而非僵硬陈列。"
     )
     space_sentence = (
         f"空间叙事遵循“{_anchor(plan, 'spatial_zh')}”的路径：前景提供可触摸的尺度和线索，"
@@ -535,10 +713,10 @@ def _render_chinese(
         )
     subject_surface = "结构表面" if non_person else "脸部与皮肤表面"
     camera_sentence = (
-        f"镜头执行“{camera_beat}”的拍摄时机，并严格保留{composition}的景别与透视。"
-        f"{lighting}不只负责照亮主体，而会随着事件推进在{subject_surface}、{outfit}、{props}和背景之间迁移，"
+        f"镜头从“{camera_beat}”中选取一个决定性拍摄时机，并保留{composition}的景别与透视。"
+        f"{lighting}冻结在这个决定性瞬间，同时在{subject_surface}、{outfit}、{props}和背景之间建立清楚层级，"
         "主光说明行动方向，辅光保留暗部信息，轮廓光与环境反射把主体从空间中分离；"
-        f"焦点由线索移动到回应动作，再落向能够承接结尾的背景位置；{_anchor(plan, 'climax_zh')}。"
+        f"焦点锁定当前主体与动作，线索和后果通过同一景深内的前后景读出；{_anchor(plan, 'climax_zh')}。"
     )
     detail_bits = []
     if custom:
@@ -563,7 +741,7 @@ def _render_chinese(
     )
     ending_sentence = (
         f"最终画面在视觉上完成一次清楚的剧情推进，但不把结果说死：{_anchor(plan, 'ending_zh')}。"
-        "最后一帧仍保留动作余势、环境反馈和情绪余韵，使它像一部电影中可以向前或向后延伸的真实剧照。"
+        "这个唯一定格保留动作余势、环境反馈与情绪余韵，像一张拥有过去和未来、却不并列多个时刻的真实电影剧照。"
     )
 
     level = _clean(detail_level)
@@ -594,6 +772,7 @@ def _render_english(
     detail_level: str,
     non_person: bool,
     adult_mode: bool,
+    layout_mode: str,
 ) -> str:
     lead = _anchor(anchors, "lead", "A highly finished image")
     subject = _anchor(anchors, "subject", "the main non-human subject" if non_person else "the selected subject")
@@ -609,6 +788,7 @@ def _render_english(
     custom = _anchor(anchors, "custom")
     residual = _anchor(anchors, "residual")
     quality = _anchor(anchors, "quality", "high detail, clean focus, and stable structure")
+    layout_clause = visual_layout_contract(layout_mode, english=True)
 
     style_clause = f", unified by {style}" if style else ""
     if style_bridge:
@@ -621,12 +801,13 @@ def _render_english(
 
     anchor_sentence = (
         f"{lead} is centered on {subject}{style_clause}. The event takes place in {scene}, using {composition}; "
-        f"the selected visual anchors belong to one continuous moment instead of a chain of keywords.{adult_clause}"
+        f"the selected visual anchors belong to one continuous moment instead of a chain of keywords.{adult_clause} {layout_clause}"
     )
     story_sentence = (
-        f"{_anchor(plan, 'opening_en')}. {_anchor(plan, 'motive_en')}. The selected story clue, {props}, becomes concrete when {_anchor(plan, 'trigger_en')}. "
-        f"Because of it, {subject} answers through {action}. This is not a display pose but a motivated choice: "
-        f"{_anchor(plan, 'response_en')}. Then {_anchor(plan, 'escalation_en')}, and {_anchor(plan, 'turn_en')}."
+        f"The story background combines {_anchor(plan, 'opening_en')} with {_anchor(plan, 'motive_en')}, but neither becomes a separate image. "
+        f"The camera shows only the most informative response instant: {props} is already a concrete clue when {_anchor(plan, 'trigger_en')}. "
+        f"Because of it, {subject} answers through {action}, making a motivated choice in which {_anchor(plan, 'response_en')}. "
+        f"{_anchor(plan, 'escalation_en')} and {_anchor(plan, 'turn_en')} are compressed into the same pose, expression, and environmental result instead of another visible action stage."
     )
     motion_details = (
         "weight, contact points, structural edges, moving joints, and surface highlights"
@@ -651,8 +832,8 @@ def _render_english(
         )
     subject_surface = "structural surfaces" if non_person else "the face and skin surfaces"
     camera_sentence = (
-        f"The camera follows this timing: {camera_beat}, while preserving {composition}. {lighting} does more than illuminate the subject: it migrates across {subject_surface}, {outfit}, {props}, and the background as the event advances. "
-        f"Key light explains movement, fill preserves readable shadow information, and rim light or environmental reflection separates the subject. Focus travels from clue to response and finally to the background element that carries the ending. {_anchor(plan, 'climax_en')}."
+        f"The camera selects one decisive exposure from this timing: {camera_beat}, while preserving {composition}. {lighting} is frozen at that instant and establishes a readable hierarchy across {subject_surface}, {outfit}, {props}, and the background. "
+        f"Key light explains movement, fill preserves readable shadow information, and rim light or environmental reflection separates the subject. Focus remains on the current subject and action, while clue and consequence are read through depth inside the same frame. {_anchor(plan, 'climax_en')}."
     )
     detail_parts = []
     if custom:
@@ -674,7 +855,7 @@ def _render_english(
         f"The finish preserves {quality}, {stability_details}, and excludes text, watermark, and low-resolution artifacts."
     )
     ending_sentence = (
-        f"The final image advances the narrative clearly without closing every answer: {_anchor(plan, 'ending_en')}. The last frame retains the momentum of the action, the environment's response, and emotional aftertone, so it feels like a real cinematic still with a past and a possible next shot."
+        f"The final image advances the narrative clearly without closing every answer: {_anchor(plan, 'ending_en')}. This single held instant retains the momentum of the action, the environment's response, and emotional aftertone, so it feels like a real cinematic still with a past and a possible next shot without showing multiple times at once."
     )
 
     level = _clean(detail_level)
@@ -706,9 +887,13 @@ def render_narrative_prompt(
     detail_level: str = "标准",
     non_person: bool = False,
     adult_mode: bool = False,
+    layout_mode: str = "",
 ) -> str:
     """Render one long, causal, natural-language prompt from selected anchors."""
 
+    resolved_layout = str(layout_mode or anchors.get("layout_mode", "") or "").strip()
+    if not resolved_layout:
+        resolved_layout = resolve_visual_layout_mode(non_person=non_person)
     if str(language or "纯中文").strip() in {"纯英文", "英文提示词+中文说明"}:
         return _render_english(
             anchors,
@@ -716,6 +901,7 @@ def render_narrative_prompt(
             detail_level=detail_level,
             non_person=non_person,
             adult_mode=adult_mode,
+            layout_mode=resolved_layout,
         )
     return _render_chinese(
         anchors,
@@ -723,4 +909,5 @@ def render_narrative_prompt(
         detail_level=detail_level,
         non_person=non_person,
         adult_mode=adult_mode,
+        layout_mode=resolved_layout,
     )

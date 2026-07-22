@@ -7,11 +7,17 @@ from collections import OrderedDict
 from typing import Any
 
 try:
-    from .narrative import build_narrative_plan, render_narrative_prompt, summarize_narrative_plan
+    from .narrative import (
+        build_narrative_plan,
+        render_narrative_prompt,
+        resolve_visual_layout_mode,
+        summarize_narrative_plan,
+    )
 except Exception:  # pragma: no cover - direct file loading in focused tests
     from stage_prompt_narrative_test import (  # type: ignore
         build_narrative_plan,
         render_narrative_prompt,
+        resolve_visual_layout_mode,
         summarize_narrative_plan,
     )
 
@@ -615,6 +621,13 @@ def _ordered_zh_clauses(ordered: list[tuple[str, str, list[str] | str]]) -> list
 
 def _build_tag_block_prompt_zh(blocks: list[dict[str, Any]], settings: dict[str, Any], *, style_track: str = "", subject_type: str = "", template_style: str = "", variation_index: int = 0) -> str:
     by_group, text_blocks, ordered = _collect_block_material(blocks)
+    non_person = str(subject_type).strip() == "非人物主体"
+    layout_mode = resolve_visual_layout_mode(
+        [tag for group_tags in by_group.values() for tag in group_tags] + list(text_blocks),
+        settings,
+        non_person=non_person,
+    )
+    settings["画面结构模式解析结果"] = layout_mode
     detail = str(settings.get("详细度", "标准") or "标准")
     style_text = _join_terms(by_group.get("画面风格", []), fallback=_clean_text(style_track or template_style or settings.get("模板风格") or "完整画面", max_length=80))
     subject_text = _join_terms(by_group.get("主体", []), fallback=_find_text_subject(text_blocks) or ("非人物主体" if str(subject_type).strip() == "非人物主体" else "人物主体"))
@@ -646,6 +659,7 @@ def _build_tag_block_prompt_zh(blocks: list[dict[str, Any]], settings: dict[str,
         "residual": "；".join([*ordered_clauses, variation_sentence] if variation_sentence else ordered_clauses),
         "quality": quality_text,
         "style_track": style_track,
+        "layout_mode": layout_mode,
     }
     plan = build_narrative_plan(
         anchors,
@@ -660,8 +674,9 @@ def _build_tag_block_prompt_zh(blocks: list[dict[str, Any]], settings: dict[str,
         plan,
         language="纯中文",
         detail_level=detail,
-        non_person=str(subject_type).strip() == "非人物主体",
+        non_person=non_person,
         adult_mode=bool(adult_text),
+        layout_mode=layout_mode,
     )
 
 
@@ -701,8 +716,17 @@ def _ordered_en_clauses(ordered: list[tuple[str, str, list[str] | str]]) -> list
 
 
 def _build_tag_block_prompt_en(blocks: list[dict[str, Any]], settings: dict[str, Any], *, style_track: str = "", subject_type: str = "", template_style: str = "", variation_index: int = 0) -> str:
-    blocks = _localize_blocks_for_english(blocks)
+    source_blocks = blocks
+    blocks = _localize_blocks_for_english(source_blocks)
     by_group, text_blocks, ordered = _collect_block_material(blocks)
+    source_by_group, source_text_blocks, _source_ordered = _collect_block_material(source_blocks)
+    non_person = str(subject_type).strip() == "非人物主体"
+    layout_mode = resolve_visual_layout_mode(
+        [tag for group_tags in source_by_group.values() for tag in group_tags] + list(source_text_blocks),
+        settings,
+        non_person=non_person,
+    )
+    settings["画面结构模式解析结果"] = layout_mode
     detail = str(settings.get("详细度", "标准") or "标准")
     style_fallback = _localize_english_text(
         style_track or template_style or settings.get("模板风格") or "coherent finished image",
@@ -743,6 +767,7 @@ def _build_tag_block_prompt_en(blocks: list[dict[str, Any]], settings: dict[str,
         "residual": "; ".join([*ordered_clauses, variation_sentence] if variation_sentence else ordered_clauses),
         "quality": quality_text,
         "style_track": style_track,
+        "layout_mode": layout_mode,
     }
     plan = build_narrative_plan(
         anchors,
@@ -757,8 +782,9 @@ def _build_tag_block_prompt_en(blocks: list[dict[str, Any]], settings: dict[str,
         plan,
         language="纯英文",
         detail_level=detail,
-        non_person=str(subject_type).strip() == "非人物主体",
+        non_person=non_person,
         adult_mode=bool(adult_text),
+        layout_mode=layout_mode,
     )
 
 
