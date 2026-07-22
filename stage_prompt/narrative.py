@@ -279,9 +279,13 @@ def visual_layout_contract(mode: str, *, english: bool = False) -> str:
     if english:
         if resolved == VISUAL_LAYOUT_MULTI_VIEW:
             return (
-                "Honor the explicitly selected character-sheet, turnaround, panel, or mirror-view structure. The result is a multi-view character turnaround with exactly the requested views. "
-                "Use exactly the requested views, with one continuous identity, matching facial structure and wardrobe, "
-                "and give every view a distinct, readable purpose."
+                "Honor the explicitly selected character-sheet, turnaround, panel, or mirror-view structure and use exactly the requested views. "
+                "For a standard three-view character turnaround, place exactly three primary full-body views from left to right: front at 0 degrees, "
+                "one true side profile at 90 degrees, and back at 180 degrees. Give them three equal-width columns in a balanced 1:1:1 layout, "
+                "with identical character height, one shared head line and ground baseline, matching camera height, orthographic projection, neutral stance, "
+                "complete head-to-foot framing, equal margins, and clearly separated silhouettes. Preserve one continuous identity with matching face, anatomy, hairstyle, wardrobe, palette, and materials. "
+                "Only an explicitly requested headshot or material detail may enter a separate support strip without reducing the three primary views; "
+                "an explicitly requested alternative multi-view structure keeps its requested count but distributes every view evenly."
             )
         if resolved == VISUAL_LAYOUT_MULTI_SUBJECT:
             return (
@@ -300,8 +304,9 @@ def visual_layout_contract(mode: str, *, english: bool = False) -> str:
         )
     if resolved == VISUAL_LAYOUT_MULTI_VIEW:
         return (
-            "服从显式角色设定图、三视图、分区或镜中视图，视图数量严格对应用户选择；"
-            "各视图共享同一身份、服装和脸部结构，每个角度用途明确、轮廓完整。"
+            "标准三视图从左到右为正面0度、单个90度标准侧面、背面180度三幅全身，横向三栏等宽且1:1:1均衡布局。"
+            "人物等高，同一头顶线与脚底基线、统一镜头高度、正交投影、中性站姿和完整头脚。各视图共享同一身份、服装和脸部结构，"
+            "体型、发型、配色、材质一致；要求的细节另置且不改变主视图尺寸。其他多视图按指定数量均分。"
         )
     if resolved == VISUAL_LAYOUT_MULTI_SUBJECT:
         return (

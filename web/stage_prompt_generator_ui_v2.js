@@ -887,8 +887,18 @@ const CHARACTER_SHEET_BASE_TAGS = [
 	"正面视图",
 	"侧面视图",
 	"背面视图",
-	"头像特写",
-	"全身",
+	"正面全身",
+	"标准侧面全身",
+	"背面全身",
+	"横向三栏等宽布局",
+	"视图比例1:1:1",
+	"相同人物高度",
+	"同一头顶线",
+	"同一地面基线",
+	"正交投影视角",
+	"统一镜头高度",
+	"中性自然站姿",
+	"全身完整入镜",
 	"低遮挡",
 	"身体轮廓清晰",
 	"服装结构完整",
@@ -900,9 +910,10 @@ const CHARACTER_SHEET_BASE_TAGS = [
 ];
 const CHARACTER_SHEET_STYLE_TAGS = ["高细节", "主体轮廓清晰", "人物完整入镜", "空间层次明确"];
 const CHARACTER_SHEET_PROMPTS = {
-	reference: "角色设定图模式：接入单人参考图作为角色来源，保持同一成年角色的脸型、发型、关键服装结构、主配色和材质逻辑一致；画面组织为角色设定展示，可包含头像特写、正面全身、侧面全身、背面全身等视角；背景、风格、服装和色彩跟随参考图与用户补充，不要自行锁定白底、古风、汉服或固定颜色；不要更换人物，不要生成多人故事场景，不要文字标注。",
-	prompt: "角色设定图模式：根据当前文字生成角色设定展示，可包含头像特写、正面全身、侧面全身、背面全身等视角；角色身份、服装、风格、配色、背景和材质完全跟随用户输入与当前节点标签，不要额外锁定白底、古风、汉服、粉色或固定题材；重点表现服装结构、发型轮廓、材质层次和角色一致性，不要文字标注。",
+	reference: "角色设定图模式：接入单人参考图作为唯一角色来源，保持同一成年角色的脸型、发型、体型、关键服装结构、主配色和材质逻辑一致；默认严格生成从左到右排列的正面全身、90度标准侧面全身、背面全身三幅主视图，三栏等宽且比例为1:1:1，三幅视图使用相同人物高度、同一头顶线和脚底基线、统一镜头高度与正交投影，采用中性自然站姿并让头顶到鞋底完整入镜；背景使用与参考配色协调的简洁连续表面，头像或材质细节仅在用户明确提出时放入独立辅助带，辅助带保持独立，三幅主视图尺寸与等宽比例保持不变；风格、服装和色彩跟随参考图与用户补充，画面保持单一角色身份与清晰服装结构。",
+	prompt: "角色设定图模式：根据当前文字生成同一成年角色的标准三视图；默认严格生成从左到右排列的正面全身、90度标准侧面全身、背面全身三幅主视图，三栏等宽且比例为1:1:1，三幅视图使用相同人物高度、同一头顶线和脚底基线、统一镜头高度与正交投影，采用中性自然站姿并让头顶到鞋底完整入镜；角色身份、脸部结构、体型、服装、发型、配色和材质在三幅视图中保持一致，背景使用与当前主题协调的简洁连续表面；头像或材质细节仅在用户明确提出时放入独立辅助带，辅助带保持独立，三幅主视图尺寸与等宽比例保持不变；风格与题材跟随用户输入和当前节点标签，重点呈现准确比例、轮廓转折、服装结构和材质关系。",
 };
+const CHARACTER_SHEET_PROMPT_PREFIX = "角色设定图模式：";
 const CHARACTER_SHEET_STRATEGY_PREFIX = "角色设定图策略：";
 const CHARACTER_SHEET_MODE_TAGS = ["参考图一致性", "纯提示词角色设计"];
 const CHARACTER_SHEET_AUTO_TAGS = new Set([...CHARACTER_SHEET_BASE_TAGS, ...CHARACTER_SHEET_STYLE_TAGS, ...CHARACTER_SHEET_MODE_TAGS]);
@@ -913,6 +924,18 @@ const CHARACTER_SHEET_LEGACY_CLEANUP_TAGS = new Set([
 	"侧面视图",
 	"背面视图",
 	"头像特写",
+	"正面全身",
+	"标准侧面全身",
+	"背面全身",
+	"横向三栏等宽布局",
+	"视图比例1:1:1",
+	"相同人物高度",
+	"同一头顶线",
+	"同一地面基线",
+	"正交投影视角",
+	"统一镜头高度",
+	"中性自然站姿",
+	"全身完整入镜",
 	"服装结构完整",
 	"发型结构完整",
 	...CHARACTER_SHEET_MODE_TAGS,
@@ -7851,7 +7874,7 @@ function stripCharacterSheetPromptText(text) {
 	return String(text ?? "")
 		.split(/\r?\n/u)
 		.map((line) => line.trim())
-		.filter((line) => line && !promptTexts.has(line) && !line.startsWith(CHARACTER_SHEET_STRATEGY_PREFIX))
+		.filter((line) => line && !promptTexts.has(line) && !line.startsWith(CHARACTER_SHEET_PROMPT_PREFIX) && !line.startsWith(CHARACTER_SHEET_STRATEGY_PREFIX))
 		.join("\n");
 }
 
@@ -17260,7 +17283,7 @@ function openCharacterSheetDialog(node, library) {
 	titleWrap.appendChild(title);
 	const subtitle = document.createElement("div");
 	subtitle.className = "qwen-te-modal__subtitle";
-	subtitle.textContent = `生成多视角角色展示图；风格、服装、颜色和背景跟随输入。当前节点：${modalContext.nodeName}。`;
+	subtitle.textContent = `生成等比例角色三视图；正面、标准侧面和背面保持同高度、同基线。当前节点：${modalContext.nodeName}。`;
 	titleWrap.appendChild(subtitle);
 	const closeButton = document.createElement("button");
 	closeButton.className = "qwen-te-modal__footer-button";
@@ -17312,7 +17335,7 @@ function openCharacterSheetDialog(node, library) {
 
 	const promptInput = document.createElement("textarea");
 	promptInput.className = "qwen-te-modal__textarea";
-	promptInput.placeholder = "可选：补充你想保留的角色设定，例如：服装、发型、配色、材质、背景、镜头比例；不填则跟随当前标签或参考图。";
+	promptInput.placeholder = "可选：补充要保留的服装、发型、配色和材质；默认输出等宽正面、侧面、背面三视图。";
 	body.appendChild(promptInput);
 	const preview = document.createElement("div");
 	preview.className = "qwen-te-modal__status";
@@ -18898,7 +18921,7 @@ function enhanceStagePromptNode(node, library) {
 	registerPanelButton("smartMatch", makeBtn(quickbar,"匹配启用","AI", async()=>{ await runSmartTextMatch(node); },"qwen-te-panel__button--cool","输入一句描述，自动匹配标签并启用智能文本；NSFW 开启时会自动切到成人向成熟策略。"));
 	registerPanelButton("tagBlocks", makeBtn(quickbar,"编排","BLK", async()=>{ if (!node[PANEL_KEY]) return; node[PANEL_KEY].displayMode = "blocks"; refreshStageDisplay(node); openStageOutputDialog(node); },"qwen-te-panel__button--cool","打开标签块编排，可拖拽排序、删词、插入文字并按顺序生成。"));
 	registerPanelButton("model", makeBtn(quickbar,"模型","MDL", async()=>{ openStageModelDialog(node); },"qwen-te-panel__button--cool","打开模型面板，可选择本地模型、API 接口或仅 Skill；本地模型支持外接对象和内置 GGUF。"));
-	registerPanelButton("characterSheet", makeBtn(quickbar,"设定图","CS", async(mutationRevision)=>{ const nextLibrary = await getFreshLibraryForUi(node, library, { mutationRevision }); if (isNodeStateMutationCurrent(node, mutationRevision)) openCharacterSheetDialog(node, nextLibrary); },"qwen-te-panel__button--accent","生成头像特写、正面、侧面、背面组合的角色设定图提示词。"));
+	registerPanelButton("characterSheet", makeBtn(quickbar,"设定图","CS", async(mutationRevision)=>{ const nextLibrary = await getFreshLibraryForUi(node, library, { mutationRevision }); if (isNodeStateMutationCurrent(node, mutationRevision)) openCharacterSheetDialog(node, nextLibrary); },"qwen-te-panel__button--accent","生成等宽、等高、同基线的正面、90度侧面、背面三视图提示词。"));
 	registerPanelButton("random", makeBtn(quickbar,"随机","RD", async(mutationRevision)=>{ const nextLibrary = await getFreshLibraryForUi(node, library, { mutationRevision }); if (!isNodeStateMutationCurrent(node, mutationRevision)) return; await buildAndApplyRandomState(node, nextLibrary, { mutationRevision }); },"qwen-te-panel__button--warm","按当前规则随机重排标签。"));
 	registerPanelButton("example", makeBtn(quickbar,"示例","EX", async(mutationRevision)=>{ const nextLibrary = await getFreshLibraryForUi(node, library, { mutationRevision }); if (isNodeStateMutationCurrent(node, mutationRevision)) openExampleDialog(node, nextLibrary); },"qwen-te-panel__button--accent","打开少量风格锚点，用于定调和选路。"));
 	registerPanelButton("presets", makeBtn(quickbar,"预设","PRE", async(mutationRevision)=>{ const nextLibrary = await getFreshLibraryForUi(node, library, { mutationRevision }); if (isNodeStateMutationCurrent(node, mutationRevision)) openPresetManager(node, nextLibrary); },"","管理可直接生产的稳定模板与批量连测。"));

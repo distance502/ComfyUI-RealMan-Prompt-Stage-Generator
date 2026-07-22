@@ -9,18 +9,24 @@ from typing import Any
 
 CHARACTER_SHEET_STRATEGY_NOTE = "角色设定图策略：启用时将当前节点提示词重构为多视角角色设定展示；停用时不介入全局生成。"
 CHARACTER_SHEET_PROMPT_BRIEF = (
-    "角色设定图，多视角角色展示，头像特写，正面全身，侧面全身，背面全身，"
-    "同一角色一致，服装结构完整，发型轮廓清晰，材质层次明确，背景跟随当前素材并保持纯净表面"
+    "角色设定图，标准角色三视图，从左到右依次为正面全身、90度标准侧面全身、背面全身，"
+    "横向三栏等宽布局，视图比例1:1:1，相同人物高度，同一头顶线与地面基线，统一镜头高度，"
+    "正交投影视角，中性自然站姿，全身从头顶到鞋底完整入镜，同一角色身份、脸部结构、体型、"
+    "服装、发型、配色与材质一致，简洁连续背景；头像或材质细节仅在用户明确要求时作为独立辅助带"
 )
 CHARACTER_SHEET_PROMPT_BRIEF_EN = (
-    "character sheet, multi-view character turnaround, headshot close-up, "
-    "front full-body view, side full-body view, back full-body view, "
-    "consistent character identity across every view, complete outfit construction, "
-    "clear hairstyle structure, readable material layers, and a concept-aware background with clean surfaces"
+    "character sheet, multi-view character turnaround, standard three-view character turnaround, exactly three primary full-body views ordered "
+    "left to right as front full-body view, true 90-degree side full-body view, and back full-body view, "
+    "three equal-width columns in a 1:1:1 layout, identical character height, shared head line and ground baseline, "
+    "matching camera height and orthographic projection, neutral natural stance, complete framing from head to footwear, "
+    "consistent identity, facial structure, body proportions, clothing, hairstyle, palette, and materials across all views, "
+    "with a simple continuous background; headshots or material details appear only in a separate support strip when explicitly requested"
 )
 CHARACTER_SHEET_INTERNAL_POLICY = (
     "角色设定图内部策略：只把参考图可见角色特征、当前节点标签和用户补充整理成画面素材；"
     "参考图模式下以可见角色的脸型、发型、服装结构、主配色和材质逻辑优先，节点标签只作为风格、场景、光影和气氛补充；"
+    "默认版式严格固定为正面全身、90度标准侧面全身、背面全身三幅等宽主视图，统一人物高度、头顶线、脚底基线、镜头高度和正交投影；"
+    "所有主视图使用同一中性站姿与同一角色设定，场景信息只转化为简洁背景的配色和材质线索；头像、表情或材质细节仅在用户明确要求时进入独立辅助带；"
     "不要把策略说明、Thinking Process、任务分析、输出要求或规则文本写进最终提示词。"
 )
 

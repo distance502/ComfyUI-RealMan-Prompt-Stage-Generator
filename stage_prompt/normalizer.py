@@ -397,6 +397,11 @@ def normalize_inference_state(
     tags = tag_set()
     reference_sheet_tags = set(context.get("danbooru_reference_sheet_tags", set()))
     reference_sheet_hits = [tag for tag in collect_all_tags(normalized_selected, normalized_custom) if tag in reference_sheet_tags]
+    character_sheet_active = bool(str(settings.get("角色设定图内部策略", "") or "").strip())
+    if character_sheet_active and not reference_sheet_hits:
+        append_tag_to_state(normalized_selected, normalized_custom, "角色设定图")
+        append_tag_to_state(normalized_selected, normalized_custom, "角色三视图")
+        reference_sheet_hits = ["角色设定图", "角色三视图"]
     if reference_sheet_hits:
         allowed_backgrounds = set(context.get("danbooru_reference_sheet_background_tags", set()))
         removed_scenes = [
@@ -412,11 +417,26 @@ def normalize_inference_state(
         removed_dynamic = [tag for tag in collect_all_tags(normalized_selected, normalized_custom) if tag in dynamic_tags]
         for dynamic_tag in removed_dynamic:
             remove_tag_from_state(normalized_selected, normalized_custom, dynamic_tag)
-        if removed_scenes or removed_dynamic:
+        balance_tags = [
+            str(tag).strip()
+            for tag in context.get("danbooru_reference_sheet_balance_tags", ())
+            if str(tag).strip()
+        ]
+        added_balance_tags: list[str] = []
+        for balance_tag in balance_tags:
+            if balance_tag in tag_set():
+                continue
+            append_tag_to_state(normalized_selected, normalized_custom, balance_tag)
+            added_balance_tags.append(balance_tag)
+        if removed_scenes or removed_dynamic or added_balance_tags:
             notes.append(
-                "设定表收敛：保留多视角/参考表结构，移除具体场景或动态镜头 "
-                + "、".join(uniq([*removed_scenes, *removed_dynamic]))
-                + "，并使用简洁背景。"
+                "设定表收敛：固定正面、90度侧面、背面三幅等宽全身视图并统一人物高度、头顶线、地面基线和正交镜头；"
+                + (
+                    "移除具体场景或动态镜头 " + "、".join(uniq([*removed_scenes, *removed_dynamic])) + "；"
+                    if removed_scenes or removed_dynamic
+                    else ""
+                )
+                + "使用简洁连续背景。"
             )
 
     for family in context.get("danbooru_visual_intent_families", ()):

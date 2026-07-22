@@ -2028,14 +2028,20 @@ test("character sheet button writes a focused multi-view prompt state", async ()
 	assert.equal(state.settings["图片反推最大边长"], 960);
 	assert.match(state.settings["额外要求"], /接入单人参考图/u);
 	assert.match(state.settings["额外要求"], /机甲角色/u);
-	assert.match(state.settings["额外要求"], /不要自行锁定白底、古风、汉服或固定颜色/u);
-	assert.match(state.settings["额外要求"], /头像特写/u);
-	assert.match(state.settings["额外要求"], /正面全身/u);
+	assert.match(state.settings["额外要求"], /风格、服装和色彩跟随参考图与用户补充/u);
+	assert.match(state.settings["额外要求"], /正面全身、90度标准侧面全身、背面全身/u);
+	assert.match(state.settings["额外要求"], /三栏等宽且比例为1:1:1/u);
+	assert.match(state.settings["额外要求"], /相同人物高度、同一头顶线和脚底基线、统一镜头高度与正交投影/u);
 	assert.equal(state.settings["额外要求"].includes("粉色汉服"), false);
 	assert.equal(state.settings["额外要求"].includes("白底棚拍"), false);
-	for (const tag of ["角色设定图", "角色三视图", "头像特写", "正面视图", "侧面视图", "背面视图", "参考图一致性"]) {
+	for (const tag of [
+		"角色设定图", "角色三视图", "正面视图", "侧面视图", "背面视图", "正面全身", "标准侧面全身", "背面全身",
+		"横向三栏等宽布局", "视图比例1:1:1", "相同人物高度", "同一头顶线", "同一地面基线", "正交投影视角",
+		"统一镜头高度", "中性自然站姿", "全身完整入镜", "参考图一致性",
+	]) {
 		assert.equal(state.customTags.includes(tag), true, `${tag} should be added`);
 	}
+	assert.equal(state.customTags.includes("头像特写"), false, "headshot should be opt-in instead of shrinking the three primary views");
 	for (const tag of ["古风", "汉服", "粉色汉服", "白底棚拍"]) {
 		assert.equal(state.customTags.includes(tag), false, `${tag} should not be locked by default`);
 	}
@@ -2061,7 +2067,9 @@ test("character sheet prompt mode enables sheet strategy without forcing languag
 	assert.equal(state.settings["图片反推生成"], true);
 	assert.equal(state.settings["图片反推模式"], "角色设定图");
 	assert.equal(state.settings["提示词语言"], "纯英文");
-	assert.match(state.settings["额外要求"], /纯提示词角色设计|当前文字生成角色设定展示/u);
+	assert.match(state.settings["额外要求"], /根据当前文字生成同一成年角色的标准三视图/u);
+	assert.match(state.settings["额外要求"], /正面全身、90度标准侧面全身、背面全身/u);
+	assert.match(state.settings["额外要求"], /相同人物高度/u);
 	assert.equal(state.customTags.includes("纯提示词角色设计"), true);
 	assert.equal(state.customTags.includes("参考图一致性"), false);
 });

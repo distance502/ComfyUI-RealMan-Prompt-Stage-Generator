@@ -92,6 +92,7 @@ except Exception:  # pragma: no cover - focused tests may stub .nodes
         return []
 from .prompt_tag_library import (
     DANBOORU_GENERAL_TAG_ALIASES,
+    DANBOORU_REFERENCE_SHEET_BALANCE_TAGS,
     DANBOORU_REFERENCE_SHEET_BACKGROUND_TAGS,
     DANBOORU_REFERENCE_SHEET_DYNAMIC_TAGS,
     DANBOORU_REFERENCE_SHEET_TAGS,
@@ -830,8 +831,8 @@ SETTING_DEFAULTS = {
     "优先柔和肤质": False,
     "抑制文字伪影": False,
     "额外要求": "",
-	"智能文本匹配": False,
-	"智能文本输入": "",
+    "智能文本匹配": False,
+    "智能文本输入": "",
     "智能文本风格优先": "自动判断",
     "标签块编排启用": False,
     "标签块编排JSON": "",
@@ -868,7 +869,7 @@ SETTING_DEFAULTS = {
     "API超时秒": 120,
     "API额外请求头": "",
     "模型瞬时重试次数": 1,
-	"系统提示词覆盖": DEFAULT_STAGE_PROMPT_SYSTEM_TEMPLATE,
+    "系统提示词覆盖": DEFAULT_STAGE_PROMPT_SYSTEM_TEMPLATE,
     "最大生成token": 1800,
     "温度": 0.62,
     "top_p": 0.9,
@@ -2259,6 +2260,7 @@ def _normalize_inference_state(
             "runtime_style_isolation_families": _运行随机风格隔离标签族,
             "danbooru_visual_intent_families": DANBOORU_VISUAL_INTENT_FAMILIES,
             "danbooru_reference_sheet_tags": DANBOORU_REFERENCE_SHEET_TAGS,
+            "danbooru_reference_sheet_balance_tags": DANBOORU_REFERENCE_SHEET_BALANCE_TAGS,
             "danbooru_reference_sheet_background_tags": DANBOORU_REFERENCE_SHEET_BACKGROUND_TAGS,
             "danbooru_reference_sheet_dynamic_tags": DANBOORU_REFERENCE_SHEET_DYNAMIC_TAGS,
         },
@@ -3601,8 +3603,10 @@ def _build_image_reverse_prompt(settings: dict[str, Any]) -> str:
         return base + "请保持为一段自然语言描述，便于智能文本匹配。"
     return (
         base
-        + "当前目标是生成角色设定图：请额外强调同一角色一致性、可选头像特写、正面全身、侧面全身、背面全身等视角，"
-        "服装结构完整、发型结构完整、材质层次清晰；背景、风格、服装和配色跟随参考图与用户输入，除非用户明确要求，不要锁定白底、古风、汉服或固定颜色；不要文字标注。"
+        + "当前目标是生成标准角色三视图：请准确提取同一角色的脸型、发型、体型、服装结构、主配色和材质逻辑，"
+        "并为后续从左到右的正面全身、90度标准侧面全身、背面全身三幅等宽视图提供一致设定；三幅人物使用相同高度、"
+        "同一头顶线和脚底基线、统一镜头高度、正交投影、中性站姿与完整头脚构图。背景、风格、服装和配色跟随参考图与用户输入，"
+        "除非用户明确要求，不要锁定白底、古风、汉服或固定颜色；不要文字标注。头像或材质细节只在用户明确要求时作为独立辅助信息。"
     )
 
 
@@ -4761,9 +4765,9 @@ _STRICT_VARIATION_ACTION_EN = (
 
 _STRICT_VARIATION_SPECIAL_CUES_ZH: dict[str, tuple[str, ...]] = {
     "character_sheet": (
-        "保持同一角色身份与多视角设定图结构不变，改用另一组材质细节、配件展示和留白节奏组织版面",
-        "保留头像、正面、侧面与背面展示关系，只调整辅助细节格、色温和材质落点，避免改变角色设定",
-        "维持角色比例、服装和视图数量，在未锁定区域更换灯光方向、背景明度与道具陈列方式",
+        "保持多视角设定图结构、正面、90度侧面、背面三幅等宽全身视图与同一角色身份不变，只调整背景明度、材质重点和留白节奏",
+        "维持多视角设定图结构、1:1:1三栏、相同人物高度、同一头顶线和脚底基线，只在独立辅助带变化用户已明确要求的细节",
+        "保留多视角设定图结构、正交镜头、中性站姿、角色比例和服装结构，在未锁定区域更换统一光线、背景色值与材质呈现",
     ),
     "tag_block": (
         "保持锁定块内容与用户块顺序不变，只在未锁定块中调整前中后景、光线落点和材质层次",
@@ -4783,9 +4787,9 @@ _STRICT_VARIATION_SPECIAL_CUES_ZH: dict[str, tuple[str, ...]] = {
 }
 _STRICT_VARIATION_SPECIAL_CUES_EN: dict[str, tuple[str, ...]] = {
     "character_sheet": (
-        "preserve the same character identity and multi-view sheet structure while varying material closeups, accessory presentation, and negative-space rhythm",
-        "keep the headshot, front, side, and back views intact; vary only the support detail panels, color temperature, and material emphasis",
-        "retain character proportions, clothing, and the multi-view count and arrangement while changing unlocked lighting, backdrop value, and prop presentation",
+        "preserve the multi-view character-sheet structure with equal-width front, true 90-degree side, and back full-body views and one identity while varying backdrop value, material emphasis, and negative-space rhythm",
+        "keep the multi-view structure, balanced 1:1:1 columns, identical character height, shared head line, and ground baseline; vary only explicitly requested details in a separate support strip",
+        "retain the multi-view three-view arrangement, orthographic cameras, neutral stance, character proportions, and wardrobe while changing unlocked lighting, backdrop tone, and material presentation",
     ),
     "tag_block": (
         "preserve locked blocks and the user-defined block order while varying only unlocked depth layers, light placement, and material emphasis",
@@ -5483,7 +5487,7 @@ _阶段输入参数说明 = {
     "智能文本风格优先": "自动判断最通用；节点优先保持已选风格，文本优先更尊重输入描述中的媒介和题材。",
     "标签块编排启用": "按标签块顺序组织提示词。锁定块会作为高优先级事实保留。",
     "标签块编排JSON": "由编排面板维护的结构化数据；建议通过界面编辑，不要手工截断或填写无效 JSON。",
-    "图片反推模式": "角色设定图生成多视角角色说明；仅反推描述只提取参考图中的可见事实。",
+    "图片反推模式": "角色设定图默认生成正面、90度侧面、背面三幅等宽全身视图，并统一人物高度、基线和正交镜头；仅反推描述只提取参考图中的可见事实。",
     "图片反推最大边长": "送入视觉模型前的最长边。默认 960；越大细节越多，但编码和推理更慢、占用更高。",
     "系统提示词覆盖": "高级模型合同。默认模板已包含自然语言、剧情、语言和长度约束；只有明确了解后果时修改。",
     "最大生成token": "每条模型输出的 token 上限。默认 1800；太低可能截断长提示词，太高会增加本地/API 耗时和费用。",

@@ -2358,6 +2358,13 @@ class TestStagePromptModules(unittest.TestCase):
             },
         )[4]
         self.assertIn("跨视图身份漂移", sheet)
+        self.assertIn("三栏宽度不一致", sheet)
+        self.assertIn("人物高度不一致", sheet)
+        self.assertIn("头顶线错位", sheet)
+        self.assertIn("脚底基线错位", sheet)
+        self.assertIn("侧面不是90度", sheet)
+        self.assertIn("透视缩短", sheet)
+        self.assertIn("辅助细节格挤压主视图", sheet)
         self.assertNotIn("上下重复画面", sheet)
 
     def test_prompt_builder_appends_extra_requirement(self) -> None:
@@ -8801,6 +8808,10 @@ class TestStagePromptModules(unittest.TestCase):
         module = load_stage_prompt_generator_for_integration_test()
         prompt = module._build_image_reverse_prompt({"图片反推模式": "角色设定图"})
         self.assertIn("正面全身", prompt)
+        self.assertIn("90度标准侧面全身", prompt)
+        self.assertIn("三幅等宽视图", prompt)
+        self.assertIn("同一头顶线和脚底基线", prompt)
+        self.assertIn("正交投影", prompt)
         self.assertIn("跟随参考图与用户输入", prompt)
         self.assertIn("不要锁定白底、古风、汉服或固定颜色", prompt)
         self.assertNotIn("白底棚拍", prompt)
@@ -8831,8 +8842,11 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertIn("纯提示词模式", settings["智能文本输入"])
         self.assertIn("机械少女", settings["智能文本输入"])
         self.assertIn("雾夜街道", settings["智能文本输入"])
-        self.assertIn("多视角角色展示", settings["智能文本输入"])
+        self.assertIn("标准角色三视图", settings["智能文本输入"])
         self.assertIn("正面全身", settings["额外要求"])
+        self.assertIn("90度标准侧面全身", settings["额外要求"])
+        self.assertIn("视图比例1:1:1", settings["额外要求"])
+        self.assertIn("同一头顶线与地面基线", settings["额外要求"])
         self.assertNotIn("不要自行锁定", settings["额外要求"])
         self.assertNotIn("生成目标", settings["智能文本输入"])
         self.assertIn("角色设定图策略", "\n".join(settings["推理纠偏说明"]))
@@ -8861,8 +8875,11 @@ class TestStagePromptModules(unittest.TestCase):
             "character sheet",
             "multi-view character turnaround",
             "front full-body view",
-            "side full-body view",
+            "true 90-degree side full-body view",
             "back full-body view",
+            "three equal-width columns",
+            "shared head line and ground baseline",
+            "orthographic projection",
         ):
             self.assertIn(required, prompt)
 
@@ -8938,7 +8955,7 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertIn("Young woman", combined)
         self.assertIn("silver white long braided hair", combined)
         self.assertIn("black leather jacket", combined)
-        self.assertIn("多视角角色展示", combined)
+        self.assertIn("标准角色三视图", combined)
         self.assertIn("角色设定图内部策略", settings["角色设定图内部策略"])
 
     def test_smart_text_matches_free_text_to_stage_tags(self) -> None:
@@ -13661,7 +13678,7 @@ class TestStagePromptModules(unittest.TestCase):
         module = load_stage_prompt_generator_for_integration_test()
         selected = OrderedDict((name, []) for name, _slots, _options in module._all_tag_groups())
         selected["场景背景"] = ["城市街道", "白色背景", "黑色背景"]
-        selected["构图视角"] = ["参考设定表", "多视角展示", "鱼眼镜头", "第一人称视角"]
+        selected["构图视角"] = ["参考设定表", "多视角展示", "鱼眼镜头", "第一人称视角", "鸟瞰视角"]
         selected["光影氛围"] = ["双色调", "互补色", "高键光", "低键光", "月光"]
         normalized, custom_tags, notes = module._normalize_inference_state(
             selected,
@@ -13676,11 +13693,27 @@ class TestStagePromptModules(unittest.TestCase):
         active = set(module._collect_all_tags(normalized, custom_tags))
         self.assertIn("参考设定表", active)
         self.assertIn("多视角展示", active)
+        for balance_tag in (
+            "正面全身",
+            "标准侧面全身",
+            "背面全身",
+            "横向三栏等宽布局",
+            "视图比例1:1:1",
+            "相同人物高度",
+            "同一头顶线",
+            "同一地面基线",
+            "正交投影视角",
+            "统一镜头高度",
+            "中性自然站姿",
+            "全身完整入镜",
+        ):
+            self.assertIn(balance_tag, active)
         self.assertEqual(len(active & {"简单背景", "白色背景", "黑色背景", "渐变背景", "网格背景", "透明背景"}), 1)
         self.assertIn("白色背景", active)
         self.assertNotIn("城市街道", active)
         self.assertNotIn("鱼眼镜头", active)
         self.assertNotIn("第一人称视角", active)
+        self.assertNotIn("鸟瞰视角", active)
         self.assertEqual(len(active & {"双色调", "互补色", "冷暖对比", "单色插画"}), 1)
         self.assertLessEqual(len(active & {"顶光", "底光", "聚光灯", "伦勃朗光", "高键光", "低键光", "月光", "霓虹光"}), 2)
         self.assertTrue(any("设定表收敛" in note for note in notes))
@@ -14372,6 +14405,11 @@ class TestStagePromptModules(unittest.TestCase):
             style="CG感",
         )
         self.assertIn("各视图共享同一身份、服装和脸部结构", sheet)
+        self.assertIn("正面0度", sheet)
+        self.assertIn("单个90度标准侧面", sheet)
+        self.assertIn("横向三栏等宽且1:1:1均衡布局", sheet)
+        self.assertIn("同一头顶线与脚底基线", sheet)
+        self.assertIn("正交投影", sheet)
         self.assertNotIn("整张画面只有这一位人物", sheet)
         self.assertEqual(sheet_settings["画面结构模式解析结果"], narrative.VISUAL_LAYOUT_MULTI_VIEW)
         for prompt in (solo, duo, sheet):
