@@ -1474,8 +1474,12 @@ class TestStagePromptModules(unittest.TestCase):
         scenery = tag_library.展平标签分类("场景背景")
         self.assertIn("丁达尔光效", lighting)
         self.assertIn("雾中体积光柱", lighting)
+        self.assertIn("海雾日出丁达尔光", lighting)
+        self.assertIn("城市峡谷气溶胶光", lighting)
         self.assertIn("云海山巅", scenery)
         self.assertIn("海蚀拱门", scenery)
+        self.assertIn("晨雾渔港", scenery)
+        self.assertIn("银河下的盐湖", scenery)
         self.assertGreaterEqual(len(lighting), 300)
         self.assertGreaterEqual(len(scenery), 550)
 
@@ -1491,6 +1495,16 @@ class TestStagePromptModules(unittest.TestCase):
             "丁达尔光效，光束穿过水汽并指向人物动作",
             nsfw_presets.NSFW_WORKSPACE_OPTIONS["light_type"],
         )
+        self.assertIn("成年摄影师", nsfw_presets.NSFW_WORKSPACE_OPTIONS["selector_character"])
+        self.assertIn("旧电影放映室，银幕余光、红绒座椅与胶片盒构成叙事线索", nsfw_presets.NSFW_WORKSPACE_OPTIONS["scene"])
+        positive_option_text = "\n".join(
+            option
+            for field, options in nsfw_presets.NSFW_WORKSPACE_OPTIONS.items()
+            if field != "negative_preset"
+            for option in options
+        )
+        for artifact in ("克隆主体", "重复脸", "重复人物", "额外头部", "上下分屏", "堆叠肖像"):
+            self.assertNotIn(artifact, positive_option_text)
 
     def test_tag_library_enriches_example_case_scene_and_colossus_tags(self) -> None:
         library = tag_library.当前标签库()
@@ -2316,6 +2330,9 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertIn("上下重复画面", solo)
         self.assertIn("重复脸", solo)
         self.assertIn("单人图误入第二人物", solo)
+        self.assertIn("前景背景同一人物", solo)
+        self.assertIn("脸部重影", solo)
+        self.assertIn("单人前后景各出现一次", solo)
 
         duo = module._run_stage(
             None,
@@ -6277,7 +6294,7 @@ class TestStagePromptModules(unittest.TestCase):
                 for banned in case["must_not_have"]:
                     self.assertNotIn(banned, prompt)
 
-    def test_prompt_builder_style_noise_filter_keeps_negative_constraints(self) -> None:
+    def test_prompt_builder_style_noise_filter_keeps_negative_constraints_out_of_positive_prompt(self) -> None:
         selected = OrderedDict(
             {
                 "主体": ["成年女性"],
@@ -6313,8 +6330,9 @@ class TestStagePromptModules(unittest.TestCase):
         fragments = [fragment.strip() for fragment in prompt.split("，") if fragment.strip()]
         self.assertNotIn("二次元", fragments)
         self.assertNotIn("水彩线稿", fragments)
-        self.assertIn("不要二次元", prompt)
-        self.assertIn("不要水彩线稿", prompt)
+        self.assertNotIn("不要二次元", prompt)
+        self.assertNotIn("不要水彩线稿", prompt)
+        self.assertIn("保持真实摄影", prompt)
 
     def test_prompt_builder_uses_world_and_adult_tag_groups(self) -> None:
         selected = OrderedDict(
@@ -14325,8 +14343,8 @@ class TestStagePromptModules(unittest.TestCase):
                 }
             )
         )
-        self.assertIn("同一人物只出现一次", solo)
-        self.assertIn("一个清晰头部和一张脸", solo)
+        self.assertIn("整张画面只有这一位人物", solo)
+        self.assertIn("身体、头部和脸部各自保持唯一且完整", solo)
         self.assertEqual(solo_settings["画面结构模式解析结果"], narrative.VISUAL_LAYOUT_SINGLE_PERSON)
 
         duo, duo_settings = render(
@@ -14339,8 +14357,8 @@ class TestStagePromptModules(unittest.TestCase):
                 }
             )
         )
-        self.assertIn("每人只出现一次", duo)
-        self.assertNotIn("同一人物只出现一次", duo)
+        self.assertIn("每位人物都有唯一完整的身体、头部和脸部", duo)
+        self.assertNotIn("整张画面只有这一位人物", duo)
         self.assertEqual(duo_settings["画面结构模式解析结果"], narrative.VISUAL_LAYOUT_MULTI_SUBJECT)
 
         sheet, sheet_settings = render(
@@ -14353,13 +14371,108 @@ class TestStagePromptModules(unittest.TestCase):
             ),
             style="CG感",
         )
-        self.assertIn("各视图身份、服装和脸部一致", sheet)
-        self.assertNotIn("同一人物只出现一次", sheet)
+        self.assertIn("各视图共享同一身份、服装和脸部结构", sheet)
+        self.assertNotIn("整张画面只有这一位人物", sheet)
         self.assertEqual(sheet_settings["画面结构模式解析结果"], narrative.VISUAL_LAYOUT_MULTI_VIEW)
         for prompt in (solo, duo, sheet):
             self.assertGreaterEqual(len(prompt), 800, prompt)
             self.assertLessEqual(len(prompt), 1200, prompt)
             self.assertNotIn("故事背景由故事", prompt)
+
+    def test_mirror_and_single_view_tags_keep_single_frame_protection(self) -> None:
+        self.assertEqual(
+            narrative.resolve_visual_layout_mode(["成年女性", "镜前正面", "镜中倒影"]),
+            narrative.VISUAL_LAYOUT_SINGLE_PERSON,
+        )
+        self.assertEqual(
+            narrative.resolve_visual_layout_mode(["成年女性", "侧面视图"]),
+            narrative.VISUAL_LAYOUT_SINGLE_PERSON,
+        )
+        self.assertEqual(
+            narrative.resolve_visual_layout_mode(["成年女性", "正面视图", "侧面视图"]),
+            narrative.VISUAL_LAYOUT_MULTI_VIEW,
+        )
+        self.assertEqual(
+            narrative.resolve_visual_layout_mode(
+                ["成年女性"],
+                {"额外要求": "画面中不要多人，也不要双人构图"},
+            ),
+            narrative.VISUAL_LAYOUT_SINGLE_PERSON,
+        )
+        self.assertEqual(
+            narrative.resolve_visual_layout_mode(
+                ["成年女性"],
+                {"额外要求": "没有雨，双人互动"},
+            ),
+            narrative.VISUAL_LAYOUT_MULTI_SUBJECT,
+        )
+
+    def test_negative_clause_filter_preserves_english_words_ending_in_no(self) -> None:
+        self.assertEqual(
+            prompt_builder._strip_negative_constraint_clauses("piano performance, no watermark"),
+            "piano performance",
+        )
+
+    def test_final_positive_prompt_keeps_layout_artifacts_in_negative_output_only(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["成年女性"],
+                "画面风格": ["电影写实"],
+                "场景背景": ["雨夜酒店走廊"],
+                "构图视角": ["镜前正面", "全景全身"],
+                "动作姿态": ["镜前整理耳饰"],
+                "光影氛围": ["丁达尔光效"],
+            }
+        )
+        settings = {
+            "模板风格": "真实感",
+            "主体类型": "人物角色",
+            "案例输出结构": "案例长段版",
+            "标签反推模式": "自动平衡",
+            "运行时随机标签": False,
+            "提示词语言": "纯中文",
+            "详细度": "标准",
+            "生成数量": 1,
+            "额外要求": "画面中不要多人，避免上下分屏和重复脸",
+            "seed": 20260722,
+        }
+        prompt = prompt_builder.build_prompt_list(
+            selected,
+            [],
+            settings,
+            uniq=uniq,
+            infer_template_style=lambda _tags, explicit: explicit,
+            infer_subject_type=lambda _tags, explicit: explicit,
+            infer_output_structure=lambda _subject, explicit: explicit,
+        )[0]
+        self.assertEqual(settings["画面结构模式解析结果"], narrative.VISUAL_LAYOUT_SINGLE_PERSON)
+        self.assertTrue(narrative.prompt_is_positive_layout_safe(prompt, narrative.VISUAL_LAYOUT_SINGLE_PERSON), prompt)
+        self.assertIn("整张画面只有这一位人物", prompt)
+        for artifact in ("上下分屏", "重复脸", "克隆主体", "堆叠肖像", "时间切片"):
+            self.assertNotIn(artifact, prompt)
+        self.assertGreaterEqual(len(prompt), 800)
+        self.assertLessEqual(len(prompt), 1200)
+
+        for artifact in (
+            "上下分屏与重复脸构图",
+            "前景背景同一人物",
+            "脸部重影",
+            "半透明人物残影",
+            "动作残影复制身体",
+        ):
+            unsafe_model_candidate = prompt.replace(
+                "整张画面只有这一位人物",
+                f"整张画面只有这一位人物，画面包含{artifact}",
+                1,
+            )
+            adopted, status, reason = model_refiner._resolve_model_prompt_candidate(
+                prompt,
+                unsafe_model_candidate,
+                settings,
+            )
+            self.assertEqual(adopted, prompt)
+            self.assertEqual(status, "rejected")
+            self.assertIn("画面结构", reason)
 
     def test_non_person_template_profile_does_not_inject_portrait_only_tags(self) -> None:
         module = load_stage_prompt_generator_for_integration_test()
@@ -14381,7 +14494,7 @@ class TestStagePromptModules(unittest.TestCase):
         )
         prompt = result[1]
         selected_text = result[2]
-        self.assertIn("非人物主主体只出现一次", prompt)
+        self.assertIn("非人物主主体拥有唯一完整轮廓", prompt)
         self.assertNotIn("牛仔景别", prompt)
         self.assertNotIn("牛仔景别", selected_text)
         self.assertNotIn("半身", selected_text)
@@ -14400,8 +14513,8 @@ class TestStagePromptModules(unittest.TestCase):
             settings = {**base_settings, "模型来源": source}
             system_prompt = model_refiner._resolve_system_prompt(settings)
             model_context = model_refiner._skill_context_for_model(settings)
-            self.assertIn("每人只出现一次", system_prompt)
-            self.assertIn("每人只出现一次", model_context)
+            self.assertIn("每位人物都有唯一完整的身体", system_prompt)
+            self.assertIn("每位人物都有唯一完整的身体", model_context)
 
         smart_settings = dict(base_settings)
         seed = smart_text.build_smart_text_seed(
@@ -14410,7 +14523,7 @@ class TestStagePromptModules(unittest.TestCase):
             selected_tags_text="成年情侣、双人互动、爵士酒廊",
             settings=smart_settings,
         )
-        self.assertIn("每人只出现一次", seed)
+        self.assertIn("每位人物都有唯一完整的身体", seed)
         self.assertEqual(smart_settings["画面结构模式解析结果"], narrative.VISUAL_LAYOUT_MULTI_SUBJECT)
 
     def test_narrative_plan_changes_when_recent_output_history_changes(self) -> None:

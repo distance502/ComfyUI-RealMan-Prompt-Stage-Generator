@@ -10,13 +10,13 @@ from typing import Any
 CHARACTER_SHEET_STRATEGY_NOTE = "角色设定图策略：启用时将当前节点提示词重构为多视角角色设定展示；停用时不介入全局生成。"
 CHARACTER_SHEET_PROMPT_BRIEF = (
     "角色设定图，多视角角色展示，头像特写，正面全身，侧面全身，背面全身，"
-    "同一角色一致，服装结构完整，发型轮廓清晰，材质层次明确，背景跟随当前素材，无文字标注"
+    "同一角色一致，服装结构完整，发型轮廓清晰，材质层次明确，背景跟随当前素材并保持纯净表面"
 )
 CHARACTER_SHEET_PROMPT_BRIEF_EN = (
     "character sheet, multi-view character turnaround, headshot close-up, "
     "front full-body view, side full-body view, back full-body view, "
     "consistent character identity across every view, complete outfit construction, "
-    "clear hairstyle structure, readable material layers, concept-aware background, no text labels"
+    "clear hairstyle structure, readable material layers, and a concept-aware background with clean surfaces"
 )
 CHARACTER_SHEET_INTERNAL_POLICY = (
     "角色设定图内部策略：只把参考图可见角色特征、当前节点标签和用户补充整理成画面素材；"

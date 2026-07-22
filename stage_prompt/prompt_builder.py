@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import re
 from collections import OrderedDict
 from typing import Any, Callable, NotRequired, TypedDict
 
@@ -3875,14 +3876,40 @@ def _translate_prompt_fragment(fragment: Any) -> str:
     return "" if _has_cjk(translated) else translated
 
 
+_NEGATIVE_ONLY_POSITIVE_FRAGMENT_KEYS = {
+    "无文字",
+    "无文本",
+    "无水印",
+    "无logo",
+    "无边框",
+    "no text",
+    "no unwanted text",
+    "no text labels",
+    "no watermark",
+    "no logo",
+    "no border",
+    "no low-resolution artifacts",
+}
+
+
 def _localize_prompt_fragments(fragments: list[str], settings: dict[str, Any]) -> list[str]:
+    positive_fragments: list[str] = []
+    for raw_fragment in fragments:
+        original = _clean_fragment(raw_fragment)
+        if not original or original.casefold() in _NEGATIVE_ONLY_POSITIVE_FRAGMENT_KEYS:
+            continue
+        fragment = _strip_negative_constraint_clauses(original)
+        if fragment:
+            positive_fragments.append(fragment)
     if not _use_english_prompt(settings):
-        return list(fragments)
+        return positive_fragments
 
     localized: list[str] = []
     seen: set[str] = set()
-    for fragment in fragments:
+    for fragment in positive_fragments:
         translated = _translate_prompt_fragment(fragment)
+        if translated.casefold() in _NEGATIVE_ONLY_POSITIVE_FRAGMENT_KEYS:
+            continue
         key = _fragment_key(translated)
         if not translated or key in seen:
             continue
@@ -4390,7 +4417,7 @@ def _prioritize_custom_prompt_values(values: list[str]) -> list[str]:
     generic_quality: list[str] = []
     seen: set[str] = set()
     for raw_value in values:
-        value = _clean_fragment(raw_value)
+        value = _strip_negative_constraint_clauses(_clean_fragment(raw_value))
         key = _fragment_key(value)
         if not value or not key or key in seen:
             continue
@@ -4428,7 +4455,7 @@ def _residual_prompt_fragments(
     result: list[str] = []
     seen: set[str] = set()
     for raw_fragment in fragments[1:]:
-        fragment = _clean_fragment(raw_fragment)
+        fragment = _strip_negative_constraint_clauses(_clean_fragment(raw_fragment))
         key = _fragment_key(fragment)
         if (
             not fragment
@@ -4719,7 +4746,38 @@ def _contains_any_term(fragment: str, terms: tuple[str, ...]) -> bool:
 
 def _is_negative_constraint_fragment(fragment: str) -> bool:
     text = str(fragment).strip()
-    return any(marker in text for marker in ("不要", "避免", "禁止", "不得", "无文字", "无文本"))
+    if any(
+        marker in text
+        for marker in (
+            "不要",
+            "避免",
+            "禁止",
+            "不得",
+            "不能",
+            "不出现",
+            "不包含",
+            "不需要",
+            "排除",
+            "无文字",
+            "无文本",
+        )
+    ):
+        return True
+    return bool(re.search(r"\b(?:no|without|avoid|exclude)\b", text, flags=re.IGNORECASE))
+
+
+def _strip_negative_constraint_clauses(fragment: str) -> str:
+    text = _clean_fragment(fragment)
+    if not text:
+        return ""
+    clauses = [clause.strip() for clause in re.split(r"[，,；;。！？!?]+", text) if clause.strip()]
+    positive = [
+        clause
+        for clause in clauses
+        if clause.casefold() not in _NEGATIVE_ONLY_POSITIVE_FRAGMENT_KEYS
+        and not _is_negative_constraint_fragment(clause)
+    ]
+    return "，".join(positive)
 
 
 def _filter_style_positive_fragments(fragments: list[str], style: str) -> list[str]:

@@ -103,6 +103,9 @@ from __future__ import annotations
 全身构图附加负面词_EN = ["cropped legs", "cropped feet", "partial body crop"]
 全局单帧附加负面词_ZH = [
     "上下重复画面",
+    "上下分屏",
+    "左右分屏",
+    "分屏构图",
     "纵向分屏",
     "横向分屏",
     "双联画",
@@ -116,9 +119,15 @@ from __future__ import annotations
     "画中画",
     "多场景并列",
     "时间切片",
+    "前后两段重复画面",
+    "同一画面上下复制",
+    "双重曝光人物构图",
 ]
 全局单帧附加负面词_EN = [
     "vertically duplicated image",
+    "top-bottom split screen",
+    "left-right split screen",
+    "split-screen composition",
     "vertical split screen",
     "horizontal split screen",
     "diptych",
@@ -132,6 +141,9 @@ from __future__ import annotations
     "picture-in-picture",
     "multiple scenes in one image",
     "time slicing",
+    "front and back duplicated frame",
+    "same image copied top and bottom",
+    "double-exposure person layout",
 ]
 主体复制附加负面词_ZH = [
     "同一人物重复出现",
@@ -144,6 +156,12 @@ from __future__ import annotations
     "双重面孔",
     "镜像复制主体",
     "倒影变成第二人物",
+    "人物前后重复",
+    "前景背景同一人物",
+    "半透明人物残影",
+    "脸部重影",
+    "背景幽灵脸",
+    "动作残影复制身体",
 ]
 主体复制附加负面词_EN = [
     "same person repeated",
@@ -156,6 +174,12 @@ from __future__ import annotations
     "double face",
     "mirror-cloned subject",
     "reflection becoming a second person",
+    "same person repeated in foreground and background",
+    "foreground and background duplicate subject",
+    "transparent duplicate person",
+    "ghosted face",
+    "ghost face in background",
+    "motion trail duplicating the body",
 ]
 多视图一致性附加负面词_ZH = [
     "同一视图重复",
@@ -231,6 +255,10 @@ from __future__ import annotations
     "单人主体出现两张脸",
     "单人主体出现额外头部",
     "单人主体被复制",
+    "单人前后景各出现一次",
+    "单人背后出现同脸人物",
+    "单人脸部产生重影",
+    "单人身体双重曝光",
 ]
 单人构图附加负面词_EN = [
     "background bystander intruding into a single-subject shot",
@@ -242,6 +270,10 @@ from __future__ import annotations
     "two faces on one solo subject",
     "extra head on a solo subject",
     "duplicated solo subject",
+    "solo subject repeated across depth planes",
+    "same face appearing behind the solo subject",
+    "ghosted face on a solo subject",
+    "double-exposed solo body",
 ]
 手部构图附加负面词_ZH = [
     "前景大手抢镜",
