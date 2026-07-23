@@ -4560,16 +4560,11 @@ function getSerializableWidgets(node) {
 
 function removeNodeWidgetSafely(node, widget) {
 	if (!Array.isArray(node?.widgets) || !node.widgets.includes(widget)) return false;
-	if (widget && typeof node.removeWidget === "function") {
-		try {
-			node.removeWidget(widget);
-			if (!node.widgets.includes(widget)) return true;
-		} catch (_error) {}
-	}
 	const index = node.widgets.indexOf(widget);
 	if (index < 0) return false;
 	node.widgets.splice(index, 1);
 	try { widget?.onRemove?.(); } catch (_error) {}
+	try { widget?.element?.remove?.(); } catch (_error) {}
 	return true;
 }
 
@@ -18988,6 +18983,7 @@ function enhanceStagePromptNode(node, library) {
 	// Only expose a healthy main panel after native controls are compacted and display state is ready.
 	node[PANEL_KEY].ready = true;
 	node[PANEL_READY_KEY] = true;
+	try { window.__QWEN_TE_STAGE_CLEANUP_MINI_TOOLBAR__?.(node, { scheduleLayout: false }); } catch (_error) {}
 	void syncNodeStageOutputCache(node, { shouldCommit: () => !node[NODE_REMOVED_KEY] && !!node[PANEL_KEY] }).then((output)=>{ if (node[NODE_REMOVED_KEY] || !node[PANEL_KEY]) return; if (output) refreshStageDisplay(node); else if (!getStagePromptOutputText(node)) { if (!hydrateStageDisplayStateFromPersistedData(node)) { void syncNodeWorkflowOutputMetaFromHistory(node, { createdAfter: getNodeWorkflowHistorySearchAfter(node), shouldCommit: () => !node[NODE_REMOVED_KEY] && !!node[PANEL_KEY] }).then(() => { if (node[NODE_REMOVED_KEY] || !node[PANEL_KEY]) return; hydrateStageDisplayStateFromPersistedData(node); refreshStageDisplay(node); }).catch(() => {}); } else { refreshStageDisplay(node); } } }).catch(() => {}); requestAnimationFrame(()=>{ if (node[NODE_REMOVED_KEY] || !node[PANEL_KEY]) return; if (node.size[0] < 560) node.setSize([560, node.size[1]]); scheduleNodeLayoutUpdate(node); });
 	return true;
 }

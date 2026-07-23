@@ -30,9 +30,12 @@ const MINI_CLEAR_CONFIRM_TIMER_KEY = Symbol.for("qwenTeMiniClearConfirmTimer");
 const MINI_NODE_REMOVED_KEY = Symbol.for("qwenTeMiniNodeRemoved");
 const MINI_NODE_DEF_HOOK_KEY = Symbol.for("qwenTeMiniNodeDefHook");
 const MINI_GRAPH_HOOK_KEY = Symbol.for("qwenTeMiniGraphHook");
+const MINI_HANDOFF_TIMER_KEY = Symbol.for("qwenTeMiniMainHandoffTimer");
+const MINI_OWNER_NODE_KEY = Symbol.for("qwenTeMiniOwnerNode");
 const MINI_STARTUP_SCAN_TIMER_KEY = "__qwenTeMiniToolbarStartupScanTimer";
 const MINI_STARTUP_SCAN_LIMIT = 8;
 const MINI_STARTUP_SCAN_INTERVAL_MS = 1200;
+const MINI_MAIN_HANDOFF_DELAY_MS = 1200;
 const MINI_WIDGET_RECONCILE_LIMIT = 64;
 const MINI_WIDGET_RECONCILE_INTERVAL_MS = 160;
 const MINI_FRONTEND_PROBE_QUERY_PATTERN = /(?:^|[?&])qwen_te_probe=(?:1|true|on)(?:&|$)/iu;
@@ -194,17 +197,19 @@ function getWidget(node, name) {
 
 function removeNodeWidgetSafely(node, widget) {
 	if (!node || !widget || !Array.isArray(node.widgets)) return false;
-	if (typeof node.removeWidget === "function") {
+	const detachElement = () => {
+		const element = widget.element;
+		const parent = element?.parentElement;
+		try { element?.remove?.(); } catch (_error) {}
 		try {
-			node.removeWidget(widget);
-			if (!node.widgets.includes(widget)) return true;
+			if (parent?.dataset?.qwenTeMiniToolbar === "true" && !parent?.children?.length) parent.remove?.();
 		} catch (_error) {}
-	}
+	};
 	const index = node.widgets.indexOf(widget);
 	if (index < 0) return false;
 	node.widgets.splice(index, 1);
 	try { widget.onRemove?.(); } catch (_error) {}
-	try { widget.element?.remove?.(); } catch (_error) {}
+	detachElement();
 	return true;
 }
 
@@ -656,13 +661,53 @@ function isLegacyMiniWidget(widget) {
 
 function cleanupLegacyMiniWidgets(node) {
 	if (!Array.isArray(node?.widgets)) return false;
+	const widgetsToRemove = [...node.widgets].filter(isLegacyMiniWidget);
 	let changed = false;
-	node.widgets = node.widgets.filter((widget) => {
-		const remove = isLegacyMiniWidget(widget);
-		if (remove) changed = true;
-		return !remove;
-	});
+	for (const widget of widgetsToRemove) changed = removeNodeWidgetSafely(node, widget) || changed;
 	return changed;
+}
+
+function pruneOrphanMiniToolbarDom(node) {
+	if (!node) return false;
+	let changed = false;
+	for (const root of document.querySelectorAll?.(".qwen-te-mini") ?? []) {
+		if (root?.[MINI_OWNER_NODE_KEY] !== node) continue;
+		const parent = root?.parentElement;
+		try { root?.remove?.(); } catch (_error) {}
+		try {
+			if (parent?.dataset?.qwenTeMiniToolbar === "true" && !parent?.children?.length) parent.remove?.();
+		} catch (_error) {}
+		changed = true;
+	}
+	return changed;
+}
+
+function clearMiniHandoffTimer(node, expectedTimer = null) {
+	const timer = node?.[MINI_HANDOFF_TIMER_KEY];
+	if (expectedTimer != null && timer !== expectedTimer) return false;
+	if (timer == null) return false;
+	clearTimeout(timer);
+	delete node[MINI_HANDOFF_TIMER_KEY];
+	return true;
+}
+
+function scheduleMiniFallback(node) {
+	if (!node || node[MINI_NODE_REMOVED_KEY] || hasMainStagePanel(node)) return null;
+	if (node[MINI_HANDOFF_TIMER_KEY] != null) return node[MINI_HANDOFF_TIMER_KEY];
+	let timer = null;
+	timer = setTimeout(() => {
+		if (node[MINI_HANDOFF_TIMER_KEY] !== timer) return;
+		delete node[MINI_HANDOFF_TIMER_KEY];
+		if (node[MINI_NODE_REMOVED_KEY] || hasMainStagePanel(node)) {
+			cleanupMiniToolbar(node);
+			return;
+		}
+		ensureMiniToolbar(node);
+		refreshMiniToolbar(node);
+	}, MINI_MAIN_HANDOFF_DELAY_MS);
+	node[MINI_HANDOFF_TIMER_KEY] = timer;
+	timer?.unref?.();
+	return timer;
 }
 
 function refreshMiniToolbar(node) {
@@ -818,10 +863,12 @@ function cleanupMiniToolbar(node, options = {}) {
 		node[MINI_STATUS_TEXT_KEY] ||
 		node[MINI_CLEAR_CONFIRM_PENDING_KEY] != null ||
 		node[MINI_CLEAR_CONFIRM_TIMER_KEY] != null ||
+		node[MINI_HANDOFF_TIMER_KEY] != null ||
 		hasLegacyWidgets ||
 		hasTitleSuffix
 	);
-	if (!hasState) return false;
+	if (!hasState) return pruneOrphanMiniToolbarDom(node);
+	clearMiniHandoffTimer(node);
 	cancelMiniClearConfirmation(node, { refresh: false });
 	clearMiniWidgetReconcile(node);
 	let layoutChanged = hasLegacyWidgets || hasTitleSuffix;
@@ -839,6 +886,7 @@ function cleanupMiniToolbar(node, options = {}) {
 	} catch (_error) {}
 	layoutChanged = restoreStashedWidgets(node) || layoutChanged;
 	layoutChanged = cleanupLegacyMiniWidgets(node) || layoutChanged;
+	layoutChanged = pruneOrphanMiniToolbarDom(node) || layoutChanged;
 	delete node[MINI_TOOLBAR_KEY];
 	delete node[MINI_STATE_KEY];
 	delete node[MINI_STATUS_TEXT_KEY];
@@ -859,6 +907,7 @@ function sendMiniDecisionProbe(marker, node) {
 
 function ensureMiniToolbar(node) {
 	if (node?.[MINI_NODE_REMOVED_KEY]) return;
+	clearMiniHandoffTimer(node);
 	if (!isStagePromptNode(node)) {
 		const widgetPreview = (node?.widgets ?? [])
 			.slice(0, 6)
@@ -913,6 +962,7 @@ function ensureMiniToolbar(node) {
 
 	const root = document.createElement("div");
 	root.className = "qwen-te-mini";
+	root[MINI_OWNER_NODE_KEY] = node;
 	root.style.pointerEvents = "auto";
 	liftMiniToolbarDomWidget(root);
 	root.addEventListener("pointerdown", (event) => event.stopPropagation());
@@ -1006,8 +1056,11 @@ function enhanceExistingNodes() {
 			cleanupMiniToolbar(node);
 			continue;
 		}
-		ensureMiniToolbar(node);
-		refreshMiniToolbar(node);
+		if (globalThis.__QWEN_TE_STAGE_MAIN_UI__ === true) scheduleMiniFallback(node);
+		else {
+			ensureMiniToolbar(node);
+			refreshMiniToolbar(node);
+		}
 	}
 }
 
@@ -1050,8 +1103,11 @@ function installMiniGraphNodeAddedHook() {
 		delete node[MINI_NODE_REMOVED_KEY];
 		setTimeout(() => {
 			if (node?.[MINI_NODE_REMOVED_KEY]) return;
-			ensureMiniToolbar(node);
-			refreshMiniToolbar(node);
+			if (globalThis.__QWEN_TE_STAGE_MAIN_UI__ === true) scheduleMiniFallback(node);
+			else {
+				ensureMiniToolbar(node);
+				refreshMiniToolbar(node);
+			}
 		}, 0);
 		return result;
 	};
@@ -1078,7 +1134,9 @@ function installMiniNodeLifecycleHooks(nodeType) {
 		delete this[MINI_NODE_REMOVED_KEY];
 		const result = originalOnNodeCreated?.apply(this, arguments);
 		setTimeout(() => {
-			if (!this[MINI_NODE_REMOVED_KEY]) ensureMiniToolbar(this);
+			if (this[MINI_NODE_REMOVED_KEY]) return;
+			if (globalThis.__QWEN_TE_STAGE_MAIN_UI__ === true) scheduleMiniFallback(this);
+			else ensureMiniToolbar(this);
 		}, 0);
 		return result;
 	};
@@ -1122,7 +1180,7 @@ app.registerExtension({
 	async setup() {
 		sendFrontendProbe("setup");
 		clearMiniStartupScanTimer();
-		enhanceExistingNodes();
+		if (globalThis.__QWEN_TE_STAGE_MAIN_UI__ !== true) enhanceExistingNodes();
 		installMiniGraphNodeAddedHook();
 		startMiniStartupScan();
 	},
@@ -1130,7 +1188,10 @@ app.registerExtension({
 		if (!isStagePromptNode(node)) return;
 		delete node[MINI_NODE_REMOVED_KEY];
 		sendFrontendProbe("nodeCreated");
-		ensureMiniToolbar(node);
-		refreshMiniToolbar(node);
+		if (globalThis.__QWEN_TE_STAGE_MAIN_UI__ === true) scheduleMiniFallback(node);
+		else {
+			ensureMiniToolbar(node);
+			refreshMiniToolbar(node);
+		}
 	},
 });

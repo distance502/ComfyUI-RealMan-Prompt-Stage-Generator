@@ -124,6 +124,9 @@ globalThis.__miniToolbarTestExports = {
 	ensureMiniToolbar,
 	cleanupMiniToolbar,
 	cleanupLegacyMiniWidgets,
+	pruneOrphanMiniToolbarDom,
+	clearMiniHandoffTimer,
+	scheduleMiniFallback,
 	enhanceExistingNodes,
 	clearMiniWidgetReconcile,
 	startMiniWidgetReconcile,
@@ -135,6 +138,7 @@ globalThis.__miniToolbarTestExports = {
 	sendFrontendProbe,
 	MINI_STARTUP_SCAN_TIMER_KEY,
 	MINI_STARTUP_SCAN_LIMIT,
+	MINI_MAIN_HANDOFF_DELAY_MS,
 	MINI_WIDGET_RECONCILE_INTERVAL_MS,
 	buildSelectedTagsText,
 	buildMiniBaseStatus,
@@ -269,6 +273,117 @@ test("legacy mini cleanup preserves the main panel status rows", async () => {
 
 	assert.equal(exports.cleanupLegacyMiniWidgets(node), true);
 	assert.deepEqual(Array.from(node.widgets, (widget) => widget.name), ["状态", "摘要", "模板风格"]);
+});
+
+test("legacy mini cleanup uses widget lifecycle and removes the DOM wrapper", async () => {
+	const exports = await loadMiniToolbarExports();
+	const wrapper = new MockElement("div");
+	wrapper.dataset.qwenTeMiniToolbar = "true";
+	const root = new MockElement("div");
+	root.className = "qwen-te-mini";
+	wrapper.appendChild(root);
+	exports.__context.document.body.appendChild(wrapper);
+	const preserved = { name: "模板风格", serialize: true };
+	let lifecycleCalls = 0;
+	const mini = {
+		name: "qwen_te_mini_toolbar_dom",
+		serialize: false,
+		__qwenStageMiniWidget: true,
+		element: root,
+		onRemove() { lifecycleCalls += 1; },
+	};
+	const node = {
+		widgets: [preserved, mini],
+		removeWidget() { throw new Error("cleanup must not depend on a version-specific removeWidget signature"); },
+	};
+
+	assert.equal(exports.cleanupLegacyMiniWidgets(node), true);
+	assert.deepEqual(Array.from(node.widgets), [preserved]);
+	assert.equal(lifecycleCalls, 1);
+	assert.equal(root.parentElement, null);
+	assert.equal(wrapper.parentElement, null);
+});
+
+test("main-panel cleanup prunes an orphan mini DOM after runtime state was lost", async () => {
+	const exports = await loadMiniToolbarExports();
+	const wrapper = new MockElement("div");
+	wrapper.dataset.qwenTeMiniToolbar = "true";
+	const root = new MockElement("div");
+	root.className = "qwen-te-mini";
+	wrapper.appendChild(root);
+	exports.__context.document.body.appendChild(wrapper);
+	const node = {
+		widgets: [{ name: "qwen_te_tag_panel" }],
+		[Symbol.for("qwen_te.stage_prompt.panel")]: { ready: true },
+		[Symbol.for("qwen_te.stage_prompt.panel_ready")]: true,
+	};
+	root[Symbol.for("qwenTeMiniOwnerNode")] = node;
+	const otherWrapper = new MockElement("div");
+	otherWrapper.dataset.qwenTeMiniToolbar = "true";
+	const otherRoot = new MockElement("div");
+	otherRoot.className = "qwen-te-mini";
+	otherRoot[Symbol.for("qwenTeMiniOwnerNode")] = { id: "another-workflow-node" };
+	otherWrapper.appendChild(otherRoot);
+	exports.__context.document.body.appendChild(otherWrapper);
+	exports.__context.document.querySelectorAll = (selector) => selector === ".qwen-te-mini" ? [root, otherRoot] : [];
+
+	assert.equal(exports.cleanupMiniToolbar(node), true);
+	assert.equal(root.parentElement, null);
+	assert.equal(wrapper.parentElement, null);
+	assert.equal(otherRoot.parentElement, otherWrapper);
+	assert.equal(otherWrapper.parentElement, exports.__context.document.body);
+});
+
+test("main UI gets a handoff window before the mini fallback is created", async () => {
+	const exports = await loadMiniToolbarExports();
+	const timers = [];
+	exports.__context.setTimeout = (callback, delayMs) => {
+		const timer = { callback, delayMs, unref() {} };
+		timers.push(timer);
+		return timer;
+	};
+	exports.__context.clearTimeout = () => {};
+	exports.__context.__QWEN_TE_STAGE_MAIN_UI__ = true;
+	const node = {
+		title: "阶段式提示词生成器",
+		comfyClass: "QwenTE_StagePromptGenerator",
+		widgets: [],
+	};
+
+	await exports.__extension.nodeCreated(node);
+	assert.equal(node.widgets.some((widget) => widget.name === "qwen_te_mini_toolbar_dom"), false);
+	assert.equal(timers.length, 1);
+	assert.equal(timers[0].delayMs, exports.MINI_MAIN_HANDOFF_DELAY_MS);
+
+	node.widgets.push({ name: "qwen_te_tag_panel" });
+	node[Symbol.for("qwen_te.stage_prompt.panel")] = { ready: true };
+	node[Symbol.for("qwen_te.stage_prompt.panel_ready")] = true;
+	timers[0].callback();
+	assert.equal(node.widgets.some((widget) => widget.name === "qwen_te_mini_toolbar_dom"), false);
+});
+
+test("startup scans share one main UI handoff timer instead of creating mini immediately", async () => {
+	const exports = await loadMiniToolbarExports();
+	const timers = [];
+	exports.__context.setTimeout = (callback, delayMs) => {
+		const timer = { callback, delayMs, unref() {} };
+		timers.push(timer);
+		return timer;
+	};
+	exports.__context.clearTimeout = () => {};
+	exports.__context.__QWEN_TE_STAGE_MAIN_UI__ = true;
+	const node = {
+		title: "阶段式提示词生成器",
+		comfyClass: "QwenTE_StagePromptGenerator",
+		widgets: [],
+	};
+	exports.__context.__testApp.graph._nodes = [node];
+
+	exports.enhanceExistingNodes();
+	exports.enhanceExistingNodes();
+	assert.equal(node.widgets.some((widget) => widget.name === "qwen_te_mini_toolbar_dom"), false);
+	assert.equal(timers.length, 1);
+	assert.equal(timers[0].delayMs, exports.MINI_MAIN_HANDOFF_DELAY_MS);
 });
 
 test("buildMiniBaseStatus prefers operational state over fold state noise", async () => {
