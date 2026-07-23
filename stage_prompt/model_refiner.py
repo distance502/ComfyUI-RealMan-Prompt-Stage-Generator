@@ -83,7 +83,7 @@ _LEADING_SCENE_WRAPPER_PATTERN = re.compile(
     r"^\s*(?:一张|一幅)\s*(?:描绘|展示|呈现|表现|刻画)?\s*(.+?)\s*的(?:画面|图像)(?:中)?\s*[，,]?\s*(.*)$"
 )
 _NARRATIVE_FILLER_PATTERNS = (
-    re.compile(r"(?:画面中|图像中|镜头中|场景中)\s*[，,]?\s*"),
+    re.compile(r"^(?:画面中|图像中|镜头中|场景中)\s*[，,]?\s*"),
     re.compile(r"(?:这个角色|该角色|这个场景|该场景)\s*[，,]?\s*"),
     re.compile(r"(?:整体呈现(?:出)?|整体营造出|整体展现出)\s*"),
     re.compile(r"(?:仿佛|宛如|如同)\s*"),
@@ -578,6 +578,17 @@ def _postprocess_prompt_text(text: str) -> str:
     collapsed = re.sub(r"\s*[，,]\s*", "，", collapsed)
     collapsed = _dedupe_prompt_fragments(collapsed)
     return collapsed.strip("，,;； \n\t")
+
+
+def _repair_common_video_fragment_errors(text: str) -> str:
+    """Repair short local-model omissions before conservative video blending."""
+
+    result = str(text or "")
+    result = result.replace("线索与的另一处", "线索与另一处")
+    result = re.sub(r"位于(?:画面)?心偏前", "位于画面中心偏前", result)
+    result = result.replace("在前后保持一致", "在前后画面中保持一致")
+    result = result.replace("前后保持一致", "前后画面中保持一致")
+    return result
 
 
 def _dedupe_prompt_fragments(text: str) -> str:
@@ -2295,7 +2306,7 @@ def maybe_model_refine_video(
         return original
 
     prepared, recovered = _prepare_model_response_text(raw_text)
-    candidate = _postprocess_prompt_text(prepared)
+    candidate = _repair_common_video_fragment_errors(_postprocess_prompt_text(prepared))
     language = str(settings.get("提示词语言", "纯中文") or "纯中文")
     anchors = [str(item).strip() for item in settings.get("视频提示词必保留锚点", []) if str(item).strip()]
     missing = [anchor for anchor in anchors if anchor not in candidate]

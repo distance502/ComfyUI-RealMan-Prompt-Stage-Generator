@@ -11204,6 +11204,55 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertEqual(selected["服装造型"], ["丝质睡袍"])
         self.assertEqual(selected["场景背景"], ["浴缸"])
 
+    def test_runtime_random_mainline_keeps_dungeon_role_shot_and_gear_coherent(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["特工", "载具", "女冒险者", "病娇"],
+                "画面风格": ["暗黑漫画"],
+                "场景背景": ["地下城遗迹"],
+                "动作姿态": ["阔步前行"],
+                "构图视角": ["头肩像", "固定镜头时刻", "全景全身"],
+                "服装造型": ["T恤", "雪纺"],
+                "道具世界观": ["旅行箱", "旅行包"],
+            }
+        )
+        notes: list[str] = []
+        skills._apply_runtime_random_mainline_convergence(
+            selected=selected,
+            custom_tags=[],
+            settings={
+                "主体类型": "人物角色",
+                "模板风格": "暗黑漫画",
+                "运行时随机标签": True,
+                "随机主题池": "地下城冒险",
+                "标签反推模式": "自动平衡",
+                "随机主题池档案标记": [
+                    "tag:地下城冒险",
+                    "tag:女冒险者",
+                    "tag:地下城遗迹",
+                ],
+            },
+            notes=notes,
+            context={
+                "runtime_subject_identity_tags": {"特工", "女冒险者"},
+                "runtime_theme_constraints": {
+                    "地下城冒险": {
+                        "blocked_outfits": {"T恤", "雪纺"},
+                        "fallback_outfit": "皮革护甲",
+                        "blocked_props": {"旅行箱", "旅行包"},
+                        "fallback_prop": "火炬",
+                    },
+                },
+            },
+            remove_tag_from_state=remove_tag_from_state,
+        )
+
+        self.assertEqual(selected["主体"], ["女冒险者", "病娇"])
+        self.assertEqual(selected["构图视角"], ["固定镜头时刻", "全景全身"])
+        self.assertEqual(selected["服装造型"], ["皮革护甲"])
+        self.assertEqual(selected["道具世界观"], ["火炬"])
+        self.assertTrue(any("运行随机单主线收敛" in note for note in notes))
+
     def test_theme_profile_rotation_continues_after_full_cycle(self) -> None:
         module = load_stage_prompt_generator_for_integration_test()
         module._CACHE.clear()
@@ -15234,6 +15283,39 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertNotIn("Thinking Process", prompt)
         self.assertLessEqual(prompt.count("、"), 10)
 
+    def test_video_prompt_skill_does_not_import_station_story_into_dungeon(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["女冒险者"],
+                "画面风格": ["暗黑漫画"],
+                "场景背景": ["地下城遗迹"],
+                "动作姿态": ["阔步前行"],
+                "服装造型": ["皮革护甲"],
+                "道具世界观": ["火炬"],
+                "光影氛围": ["顶光烟雾"],
+                "构图视角": ["固定镜头时刻", "全景全身"],
+            }
+        )
+        prompt = video_prompt_skill.build_video_prompt(
+            selected,
+            [],
+            {
+                "提示词语言": "纯中文",
+                "主体类型解析结果": "人物角色",
+                "模板风格": "暗黑漫画",
+                "seed": 20260723,
+            },
+        )
+
+        self.assertTrue(video_prompt_skill.is_natural_video_prompt(prompt, language="纯中文"))
+        self.assertTrue(800 <= len(prompt) <= 1200)
+        for anchor in ("女冒险者", "地下城遗迹", "阔步前行", "皮革护甲", "火炬"):
+            self.assertIn(anchor, prompt)
+        for contamination in ("车站", "站台", "列车", "同一场雨", "雨声"):
+            self.assertNotIn(contamination, prompt)
+        self.assertIn("镜头从全景全身开始", prompt)
+        self.assertNotIn("全景全身和固定镜头时刻", prompt)
+
     def test_video_prompt_skill_supports_english_and_bilingual_output(self) -> None:
         primary = (
             "A seasoned female detective in a dark trench coat stands on a rain-soaked railway platform, "
@@ -15387,6 +15469,23 @@ class TestStagePromptModules(unittest.TestCase):
             self.assertIn(anchor, result)
         self.assertEqual(model_settings["模型调用采纳次数"], 1)
         self.assertEqual(model_settings.get("模型活动回退数量", 0), 0)
+
+    def test_video_model_refiner_repairs_common_local_fragment_omissions(self) -> None:
+        fragmented = (
+            "线索与的另一处细节形成呼应，女冒险者位于心偏前，"
+            "皮革护甲在前后保持一致，火炬照亮地下城遗迹。"
+        )
+        result = model_refiner._repair_common_video_fragment_errors(fragmented)
+        self.assertIn("线索与另一处", result)
+        self.assertIn("位于画面中心偏前", result)
+        self.assertIn("前后画面中保持一致", result)
+        self.assertNotIn("线索与的另一处", result)
+        self.assertNotIn("位于心偏前", result)
+
+        processed = model_refiner._postprocess_natural_prompt_text(
+            "起初，线索与场景中的另一处细节形成呼应，人物才改变方向。"
+        )
+        self.assertIn("线索与场景中的另一处", processed)
 
     def test_stage_video_prompt_output_is_cached_and_exposed_in_json(self) -> None:
         module = load_stage_prompt_generator_for_integration_test()

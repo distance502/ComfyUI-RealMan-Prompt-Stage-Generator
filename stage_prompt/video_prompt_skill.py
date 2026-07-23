@@ -138,6 +138,17 @@ def _pair(groups: Mapping[str, list[str]], name: str) -> str:
     return values[0] if len(values) == 1 else f"{values[0]}和{values[1]}"
 
 
+def _primary_composition(groups: Mapping[str, list[str]]) -> str:
+    values = groups.get("构图视角", [])
+    for tag in values:
+        if any(
+            marker in tag
+            for marker in ("大全景", "大远景", "远景", "全景", "全身", "中景", "近景", "半身", "特写", "头肩", "头部")
+        ):
+            return tag
+    return values[0] if values else "中景"
+
+
 def _stable_index(parts: Sequence[str], size: int, seed: int) -> int:
     payload = "|".join([*(str(part or "") for part in parts), str(int(seed or 0))])
     digest = hashlib.blake2b(payload.encode("utf-8"), digest_size=8).digest()
@@ -291,7 +302,7 @@ def _build_chinese_video_prompt(
     outfit = _pair(groups, "服装造型")
     props = _pair(groups, "道具世界观") or "场景中的关键线索"
     lighting = _pair(groups, "光影氛围") or "主光随动作轻微移动，环境反射保留空间层次"
-    composition = _pair(groups, "构图视角") or "中景"
+    composition = _primary_composition(groups)
     brief = _source_brief(settings)
     seed = int(settings.get("运行时随机有效种子", 0) or settings.get("seed", 0) or 0)
     anchors = {
@@ -323,12 +334,12 @@ def _build_chinese_video_prompt(
         f"{_audio_zh(scene, action, non_person)}。最后，{ending}，让故事停在结果已经出现、下一步仍可继续的时刻。"
     )
     details = (
-        f"前两秒只交代{scene}的空间关系：{reference}位于画面中心偏前，{props}留在视线能够回到的位置，背景保持同一座车站和同一场雨，不用新的地点解释变化。",
+        f"前两秒只交代{scene}的空间关系：{reference}位于画面中心偏前，{props}留在视线能够回到的位置，背景始终保持同一处空间，不用新的地点解释变化。",
         f"第三秒左右，{reference}先收紧动作再改变方向，手部、肩膀和脚步按照同一个重心完成转身，{action}不是突然跳切，而是由前一刻的观察自然接上。",
         f"动作推进时，镜头保留足够的前方空间，让观众先看见{reference}要去哪里，再看见{reference}如何到达；画面不使用快速摇晃、无理由变焦或额外的蒙太奇切换。",
-        f"中段的重点不是堆放更多物件，而是让{props}、湿滑地面和远处列车灯共同证明刚才发生过什么；每一次反光、遮挡和距离变化都紧跟{reference}的动作出现。",
-        f"焦点可以从{reference}的表情和手部短暂移到{props}，随后回到{reference}，景深变化保持缓慢，服装材质、发丝方向和雨水附着方式在前后画面中保持一致。",
-        f"声音也按同一条因果线推进：先听见雨声和远处站台回响，再加入脚步与衣料摩擦，动作结束后保留一小段水滴、列车低鸣和呼吸余音，不加入旁白、字幕或突然出现的对白。",
+        f"中段的重点不是堆放更多物件，而是让{props}与{scene}中已有的表面、遮挡和距离变化共同证明刚才发生过什么；环境反馈只在{action}之后出现，不凭空抢在动作前面。",
+        f"焦点可以从{reference}的表情和手部短暂移到{props}，随后回到{reference}，景深变化保持缓慢；{outfit or '主体外观'}的材质、边缘和运动方向在前后画面中保持一致。",
+        f"声音也按同一条因果线推进：{_audio_zh(scene, action, non_person)}；动作结束后只保留当前空间自然产生的短暂余音，不加入旁白、字幕或突然出现的对白。",
         f"最后两秒不再安排新的任务，镜头继续观察已经产生的结果；{reference}的视线、{props}的位置和背景灯光共同指向下一步，让定格像故事暂停，而不是把剧情强行结束。",
     )
     return _fit_chinese_video_prompt(text, details)

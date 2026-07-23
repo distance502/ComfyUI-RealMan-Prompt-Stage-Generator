@@ -839,6 +839,17 @@ def _apply_runtime_random_mainline_convergence(
 
     removed_by_group: dict[str, list[str]] = {}
 
+    def remove_group_tags(group_name: str, tags: list[str]) -> list[str]:
+        removed: list[str] = []
+        for tag in tags:
+            if tag in protected:
+                continue
+            remove_tag_from_state(selected, custom_tags, tag)
+            removed.append(tag)
+        if removed:
+            removed_by_group.setdefault(group_name, []).extend(removed)
+        return removed
+
     def compact(group_name: str, limit: int, *, exact_style: bool = False) -> None:
         values = [str(tag).strip() for tag in selected.get(group_name, []) if str(tag).strip()]
         if len(values) <= limit and not exact_style:
@@ -916,6 +927,67 @@ def _apply_runtime_random_mainline_convergence(
     if strict_style and runtime_random:
         compact("画面风格", 1, exact_style=True)
     if runtime_random:
+        subject_type = str(settings.get("主体类型", "自动") or "自动").strip()
+        if subject_type == "人物角色":
+            non_person_tags = _AUTO_NON_PERSON_SUBJECT_TAGS | {
+                str(tag).strip()
+                for tag in context.get("non_person_subject_tags", set())
+                if str(tag).strip()
+            }
+            remove_group_tags(
+                "主体",
+                [tag for tag in selected.get("主体", []) if str(tag).strip() in non_person_tags],
+            )
+
+        # A theme profile contributes one deliberate role. Keep appearance,
+        # age and temperament around it, but drop competing random careers.
+        subject_values = [str(tag).strip() for tag in selected.get("主体", []) if str(tag).strip()]
+        theme_subjects = [tag for tag in theme_tags if tag in subject_values]
+        if theme_subjects:
+            theme_subject = theme_subjects[0]
+            identity_tags = {
+                str(tag).strip()
+                for key in ("human_identity_tags", "strong_identity_tags", "runtime_subject_identity_tags")
+                for tag in context.get(key, set())
+                if str(tag).strip()
+            }
+
+            def looks_like_competing_identity(tag: str) -> bool:
+                if tag in identity_tags:
+                    return True
+                return bool(
+                    re.search(r"(?:探险家|冒险者|魔法师|设计师|摄影师|工程师|机械师|调酒师|律师|医生|特工|祭司|骑士|剑客|忍者|战士|修女|学生|偶像|模特)$", tag)
+                )
+
+            remove_group_tags(
+                "主体",
+                [
+                    tag
+                    for tag in subject_values
+                    if tag != theme_subject and looks_like_competing_identity(tag)
+                ],
+            )
+
+        theme_pool = str(settings.get("随机主题池", "自动") or "自动").strip()
+        theme_constraints = dict(context.get("runtime_theme_constraints", {})).get(theme_pool, {})
+        if isinstance(theme_constraints, dict):
+            for group_name, blocked_key, fallback_key in (
+                ("服装造型", "blocked_outfits", "fallback_outfit"),
+                ("道具世界观", "blocked_props", "fallback_prop"),
+            ):
+                blocked = {
+                    str(tag).strip()
+                    for tag in theme_constraints.get(blocked_key, ())
+                    if str(tag).strip()
+                }
+                remove_group_tags(
+                    group_name,
+                    [tag for tag in selected.get(group_name, []) if str(tag).strip() in blocked],
+                )
+                fallback = str(theme_constraints.get(fallback_key, "") or "").strip()
+                if fallback and group_name in selected and not selected[group_name]:
+                    selected[group_name].append(fallback)
+
         compact("主体", 4)
         compact("场景背景", 1)
         compact("动作姿态", 1)
@@ -923,8 +995,8 @@ def _apply_runtime_random_mainline_convergence(
         compact("道具世界观", 2)
         compact("技术画质", 3)
 
-        # Camera angle is exclusive, while a shot size and the complete-frame
-        # safety anchor may coexist with that angle.
+        # Camera angle and shot size are independently exclusive. Dynamic
+        # full-body movement favors a readable full shot over a portrait crop.
         compositions = [str(tag).strip() for tag in selected.get("构图视角", []) if str(tag).strip()]
         angle_hits = [
             tag
@@ -937,6 +1009,24 @@ def _apply_runtime_random_mainline_convergence(
             for tag in removed_angles:
                 remove_tag_from_state(selected, custom_tags, tag)
             removed_by_group.setdefault("构图视角", []).extend(removed_angles)
+
+        compositions = [str(tag).strip() for tag in selected.get("构图视角", []) if str(tag).strip()]
+        close_shots = [
+            tag for tag in compositions
+            if any(marker in tag for marker in ("头肩", "头部", "特写", "近景", "半身", "肖像"))
+        ]
+        full_shots = [
+            tag for tag in compositions
+            if any(marker in tag for marker in ("大全景", "大远景", "远景", "全景", "全身", "人物完整", "脚部完整"))
+        ]
+        if close_shots and full_shots:
+            action_text = " ".join(str(tag).strip() for tag in selected.get("动作姿态", []))
+            dynamic_action = any(
+                marker in action_text
+                for marker in ("行走", "前行", "跨步", "奔跑", "跳跃", "追逐", "飞行", "转身", "移动")
+            )
+            losing_shots = close_shots if dynamic_action else full_shots
+            remove_group_tags("构图视角", losing_shots)
         compact("构图视角", 3)
 
         # Repair known catalog terms that describe a prop rather than image

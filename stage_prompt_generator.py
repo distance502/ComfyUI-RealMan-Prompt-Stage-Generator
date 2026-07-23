@@ -2322,6 +2322,24 @@ def _normalize_inference_state(
             "runtime_mainline_group_priorities": {
                 "道具世界观": ["手电筒", "火炬", "提灯", "地图", "罗盘", "钥匙", "卷轴"],
             },
+            "runtime_subject_identity_tags": {
+                "调酒师", "律师", "特工", "摄影师", "乐队主唱", "机修师", "机械师",
+                "医生", "研究员", "赛车手", "遗迹探险家", "精灵游侠", "龙骑士",
+                "魔剑士", "宫廷魔法师", "圣骑士", "黑暗女巫", "女武士",
+            },
+            "runtime_theme_constraints": {
+                "地下城冒险": {
+                    "blocked_outfits": {
+                        "休闲", "运动", "商务休闲", "T恤", "毛衣", "卫衣", "白衬衫",
+                        "奶油针织", "针织", "开衫", "牛仔裤", "短裤", "雪纺",
+                    },
+                    "fallback_outfit": "皮革护甲",
+                    "blocked_props": {
+                        "旅行箱", "行李箱", "旅行包", "手提包", "手持饮料",
+                    },
+                    "fallback_prop": "火炬",
+                },
+            },
             "runtime_quality_reassignments": {"飞剑": "道具世界观"},
             "danbooru_visual_intent_families": DANBOORU_VISUAL_INTENT_FAMILIES,
             "danbooru_reference_sheet_tags": DANBOORU_REFERENCE_SHEET_TAGS,
