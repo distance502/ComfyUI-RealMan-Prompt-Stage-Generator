@@ -2314,8 +2314,9 @@ test("stage output indexes and display modes match the backend output contract",
 		negativePrompt: 4,
 		promptCollection: 5,
 		smartText: 6,
+		videoPrompt: 7,
 	});
-	assert.deepEqual(Array.from(exports.STAGE_DISPLAY_MODES, (item) => item.key), ["prompt", "negative", "tags", "blocks", "json", "smart"]);
+	assert.deepEqual(Array.from(exports.STAGE_DISPLAY_MODES, (item) => item.key), ["prompt", "negative", "tags", "blocks", "json", "smart", "video"]);
 });
 
 test("stage canvas output labels stay compact while output slots remain compatible", async () => {
@@ -2329,10 +2330,11 @@ test("stage canvas output labels stay compact while output slots remain compatib
 			{ name: "推荐负面词" },
 			{ name: "正向提示词合集" },
 			{ name: "智能文本" },
+			{ name: "视频提示词" },
 		],
 	};
 	assert.equal(exports.compactStagePromptOutputs(node), true);
-	assert.deepEqual(node.outputs.map((output) => output.name), ["全文", "正向", "标签", "JSON", "负面", "合集", "智能"]);
+	assert.deepEqual(node.outputs.map((output) => output.name), ["全文", "正向", "标签", "JSON", "负面", "合集", "智能", "视频"]);
 	assert.equal(node.outputs[1]._qwenTeOriginalName, "首条正向提示词");
 	assert.equal(node.outputs[5]._qwenTeOriginalName, "正向提示词合集");
 });

@@ -82,14 +82,14 @@ def _model_skill_pipeline_label(settings: dict[str, Any]) -> str:
     if fallback_note:
         return f"{call_status or '已回退仅Skill'}：{fallback_note}"
     if source == "仅Skill":
-        return "仅Skill：不调用模型，本地Skill直接输出"
+        return "仅Skill：不调用模型，本地Skill直接输出图像、智能文本和视频提示词"
     if source == "API接口":
         provider = str(settings.get("API服务商有效", settings.get("API服务商", "")) or "").strip()
         model = str(settings.get("API模型有效", settings.get("API模型", "")) or "").strip()
         api_label = " / ".join(part for part in (provider, model) if part)
-        return f"Skill前置 + API模型后置润色{f'（{api_label}）' if api_label else ''}"
+        return f"Skill前置 + API模型后置润色{f'（{api_label}）' if api_label else ''}（含视频提示词）"
     model_name = str(settings.get("内置主模型", "") or "").strip()
-    return f"Skill前置 + 本地模型后置润色{f'（{model_name}）' if model_name else ''}"
+    return f"Skill前置 + 本地模型后置润色{f'（{model_name}）' if model_name else ''}（含视频提示词）"
 
 
 def _safe_model_api_base_url(raw_url: Any) -> str:
@@ -189,6 +189,7 @@ def build_selected_tags_text(
             f"模型来源：{model_source}",
             f"模型实际来源：{model_source_effective}",
             f"模型调用状态：{settings.get('模型调用状态', '未记录')}",
+            f"视频提示词模型状态：{settings.get('视频提示词模型状态', '未记录')}",
             f"图片反推状态：{settings.get('图片反推状态', '未启用')}",
             f"模型与Skill链路：{_model_skill_pipeline_label(settings)}",
             f"NSFW Skill解析：{settings.get('NSFW策略解析结果', '') or '未触发'}",
@@ -226,6 +227,7 @@ def build_json_payload(
     recent_tracks: list[str],
     negative_prompt: str,
     smart_text_prompt: str = "",
+    video_prompt: str = "",
 ) -> dict[str, Any]:
     display_negative_prompt = summarize_negative_prompt_for_display(negative_prompt)
     model_api_provider, model_api_base_url, model_api_model, model_config_signature = _model_api_config_meta(settings)
@@ -239,6 +241,12 @@ def build_json_payload(
         "prompt_list": prompt_list,
         "prompt_collection": "\n\n".join(prompt_list),
         "smart_text_prompt": str(smart_text_prompt or ""),
+        "video_prompt": str(video_prompt or ""),
+        "video_prompt_skill_status": str(settings.get("视频提示词Skill状态", "") or ""),
+        "video_prompt_skill_version": str(settings.get("视频提示词Skill版本", "") or ""),
+        "video_prompt_model_status": str(settings.get("视频提示词模型状态", "") or ""),
+        "video_prompt_model_source": model_source_effective,
+        "video_prompt_required_anchor_count": len(settings.get("视频提示词必保留锚点", []) or []),
         "selected_tags_text": selected_tags_text,
         "selected_tags_by_category": {key: list(value) for key, value in selected.items()},
         "selected_tags_flat": tags,
@@ -327,6 +335,7 @@ def build_cache_payload(
     negative_prompt: str,
     style_track: str,
     smart_text_prompt: str = "",
+    video_prompt: str = "",
 ) -> dict[str, Any]:
     positive_prompt = str(primary_prompt or "").strip()
     collection = str(prompt_collection or prompt_only or "").strip()
@@ -334,6 +343,7 @@ def build_cache_payload(
         positive_prompt = collection.split("\n\n", 1)[0].strip()
     full = str(full_text or "").strip()
     smart = str(smart_text_prompt or "").strip()
+    video = str(video_prompt or "").strip()
     json_meta = _json_cache_meta(json_result)
     outputs = [
         full,
@@ -343,6 +353,7 @@ def build_cache_payload(
         str(negative_prompt or "").strip(),
         collection,
         smart,
+        video,
     ]
     return {
         "status": "done",
@@ -351,6 +362,7 @@ def build_cache_payload(
         "prompt_text": positive_prompt,
         "prompt_collection": collection,
         "smart_text_prompt": smart,
+        "video_prompt": video,
         "selected_tags_text": selected_tags_text,
         "json_result": json_result,
         "negative_prompt": negative_prompt,

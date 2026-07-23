@@ -14,6 +14,7 @@ const STAGE_OUTPUT_SIGNATURE_GROUPS = new Map([
 	["推荐负面词", "negative"], ["负面", "negative"],
 	["正向提示词合集", "collection"], ["合集", "collection"],
 	["智能文本", "smart"], ["智能", "smart"],
+	["视频提示词", "video"], ["视频", "video"],
 ]);
 
 const MINI_TOOLBAR_FLAG = "__qwenTeMiniToolbarLoaded";

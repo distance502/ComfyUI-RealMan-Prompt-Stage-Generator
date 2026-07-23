@@ -141,6 +141,7 @@ def load_nodes_for_storage_test(models_dir: pathlib.Path, runtime: dict[str, obj
 
 
 narrative = load_module("stage_prompt/narrative.py", "stage_prompt_narrative_test")
+video_prompt_skill = load_module("stage_prompt/video_prompt_skill.py", "stage_prompt_video_prompt_skill_test")
 skills = load_module("stage_prompt/skills.py", "stage_prompt_skills_test")
 normalizer = load_module("stage_prompt/normalizer.py", "stage_prompt_normalizer_test")
 negative_builder = load_module("stage_prompt/negative_builder.py", "stage_prompt_negative_builder_test")
@@ -5160,6 +5161,7 @@ class TestStagePromptModules(unittest.TestCase):
             negative_prompt="文字、多人复制",
             style_track="写实人像",
             smart_text_prompt="SMART PROMPT",
+            video_prompt="VIDEO PROMPT",
         )
         self.assertEqual(cache_payload["status"], "done")
         self.assertIsInstance(cache_payload["updated_at"], int)
@@ -5177,6 +5179,8 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertEqual(cache_payload["outputs"][1], "FIRST PROMPT")
         self.assertEqual(cache_payload["outputs"][5], "FIRST PROMPT\n\nSECOND PROMPT")
         self.assertEqual(cache_payload["outputs"][6], "SMART PROMPT")
+        self.assertEqual(cache_payload["outputs"][7], "VIDEO PROMPT")
+        self.assertEqual(cache_payload["video_prompt"], "VIDEO PROMPT")
 
     def test_formatter_hides_verbose_adult_safety_terms_in_display_only(self) -> None:
         selected = OrderedDict({"主体": ["成年女性"], "构图视角": ["中景"]})
@@ -7598,7 +7602,7 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertEqual(len(payload["prompt_list"]), 3)
         self.assertEqual(payload["model_call_attempt_count"], 1)
         self.assertEqual(payload["model_call_failure_count"], 1)
-        self.assertEqual(payload["model_active_fallback_count"], 4)
+        self.assertEqual(payload["model_active_fallback_count"], 5)
         self.assertEqual(payload["model_source_effective"], "仅Skill回退")
 
     def test_smart_text_unchanged_model_output_keeps_main_adoption_count(self) -> None:
@@ -7610,6 +7614,7 @@ class TestStagePromptModules(unittest.TestCase):
         original_build_prompt = module._build_prompt_list_impl
         original_refine_batch = module._maybe_model_refine_batch_impl
         original_refine_one = module._maybe_model_refine_impl
+        original_refine_video = module._maybe_model_refine_video_impl
         original_update_history = module._update_history
 
         module._build_prompt_list_impl = lambda *args, **kwargs: [
@@ -7636,6 +7641,7 @@ class TestStagePromptModules(unittest.TestCase):
 
         module._maybe_model_refine_batch_impl = fake_batch
         module._maybe_model_refine_impl = fake_one
+        module._maybe_model_refine_video_impl = lambda _model, prompt, _settings, **_kwargs: prompt
         module._update_history = lambda *args, **kwargs: []
         try:
             result = module._run_stage(
@@ -7661,6 +7667,7 @@ class TestStagePromptModules(unittest.TestCase):
             module._build_prompt_list_impl = original_build_prompt
             module._maybe_model_refine_batch_impl = original_refine_batch
             module._maybe_model_refine_impl = original_refine_one
+            module._maybe_model_refine_video_impl = original_refine_video
             module._update_history = original_update_history
 
         payload = json.loads(result[3])
@@ -7737,9 +7744,9 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertTrue(result[1].strip())
         self.assertEqual(payload["model_source"], "API接口")
         self.assertEqual(payload["model_source_effective"], "仅Skill回退")
-        self.assertEqual(payload["model_call_attempt_count"], 1)
+        self.assertEqual(payload["model_call_attempt_count"], 2)
         self.assertEqual(payload["model_call_success_count"], 0)
-        self.assertEqual(payload["model_call_failure_count"], 1)
+        self.assertEqual(payload["model_call_failure_count"], 2)
         self.assertIn("调用失败", payload["model_call_status"])
         self.assertIn("401 Unauthorized", payload["model_fallback_note"])
         self.assertIn("401 Unauthorized", result[2])
@@ -8842,10 +8849,10 @@ class TestStagePromptModules(unittest.TestCase):
     def test_stage_generator_output_contract_matches_ui_slots(self) -> None:
         module = load_stage_prompt_generator_for_integration_test()
         node_class = getattr(module, "QwenTE阶段式提示词生成器")
-        self.assertEqual(node_class.RETURN_TYPES, ("STRING", "STRING", "STRING", "STRING", "STRING", "STRING", "STRING"))
+        self.assertEqual(node_class.RETURN_TYPES, ("STRING", "STRING", "STRING", "STRING", "STRING", "STRING", "STRING", "STRING"))
         self.assertEqual(
             node_class.RETURN_NAMES,
-            ("结果全文", "首条正向提示词", "已选标签", "JSON结果", "推荐负面词", "正向提示词合集", "智能文本"),
+            ("结果全文", "首条正向提示词", "已选标签", "JSON结果", "推荐负面词", "正向提示词合集", "智能文本", "视频提示词"),
         )
         self.assertTrue(node_class.OUTPUT_NODE)
         input_types = node_class.INPUT_TYPES()
@@ -15088,6 +15095,226 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertEqual(settings.get("模型传输重试次数"), 1)
         self.assertEqual(settings.get("模型活动回退数量", 0), 0)
         self.assertTrue(any("已恢复" in note for note in settings.get("推理纠偏说明", [])))
+
+    def test_video_prompt_skill_builds_one_causal_natural_language_shot(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["成年女性侦探"],
+                "画面风格": ["电影写实"],
+                "场景背景": ["雨夜旧车站"],
+                "动作姿态": ["转身追查线索"],
+                "服装造型": ["深色长风衣"],
+                "道具世界观": ["旧信封"],
+                "光影氛围": ["远处列车灯逆光"],
+                "构图视角": ["中景"],
+            }
+        )
+        settings = {
+            "提示词语言": "纯中文",
+            "主体类型解析结果": "人物角色",
+            "模板风格": "电影写实",
+            "额外要求": "成年女性侦探在雨夜旧车站追查失踪信件",
+            "seed": 23,
+        }
+        prompt = video_prompt_skill.build_video_prompt(selected, [], settings)
+        self.assertTrue(video_prompt_skill.is_natural_video_prompt(prompt, language="纯中文"))
+        self.assertTrue(800 <= len(prompt) <= 1200)
+        for anchor in ("成年女性侦探", "雨夜旧车站", "转身追查线索", "旧信封", "深色长风衣"):
+            self.assertIn(anchor, prompt)
+        for narrative_marker in ("起初", "因为", "镜头", "声音", "最后"):
+            self.assertIn(narrative_marker, prompt)
+        self.assertEqual(prompt.count("单镜头"), 1)
+        self.assertNotIn("标签解析", prompt)
+        self.assertNotIn("Thinking Process", prompt)
+        self.assertLessEqual(prompt.count("、"), 10)
+
+    def test_video_prompt_skill_supports_english_and_bilingual_output(self) -> None:
+        primary = (
+            "A seasoned female detective in a dark trench coat stands on a rain-soaked railway platform, "
+            "holding an old envelope under approaching train lights. The station is empty and tense."
+        )
+        english = video_prompt_skill.build_video_prompt(
+            OrderedDict(),
+            [],
+            {"提示词语言": "纯英文", "seed": 9},
+            primary_prompt=primary,
+        )
+        self.assertTrue(video_prompt_skill.is_natural_video_prompt(english, language="纯英文"))
+        self.assertNotRegex(english, r"[\u4e00-\u9fff]")
+        self.assertIn("At first", english)
+        self.assertIn("The camera", english)
+        self.assertIn("Finally", english)
+
+        bilingual = video_prompt_skill.build_video_prompt(
+            OrderedDict({"主体": ["成年女性侦探"], "场景背景": ["雨夜旧车站"]}),
+            [],
+            {"提示词语言": "英文提示词+中文说明", "seed": 9},
+            primary_prompt=primary,
+        )
+        self.assertTrue(video_prompt_skill.is_natural_video_prompt(bilingual, language="英文提示词+中文说明"))
+        self.assertIn("中文说明：", bilingual)
+
+    def test_video_model_refiner_adopts_valid_local_or_api_candidate(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["成年女性侦探"],
+                "场景背景": ["雨夜旧车站"],
+                "动作姿态": ["转身追查线索"],
+                "服装造型": ["深色长风衣"],
+                "道具世界观": ["旧信封"],
+            }
+        )
+        settings = {"提示词语言": "纯中文", "模型来源": "API接口", "seed": 23}
+        original = video_prompt_skill.build_video_prompt(selected, [], settings)
+        candidate = original.replace("画面中心偏前", "画面右侧偏前", 1)
+
+        class ApiRefiningModel:
+            def create_chat_completion(self, messages=None, **_kwargs):
+                self.messages = messages
+                return {"choices": [{"message": {"content": candidate}}]}
+
+        class LocalRefiningModel:
+            def invoke(self, prompt):
+                self.prompt = prompt
+                return candidate
+
+        for model in (ApiRefiningModel(), LocalRefiningModel()):
+            model_settings = dict(settings)
+            model_settings.update(
+                {
+                    "模型任务": "视频提示词",
+                    "视频提示词模型系统提示": video_prompt_skill.VIDEO_PROMPT_MODEL_SYSTEM_TEMPLATE,
+                    "视频提示词必保留锚点": video_prompt_skill.video_prompt_required_anchors(selected, [], settings),
+                }
+            )
+            result = model_refiner.maybe_model_refine_video(
+                model,
+                original,
+                model_settings,
+                chat_completion=lambda active_model, messages, params: active_model.create_chat_completion(messages=messages, **params),
+                clean_think_text=lambda value: value,
+                validator=video_prompt_skill.is_natural_video_prompt,
+            )
+            self.assertNotEqual(result, original)
+            self.assertIn("画面右侧偏前", result)
+            self.assertTrue(video_prompt_skill.is_natural_video_prompt(result, language="纯中文"))
+            for anchor in ("成年女性侦探", "雨夜旧车站", "转身追查线索", "深色长风衣", "旧信封"):
+                self.assertIn(anchor, result)
+            self.assertEqual(model_settings["模型调用成功次数"], 1)
+            self.assertEqual(model_settings["模型调用采纳次数"], 1)
+            self.assertEqual(model_settings.get("模型活动回退数量", 0), 0)
+            sent_text = getattr(model, "prompt", "") or "\n".join(
+                str(item.get("content", "")) for item in getattr(model, "messages", [])
+            )
+            self.assertIn("视频提示词后置导演", sent_text)
+            self.assertIn("成年女性侦探", sent_text)
+
+    def test_video_model_refiner_keeps_skill_on_invalid_candidate(self) -> None:
+        class RejectingModel:
+            def create_chat_completion(self, messages=None, **_kwargs):
+                return {"choices": [{"message": {"content": "分析：这条视频提示词还需要继续思考。"}}]}
+
+        original = video_prompt_skill.build_video_prompt(
+            OrderedDict({"主体": ["机械探测器"], "场景背景": ["废弃工厂"]}),
+            [],
+            {"提示词语言": "纯中文", "主体类型解析结果": "非人物主体", "seed": 8},
+        )
+        model_settings = {
+            "提示词语言": "纯中文",
+            "模型来源": "本地模型",
+            "模型任务": "视频提示词",
+            "视频提示词模型系统提示": video_prompt_skill.VIDEO_PROMPT_MODEL_SYSTEM_TEMPLATE,
+            "视频提示词必保留锚点": ["机械探测器", "废弃工厂"],
+        }
+        result = model_refiner.maybe_model_refine_video(
+            RejectingModel(),
+            original,
+            model_settings,
+            chat_completion=lambda model, messages, params: model.create_chat_completion(messages=messages, **params),
+            clean_think_text=lambda value: value,
+            validator=video_prompt_skill.is_natural_video_prompt,
+        )
+        self.assertEqual(result, original)
+        self.assertEqual(model_settings["模型活动回退数量"], 1)
+        self.assertIn("视频模型候选", model_settings["模型回退说明"])
+
+    def test_stage_video_prompt_output_is_cached_and_exposed_in_json(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        module._CACHE.clear()
+        node_id = "video-prompt-output"
+        result = module._run_stage(
+            None,
+            **{
+                "unique_id": node_id,
+                "生成数量": 1,
+                "提示词语言": "纯中文",
+                "模型来源": "仅Skill",
+                "智能文本匹配": True,
+                "智能文本输入": "成年女性侦探在雨夜旧车站追查失踪信件，穿深色风衣，手持旧信封",
+                "seed": 23,
+            },
+        )
+        self.assertEqual(len(result), 8)
+        video_prompt = result[7]
+        self.assertTrue(module._is_natural_video_prompt_impl(video_prompt, language="纯中文"))
+        payload = json.loads(result[3])
+        self.assertEqual(payload["video_prompt"], video_prompt)
+        self.assertEqual(payload["video_prompt_skill_status"], "已生成")
+        self.assertEqual(payload["video_prompt_skill_version"], "video-prompt-skill-v2")
+        self.assertEqual(payload["video_prompt_model_status"], "未调用（仅Skill）")
+        self.assertEqual(payload["video_prompt_model_source"], "仅Skill")
+        self.assertGreaterEqual(payload["video_prompt_required_anchor_count"], 1)
+        cache = module.获取阶段节点输出缓存(node_id)
+        self.assertEqual(cache["video_prompt"], video_prompt)
+        self.assertEqual(cache["outputs"][7], video_prompt)
+
+    def test_stage_video_prompt_adopts_model_refinement_and_reports_status(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+
+        class DummyModel:
+            pass
+
+        original_batch = module._maybe_model_refine_batch_impl
+        original_video = module._maybe_model_refine_video_impl
+        module._maybe_model_refine_batch_impl = lambda _model, prompts, _settings, **_kwargs: list(prompts)
+
+        def fake_video_refine(_model, prompt, model_settings, **_kwargs):
+            module._record_model_call_result_impl(
+                model_settings,
+                outcome="success",
+                changed=True,
+                adopted_outputs=1,
+            )
+            return prompt.replace("画面中心偏前", "画面右侧偏前", 1)
+
+        module._maybe_model_refine_video_impl = fake_video_refine
+        try:
+            result = module._run_stage(
+                DummyModel(),
+                **{
+                    "unique_id": "video-model-adopted",
+                    "模型来源": "本地模型",
+                    "模型来源实际": "外接本地模型",
+                    "模型调用基础来源": "外接本地模型",
+                    "主体标签1": "成年女性侦探",
+                    "场景背景标签1": "雨夜旧车站",
+                    "动作姿态标签1": "转身追查线索",
+                    "运行时随机标签": False,
+                    "生成数量": 1,
+                    "提示词语言": "纯中文",
+                    "seed": 23,
+                },
+            )
+        finally:
+            module._maybe_model_refine_batch_impl = original_batch
+            module._maybe_model_refine_video_impl = original_video
+
+        payload = json.loads(result[3])
+        self.assertIn("画面右侧偏前", result[7])
+        self.assertEqual(payload["video_prompt_model_status"], "已采用模型润色")
+        self.assertEqual(payload["model_call_success_count"], 1)
+        self.assertEqual(payload["model_call_adopted_count"], 1)
+        self.assertIn("视频提示词模型状态：已采用模型润色", result[2])
 
     def test_model_refiner_does_not_retry_nontransient_auth_error(self) -> None:
         class AuthError(RuntimeError):

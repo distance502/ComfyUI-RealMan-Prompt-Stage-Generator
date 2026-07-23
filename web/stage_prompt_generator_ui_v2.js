@@ -6094,6 +6094,7 @@ const STAGE_OUTPUT_INDEX = {
 	negativePrompt: 4,
 	promptCollection: 5,
 	smartText: 6,
+	videoPrompt: 7,
 };
 
 const STAGE_DISPLAY_MODES = [
@@ -6103,13 +6104,14 @@ const STAGE_DISPLAY_MODES = [
 	{ key: "blocks", label: "编排", source: "标签块编排" },
 	{ key: "json", label: "JSON", source: "JSON结果" },
 	{ key: "smart", label: "智能文本", source: "智能文本" },
+	{ key: "video", label: "视频", source: "视频提示词" },
 ];
-const STAGE_OUTPUT_FIELD_KEYS = ["full_text", "prompt_text", "selected_tags_text", "json_result", "negative_prompt", "prompt_collection", "smart_text_prompt"];
+const STAGE_OUTPUT_FIELD_KEYS = ["full_text", "prompt_text", "selected_tags_text", "json_result", "negative_prompt", "prompt_collection", "smart_text_prompt", "video_prompt"];
 const STAGE_OUTPUT_TIMESTAMP_TOLERANCE_MS = 50;
 const STAGE_OUTPUT_LEGACY_SECONDS_TOLERANCE_MS = 1100;
 const STAGE_OUTPUT_POLL_IDLE_LIMIT = 12;
 const STAGE_OUTPUT_POLL_ACTIVE_LIMIT = 600;
-const STAGE_CANVAS_OUTPUT_LABELS = ["全文", "正向", "标签", "JSON", "负面", "合集", "智能"];
+const STAGE_CANVAS_OUTPUT_LABELS = ["全文", "正向", "标签", "JSON", "负面", "合集", "智能", "视频"];
 
 function compactStagePromptOutputs(node) {
 	const outputs = node?.outputs ?? [];
@@ -6735,6 +6737,7 @@ function buildStageOutputListFromSnapshot(stageOutput) {
 		String(stageOutput.negativePrompt ?? "").trim(),
 		String(stageOutput.promptCollection ?? "").trim(),
 		String(stageOutput.smartText ?? "").trim(),
+		String(stageOutput.videoPrompt ?? "").trim(),
 	];
 }
 
@@ -6878,6 +6881,7 @@ function getStageHistoryOutputSnapshot(node) {
 	const negativePrompt = String(getStageNegativePromptText(node) ?? "").trim();
 	const promptCollection = String(getStageOutputText(node, STAGE_OUTPUT_INDEX.promptCollection) ?? "").trim();
 	const smartText = String(getStageOutputText(node, STAGE_OUTPUT_INDEX.smartText) ?? "").trim();
+	const videoPrompt = String(getStageOutputText(node, STAGE_OUTPUT_INDEX.videoPrompt) ?? "").trim();
 	if (!promptText) promptText = promptCollection || smartText || fullText;
 	let jsonPayload = null;
 	if (jsonResult) {
@@ -6885,7 +6889,7 @@ function getStageHistoryOutputSnapshot(node) {
 			jsonPayload = JSON.parse(jsonResult);
 		} catch (_error) {}
 	}
-	return { fullText, promptText, selectedTags, jsonResult, negativePrompt, promptCollection, smartText, jsonPayload };
+	return { fullText, promptText, selectedTags, jsonResult, negativePrompt, promptCollection, smartText, videoPrompt, jsonPayload };
 }
 
 function hasUsableStageOutputSnapshot(stageOutput) {
@@ -6895,6 +6899,7 @@ function hasUsableStageOutputSnapshot(stageOutput) {
 		normalized.promptText,
 		normalized.promptCollection,
 		normalized.smartText,
+		normalized.videoPrompt,
 		normalized.fullText,
 		normalized.negativePrompt,
 		normalized.selectedTags,
@@ -6934,6 +6939,7 @@ function normalizeHistoryStageOutputPayload(output) {
 		negativePrompt: pickHistoryStageTextField(output, ["negativePrompt", "negative_prompt", "negative", "negative_prompt_recommendation"]) || String(slots[STAGE_OUTPUT_INDEX.negativePrompt] ?? "").trim(),
 		promptCollection: pickHistoryStageTextField(output, ["promptCollection", "prompt_collection", "promptOnly", "prompt_only", "prompt_texts", "prompts"]) || String(slots[STAGE_OUTPUT_INDEX.promptCollection] ?? "").trim(),
 		smartText: pickHistoryStageTextField(output, ["smartText", "smart_text", "smartTextPrompt", "smart_text_prompt", "smartPrompt", "smart_prompt"]) || String(slots[STAGE_OUTPUT_INDEX.smartText] ?? "").trim(),
+		videoPrompt: pickHistoryStageTextField(output, ["videoPrompt", "video_prompt", "videoText", "video_text"]) || String(slots[STAGE_OUTPUT_INDEX.videoPrompt] ?? "").trim(),
 		styleTrack: pickHistoryStageTextField(output, ["styleTrack", "style_track", "runtime_random_style_track", "track"]),
 		jsonPayload,
 	};
@@ -6989,12 +6995,14 @@ function compactHistoryStageOutputPayload(output) {
 	const promptText = truncateHistoryText(normalized.promptText || normalized.promptCollection || normalized.smartText || normalized.fullText, 32768);
 	const promptCollection = truncateHistoryText(normalized.promptCollection, 32768);
 	const smartText = truncateHistoryText(normalized.smartText, 16384);
+	const videoPrompt = truncateHistoryText(normalized.videoPrompt, 16384);
 	const compact = {
 		promptText,
 		selectedTags: truncateHistoryText(normalized.selectedTags, 8192),
 		negativePrompt: truncateHistoryText(normalized.negativePrompt, 16384),
 		promptCollection: promptCollection && promptCollection !== promptText ? promptCollection : "",
 		smartText: smartText && smartText !== promptText ? smartText : "",
+		videoPrompt,
 		styleTrack: truncateHistoryText(normalized.styleTrack, 512),
 		jsonPayload: compactHistoryJsonPayload(normalized.jsonPayload),
 	};
@@ -7098,7 +7106,7 @@ function buildHistoryDisplaySummaryText(item) {
 
 function hasHistoryStageOutput(item) {
 	const output = getHistoryStageOutput(item);
-	return !!(output?.promptText || output?.promptCollection || output?.smartText || output?.negativePrompt || output?.selectedTags || output?.fullText || output?.jsonResult);
+	return !!(output?.promptText || output?.promptCollection || output?.smartText || output?.videoPrompt || output?.negativePrompt || output?.selectedTags || output?.fullText || output?.jsonResult);
 }
 
 function buildHistoryStageOutputText(stageOutput) {
@@ -7109,6 +7117,7 @@ function buildHistoryStageOutputText(stageOutput) {
 	if (stageOutput.promptText) lines.push("", "正向提示词：", stageOutput.promptText);
 	if (stageOutput.promptCollection && stageOutput.promptCollection !== stageOutput.promptText) lines.push("", "正向提示词合集：", stageOutput.promptCollection);
 	if (stageOutput.smartText) lines.push("", "智能文本：", stageOutput.smartText);
+	if (stageOutput.videoPrompt) lines.push("", "视频提示词：", stageOutput.videoPrompt);
 	if (stageOutput.negativePrompt) lines.push("", "推荐负面词：", stageOutput.negativePrompt);
 	if (stageOutput.selectedTags) lines.push("", "标签与参数摘要：", stageOutput.selectedTags);
 	if (!stageOutput.promptText && stageOutput.fullText) lines.push("", "结果全文：", stageOutput.fullText);
@@ -7145,6 +7154,8 @@ function getStageDisplayPayload(node, modeKey) {
 				? STAGE_OUTPUT_INDEX.jsonResult
 				: activeMode.key === "smart"
 					? STAGE_OUTPUT_INDEX.smartText
+					: activeMode.key === "video"
+						? STAGE_OUTPUT_INDEX.videoPrompt
 					: STAGE_OUTPUT_INDEX.promptText;
 	const entry = getStageOutputEntry(node, outputIndex);
 	const stableSource = entry.source || (preferWorkflowMeta ? "PNG 元数据" : activeMode.source);
@@ -7177,6 +7188,11 @@ function getStageDisplayPayload(node, modeKey) {
 		const text = entry.value;
 		if (errorText) return { text: errorText, empty: false, source: "生成失败" };
 		return { text: text || (cacheStatus === "running" ? "正在生成智能文本..." : "还没有智能文本。切到“智能文本”，输入一句描述后点“匹配启用”。"), empty: !text, source: text ? (cacheStatus === "running" ? runningSource : stableSource) : cacheStatus === "running" ? "实时生成中" : "等待匹配" };
+	}
+	if (activeMode.key === "video") {
+		const text = entry.value;
+		if (errorText) return { text: errorText, empty: false, source: "生成失败" };
+		return { text: text || (cacheStatus === "running" ? "正在生成视频提示词..." : "还没有视频提示词。请先运行一次节点。"), empty: !text, source: text ? (cacheStatus === "running" ? runningSource : stableSource) : cacheStatus === "running" ? "实时生成中" : "等待输出" };
 	}
 	const text = entry.value;
 	if (errorText) return { text: errorText, empty: false, source: "生成失败" };
@@ -12213,7 +12229,7 @@ function recordStageExecution(node, library, statusEl, stageOutputOverride = nul
 	const stageOutput = normalizeHistoryStageOutputPayload(stageOutputOverride) ?? getStageHistoryOutputSnapshot(node);
 	const promptText = String(stageOutput?.promptText ?? stageOutput?.promptCollection ?? stageOutput?.smartText ?? "").trim();
 	if(!promptText) return false;
-	const signature=JSON.stringify([promptText, stageOutput.negativePrompt, stageOutput.smartText, stageOutput.jsonResult?.slice?.(0, 240) ?? ""]);
+	const signature=JSON.stringify([promptText, stageOutput.negativePrompt, stageOutput.smartText, stageOutput.videoPrompt, stageOutput.jsonResult?.slice?.(0, 240) ?? ""]);
 	const panelState=node?.[PANEL_KEY];
 	if(panelState){
 		if(panelState.stageOutputRecordSignature===signature) return false;
@@ -14237,6 +14253,7 @@ function openHistoryManager(node, library) {
 			item?.summary,
 			stageOutput?.promptText,
 			stageOutput?.smartText,
+			stageOutput?.videoPrompt,
 			stageOutput?.negativePrompt,
 			stageOutput?.selectedTags,
 			stageOutput?.fullText,
@@ -14663,6 +14680,7 @@ function openHistoryManager(node, library) {
 						addStageOutputRow("正向提示词合集", stageOutput.promptCollection, "success");
 					}
 					addStageOutputRow("智能文本", stageOutput?.smartText, "info");
+					addStageOutputRow("视频提示词", stageOutput?.videoPrompt, "success");
 					addStageOutputRow("推荐负面词", stageOutput?.negativePrompt, "warn");
 					addStageOutputRow("标签与参数摘要", stageOutput?.selectedTags, "info");
 				}

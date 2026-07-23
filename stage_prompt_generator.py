@@ -165,6 +165,7 @@ from .stage_prompt.model_refiner import (
     is_natural_language_prompt as _is_natural_language_prompt_impl,
     maybe_model_refine as _maybe_model_refine_impl,
     maybe_model_refine_batch as _maybe_model_refine_batch_impl,
+    maybe_model_refine_video as _maybe_model_refine_video_impl,
     reconcile_model_output_fallback as _reconcile_model_output_fallback_impl,
     sanitize_model_error as _sanitize_model_error_impl,
     stabilize_prompt_output as _stabilize_prompt_output_impl,
@@ -207,6 +208,13 @@ from .stage_prompt.tag_block_composer import (
     build_tag_block_prompt_list as _build_tag_block_prompt_list_impl,
     parse_tag_block_payload as _parse_tag_block_payload_impl,
     summarize_tag_block_payload as _summarize_tag_block_payload_impl,
+)
+from .stage_prompt.video_prompt_skill import (
+    VIDEO_PROMPT_MODEL_SYSTEM_TEMPLATE as _VIDEO_PROMPT_MODEL_SYSTEM_TEMPLATE,
+    VIDEO_PROMPT_SKILL_VERSION as _VIDEO_PROMPT_SKILL_VERSION,
+    build_video_prompt as _build_video_prompt_impl,
+    is_natural_video_prompt as _is_natural_video_prompt_impl,
+    video_prompt_required_anchors as _video_prompt_required_anchors_impl,
 )
 
 NODE_CLASS_MAPPINGS: dict[str, Any] = {}
@@ -493,6 +501,7 @@ _STAGE_OUTPUT_CACHE_PUBLIC_KEYS = (
     "prompt_text",
     "prompt_collection",
     "smart_text_prompt",
+    "video_prompt",
     "selected_tags_text",
     "json_result",
     "negative_prompt",
@@ -1638,7 +1647,7 @@ def _安全加载阶段模型(settings: dict[str, Any]) -> Any:
             1,
             20,
         )
-        settings["模型活动回退数量"] = requested_fallback_count + int(
+        settings["模型活动回退数量"] = requested_fallback_count + 1 + int(
             bool(settings.get("智能文本匹配", False))
             and bool(str(settings.get("智能文本输入", "") or "").strip())
         )
@@ -4578,6 +4587,54 @@ def _run_stage_impl(
             )
     else:
         smart_text_prompt = primary_prompt
+    video_prompt = _build_video_prompt_impl(
+        selected,
+        custom_tags,
+        settings,
+        primary_prompt=primary_prompt,
+    )
+    video_model_success_before = max(0, int(settings.get("模型调用成功次数", 0) or 0))
+    video_model_failure_before = max(0, int(settings.get("模型调用失败次数", 0) or 0))
+    video_model_fallback_before = max(0, int(settings.get("模型活动回退数量", 0) or 0))
+    settings["视频提示词必保留锚点"] = _video_prompt_required_anchors_impl(
+        selected,
+        custom_tags,
+        settings,
+    )
+    video_model_settings = dict(settings)
+    video_model_settings["模型任务"] = "视频提示词"
+    video_model_settings["视频提示词模型系统提示"] = _VIDEO_PROMPT_MODEL_SYSTEM_TEMPLATE
+    refined_video_prompt = _maybe_model_refine_video_impl(
+        model,
+        video_prompt,
+        video_model_settings,
+        chat_completion=_调用chat_completion,
+        clean_think_text=_清洗think块文本,
+        validator=_is_natural_video_prompt_impl,
+    )
+    _merge_model_runtime_state(settings, video_model_settings)
+    if model is None:
+        if video_model_failure_before:
+            settings["视频提示词模型状态"] = "模型加载失败，保留 Skill 结果"
+        else:
+            settings["视频提示词模型状态"] = "未调用（仅Skill）"
+    elif refined_video_prompt != video_prompt:
+        settings["视频提示词模型状态"] = "已采用模型润色"
+    elif max(0, int(settings.get("模型调用成功次数", 0) or 0)) > video_model_success_before:
+        settings["视频提示词模型状态"] = "模型调用成功，保留 Skill 结果"
+    elif (
+        max(0, int(settings.get("模型调用失败次数", 0) or 0)) > video_model_failure_before
+        or max(0, int(settings.get("模型活动回退数量", 0) or 0)) > video_model_fallback_before
+    ):
+        settings["视频提示词模型状态"] = "模型调用失败或候选不合格，保留 Skill 结果"
+    else:
+        settings["视频提示词模型状态"] = "未产生模型候选，保留 Skill 结果"
+    video_prompt = refined_video_prompt
+    if _is_natural_video_prompt_impl(video_prompt, language=str(settings.get("提示词语言", "纯中文") or "纯中文")):
+        settings["视频提示词Skill状态"] = "已生成"
+    else:
+        settings["视频提示词Skill状态"] = "生成结果未通过自然语言校验"
+    settings["视频提示词Skill版本"] = _VIDEO_PROMPT_SKILL_VERSION
     selected_tags_text = _build_selected_tags_text_impl(
         template_style=template_style,
         subject_type=subject_type,
@@ -4616,6 +4673,7 @@ def _run_stage_impl(
         recent_tracks=recent_tracks,
         negative_prompt=negative_prompt,
         smart_text_prompt=smart_text_prompt,
+        video_prompt=video_prompt,
     )
     json_payload["runtime_random_effective_seed"] = int(settings.get("运行时随机有效种子", settings.get("seed", 0)) or 0)
     json_payload["runtime_random_preview_consumed"] = bool(settings.get("运行时随机预览已消费", False))
@@ -4625,6 +4683,7 @@ def _run_stage_impl(
         json_payload["tag_block_composer"] = tag_block_payload
         json_payload["tag_block_composer_summary"] = settings.get("标签块编排摘要", "")
     json_payload["smart_text_prompt"] = smart_text_prompt
+    json_payload["video_prompt"] = video_prompt
     json_payload["smart_text_enabled"] = bool(smart_text_enabled)
     json_payload["smart_text_input"] = smart_text_input
     json_payload["danbooru_general_tags"] = list(danbooru_general_tags)
@@ -4659,12 +4718,13 @@ def _run_stage_impl(
             negative_prompt=negative_prompt,
             style_track=style_track,
             smart_text_prompt=smart_text_prompt,
+            video_prompt=video_prompt,
         ),
     )
-    return full_text, primary_prompt, selected_tags_text, json_result, negative_prompt, prompt_only, smart_text_prompt
+    return full_text, primary_prompt, selected_tags_text, json_result, negative_prompt, prompt_only, smart_text_prompt, video_prompt
 
 
-def _run_stage(model: Any, **kwargs: Any) -> tuple[str, str, str, str, str, str, str]:
+def _run_stage(model: Any, **kwargs: Any) -> tuple[str, str, str, str, str, str, str, str]:
     preview_transaction = _RuntimeRandomPreviewTransaction()
     cache_transaction = _StageCacheTransaction()
     previous_transaction = getattr(_STAGE_CACHE_TRANSACTION_LOCAL, "current", None)
@@ -5700,7 +5760,7 @@ class QwenTE阶段式提示词生成器:
     def INPUT_TYPES(cls):
         model_list, mmproj_list = _内置模型文件选项()
         required = OrderedDict()
-        required["模型来源"] = (模型来源选项, {"default": "仅Skill", "tooltip": "仅Skill=不调用模型；本地模型=优先使用外接兼容模型，未连接时加载 models/LLM 中的内置 GGUF；API接口=调用云端、Ollama、LM Studio 或其他兼容服务。旧值本地GGUF会自动迁移。"})
+        required["模型来源"] = (模型来源选项, {"default": "仅Skill", "tooltip": "仅Skill=本地Skill直接生成图像、智能文本和视频提示词；本地模型=Skill先生成可靠底稿，再由外接兼容模型或 models/LLM 中的内置模型后置润色；API接口=Skill底稿交给云端、Ollama、LM Studio 或其他兼容服务润色。旧值本地GGUF会自动迁移。"})
         required["内置模型系列"] = (_内置模型系列选项, {"default": "Qwen3.5-VL", "tooltip": "本地模型未连接外部输入时，阶段提示词节点会按这里的设置直接加载内置 GGUF。"})
         required["内置主模型"] = (model_list, {"default": model_list[0], "tooltip": "内置加载路线使用的 GGUF 文件，放到 ComfyUI/models/LLM/；其他模型可连接 qwen模型 输入。"})
         required["内置视觉投影mmproj"] = (mmproj_list, {"default": "无", "tooltip": "多模态需要 mmproj；纯文本提示词生成可选“无”。"})
@@ -5797,8 +5857,8 @@ class QwenTE阶段式提示词生成器:
             "hidden": {"unique_id": "UNIQUE_ID", "extra_pnginfo": "EXTRA_PNGINFO"},
         }
 
-    RETURN_TYPES = ("STRING", "STRING", "STRING", "STRING", "STRING", "STRING", "STRING")
-    RETURN_NAMES = ("结果全文", "首条正向提示词", "已选标签", "JSON结果", "推荐负面词", "正向提示词合集", "智能文本")
+    RETURN_TYPES = ("STRING", "STRING", "STRING", "STRING", "STRING", "STRING", "STRING", "STRING")
+    RETURN_NAMES = ("结果全文", "首条正向提示词", "已选标签", "JSON结果", "推荐负面词", "正向提示词合集", "智能文本", "视频提示词")
     FUNCTION = "run"
     CATEGORY = "Qwen TE"
     OUTPUT_NODE = True

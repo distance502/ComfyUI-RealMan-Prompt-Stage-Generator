@@ -1068,6 +1068,17 @@ def _language_instruction(settings: dict[str, Any]) -> str:
 
 
 def _resolve_system_prompt(settings: dict[str, Any]) -> str:
+    if str(settings.get("模型任务", "") or "").strip() == "视频提示词":
+        video_prompt = str(settings.get("视频提示词模型系统提示", "") or "").strip()
+        if video_prompt:
+            language = _prompt_language_mode(settings)
+            if language == "纯中文":
+                video_prompt += "\n\n最终中文正文必须为 800-1200 字。"
+            elif language == "纯英文":
+                video_prompt += "\n\n最终英文正文必须为 90-230 个英文单词。"
+            else:
+                video_prompt += "\n\n英文正文后必须保留完整的中文说明，中文说明必须为 800-1200 字。"
+            return video_prompt
     base_prompt = str(settings.get("系统提示词覆盖") or _DEFAULT_IMAGE_REFINER_SYSTEM)
     narrative_contract = "" if GLOBAL_NARRATIVE_MODEL_CONTRACT in base_prompt else f"\n\n{GLOBAL_NARRATIVE_MODEL_CONTRACT}"
     layout_mode = resolve_visual_layout_mode(settings=settings)
@@ -1665,6 +1676,18 @@ def _skill_context_for_model(settings: dict[str, Any]) -> str:
 
 
 def _compose_model_user_prompt(prompt: str, settings: dict[str, Any]) -> str:
+    if str(settings.get("模型任务", "") or "").strip() == "视频提示词":
+        anchors = [str(item).strip() for item in settings.get("视频提示词必保留锚点", []) if str(item).strip()]
+        anchor_text = "、".join(dict.fromkeys(anchors)) or "无额外锚点"
+        spine = str(settings.get("全局创作主线摘要", "") or "").strip() or "按视频 Skill 底稿为准"
+        return (
+            "视频 Skill 已先生成一条可直接使用的单镜头底稿。你只能在这条底稿内部润色，不能另起主线。\n"
+            f"必须原样保留的主体、场景、动作等锚点：{anchor_text}\n"
+            f"全局创作主线摘要：{spine}\n"
+            "请把底稿写成自然、连贯、按时间顺序发生的可拍摄正文；变化必须有原因，不能增加人物、地点或第二个镜头。\n"
+            "只输出最终正文，不输出分析、标题、列表或 Markdown。\n\n"
+            f"视频 Skill 底稿：\n{str(prompt or '').strip()}"
+        )
     return f"{_skill_context_for_model(settings)}\n\n待整理提示词正文：\n{str(prompt or '').strip()}"
 
 
@@ -2238,6 +2261,72 @@ def maybe_model_refine(
         _append_model_runtime_note(settings, "模型返回了可用短草稿，已融入 Skill 的 800-1200 字剧情骨架，未触发输出回退。")
     _record_model_call_result(settings, outcome="success", changed=resolved != str(prompt or "").strip())
     return resolved
+
+
+def maybe_model_refine_video(
+    model: Any,
+    prompt: str,
+    settings: dict[str, Any],
+    *,
+    chat_completion: Callable[..., Any],
+    clean_think_text: Callable[[str], str],
+    validator: Callable[..., bool],
+) -> str:
+    """Use the configured local/API model to polish a video Skill result conservatively."""
+
+    original = str(prompt or "").strip()
+    llm = _resolve_model_backend(model)
+    if llm is None or not original:
+        return original
+    video_settings = dict(settings)
+    video_settings["模型任务"] = "视频提示词"
+    try:
+        raw_text = _call_model_text_with_retry(
+            llm,
+            original,
+            video_settings,
+            chat_completion=chat_completion,
+            clean_think_text=clean_think_text,
+            prompt_count=1,
+        )
+    except Exception as exc:
+        _record_model_call_result(video_settings, outcome="failure", reason=exc)
+        settings.update({key: value for key, value in video_settings.items() if key.startswith("模型") or key == "推理纠偏说明"})
+        return original
+
+    prepared, recovered = _prepare_model_response_text(raw_text)
+    candidate = _postprocess_prompt_text(prepared)
+    language = str(settings.get("提示词语言", "纯中文") or "纯中文")
+    anchors = [str(item).strip() for item in settings.get("视频提示词必保留锚点", []) if str(item).strip()]
+    missing = [anchor for anchor in anchors if anchor not in candidate]
+    if (
+        not candidate
+        or _looks_like_broken_prompt(candidate)
+        or missing
+        or not bool(validator(candidate, language=language))
+    ):
+        reason = "视频模型候选未通过 800-1200 字、自然语言、单镜头或锚点校验。"
+        if missing:
+            reason += f" 缺少锚点：{'、'.join(missing[:3])}。"
+        _record_model_call_result(
+            video_settings,
+            outcome="partial",
+            fallback_outputs=1,
+            output_count=1,
+            reason=reason,
+        )
+        settings.update({key: value for key, value in video_settings.items() if key.startswith("模型") or key == "推理纠偏说明"})
+        return original
+    if recovered:
+        _append_model_runtime_note(video_settings, "视频模型响应中的思考或包装字段已清洗，仅采用最终正文。")
+    _record_model_call_result(
+        video_settings,
+        outcome="success",
+        changed=candidate != original,
+        adopted_outputs=1 if candidate != original else 0,
+    )
+    settings.update({key: value for key, value in video_settings.items() if key.startswith("模型") or key == "推理纠偏说明"})
+    return candidate
 
 
 def maybe_model_refine_batch(
