@@ -11098,6 +11098,112 @@ class TestStagePromptModules(unittest.TestCase):
         )
         self.assertEqual(drift["画面风格"], ["真实感", "插画感"])
 
+    def test_runtime_random_mainline_converges_dark_comic_dungeon_case(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["平胸", "病娇", "遗迹探险家"],
+                "画面风格": ["金政基风", "健身抓拍", "暗黑漫画", "恐怖漫画"],
+                "成人向表达": ["丝质睡袍", "浴缸"],
+                "光影氛围": ["潮湿闷热", "云影落在山谷", "顶光烟雾"],
+                "构图视角": ["低角度广角仰拍", "高角度", "全景全身", "人物完整入镜"],
+                "动作姿态": ["跳跃", "坐姿慵懒"],
+                "服装造型": ["耳钉", "宝石", "丝质睡袍"],
+                "场景背景": ["雪线营地", "微缩街区", "水晶洞窟", "废弃老屋", "浴缸"],
+                "道具世界观": ["腰包", "手电筒", "浮空水晶"],
+                "技术画质": ["飞剑", "宝石反光", "刮擦纹理"],
+            }
+        )
+        settings = {
+            "模板风格": "暗黑漫画",
+            "风格隔离策略": "严格风格隔离",
+            "运行时随机标签": True,
+            "运行时随机模式解析结果": "全随机",
+            "随机主题池": "地下城冒险",
+            "标签反推模式": "自动平衡",
+            "NSFW工作台启用": False,
+            "NSFW策略启用": False,
+            "随机主题池档案标记": [
+                "tag:奇幻概念设计",
+                "tag:遗迹探险家",
+                "tag:水晶洞窟",
+                "tag:浮空水晶",
+            ],
+            "模板风格档案标记": [
+                "styletag:暗黑漫画",
+                "styletag:恐怖漫画",
+                "styletag:废弃老屋",
+                "styletag:顶光烟雾",
+                "styletag:刮擦纹理",
+            ],
+        }
+        notes: list[str] = []
+        context = {
+            "runtime_style_isolation_families": {
+                "真实感": {"健身抓拍"},
+                "插画感": {"金政基风", "暗黑漫画", "恐怖漫画", "奇幻概念设计"},
+            },
+            "intimate_clothing_tags": {"丝质睡袍"},
+            "adult_mature_intimate_clothing": {"丝质睡袍"},
+            "private_scene_tags": {"浴缸"},
+            "runtime_private_scene_tags": {"浴缸"},
+            "runtime_mainline_group_priorities": {"道具世界观": ["手电筒"]},
+            "runtime_quality_reassignments": {"飞剑": "道具世界观"},
+        }
+        skills.apply_stage_prompt_skills(
+            selected,
+            [],
+            settings,
+            notes,
+            phase="final_normalize",
+            collect_all_tags=collect_all_tags,
+            remove_tag_from_state=remove_tag_from_state,
+            append_tag_to_state=append_tag_to_state,
+            uniq=uniq,
+            context=context,
+        )
+
+        self.assertEqual(selected["画面风格"], ["暗黑漫画"])
+        self.assertEqual(selected["成人向表达"], [])
+        self.assertNotIn("丝质睡袍", selected["服装造型"])
+        self.assertEqual(selected["场景背景"], ["水晶洞窟"])
+        self.assertEqual(selected["动作姿态"], ["跳跃"])
+        self.assertIn("低角度广角仰拍", selected["构图视角"])
+        self.assertNotIn("高角度", selected["构图视角"])
+        self.assertEqual(selected["道具世界观"], ["浮空水晶", "手电筒"])
+        self.assertNotIn("飞剑", selected["技术画质"])
+        self.assertTrue(any("NSFW关闭收敛" in note for note in notes))
+        self.assertTrue(any("运行随机单主线收敛" in note for note in notes))
+
+    def test_runtime_random_mainline_preserves_locked_sensitive_tags(self) -> None:
+        selected = OrderedDict(
+            {
+                "成人向表达": ["高级性感"],
+                "服装造型": ["丝质睡袍"],
+                "场景背景": ["浴缸", "水晶洞窟"],
+            }
+        )
+        notes: list[str] = []
+        skills._apply_runtime_random_mainline_convergence(
+            selected=selected,
+            custom_tags=[],
+            settings={
+                "运行时随机标签": True,
+                "标签反推模式": "自动平衡",
+                "NSFW策略启用": False,
+                "锁定标签白名单": "高级性感,丝质睡袍,浴缸",
+                "风格隔离策略": "平衡收敛",
+            },
+            notes=notes,
+            context={
+                "intimate_clothing_tags": {"丝质睡袍"},
+                "private_scene_tags": {"浴缸"},
+            },
+            remove_tag_from_state=remove_tag_from_state,
+        )
+        self.assertEqual(selected["成人向表达"], ["高级性感"])
+        self.assertEqual(selected["服装造型"], ["丝质睡袍"])
+        self.assertEqual(selected["场景背景"], ["浴缸"])
+
     def test_theme_profile_rotation_continues_after_full_cycle(self) -> None:
         module = load_stage_prompt_generator_for_integration_test()
         module._CACHE.clear()
@@ -15237,6 +15343,50 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertEqual(result, original)
         self.assertEqual(model_settings["模型活动回退数量"], 1)
         self.assertIn("视频模型候选", model_settings["模型回退说明"])
+
+    def test_video_model_refiner_blends_useful_short_skill_continuation(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["成年女性侦探"],
+                "场景背景": ["雨夜旧车站"],
+                "动作姿态": ["转身追查线索"],
+                "服装造型": ["深色长风衣"],
+                "道具世界观": ["旧信封"],
+            }
+        )
+        settings = {"提示词语言": "纯中文", "模型来源": "本地模型", "seed": 23}
+        original = video_prompt_skill.build_video_prompt(selected, [], settings)
+        short_candidate = (
+            "她没有立刻追出去，而是先听见站台尽头传来的金属碰撞声。"
+            "旧信封边缘被雨水浸深，列车灯掠过纸面时，藏在折痕里的铅笔记号短暂显现。"
+        )
+
+        class ShortLocalModel:
+            def invoke(self, prompt):
+                self.prompt = prompt
+                return short_candidate
+
+        model_settings = {
+            **settings,
+            "模型任务": "视频提示词",
+            "视频提示词模型系统提示": video_prompt_skill.VIDEO_PROMPT_MODEL_SYSTEM_TEMPLATE,
+            "视频提示词必保留锚点": video_prompt_skill.video_prompt_required_anchors(selected, [], settings),
+        }
+        result = model_refiner.maybe_model_refine_video(
+            ShortLocalModel(),
+            original,
+            model_settings,
+            chat_completion=lambda active_model, messages, params: active_model.create_chat_completion(messages=messages, **params),
+            clean_think_text=lambda value: value,
+            validator=video_prompt_skill.is_natural_video_prompt,
+        )
+        self.assertNotEqual(result, original)
+        self.assertIn("金属碰撞声", result)
+        self.assertTrue(video_prompt_skill.is_natural_video_prompt(result, language="纯中文"))
+        for anchor in ("成年女性侦探", "雨夜旧车站", "转身追查线索", "深色长风衣", "旧信封"):
+            self.assertIn(anchor, result)
+        self.assertEqual(model_settings["模型调用采纳次数"], 1)
+        self.assertEqual(model_settings.get("模型活动回退数量", 0), 0)
 
     def test_stage_video_prompt_output_is_cached_and_exposed_in_json(self) -> None:
         module = load_stage_prompt_generator_for_integration_test()

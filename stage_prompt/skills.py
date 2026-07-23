@@ -791,6 +791,183 @@ def _apply_runtime_random_style_isolation(
         )
 
 
+def _setting_tags(value: Any) -> list[str]:
+    if isinstance(value, (list, tuple, set)):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return [
+        item.strip()
+        for item in re.split(r"[,，、;；|\n]+", str(value or ""))
+        if item.strip()
+    ]
+
+
+def _profile_marker_tags(settings: dict[str, Any], key: str, prefix: str) -> list[str]:
+    return [
+        marker[len(prefix):].strip()
+        for marker in _setting_tags(settings.get(key, []))
+        if marker.startswith(prefix) and marker[len(prefix):].strip()
+    ]
+
+
+def _apply_runtime_random_mainline_convergence(
+    *,
+    selected: SelectedTags,
+    custom_tags: list[str],
+    settings: dict[str, Any],
+    notes: list[str],
+    context: dict[str, Any],
+    remove_tag_from_state: TagRemoveFn,
+    **_: Any,
+) -> None:
+    """Collapse random, theme, and style additions into one coherent story line."""
+
+    runtime_random = bool(settings.get("运行时随机标签", False))
+    strict_style = _style_isolation_mode(settings) == "严格风格隔离"
+    if not runtime_random and not strict_style:
+        return
+
+    protected = set(_setting_tags(settings.get("锁定标签白名单", "")))
+    protected.update(_setting_tags(settings.get("运行时随机保护标签", [])))
+    theme_tags = _profile_marker_tags(settings, "随机主题池档案标记", "tag:")
+    style_tags = _profile_marker_tags(settings, "模板风格档案标记", "styletag:")
+    explicit_style = str(settings.get("模板风格", "自动") or "自动").strip()
+    user_text = " ".join(
+        str(settings.get(key, "") or "").strip()
+        for key in ("智能文本输入", "额外要求")
+        if str(settings.get(key, "") or "").strip()
+    )
+
+    removed_by_group: dict[str, list[str]] = {}
+
+    def compact(group_name: str, limit: int, *, exact_style: bool = False) -> None:
+        values = [str(tag).strip() for tag in selected.get(group_name, []) if str(tag).strip()]
+        if len(values) <= limit and not exact_style:
+            return
+        group_priorities = dict(context.get("runtime_mainline_group_priorities", {}))
+        preferred = [str(tag).strip() for tag in group_priorities.get(group_name, ()) if str(tag).strip()]
+        if exact_style and explicit_style not in {"", "自动"} and explicit_style in values:
+            ranked = [explicit_style]
+        else:
+            marker_order = [*theme_tags, *style_tags]
+            if group_name in {"画面风格", "光影氛围", "技术画质"}:
+                marker_order = [*style_tags, *theme_tags]
+            ranked = [
+                *[tag for tag in values if tag in protected],
+                *[tag for tag in values if user_text and tag in user_text],
+                *[tag for tag in marker_order if tag in values],
+                *[tag for tag in preferred if tag in values],
+                *values,
+            ]
+        protected_count = sum(1 for tag in values if tag in protected)
+        kept = list(dict.fromkeys(ranked))[: max(limit, protected_count)]
+        removed = [tag for tag in values if tag not in kept]
+        if not removed:
+            return
+        selected[group_name] = kept
+        removed_by_group.setdefault(group_name, []).extend(removed)
+
+    # With NSFW disabled, random/profile material must not silently activate
+    # an adult route. Explicitly locked user tags remain authoritative.
+    nsfw_active = _is_nsfw_strategy_enabled(settings, context)
+    removed_adult: list[str] = []
+    if runtime_random and not nsfw_active:
+        for tag in list(selected.get("成人向表达", [])):
+            text = str(tag).strip()
+            if text and text not in protected:
+                remove_tag_from_state(selected, custom_tags, text)
+                removed_adult.append(text)
+        intimate_tags = {
+            str(tag).strip()
+            for tag in (
+                set(context.get("intimate_clothing_tags", set()))
+                | set(context.get("adult_mature_intimate_clothing", set()))
+            )
+            if str(tag).strip()
+        }
+        removed_intimate: list[str] = []
+        for tag in list(selected.get("服装造型", [])):
+            text = str(tag).strip()
+            if text in intimate_tags and text not in protected:
+                remove_tag_from_state(selected, custom_tags, text)
+                removed_intimate.append(text)
+        private_scenes = {
+            str(tag).strip()
+            for tag in (
+                set(context.get("private_scene_tags", set()))
+                | set(context.get("runtime_private_scene_tags", set()))
+            )
+            if str(tag).strip()
+        }
+        removed_private: list[str] = []
+        if removed_adult or removed_intimate:
+            for tag in list(selected.get("场景背景", [])):
+                text = str(tag).strip()
+                if text in private_scenes and text not in protected:
+                    remove_tag_from_state(selected, custom_tags, text)
+                    removed_private.append(text)
+        removed_sensitive = [*removed_adult, *removed_intimate, *removed_private]
+        if removed_sensitive:
+            notes.append(
+                "NSFW关闭收敛：移除未锁定的随机成人表达、私密服装或私密场景 "
+                + "、".join(dict.fromkeys(removed_sensitive))
+                + "。"
+            )
+
+    if strict_style and runtime_random:
+        compact("画面风格", 1, exact_style=True)
+    if runtime_random:
+        compact("主体", 4)
+        compact("场景背景", 1)
+        compact("动作姿态", 1)
+        compact("光影氛围", 2)
+        compact("道具世界观", 2)
+        compact("技术画质", 3)
+
+        # Camera angle is exclusive, while a shot size and the complete-frame
+        # safety anchor may coexist with that angle.
+        compositions = [str(tag).strip() for tag in selected.get("构图视角", []) if str(tag).strip()]
+        angle_hits = [
+            tag
+            for tag in compositions
+            if any(marker in tag for marker in ("低角", "高角", "仰拍", "俯拍", "鸟瞰", "平视", "眼平"))
+        ]
+        if len(angle_hits) > 1:
+            keep_angle = next((tag for tag in angle_hits if tag in protected), angle_hits[0])
+            removed_angles = [tag for tag in angle_hits if tag != keep_angle]
+            for tag in removed_angles:
+                remove_tag_from_state(selected, custom_tags, tag)
+            removed_by_group.setdefault("构图视角", []).extend(removed_angles)
+        compact("构图视角", 3)
+
+        # Repair known catalog terms that describe a prop rather than image
+        # quality. Do this after compaction so a full prop group is not made
+        # noisier merely by correcting metadata.
+        reassignments = dict(context.get("runtime_quality_reassignments", {}))
+        rerouted: list[str] = []
+        for raw_tag, raw_group in reassignments.items():
+            tag = str(raw_tag).strip()
+            target_group = str(raw_group).strip()
+            if not tag or tag not in selected.get("技术画质", []):
+                continue
+            remove_tag_from_state(selected, custom_tags, tag)
+            if target_group in selected and len(selected[target_group]) < 2 and tag not in selected[target_group]:
+                selected[target_group].append(tag)
+                rerouted.append(f"{tag}->{target_group}")
+            else:
+                rerouted.append(f"{tag}->移除")
+        if rerouted:
+            notes.append(f"标签分组修正：{'、'.join(rerouted)}，避免道具混入技术画质。")
+
+    if removed_by_group:
+        details = []
+        for group_name, removed in removed_by_group.items():
+            kept = [str(tag).strip() for tag in selected.get(group_name, []) if str(tag).strip()]
+            details.append(
+                f"{group_name}保留{'、'.join(kept) or '空'}，移除{'、'.join(dict.fromkeys(removed))}"
+            )
+        notes.append("运行随机单主线收敛：" + "；".join(details) + "。")
+
+
 _DEFAULT_REPETITION_FAMILIES: tuple[dict[str, Any], ...] = (
     {
         "name": "写实风格",
@@ -1131,6 +1308,12 @@ _STAGE_PROMPT_SKILLS: tuple[StagePromptSkill, ...] = (
         phase="final_normalize",
         enabled=lambda settings, context: True,
         apply=_apply_runtime_random_style_isolation,
+    ),
+    StagePromptSkill(
+        name="runtime_random_mainline_convergence",
+        phase="final_normalize",
+        enabled=lambda settings, context: True,
+        apply=_apply_runtime_random_mainline_convergence,
     ),
     StagePromptSkill(
         name="custom_tag_router",

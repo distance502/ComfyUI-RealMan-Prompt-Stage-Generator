@@ -2299,12 +2299,27 @@ def maybe_model_refine_video(
     language = str(settings.get("提示词语言", "纯中文") or "纯中文")
     anchors = [str(item).strip() for item in settings.get("视频提示词必保留锚点", []) if str(item).strip()]
     missing = [anchor for anchor in anchors if anchor not in candidate]
-    if (
+    candidate_valid = not (
         not candidate
         or _looks_like_broken_prompt(candidate)
         or missing
         or not bool(validator(candidate, language=language))
-    ):
+    )
+    if not candidate_valid:
+        blended = _blend_model_draft_with_skill_prompt(original, candidate, video_settings)
+        blended_missing = [anchor for anchor in anchors if anchor not in blended]
+        if (
+            blended != original
+            and not blended_missing
+            and bool(validator(blended, language=language))
+        ):
+            _append_model_runtime_note(
+                video_settings,
+                "视频模型返回了可用短草稿，已融入 Skill 的 800-1200 字单镜头骨架，主体、场景、动作与结尾锚点保持不变。",
+            )
+            _record_model_call_result(video_settings, outcome="success", changed=True)
+            settings.update({key: value for key, value in video_settings.items() if key.startswith("模型") or key == "推理纠偏说明"})
+            return blended
         reason = "视频模型候选未通过 800-1200 字、自然语言、单镜头或锚点校验。"
         if missing:
             reason += f" 缺少锚点：{'、'.join(missing[:3])}。"

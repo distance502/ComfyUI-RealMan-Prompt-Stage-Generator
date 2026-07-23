@@ -198,6 +198,7 @@ from .stage_prompt.fantasy_profiles import (
     FANTASY_THEME_VARIANTS,
 )
 from .stage_prompt.expanded_profiles import (
+    EXPANDED_STYLE_KEYWORDS_BY_BASE,
     EXPANDED_TEMPLATE_OPTIONS,
     EXPANDED_TEMPLATE_STYLE_VARIANTS,
     EXPANDED_THEME_POOL_OPTIONS,
@@ -1753,6 +1754,10 @@ _运行随机风格隔离标签族 = {
 _运行随机风格隔离标签族["插画感"].update({"日式奇幻动画", "漆原智志画风", "结城信辉画风", "童话绘本", "魔幻油画", "精细赛璐璐", "柔和赛璐璐", "90年代奇幻OVA质感"})
 _运行随机风格隔离标签族["CG感"].update({"奇幻概念设计", "史诗奇幻海报", "史诗概念艺术完成度", "奇幻角色设定"})
 _运行随机风格隔离标签族["神话感"].update({"奇幻风格", "西方奇幻", "高等奇幻", "剑与魔法", "哥特奇幻", "黑暗童话", "精灵幻想", "梦幻奇境"})
+for _base_style_name, _expanded_style_tags in EXPANDED_STYLE_KEYWORDS_BY_BASE.items():
+    _运行随机风格隔离标签族.setdefault(_base_style_name, set()).update(_expanded_style_tags)
+_运行随机风格隔离标签族["真实感"].update({"健身抓拍"})
+_运行随机风格隔离标签族["插画感"].update({"金政基风"})
 _古风场景冲突标签集合 = {
     "办公室",
     "教室",
@@ -2310,6 +2315,14 @@ def _normalize_inference_state(
             "prompt_noise_tags": {"True", "False", "true", "false", "自动", "标准", "详细", "简洁", "低保真", "none", "null"},
             "style_positive_exclusion_terms": _STYLE_POSITIVE_EXCLUSION_TERMS,
             "runtime_style_isolation_families": _运行随机风格隔离标签族,
+            "runtime_private_scene_tags": {
+                "卧室", "浴室", "浴缸", "蒸汽浴室", "酒店套房", "豪华套房氛围",
+                "晨光私房", "温泉雾气", "桑拿房", "酒吧", "夜店",
+            },
+            "runtime_mainline_group_priorities": {
+                "道具世界观": ["手电筒", "火炬", "提灯", "地图", "罗盘", "钥匙", "卷轴"],
+            },
+            "runtime_quality_reassignments": {"飞剑": "道具世界观"},
             "danbooru_visual_intent_families": DANBOORU_VISUAL_INTENT_FAMILIES,
             "danbooru_reference_sheet_tags": DANBOORU_REFERENCE_SHEET_TAGS,
             "danbooru_reference_sheet_balance_tags": DANBOORU_REFERENCE_SHEET_BALANCE_TAGS,
