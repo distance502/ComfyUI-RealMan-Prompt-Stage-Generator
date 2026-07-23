@@ -7353,6 +7353,17 @@ class TestStagePromptModules(unittest.TestCase):
             content = [{"text": "object content"}]
 
         self.assertEqual(model_refiner.extract_text(AiMessage()), "object content")
+
+        class ChoiceMessage:
+            content = [{"type": "output_text", "text": "object choice final"}]
+
+        class Choice:
+            message = ChoiceMessage()
+
+        class ChoiceResponse:
+            choices = [Choice()]
+
+        self.assertEqual(model_refiner.extract_text(ChoiceResponse()), "object choice final")
         self.assertEqual(
             model_refiner.extract_text(
                 [{"generated_text": [{"role": "user", "content": "echo"}, {"role": "assistant", "content": "pipeline output"}]}]
@@ -7360,6 +7371,32 @@ class TestStagePromptModules(unittest.TestCase):
             "pipeline output",
         )
         self.assertEqual(model_refiner.extract_text({"final_prompt": "json final"}), "json final")
+        self.assertEqual(
+            model_refiner.extract_text(
+                {
+                    "choices": [
+                        {"message": {"content": "", "reasoning_content": "analysis only"}},
+                        {"message": {"content": "second choice final"}},
+                    ]
+                }
+            ),
+            "second choice final",
+        )
+        self.assertEqual(
+            model_refiner.extract_text(
+                {
+                    "output": [
+                        {"type": "reasoning", "content": [{"type": "text", "text": "private analysis"}]},
+                        {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "responses final"}]},
+                    ]
+                }
+            ),
+            "responses final",
+        )
+        self.assertEqual(
+            model_refiner.extract_text({"choices": [{"message": {"content": "", "reasoning_content": "analysis only"}}]}),
+            "",
+        )
         self.assertEqual(model_refiner.extract_text({"unexpected": {"value": "not prompt text"}}), "")
         with self.assertRaisesRegex(RuntimeError, "token rejected"):
             model_refiner.extract_text({"error": {"message": "token rejected"}})
@@ -11169,7 +11206,7 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertEqual(selected["动作姿态"], ["跳跃"])
         self.assertIn("低角度广角仰拍", selected["构图视角"])
         self.assertNotIn("高角度", selected["构图视角"])
-        self.assertEqual(selected["道具世界观"], ["浮空水晶", "手电筒"])
+        self.assertEqual(selected["道具世界观"], ["浮空水晶"])
         self.assertNotIn("飞剑", selected["技术画质"])
         self.assertTrue(any("NSFW关闭收敛" in note for note in notes))
         self.assertTrue(any("运行随机单主线收敛" in note for note in notes))
@@ -11203,6 +11240,56 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertEqual(selected["成人向表达"], ["高级性感"])
         self.assertEqual(selected["服装造型"], ["丝质睡袍"])
         self.assertEqual(selected["场景背景"], ["浴缸"])
+
+    def test_runtime_mainline_prioritizes_theme_and_style_markers_before_compaction(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["成年女性", "旅行者"],
+                "画面风格": ["真实感", "商业广告大片"],
+                "成人向表达": [],
+                "光影氛围": ["冷硬顶光", "日落逆光"],
+                "动作姿态": ["低头看手机", "迎着海风前行"],
+                "服装造型": ["商务西装", "度假长裙"],
+                "场景背景": ["写字楼", "海边栈道"],
+                "道具世界观": ["公文包", "草帽"],
+                "技术画质": ["噪点", "胶片颗粒", "材质细节丰富"],
+            }
+        )
+        notes: list[str] = []
+        skills._apply_runtime_random_mainline_convergence(
+            selected=selected,
+            custom_tags=[],
+            settings={
+                "模板风格": "真实感",
+                "风格隔离策略": "严格风格隔离",
+                "运行时随机标签": True,
+                "随机主题池": "海岸假日",
+                "随机主题池档案标记": [
+                    "tag:海边栈道",
+                    "tag:日落逆光",
+                    "tag:迎着海风前行",
+                    "tag:度假长裙",
+                    "tag:草帽",
+                ],
+                "模板风格档案标记": [
+                    "styletag:真实感",
+                    "styletag:胶片颗粒",
+                    "styletag:材质细节丰富",
+                ],
+            },
+            notes=notes,
+            context={},
+            remove_tag_from_state=remove_tag_from_state,
+        )
+
+        self.assertEqual(selected["画面风格"], ["真实感"])
+        self.assertEqual(selected["场景背景"], ["海边栈道"])
+        self.assertEqual(selected["光影氛围"], ["日落逆光"])
+        self.assertEqual(selected["动作姿态"], ["迎着海风前行"])
+        self.assertEqual(selected["服装造型"], ["度假长裙"])
+        self.assertEqual(selected["道具世界观"], ["草帽"])
+        self.assertEqual(selected["技术画质"], ["胶片颗粒", "材质细节丰富"])
+        self.assertTrue(any("运行随机单主线收敛" in note for note in notes))
 
     def test_runtime_random_mainline_keeps_dungeon_role_shot_and_gear_coherent(self) -> None:
         selected = OrderedDict(
@@ -11252,6 +11339,52 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertEqual(selected["服装造型"], ["皮革护甲"])
         self.assertEqual(selected["道具世界观"], ["火炬"])
         self.assertTrue(any("运行随机单主线收敛" in note for note in notes))
+
+    def test_dungeon_mainline_removes_api_case_cross_theme_pollution_in_every_random_mode(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        for runtime_enabled, runtime_mode in ((True, "全随机"), (True, "补全缺失"), (False, "关闭")):
+            with self.subTest(runtime_enabled=runtime_enabled, runtime_mode=runtime_mode):
+                selected = OrderedDict(
+                    {
+                        "主体": ["长腿", "傲娇", "女冒险者", "异兽"],
+                        "画面风格": ["巨构史诗奇观", "地下城冒险", "暗黑漫画"],
+                        "成人向表达": ["吊带睡裙", "夜店"],
+                        "光影氛围": ["云瀑翻涌", "树洞入口柔光", "火炬光", "冷雾惊悚侧光"],
+                        "构图视角": ["背面", "取景器视角", "全景全身", "人物完整入镜"],
+                        "动作姿态": ["抬头仰望", "坐姿慵懒"],
+                        "服装造型": ["步摇", "哥特礼服", "盘扣", "宝石头饰"],
+                        "场景背景": ["现代大厅", "云端阶梯", "地下城遗迹", "地下通道"],
+                        "道具世界观": ["手电筒", "义体接口", "旅行地图"],
+                        "技术画质": ["宝石反光", "高细节", "黑白线稿"],
+                    }
+                )
+                settings = {
+                    "模板风格": "暗黑漫画",
+                    "主体类型": "人物角色",
+                    "风格隔离策略": "严格风格隔离",
+                    "运行时随机标签": runtime_enabled,
+                    "运行时随机模式解析结果": runtime_mode,
+                    "随机主题池": "地下城冒险",
+                    "标签反推模式": "自动平衡",
+                    "NSFW工作台启用": False,
+                    "NSFW策略启用": False,
+                    "随机主题池档案标记": [
+                        "tag:地下城冒险", "tag:女冒险者", "tag:地下城遗迹", "tag:火炬光",
+                    ],
+                    "模板风格档案标记": ["styletag:暗黑漫画", "styletag:黑白线稿"],
+                }
+                normalized, custom, _notes = module._normalize_inference_state(selected, [], settings)
+                self.assertEqual(custom, [])
+                self.assertEqual(normalized["画面风格"], ["暗黑漫画"])
+                self.assertEqual(normalized["成人向表达"], [])
+                self.assertEqual(normalized["主体"][0], "女冒险者")
+                self.assertEqual(normalized["场景背景"], ["地下城遗迹"])
+                self.assertEqual(normalized["服装造型"], ["皮革护甲"])
+                self.assertEqual(normalized["道具世界观"], ["火炬"])
+                self.assertEqual(len(normalized["动作姿态"]), 1)
+                self.assertNotIn("异兽", normalized["主体"])
+                self.assertNotIn("现代大厅", collect_all_tags(normalized, custom))
+                self.assertNotIn("义体接口", collect_all_tags(normalized, custom))
 
     def test_theme_profile_rotation_continues_after_full_cycle(self) -> None:
         module = load_stage_prompt_generator_for_integration_test()
@@ -11847,6 +11980,7 @@ class TestStagePromptModules(unittest.TestCase):
         state = module._parse_prompt_dedupe_cache(settings["连续生成避重缓存输出"])
         self.assertEqual(len(state["channels"]["prompt"]["hashes"]), 1)
         self.assertEqual(len(state["channels"]["smart"]["hashes"]), 1)
+        self.assertEqual(len(state["channels"]["video"]["hashes"]), 0)
 
     def test_stage_generator_tag_block_output_is_strictly_unique_across_runs(self) -> None:
         module = load_stage_prompt_generator_for_integration_test()
@@ -14595,6 +14729,100 @@ class TestStagePromptModules(unittest.TestCase):
                     self.assertIn("最终画面", prompt)
                 self.assertIn("旧车票", smart_prompt)
 
+    def test_all_model_sources_share_skill_contract_across_random_smart_nsfw_and_video(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+
+        class DummyModel:
+            pass
+
+        captured: list[tuple[str, str, dict[str, Any]]] = []
+
+        def keep_batch(_model, prompts, settings, **_kwargs):
+            captured.append((str(settings.get("模型来源", "")), "prompt", dict(settings)))
+            return list(prompts)
+
+        def keep_smart(_model, prompt, settings, **_kwargs):
+            captured.append((str(settings.get("模型来源", "")), "smart", dict(settings)))
+            return prompt
+
+        def keep_video(_model, prompt, settings, **_kwargs):
+            captured.append((str(settings.get("模型来源", "")), "video", dict(settings)))
+            return prompt
+
+        nsfw_workspace = {
+            "enabled": True,
+            "preset": "——",
+            "quality_tier": "高质量",
+            "random_mode": "关闭",
+            "trigger_words": ["成年模特"],
+            "scene": "豪华卧室",
+            "negative_preset": "标准负面提示词",
+        }
+        with (
+            mock.patch.object(module, "_maybe_model_refine_batch_impl", side_effect=keep_batch),
+            mock.patch.object(module, "_maybe_model_refine_impl", side_effect=keep_smart),
+            mock.patch.object(module, "_maybe_model_refine_video_impl", side_effect=keep_video),
+        ):
+            for source in ("仅Skill", "本地模型", "API接口"):
+                for mode in ("random-smart", "nsfw"):
+                    with self.subTest(source=source, mode=mode):
+                        module._CACHE.clear()
+                        kwargs: dict[str, Any] = {
+                            "unique_id": f"all-mode-skill-contract-{source}-{mode}",
+                            "主体标签1": "成年女性",
+                            "画面风格标签1": "暗黑漫画",
+                            "模板风格": "暗黑漫画",
+                            "生成数量": 1,
+                            "提示词语言": "纯中文",
+                            "模型来源": source,
+                            "seed": 20260724,
+                        }
+                        if mode == "random-smart":
+                            kwargs.update(
+                                {
+                                    "场景背景标签1": "现代大厅",
+                                    "服装造型标签1": "商务西装",
+                                    "道具世界观标签1": "义体接口",
+                                    "运行时随机标签": True,
+                                    "运行时随机模式": "全随机",
+                                    "随机主题池": "地下城冒险",
+                                    "风格隔离策略": "严格风格隔离",
+                                    "智能文本匹配": True,
+                                    "智能文本输入": "女冒险者在地下城遗迹发现机关后持武器谨慎前行",
+                                }
+                            )
+                        else:
+                            kwargs.update(
+                                {
+                                    "运行时随机标签": False,
+                                    "随机主题池": "自动",
+                                    "nsfw_workspace": nsfw_workspace,
+                                }
+                            )
+                        model = None if source == "仅Skill" else DummyModel()
+                        result = module._run_stage(model, **kwargs)
+                        payload = json.loads(result[3])
+                        contract_settings = {"提示词语言": "纯中文", "全局叙事合同启用": True}
+                        for prompt in (result[1], result[6]):
+                            self.assertGreaterEqual(len(prompt), 800, prompt)
+                            self.assertLessEqual(len(prompt), 1200, prompt)
+                            self.assertTrue(model_refiner.is_natural_language_prompt(prompt, contract_settings), prompt)
+                        self.assertTrue(module._is_natural_video_prompt_impl(result[7], language="纯中文"), result[7])
+                        self.assertGreaterEqual(len(result[7]), 800)
+                        self.assertLessEqual(len(result[7]), 1200)
+                        self.assertIsInstance(payload["global_creative_spine"], dict)
+                        if mode == "random-smart":
+                            flat = set(payload["selected_tags_flat"])
+                            self.assertNotIn("现代大厅", flat)
+                            self.assertNotIn("义体接口", flat)
+
+        for source in ("仅Skill", "本地模型", "API接口"):
+            source_calls = [(channel, settings) for call_source, channel, settings in captured if call_source == source]
+            self.assertTrue({"prompt", "smart", "video"} <= {channel for channel, _settings in source_calls})
+            for _channel, settings in source_calls:
+                self.assertIsInstance(settings.get("全局创作主线合同"), dict)
+                self.assertTrue(str(settings.get("全局创作主线摘要", "")).strip())
+
     def test_global_narrative_planner_creates_distinct_batch_story_arcs(self) -> None:
         anchors = {
             "subject": "成年女性剑客",
@@ -15251,6 +15479,73 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertEqual(settings.get("模型活动回退数量", 0), 0)
         self.assertTrue(any("已恢复" in note for note in settings.get("推理纠偏说明", [])))
 
+    def test_model_refiner_retries_empty_api_text_and_recovers_without_skill_fallback(self) -> None:
+        class EmptyThenFinalLLM:
+            def __init__(self):
+                self.calls = 0
+
+            def create_chat_completion(self, *args, **kwargs):
+                self.calls += 1
+                if self.calls == 1:
+                    return {"choices": [{"message": {"content": "", "reasoning_content": "analysis only"}}]}
+                return {"choices": [{"message": {"content": "成年女冒险者因为听见石门后的响动而举起火炬，沿地下城遗迹谨慎前行，最后停在门前观察刻痕。"}}]}
+
+        llm = EmptyThenFinalLLM()
+        settings = {
+            "提示词语言": "纯中文",
+            "主体类型": "人物角色",
+            "主体类型解析结果": "人物角色",
+            "模型来源": "API接口",
+            "模型调用基础来源": "API接口",
+            "模型瞬时重试次数": 1,
+        }
+        result = model_refiner.maybe_model_refine(
+            llm,
+            "成年女冒险者在地下城遗迹举起火炬，全景全身，暗黑漫画，高细节",
+            settings,
+            chat_completion=lambda model, messages, params: model.create_chat_completion(messages=messages, **params),
+            clean_think_text=lambda value: value,
+        )
+        self.assertEqual(llm.calls, 2)
+        self.assertIn("因为", result)
+        self.assertEqual(settings.get("模型传输重试次数"), 1)
+        self.assertEqual(settings.get("模型活动回退数量", 0), 0)
+
+    def test_video_model_retries_invalid_body_and_accepts_repaired_skill_prompt(self) -> None:
+        original = build_long_test_skill_prompt()
+
+        class RepairingVideoLLM:
+            def __init__(self):
+                self.calls = 0
+
+            def create_chat_completion(self, *args, **kwargs):
+                self.calls += 1
+                if self.calls == 1:
+                    return {"choices": [{"message": {"content": "分析：先理解用户需求，然后输出[视频提示词]。"}}]}
+                return {"choices": [{"message": {"content": original}}]}
+
+        llm = RepairingVideoLLM()
+        settings = {
+            "提示词语言": "纯中文",
+            "模型来源": "API接口",
+            "模型调用基础来源": "API接口",
+            "模型任务": "视频提示词",
+            "视频提示词必保留锚点": [],
+        }
+        result = model_refiner.maybe_model_refine_video(
+            llm,
+            original,
+            settings,
+            chat_completion=lambda model, messages, params: model.create_chat_completion(messages=messages, **params),
+            clean_think_text=lambda value: value,
+            validator=lambda text, language: 800 <= len(text) <= 1200,
+        )
+        self.assertEqual(llm.calls, 2)
+        self.assertEqual(result, original)
+        self.assertEqual(settings.get("模型活动回退数量", 0), 0)
+        self.assertEqual(settings.get("模型输出修复重试次数实际"), 1)
+        self.assertTrue(any("首次正文不合格" in note for note in settings.get("推理纠偏说明", [])))
+
     def test_video_prompt_skill_builds_one_causal_natural_language_shot(self) -> None:
         selected = OrderedDict(
             {
@@ -15279,6 +15574,7 @@ class TestStagePromptModules(unittest.TestCase):
         for narrative_marker in ("起初", "因为", "镜头", "声音", "最后"):
             self.assertIn(narrative_marker, prompt)
         self.assertEqual(prompt.count("单镜头"), 1)
+        self.assertNotRegex(prompt, r"(?:\d+|[一二三四五六七八九十两几]+)\s*秒")
         self.assertNotIn("标签解析", prompt)
         self.assertNotIn("Thinking Process", prompt)
         self.assertLessEqual(prompt.count("、"), 10)
@@ -15313,8 +15609,54 @@ class TestStagePromptModules(unittest.TestCase):
             self.assertIn(anchor, prompt)
         for contamination in ("车站", "站台", "列车", "同一场雨", "雨声"):
             self.assertNotIn(contamination, prompt)
+        self.assertNotIn("秒", prompt)
         self.assertIn("镜头从全景全身开始", prompt)
         self.assertNotIn("全景全身和固定镜头时刻", prompt)
+
+    def test_video_skill_uses_only_normalized_contract_primary_anchors(self) -> None:
+        raw_selected = OrderedDict(
+            {
+                "主体": ["长腿", "女冒险者"],
+                "画面风格": ["巨构史诗奇观", "暗黑漫画"],
+                "场景背景": ["现代大厅", "云端阶梯"],
+                "动作姿态": ["抬头仰望", "坐姿慵懒"],
+                "服装造型": ["步摇", "哥特礼服"],
+                "道具世界观": ["手电筒", "义体接口"],
+                "光影氛围": ["云瀑翻涌", "树洞入口柔光"],
+            }
+        )
+        normalized_contract = {
+            "groups": {
+                "主体": ["女冒险者", "长腿"],
+                "画面风格": ["暗黑漫画"],
+                "场景背景": ["地下城遗迹"],
+                "动作姿态": ["持武器"],
+                "服装造型": ["皮革护甲"],
+                "道具世界观": ["火炬"],
+                "光影氛围": ["顶光烟雾"],
+                "构图视角": ["全景全身"],
+            }
+        }
+        prompt = video_prompt_skill.build_video_prompt(
+            raw_selected,
+            [],
+            {
+                "提示词语言": "纯中文",
+                "主体类型解析结果": "人物角色",
+                "模板风格": "暗黑漫画",
+                "全局创作主线合同": normalized_contract,
+                "seed": 20260724,
+            },
+        )
+        self.assertTrue(video_prompt_skill.is_natural_video_prompt(prompt, language="纯中文"))
+        for anchor in ("女冒险者", "暗黑漫画", "地下城遗迹", "持武器", "皮革护甲", "火炬"):
+            self.assertIn(anchor, prompt)
+        for contamination in (
+            "巨构史诗奇观", "现代大厅", "云端阶梯", "抬头仰望", "坐姿慵懒",
+            "步摇", "哥特礼服", "手电筒", "义体接口", "云瀑翻涌", "树洞入口柔光",
+        ):
+            self.assertNotIn(contamination, prompt)
+        self.assertNotRegex(prompt, r"(?:\d+|[一二三四五六七八九十两几]+)\s*秒")
 
     def test_video_prompt_skill_supports_english_and_bilingual_output(self) -> None:
         primary = (
@@ -15509,13 +15851,48 @@ class TestStagePromptModules(unittest.TestCase):
         payload = json.loads(result[3])
         self.assertEqual(payload["video_prompt"], video_prompt)
         self.assertEqual(payload["video_prompt_skill_status"], "已生成")
-        self.assertEqual(payload["video_prompt_skill_version"], "video-prompt-skill-v2")
+        self.assertEqual(payload["video_prompt_skill_version"], "video-prompt-skill-v3")
         self.assertEqual(payload["video_prompt_model_status"], "未调用（仅Skill）")
         self.assertEqual(payload["video_prompt_model_source"], "仅Skill")
         self.assertGreaterEqual(payload["video_prompt_required_anchor_count"], 1)
         cache = module.获取阶段节点输出缓存(node_id)
         self.assertEqual(cache["video_prompt"], video_prompt)
         self.assertEqual(cache["outputs"][7], video_prompt)
+
+    def test_video_prompt_strict_dedupe_uses_natural_single_take_variation(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        module._CACHE.clear()
+        selected = OrderedDict(
+            {
+                "主体": ["女冒险者"],
+                "画面风格": ["暗黑漫画"],
+                "服装造型": ["皮革护甲"],
+                "场景背景": ["地下城遗迹"],
+                "动作姿态": ["持武器前行"],
+                "光影氛围": ["火炬光"],
+                "构图视角": ["全景全身"],
+                "道具世界观": ["火炬"],
+            }
+        )
+        settings = {
+            "提示词语言": "纯中文",
+            "主体类型": "人物角色",
+            "模板风格": "暗黑漫画",
+            "seed": 19,
+            "连续生成避重缓存": "",
+        }
+        base = module._build_video_prompt_impl(selected, [], settings, primary_prompt="")
+        first = module._strict_dedupe_prompt_list("video-strict-dedupe", [base], settings, channel="video")[0]
+        second = module._strict_dedupe_prompt_list("video-strict-dedupe", [base], settings, channel="video")[0]
+
+        self.assertEqual(first, base)
+        self.assertNotEqual(second, first)
+        self.assertTrue(module._is_natural_video_prompt_impl(second, language="纯中文"))
+        self.assertIn("镜头在这次连续行动中", second)
+        self.assertNotIn("画面变化方向", second)
+        self.assertIsNone(re.search(r"(?:约|大约)?\s*\d+(?:\.\d+)?\s*秒", second))
+        state = module._parse_prompt_dedupe_cache(settings["连续生成避重缓存输出"])
+        self.assertEqual(len(state["channels"]["video"]["hashes"]), 2)
 
     def test_stage_video_prompt_adopts_model_refinement_and_reports_status(self) -> None:
         module = load_stage_prompt_generator_for_integration_test()

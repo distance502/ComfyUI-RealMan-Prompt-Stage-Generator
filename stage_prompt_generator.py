@@ -2329,13 +2329,33 @@ def _normalize_inference_state(
             },
             "runtime_theme_constraints": {
                 "地下城冒险": {
+                    "allowed_scenes": {
+                        "地下城遗迹", "地下通道", "水晶洞窟", "远古遗迹", "森林遗迹",
+                        "龙巢宝库", "遗忘神殿", "秘仪大厅", "废弃老屋", "废弃地下老屋",
+                    },
+                    "blocked_scenes": {
+                        "现代大厅", "现代客厅", "现代公寓", "写字楼", "办公室", "商业街",
+                        "云端阶梯", "雪线营地", "微缩街区", "夜店", "酒吧", "浴缸",
+                        "未来都市", "霓虹街区", "机械舱", "轨道空间站",
+                    },
+                    "fallback_scene": "地下城遗迹",
+                    "allowed_outfits": {
+                        "皮革护甲", "皮革", "磨砂皮革", "冒险者披风", "精灵轻甲",
+                        "龙鳞铠甲", "黑金重甲", "银白雕花重甲", "长靴", "短靴",
+                    },
                     "blocked_outfits": {
                         "休闲", "运动", "商务休闲", "T恤", "毛衣", "卫衣", "白衬衫",
                         "奶油针织", "针织", "开衫", "牛仔裤", "短裤", "雪纺",
+                        "步摇", "哥特礼服", "吊带睡裙", "丝质睡袍", "睡裙", "浴袍",
                     },
                     "fallback_outfit": "皮革护甲",
+                    "allowed_props": {
+                        "火炬", "提灯", "地图", "冒险地图", "罗盘", "钥匙", "卷轴", "腰包",
+                        "浮空水晶", "魔剑", "魔法书", "水晶法杖", "星图仪", "魔法阵",
+                    },
                     "blocked_props": {
                         "旅行箱", "行李箱", "旅行包", "手提包", "手持饮料",
+                        "手电筒", "义体接口", "手机", "笔记本电脑", "相机",
                     },
                     "fallback_prop": "火炬",
                 },
@@ -4341,6 +4361,15 @@ def _run_stage_impl(
         custom_tags = nsfw_output["custom_tags"]
         settings["运行时随机保护标签"] = ",".join(nsfw_output.get("protected_tags", []))
         _merge_inference_notes(settings, ["NSFW工作台锚点保护：仅保留最终归一化后仍有效的工作台显式选择。"])
+        selected, custom_tags, post_nsfw_notes = _normalize_inference_state(
+            selected,
+            custom_tags,
+            settings,
+            tag_group_index=tag_group_index,
+            tag_group_memberships=tag_group_memberships,
+        )
+        if post_nsfw_notes:
+            _merge_inference_notes(settings, post_nsfw_notes)
     tags = _collect_all_tags(selected, custom_tags)
     if generated:
         active_tags = set(tags)
@@ -4661,6 +4690,24 @@ def _run_stage_impl(
     else:
         settings["视频提示词模型状态"] = "未产生模型候选，保留 Skill 结果"
     video_prompt = refined_video_prompt
+    pre_dedupe_video_prompt = video_prompt
+    deduped_video_prompt = (
+        _strict_dedupe_prompt_list(cache_key, [video_prompt], settings, channel="video")
+        or [video_prompt]
+    )[0]
+    deduped_video_missing_anchors = [
+        str(anchor).strip()
+        for anchor in settings.get("视频提示词必保留锚点", [])
+        if str(anchor).strip() and str(anchor).strip() not in deduped_video_prompt
+    ]
+    if _is_natural_video_prompt_impl(
+        deduped_video_prompt,
+        language=str(settings.get("提示词语言", "纯中文") or "纯中文"),
+    ) and not deduped_video_missing_anchors:
+        video_prompt = deduped_video_prompt
+    else:
+        video_prompt = pre_dedupe_video_prompt
+        _merge_inference_notes(settings, ["视频提示词避重候选未通过自然语言合同，已保留本轮有效视频正文。"])
     if _is_natural_video_prompt_impl(video_prompt, language=str(settings.get("提示词语言", "纯中文") or "纯中文")):
         settings["视频提示词Skill状态"] = "已生成"
     else:
@@ -5098,7 +5145,7 @@ def _parse_prompt_dedupe_cache(value: Any) -> dict[str, Any]:
         source_version = 3
     legacy_schema = source_version < 3
     normalized_channels: dict[str, dict[str, Any]] = {}
-    for channel_name in ("prompt", "smart"):
+    for channel_name in ("prompt", "smart", "video"):
         raw_channel = channels.get(channel_name, {}) if isinstance(channels, dict) else {}
         raw_hashes = [
             str(item).strip().lower()
@@ -5147,8 +5194,16 @@ def _serialize_prompt_dedupe_cache(state: dict[str, Any]) -> str:
     return json.dumps(_parse_prompt_dedupe_cache(state), ensure_ascii=False, separators=(",", ":"))
 
 
-def _strip_strict_variation_clause(text: str) -> str:
+def _strip_strict_variation_clause(text: str, *, channel: str = "prompt") -> str:
     prompt = str(text or "").strip()
+    if channel == "video":
+        prompt = re.sub(
+            r"(?:镜头在这次连续行动中|Within this continuous take, the camera)"
+            r"[^。.!?]*[。.!?]?\s*$",
+            "",
+            prompt,
+            flags=re.IGNORECASE,
+        ).strip("，,。；;.!? \t\n")
     marker_pattern = re.compile(
         r"(?:[，,；;]\s*)?(?:画面变化方向|visual\s+variation)(?:\s*[（(][^）)]*[）)])?\s*[:：]",
         re.IGNORECASE,
@@ -5157,7 +5212,142 @@ def _strip_strict_variation_clause(text: str) -> str:
     return prompt[:match.start()].strip("，,。；; \t\n") if match else prompt
 
 
-def _append_strict_variation_clause(text: str, cursor: int, settings: dict[str, Any]) -> str:
+_STRICT_VIDEO_CAMERA_VARIATIONS_ZH: tuple[str, ...] = (
+    "以克制的贴近保持主体重心清楚",
+    "沿主体移动方向缓慢调整前后景距离",
+    "借前景遮挡的自然移开显露行动结果",
+    "先守住空间全貌，再平稳靠近关键动作",
+    "围绕道具与手部关系做一次柔和跟随",
+    "让焦点在主体和环境反馈之间缓慢往返",
+    "顺着视线和动作方向维持稳定的侧向移动",
+    "从空间纵深中逐步确认主体造成的变化",
+)
+_STRICT_VIDEO_FEEDBACK_VARIATIONS_ZH: tuple[str, ...] = (
+    "材质受力与反光在动作之后逐层显现",
+    "空气、尘埃和边缘光只响应已经发生的动作",
+    "遮挡关系与景深变化共同确认行动方向",
+    "地面反射和背景结构延迟回应主体移动",
+    "衣料惯性与道具位置延续同一条因果线",
+    "空间明暗随主体位置变化而自然重新分配",
+    "前后景距离在行动完成后才出现可见改变",
+    "局部高光与环境纹理共同回应动作力度",
+)
+_STRICT_VIDEO_SOUND_VARIATIONS_ZH: tuple[str, ...] = (
+    "环境回声由近及远自然收束",
+    "呼吸与材质摩擦在动作完成后留下短暂余音",
+    "脚步和空间底噪共同标记距离变化",
+    "道具接触声与环境声保持清楚的先后关系",
+    "短促回声跟随动作方向移动并逐渐减弱",
+    "衣料声和远处底噪保持自然的空间层次",
+    "环境声在主体停稳后恢复原有秩序",
+    "细小碰撞声准确落在道具状态变化之后",
+    "动作余音与背景声场在结尾处平稳衔接",
+)
+
+_STRICT_VIDEO_CAMERA_VARIATIONS_EN: tuple[str, ...] = (
+    "holds close to the subject's shifting weight",
+    "tracks gently along the direction of movement",
+    "uses a foreground reveal to expose the consequence",
+    "keeps the location readable before approaching the action",
+    "follows the relationship between the hands and the key prop",
+    "lets focus travel slowly between the subject and the response",
+    "maintains a steady lateral move along the subject's sightline",
+    "uses the existing depth to confirm the resulting change",
+)
+_STRICT_VIDEO_FEEDBACK_VARIATIONS_EN: tuple[str, ...] = (
+    "material response follows the action",
+    "light and depth react only after the movement",
+    "prop placement confirms the same causal line",
+    "reflections reveal the direction and weight of the action",
+    "foreground spacing changes only after the subject moves",
+    "fabric inertia and surface detail preserve continuity",
+    "the location redistributes light around the new position",
+    "background structure makes the consequence readable",
+)
+_STRICT_VIDEO_SOUND_VARIATIONS_EN: tuple[str, ...] = (
+    "ambient sound settles naturally behind the result",
+    "footsteps and room tone mark the change in distance",
+    "material contact leaves a restrained natural echo",
+    "breathing and fabric movement remain grounded in the location",
+    "prop contact follows the visible movement in the correct order",
+    "the sound field narrows gently as the action ends",
+    "small impacts arrive only after the prop changes position",
+    "the final ambience holds the consequence without narration",
+    "background noise returns to its prior balance at the end",
+)
+
+
+def _append_video_variation_clause(text: str, cursor: int, settings: dict[str, Any]) -> str:
+    prompt = _strip_strict_variation_clause(text, channel="video")
+    index = max(0, int(cursor))
+    english = str(settings.get("提示词语言", "纯中文") or "纯中文").strip() == "纯英文"
+    if english:
+        camera = _STRICT_VIDEO_CAMERA_VARIATIONS_EN[index % len(_STRICT_VIDEO_CAMERA_VARIATIONS_EN)]
+        feedback = _STRICT_VIDEO_FEEDBACK_VARIATIONS_EN[
+            (index // len(_STRICT_VIDEO_CAMERA_VARIATIONS_EN)) % len(_STRICT_VIDEO_FEEDBACK_VARIATIONS_EN)
+        ]
+        sound = _STRICT_VIDEO_SOUND_VARIATIONS_EN[
+            (index // (len(_STRICT_VIDEO_CAMERA_VARIATIONS_EN) * len(_STRICT_VIDEO_FEEDBACK_VARIATIONS_EN)))
+            % len(_STRICT_VIDEO_SOUND_VARIATIONS_EN)
+        ]
+        return f"{prompt.rstrip(' ,.;')} Within this continuous take, the camera {camera}, while {feedback}, and {sound}."
+    camera = _STRICT_VIDEO_CAMERA_VARIATIONS_ZH[index % len(_STRICT_VIDEO_CAMERA_VARIATIONS_ZH)]
+    feedback = _STRICT_VIDEO_FEEDBACK_VARIATIONS_ZH[
+        (index // len(_STRICT_VIDEO_CAMERA_VARIATIONS_ZH)) % len(_STRICT_VIDEO_FEEDBACK_VARIATIONS_ZH)
+    ]
+    sound = _STRICT_VIDEO_SOUND_VARIATIONS_ZH[
+        (index // (len(_STRICT_VIDEO_CAMERA_VARIATIONS_ZH) * len(_STRICT_VIDEO_FEEDBACK_VARIATIONS_ZH)))
+        % len(_STRICT_VIDEO_SOUND_VARIATIONS_ZH)
+    ]
+    return f"{prompt.rstrip('，。；,.;')}。镜头在这次连续行动中{camera}，{feedback}，{sound}。"
+
+
+def _fit_strict_video_variation(text: str, settings: dict[str, Any]) -> str:
+    """Trim one expendable middle sentence if a video variation exceeds its contract."""
+
+    prompt = str(text or "").strip()
+    language = str(settings.get("提示词语言", "纯中文") or "纯中文").strip()
+    anchors = [
+        str(anchor).strip().casefold()
+        for anchor in settings.get("视频提示词必保留锚点", [])
+        if str(anchor).strip()
+    ]
+
+    def trim_body(body: str, *, english: bool) -> str:
+        sentences = [part.strip() for part in re.split(r"(?<=[。！？.!?])\s*", body) if part.strip()]
+        critical = ("at first", "camera", "finally") if english else ("起初", "镜头", "最后")
+        measure = lambda value: len(re.findall(r"\b[A-Za-z][A-Za-z'-]*\b", value)) if english else len(value)
+        maximum = 230 if english else 1200
+        separator = " " if english else ""
+        while len(sentences) > 4 and measure(separator.join(sentences)) > maximum:
+            removable = [
+                index
+                for index, sentence in enumerate(sentences[:-1])
+                if index > 0
+                and not any(marker in sentence.casefold() for marker in critical)
+                and not any(anchor in sentence.casefold() for anchor in anchors)
+            ]
+            if not removable:
+                break
+            sentences.pop(max(removable, key=lambda index: measure(sentences[index])))
+        return separator.join(sentences).strip()
+
+    if language == "英文提示词+中文说明":
+        english, marker, chinese = prompt.partition("中文说明：")
+        if marker:
+            return f"{trim_body(english, english=True)}\n中文说明：{trim_body(chinese, english=False)}"
+    return trim_body(prompt, english=language == "纯英文")
+
+
+def _append_strict_variation_clause(
+    text: str,
+    cursor: int,
+    settings: dict[str, Any],
+    *,
+    channel: str = "prompt",
+) -> str:
+    if channel == "video":
+        return _append_video_variation_clause(text, cursor, settings)
     prompt = _strip_strict_variation_clause(text)
     english = str(settings.get("提示词语言", "纯中文") or "纯中文").strip() == "纯英文"
     index = max(0, int(cursor))
@@ -5186,7 +5376,15 @@ def _append_strict_variation_clause(text: str, cursor: int, settings: dict[str, 
     return f"{prompt.rstrip('，。；,.;')}；画面变化方向：{spatial}；{light}；{action}{pass_note}"
 
 
-def _append_strict_unique_fallback(text: str, cursor: int, settings: dict[str, Any]) -> str:
+def _append_strict_unique_fallback(
+    text: str,
+    cursor: int,
+    settings: dict[str, Any],
+    *,
+    channel: str = "prompt",
+) -> str:
+    if channel == "video":
+        return _append_video_variation_clause(text, cursor, settings)
     prompt = _strip_strict_variation_clause(text)
     sequence = max(0, int(cursor)) + 1
     if str(settings.get("提示词语言", "纯中文") or "纯中文").strip() == "纯英文":
@@ -5201,7 +5399,7 @@ def _strict_dedupe_prompt_list(
     *,
     channel: str = "prompt",
 ) -> list[str]:
-    channel_name = "smart" if channel == "smart" else "prompt"
+    channel_name = channel if channel in {"prompt", "smart", "video"} else "prompt"
     input_state = _parse_prompt_dedupe_cache(
         settings.get("连续生成避重缓存输出") or settings.get("连续生成避重缓存", "")
     )
@@ -5237,7 +5435,7 @@ def _strict_dedupe_prompt_list(
 
         for raw_prompt in prompt_list:
             candidate = str(raw_prompt or "").strip()
-            base_prompt = _strip_strict_variation_clause(candidate)
+            base_prompt = _strip_strict_variation_clause(candidate, channel=channel_name)
             base_hash = _canonical_prompt_hash(base_prompt)
             candidate_hash = _canonical_prompt_hash(candidate)
             legacy_base_hash = _legacy_canonical_prompt_hash(base_prompt)
@@ -5258,8 +5456,16 @@ def _strict_dedupe_prompt_list(
                 for _attempt in range(_STRICT_PROMPT_VARIATION_ATTEMPTS):
                     variation_cursor = cursor
                     cursor += 1
-                    varied = _append_strict_variation_clause(base_prompt, variation_cursor, settings)
-                    varied = _stabilize_prompt_output_impl(varied, settings) or varied
+                    varied = _append_strict_variation_clause(
+                        base_prompt,
+                        variation_cursor,
+                        settings,
+                        channel=channel_name,
+                    )
+                    if channel_name == "video":
+                        varied = _fit_strict_video_variation(varied, settings) or varied
+                    else:
+                        varied = _stabilize_prompt_output_impl(varied, settings) or varied
                     varied_hash = _canonical_prompt_hash(varied)
                     varied_legacy_hash = _legacy_canonical_prompt_hash(varied)
                     if (
@@ -5275,7 +5481,12 @@ def _strict_dedupe_prompt_list(
                 while not resolved:
                     variation_cursor = cursor
                     cursor += 1
-                    varied = _append_strict_unique_fallback(base_prompt, variation_cursor, settings)
+                    varied = _append_strict_unique_fallback(
+                        base_prompt,
+                        variation_cursor,
+                        settings,
+                        channel=channel_name,
+                    )
                     varied_hash = _canonical_prompt_hash(varied)
                     varied_legacy_hash = _legacy_canonical_prompt_hash(varied)
                     if (
@@ -5300,7 +5511,7 @@ def _strict_dedupe_prompt_list(
                 accepted_base_hashes.append(base_hash)
 
         merged_state = _parse_prompt_dedupe_cache(memory_state)
-        for other_channel in ("prompt", "smart"):
+        for other_channel in ("prompt", "smart", "video"):
             input_other = input_state["channels"][other_channel]
             memory_other = merged_state["channels"][other_channel]
             if other_channel == channel_name:
@@ -5324,7 +5535,8 @@ def _strict_dedupe_prompt_list(
 
         settings["连续生成避重缓存输出"] = _serialize_prompt_dedupe_cache(merged_state)
         if changed_count:
-            _merge_inference_notes(settings, [f"最终提示词严格避重：改写 {changed_count} 条与最近输出完全相同的提示词。"])
+            channel_label = {"prompt": "主提示词", "smart": "智能文本", "video": "视频提示词"}[channel_name]
+            _merge_inference_notes(settings, [f"{channel_label}严格避重：改写 {changed_count} 条与最近输出完全相同的提示词。"])
         return accepted
 
 
@@ -5658,6 +5870,15 @@ def 构建运行时随机预览状态(payload: dict[str, Any]) -> dict[str, Any]
         custom_tags = nsfw_output["custom_tags"]
         settings["运行时随机保护标签"] = ",".join(nsfw_output.get("protected_tags", []))
         _merge_inference_notes(settings, ["NSFW工作台锚点保护：仅保留最终归一化后仍有效的工作台显式选择。"])
+        selected, custom_tags, post_nsfw_notes = _normalize_inference_state(
+            selected,
+            custom_tags,
+            settings,
+            tag_group_index=tag_group_index,
+            tag_group_memberships=tag_group_memberships,
+        )
+        if post_nsfw_notes:
+            _merge_inference_notes(settings, post_nsfw_notes)
     for group_name, slot_count, _ in tag_groups:
         selected[group_name] = _bounded_runtime_preview_tags(
             selected.get(group_name, []),

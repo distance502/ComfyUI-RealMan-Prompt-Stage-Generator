@@ -79,6 +79,9 @@ _AUTO_NON_PERSON_SUBJECT_TAGS = {
     "侦查机甲",
     "步兵机甲",
     "装甲",
+    "异兽",
+    "怪物",
+    "动物",
 }
 _AUTO_HUMAN_SUBJECT_TAGS = {
     "人物主体",
@@ -822,8 +825,10 @@ def _apply_runtime_random_mainline_convergence(
     """Collapse random, theme, and style additions into one coherent story line."""
 
     runtime_random = bool(settings.get("运行时随机标签", False))
+    theme_pool = str(settings.get("随机主题池", "自动") or "自动").strip()
+    theme_active = theme_pool not in {"", "自动"}
     strict_style = _style_isolation_mode(settings) == "严格风格隔离"
-    if not runtime_random and not strict_style:
+    if not runtime_random and not strict_style and not theme_active:
         return
 
     protected = set(_setting_tags(settings.get("锁定标签白名单", "")))
@@ -852,12 +857,14 @@ def _apply_runtime_random_mainline_convergence(
 
     def compact(group_name: str, limit: int, *, exact_style: bool = False) -> None:
         values = [str(tag).strip() for tag in selected.get(group_name, []) if str(tag).strip()]
-        if len(values) <= limit and not exact_style:
+        if not values:
             return
         group_priorities = dict(context.get("runtime_mainline_group_priorities", {}))
         preferred = [str(tag).strip() for tag in group_priorities.get(group_name, ()) if str(tag).strip()]
-        if exact_style and explicit_style not in {"", "自动"} and explicit_style in values:
-            ranked = [explicit_style]
+        if exact_style and explicit_style not in {"", "自动"}:
+            if explicit_style not in values:
+                return
+            ranked = [explicit_style, *[tag for tag in values if tag in protected]]
         else:
             marker_order = [*theme_tags, *style_tags]
             if group_name in {"画面风格", "光影氛围", "技术画质"}:
@@ -872,16 +879,16 @@ def _apply_runtime_random_mainline_convergence(
         protected_count = sum(1 for tag in values if tag in protected)
         kept = list(dict.fromkeys(ranked))[: max(limit, protected_count)]
         removed = [tag for tag in values if tag not in kept]
-        if not removed:
-            return
-        selected[group_name] = kept
-        removed_by_group.setdefault(group_name, []).extend(removed)
+        if kept != values:
+            selected[group_name] = kept
+        if removed:
+            removed_by_group.setdefault(group_name, []).extend(removed)
 
     # With NSFW disabled, random/profile material must not silently activate
     # an adult route. Explicitly locked user tags remain authoritative.
     nsfw_active = _is_nsfw_strategy_enabled(settings, context)
     removed_adult: list[str] = []
-    if runtime_random and not nsfw_active:
+    if (runtime_random or theme_active) and not nsfw_active:
         for tag in list(selected.get("成人向表达", [])):
             text = str(tag).strip()
             if text and text not in protected:
@@ -924,9 +931,9 @@ def _apply_runtime_random_mainline_convergence(
                 + "。"
             )
 
-    if strict_style and runtime_random:
+    if strict_style:
         compact("画面风格", 1, exact_style=True)
-    if runtime_random:
+    if runtime_random or theme_active:
         subject_type = str(settings.get("主体类型", "自动") or "自动").strip()
         if subject_type == "人物角色":
             non_person_tags = _AUTO_NON_PERSON_SUBJECT_TAGS | {
@@ -967,19 +974,36 @@ def _apply_runtime_random_mainline_convergence(
                     if tag != theme_subject and looks_like_competing_identity(tag)
                 ],
             )
+            remaining_subjects = [
+                str(tag).strip()
+                for tag in selected.get("主体", [])
+                if str(tag).strip() and str(tag).strip() != theme_subject
+            ]
+            selected["主体"] = [theme_subject, *remaining_subjects]
 
-        theme_pool = str(settings.get("随机主题池", "自动") or "自动").strip()
         theme_constraints = dict(context.get("runtime_theme_constraints", {})).get(theme_pool, {})
         if isinstance(theme_constraints, dict):
-            for group_name, blocked_key, fallback_key in (
-                ("服装造型", "blocked_outfits", "fallback_outfit"),
-                ("道具世界观", "blocked_props", "fallback_prop"),
+            for group_name, blocked_key, allowed_key, fallback_key in (
+                ("场景背景", "blocked_scenes", "allowed_scenes", "fallback_scene"),
+                ("服装造型", "blocked_outfits", "allowed_outfits", "fallback_outfit"),
+                ("道具世界观", "blocked_props", "allowed_props", "fallback_prop"),
             ):
                 blocked = {
                     str(tag).strip()
                     for tag in theme_constraints.get(blocked_key, ())
                     if str(tag).strip()
                 }
+                allowed = {
+                    str(tag).strip()
+                    for tag in theme_constraints.get(allowed_key, ())
+                    if str(tag).strip()
+                }
+                if allowed:
+                    blocked.update(
+                        str(tag).strip()
+                        for tag in selected.get(group_name, [])
+                        if str(tag).strip() not in allowed
+                    )
                 remove_group_tags(
                     group_name,
                     [tag for tag in selected.get(group_name, []) if str(tag).strip() in blocked],
@@ -989,11 +1013,13 @@ def _apply_runtime_random_mainline_convergence(
                     selected[group_name].append(fallback)
 
         compact("主体", 4)
+        compact("服装造型", 1)
         compact("场景背景", 1)
         compact("动作姿态", 1)
-        compact("光影氛围", 2)
-        compact("道具世界观", 2)
-        compact("技术画质", 3)
+        compact("光影氛围", 1)
+        compact("道具世界观", 1)
+        compact("成人向表达", 1)
+        compact("技术画质", 2)
 
         # Camera angle and shot size are independently exclusive. Dynamic
         # full-body movement favors a readable full shot over a portrait crop.
@@ -1030,8 +1056,8 @@ def _apply_runtime_random_mainline_convergence(
         compact("构图视角", 3)
 
         # Repair known catalog terms that describe a prop rather than image
-        # quality. Do this after compaction so a full prop group is not made
-        # noisier merely by correcting metadata.
+        # quality. A rerouted term may fill an empty prop slot, but it must not
+        # create a second prop direction after the mainline has converged.
         reassignments = dict(context.get("runtime_quality_reassignments", {}))
         rerouted: list[str] = []
         for raw_tag, raw_group in reassignments.items():
@@ -1040,7 +1066,7 @@ def _apply_runtime_random_mainline_convergence(
             if not tag or tag not in selected.get("技术画质", []):
                 continue
             remove_tag_from_state(selected, custom_tags, tag)
-            if target_group in selected and len(selected[target_group]) < 2 and tag not in selected[target_group]:
+            if target_group in selected and not selected[target_group] and tag not in selected[target_group]:
                 selected[target_group].append(tag)
                 rerouted.append(f"{tag}->{target_group}")
             else:

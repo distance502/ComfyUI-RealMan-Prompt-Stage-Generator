@@ -1,4 +1,6 @@
-import { app } from "/scripts/app.js";
+import { app } from "../../scripts/app.js";
+
+const MINI_TOOLBAR_MODULE_URL = import.meta.url;
 
 const TARGET_NODE_CLASSES = new Set([
 	"QwenTE_StagePromptGenerator",
@@ -158,6 +160,22 @@ const MINI_PRESERVED_WIDGET_NAMES = new Set([
 
 let stylesInjected = false;
 
+function resolveComfyRoute(input) {
+	if (typeof input !== "string" || !input.startsWith("/") || input.startsWith("//")) return input;
+	try {
+		const moduleUrl = new URL(MINI_TOOLBAR_MODULE_URL);
+		const routeUrl = new URL(input, "http://qwen-te.invalid");
+		const extensionIndex = moduleUrl.pathname.lastIndexOf("/extensions/");
+		if (extensionIndex < 0) return input;
+		moduleUrl.pathname = `${moduleUrl.pathname.slice(0, extensionIndex + 1)}${routeUrl.pathname.slice(1)}`;
+		moduleUrl.search = routeUrl.search;
+		moduleUrl.hash = routeUrl.hash;
+		return `${moduleUrl.pathname}${moduleUrl.search}${moduleUrl.hash}`;
+	} catch (_error) {
+		return input;
+	}
+}
+
 function hasStagePromptDisplayName(value) {
 	const text = String(value ?? "");
 	return STAGE_DISPLAY_NAME_MARKERS.some((marker) => text.includes(marker));
@@ -201,7 +219,9 @@ function getSiblingMainUiScriptUrl() {
 		if (!source.includes("stage_prompt_generator_mini_toolbar.js")) continue;
 		return source.replace("stage_prompt_generator_mini_toolbar.js", "stage_prompt_generator_ui_v2.js");
 	}
-	return "";
+	return String(MINI_TOOLBAR_MODULE_URL ?? "").includes("stage_prompt_generator_mini_toolbar.js")
+		? String(MINI_TOOLBAR_MODULE_URL).replace("stage_prompt_generator_mini_toolbar.js", "stage_prompt_generator_ui_v2.js")
+		: "";
 }
 
 function hasPendingMainUiBootstrap() {
@@ -1211,7 +1231,7 @@ function installMiniNodeLifecycleHooks(nodeType) {
 function sendFrontendProbe(marker) {
 	if (!isFrontendProbeEnabled()) return false;
 	try {
-		fetch(`/qwen_te/frontend_probe?kind=mini_toolbar&marker=${encodeURIComponent(String(marker ?? ""))}`, {
+		fetch(resolveComfyRoute(`/qwen_te/frontend_probe?kind=mini_toolbar&marker=${encodeURIComponent(String(marker ?? ""))}`), {
 			method: "GET",
 			cache: "no-store",
 		}).catch(() => {});

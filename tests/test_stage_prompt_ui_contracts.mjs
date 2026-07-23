@@ -158,10 +158,9 @@ function makeExternalModelLoaderFixture(options = {}) {
 
 async function loadUiExports(href = "http://127.0.0.1:8188/", contextOverrides = {}) {
 	const source = await fs.readFile(UI_PATH, "utf8");
-	const patchedSource = source.replace(
-		'import { app } from "/scripts/app.js";',
-		'const app = globalThis.__testApp;',
-	);
+	const patchedSource = source
+		.replace('import { app } from "../../scripts/app.js";', 'const app = globalThis.__testApp;')
+		.replace('const STAGE_PROMPT_MODULE_URL = import.meta.url;', 'const STAGE_PROMPT_MODULE_URL = globalThis.__testModuleUrl;');
 	const localStorageValues = new Map();
 	const registeredExtensions = [];
 const exportTail = `
@@ -176,6 +175,7 @@ globalThis.__stagePromptUiTestExports = {
 	registerStagePromptMiniBridge,
 	getPromptLibrary,
 	buildNativePromptLibraryFallback,
+	resolveComfyRoute,
 	fetchWithTimeout,
 	fetchJsonWithTimeout,
 	abortOwnedRequest,
@@ -395,6 +395,7 @@ globalThis.__stagePromptUiTestExports = {
 			registerExtension(extension) { registeredExtensions.push(extension); },
 			graph: { _nodes: [] },
 		},
+		__testModuleUrl: "http://127.0.0.1:8188/extensions/ComfyUI-RealMan-Prompt-Stage-Generator/stage_prompt_generator_ui_v2.js",
 		globalThis: null,
 	};
 	Object.assign(context, contextOverrides);
@@ -414,6 +415,54 @@ test("shouldForceMiniToolbarMode enables mini mode from query flag", async () =>
 test("shouldForceMiniToolbarMode stays off without query flag", async () => {
 	const exports = await loadUiExports("http://127.0.0.1:8188/");
 	assert.equal(exports.shouldForceMiniToolbarMode(), false);
+});
+
+test("backend requests keep the ComfyUI reverse-proxy prefix", async () => {
+	const requested = [];
+	const exports = await loadUiExports("https://example.test/comfy/", {
+		__testModuleUrl: "https://example.test/comfy/extensions/github-zip-folder/stage_prompt_generator_ui_v2.js",
+		fetch: async (url) => {
+			requested.push(String(url));
+			return { ok: true, status: 200, json: async () => ({ ok: true }) };
+		},
+	});
+
+	assert.equal(exports.resolveComfyRoute("/qwen_te/prompt_library?refresh=1"), "/comfy/qwen_te/prompt_library?refresh=1");
+	assert.equal(exports.resolveComfyRoute("https://api.example/v1"), "https://api.example/v1");
+	await exports.fetchJsonWithTimeout("/qwen_te/prompt_library?refresh=1");
+	assert.deepEqual(requested, ["/comfy/qwen_te/prompt_library?refresh=1"]);
+});
+
+test("embedded and companion browser routes work below a ComfyUI subpath", async () => {
+	const requested = [];
+	const exports = await loadUiExports("https://example.test/comfy/", {
+		__testModuleUrl: "https://example.test/comfy/extensions/renamed-install/stage_prompt_generator_ui_v2.js",
+		fetch: async (url) => {
+			requested.push(String(url));
+			if (String(url).endsWith("/frame")) {
+				return {
+					ok: true,
+					status: 200,
+					headers: { get: () => "frame-2" },
+					blob: async () => ({ type: "image/jpeg" }),
+				};
+			}
+			return {
+				ok: true,
+				status: 200,
+				json: async () => ({ ok: true, session_id: "session-2", browser: "Edge" }),
+			};
+		},
+	});
+
+	await exports.requestEmbeddedPromptBrowser("start", { url: "https://example.com/" });
+	await exports.fetchEmbeddedPromptBrowserFrame("session-2");
+	await exports.launchPromptCompanionBrowser("example.com", { currentOrigin: "https://example.test" });
+	assert.deepEqual(requested, [
+		"/comfy/qwen_te/embedded_browser/start",
+		"/comfy/qwen_te/embedded_browser/frame",
+		"/comfy/qwen_te/companion_browser/open",
+	]);
 });
 
 test("registerStagePromptMiniBridge is available without window app globals", async () => {

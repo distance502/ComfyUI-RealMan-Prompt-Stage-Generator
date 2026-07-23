@@ -1,4 +1,4 @@
-import { app } from "/scripts/app.js";
+import { app } from "../../scripts/app.js";
 
 const TARGET_NODE_CLASSES = new Set([
 	"QwenTE_StagePromptGenerator",

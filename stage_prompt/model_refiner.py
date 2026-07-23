@@ -368,13 +368,29 @@ _SEMANTIC_REPEAT_FAMILIES: tuple[tuple[str, int, tuple[str, ...]], ...] = (
 )
 
 
+_NON_FINAL_RESPONSE_BLOCK_TYPES = {
+    "analysis", "reasoning", "thinking", "thought", "chain_of_thought",
+    "reasoning_content", "reasoning_summary",
+}
+
+
+def _response_block_is_non_final(content: dict[str, Any]) -> bool:
+    block_type = str(content.get("type") or content.get("role") or "").strip().casefold()
+    return block_type in _NON_FINAL_RESPONSE_BLOCK_TYPES
+
+
 def _extract_content_text(content: Any, *, _depth: int = 0) -> str:
     if _depth > 6:
         return ""
     if isinstance(content, str):
         return content
     if isinstance(content, dict):
-        for key in ("text", "output_text", "generated_text", "content", "prompt", "final_prompt", "completion"):
+        if _response_block_is_non_final(content):
+            return ""
+        for key in (
+            "final_prompt", "final", "output_text", "text", "generated_text",
+            "content", "completion", "prompt", "parts", "output",
+        ):
             if key not in content:
                 continue
             text = _extract_content_text(content.get(key), _depth=_depth + 1)
@@ -421,27 +437,42 @@ def extract_text(response: Any) -> str:
             if text:
                 return text
         choices = response.get("choices")
-        if isinstance(choices, list) and choices and isinstance(choices[0], dict):
-            choice = choices[0]
-            message = choice.get("message")
-            if isinstance(message, dict):
-                text = _extract_content_text(message.get("content"))
+        if isinstance(choices, list):
+            for choice in choices:
+                if not isinstance(choice, dict):
+                    continue
+                message = choice.get("message")
+                if isinstance(message, dict):
+                    text = _extract_content_text(message)
+                    if text:
+                        return text
+                text = _extract_content_text(choice.get("text"))
                 if text:
                     return text
-            text = _extract_content_text(choice.get("text"))
-            if text:
-                return text
+        candidates = response.get("candidates")
+        if isinstance(candidates, list):
+            for candidate in candidates:
+                text = _extract_content_text(candidate)
+                if text:
+                    return text
         return ""
-    for attribute in ("text", "output_text", "generated_text", "content", "response", "answer", "completion"):
+    for attribute in (
+        "final_prompt", "final", "output_text", "text", "generated_text",
+        "content", "response", "answer", "completion", "output",
+    ):
         text = _extract_content_text(getattr(response, attribute, None))
         if text:
             return text
     choices = getattr(response, "choices", None)
-    if isinstance(choices, (list, tuple)) and choices:
-        message = getattr(choices[0], "message", None)
-        text = _extract_content_text(getattr(message, "content", None))
-        if text:
-            return text
+    if isinstance(choices, (list, tuple)):
+        for choice in choices:
+            message = getattr(choice, "message", None)
+            text = _extract_content_text(getattr(message, "content", None))
+            if text:
+                return text
+            text = _extract_content_text(getattr(choice, "text", None))
+            if text:
+                return text
     return ""
 
 
@@ -1687,19 +1718,25 @@ def _skill_context_for_model(settings: dict[str, Any]) -> str:
 
 
 def _compose_model_user_prompt(prompt: str, settings: dict[str, Any]) -> str:
+    repair_instruction = ""
+    if bool(settings.get("模型输出修复请求", False)):
+        repair_instruction = (
+            "上一次响应为空、只有分析/占位符，或未满足成品正文要求。请重新读取下面的 Skill 底稿，"
+            "直接输出一份完整可用正文；不得复述任务、解释规则、输出思考过程或标签列表。\n"
+        )
     if str(settings.get("模型任务", "") or "").strip() == "视频提示词":
         anchors = [str(item).strip() for item in settings.get("视频提示词必保留锚点", []) if str(item).strip()]
         anchor_text = "、".join(dict.fromkeys(anchors)) or "无额外锚点"
         spine = str(settings.get("全局创作主线摘要", "") or "").strip() or "按视频 Skill 底稿为准"
-        return (
+        return repair_instruction + (
             "视频 Skill 已先生成一条可直接使用的单镜头底稿。你只能在这条底稿内部润色，不能另起主线。\n"
             f"必须原样保留的主体、场景、动作等锚点：{anchor_text}\n"
             f"全局创作主线摘要：{spine}\n"
-            "请把底稿写成自然、连贯、按时间顺序发生的可拍摄正文；变化必须有原因，不能增加人物、地点或第二个镜头。\n"
+            "请把底稿写成自然、连贯、按时间顺序发生的可拍摄正文；变化必须有原因，不能增加人物、地点或第二个镜头，正文不得写具体秒数或时长参数。\n"
             "只输出最终正文，不输出分析、标题、列表或 Markdown。\n\n"
             f"视频 Skill 底稿：\n{str(prompt or '').strip()}"
         )
-    return f"{_skill_context_for_model(settings)}\n\n待整理提示词正文：\n{str(prompt or '').strip()}"
+    return repair_instruction + f"{_skill_context_for_model(settings)}\n\n待整理提示词正文：\n{str(prompt or '').strip()}"
 
 
 def _prompt_signature(prompt: str, *, limit: int = 14) -> str:
@@ -2171,6 +2208,8 @@ _TRANSIENT_MODEL_ERROR_MARKERS = (
     "eof occurred",
     "rate limit",
     "too many requests",
+    "返回空文本",
+    "未返回文本",
 )
 
 
@@ -2233,6 +2272,37 @@ def _call_model_text_with_retry(
             time.sleep(min(0.35, 0.12 * (2 ** (retry_index - 1))))
 
 
+def _retry_invalid_model_output(
+    llm: Any,
+    prompt: str,
+    settings: dict[str, Any],
+    *,
+    chat_completion: Callable[..., Any],
+    clean_think_text: Callable[[str], str],
+) -> str:
+    retry_limit = _safe_int_setting(settings, "模型输出修复重试次数", 1, 0, 1)
+    if retry_limit <= 0:
+        return ""
+    repair_settings = dict(settings)
+    repair_settings["模型输出修复请求"] = True
+    try:
+        text = _call_model_text_with_retry(
+            llm,
+            prompt,
+            repair_settings,
+            chat_completion=chat_completion,
+            clean_think_text=clean_think_text,
+            prompt_count=1,
+        )
+    except Exception:
+        return ""
+    settings["模型输出修复重试次数实际"] = max(
+        0,
+        int(settings.get("模型输出修复重试次数实际", 0) or 0),
+    ) + 1
+    return text
+
+
 def maybe_model_refine(
     model: Any,
     prompt: str,
@@ -2257,6 +2327,22 @@ def maybe_model_refine(
         _record_model_call_result(settings, outcome="failure", reason=exc)
         return prompt
     resolved, mode, reason = _resolve_model_prompt_candidate(prompt, raw_text, settings)
+    if mode == "rejected":
+        repaired_raw = _retry_invalid_model_output(
+            llm,
+            prompt,
+            settings,
+            chat_completion=chat_completion,
+            clean_think_text=clean_think_text,
+        )
+        if repaired_raw:
+            repaired, repaired_mode, repaired_reason = _resolve_model_prompt_candidate(prompt, repaired_raw, settings)
+            if repaired_mode != "rejected":
+                resolved, mode, reason = repaired, repaired_mode, repaired_reason
+                _append_model_runtime_note(
+                    settings,
+                    "模型首次正文不合格，已通过一次简化正文请求恢复，并继续沿用 Skill 的主线合同。",
+                )
     if mode == "rejected":
         _record_model_call_result(
             settings,
@@ -2316,6 +2402,32 @@ def maybe_model_refine_video(
         or missing
         or not bool(validator(candidate, language=language))
     )
+    if not candidate_valid:
+        repaired_raw = _retry_invalid_model_output(
+            llm,
+            original,
+            video_settings,
+            chat_completion=chat_completion,
+            clean_think_text=clean_think_text,
+        )
+        if repaired_raw:
+            repaired_prepared, repaired_recovered = _prepare_model_response_text(repaired_raw)
+            repaired_candidate = _repair_common_video_fragment_errors(_postprocess_prompt_text(repaired_prepared))
+            repaired_missing = [anchor for anchor in anchors if anchor not in repaired_candidate]
+            if (
+                repaired_candidate
+                and not _looks_like_broken_prompt(repaired_candidate)
+                and not repaired_missing
+                and bool(validator(repaired_candidate, language=language))
+            ):
+                candidate = repaired_candidate
+                missing = []
+                recovered = recovered or repaired_recovered
+                candidate_valid = True
+                _append_model_runtime_note(
+                    video_settings,
+                    "视频模型首次正文不合格，已通过一次简化正文请求恢复，并保留 Skill 的单镜头与必需锚点。",
+                )
     if not candidate_valid:
         blended = _blend_model_draft_with_skill_prompt(original, candidate, video_settings)
         blended_missing = [anchor for anchor in anchors if anchor not in blended]

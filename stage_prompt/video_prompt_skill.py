@@ -14,7 +14,7 @@ except Exception:  # pragma: no cover - direct file loading in focused tests
     from stage_prompt_narrative_test import build_narrative_plan  # type: ignore
 
 
-VIDEO_PROMPT_SKILL_VERSION = "video-prompt-skill-v2"
+VIDEO_PROMPT_SKILL_VERSION = "video-prompt-skill-v3"
 VIDEO_PROMPT_DURATION_SECONDS = 8
 VIDEO_PROMPT_MIN_CHARS_ZH = 800
 VIDEO_PROMPT_MAX_CHARS_ZH = 1200
@@ -26,7 +26,7 @@ VIDEO_PROMPT_MODEL_SYSTEM_TEMPLATE = """
 2. 严格保留底稿中的主体、服装、场景、动作、道具、镜头方向、光影、声音和最终定格；不得更换地点、增加人物或制造第二条剧情线。
 3. 按可见时间顺序写清起因、触发、动作、环境反馈和结果。所有变化都要有前因，不使用互相冲突的动作、机位或时间描述。
 4. 使用连贯自然语言，不堆关键词，不复述规则，不写模型无法直接拍摄的抽象评价。
-5. 保持约 8 秒的单镜头，只允许一个主要运镜。可以优化措辞和补足连续性，但不能把底稿改成分镜表、多镜头剪辑或旁白脚本。
+5. 保持连续单镜头，只允许一个主要运镜。可以优化措辞和补足连续性，但不能把底稿改成分镜表、多镜头剪辑或旁白脚本；正文不得出现具体秒数或时长参数。
 6. 中文正文必须为 800-1200 字；纯英文正文保持 90-230 个英文单词；双语模式的英文正文后必须保留“中文说明：”，且中文说明为 800-1200 字。
 """.strip()
 
@@ -43,6 +43,10 @@ _META_MARKERS = (
     "不要输出",
     "必须输出",
     "标签解析",
+)
+_DURATION_EXPRESSION_PATTERN = re.compile(
+    r"(?:(?:\d+|[一二三四五六七八九十两几]+)\s*秒钟?|\d+(?:\.\d+)?\s*(?:s|secs?|seconds?)\b)",
+    flags=re.IGNORECASE,
 )
 _CAMERA_MOVES_ZH = (
     "以稳定的低速跟拍贴着主体前进",
@@ -297,11 +301,11 @@ def _build_chinese_video_prompt(
     subject = _first(groups, "主体", "非人物主体" if non_person else "画面中的成年人物")
     reference = _subject_reference_zh(subject, non_person)
     style = _first(groups, "画面风格", str(settings.get("模板风格", "电影写实") or "电影写实"))
-    scene = _pair(groups, "场景背景") or "当前主场景"
-    action = _pair(groups, "动作姿态") or ("完成一次有明确方向的状态变化" if non_person else "先停下确认线索，再做出一个明确动作")
-    outfit = _pair(groups, "服装造型")
-    props = _pair(groups, "道具世界观") or "场景中的关键线索"
-    lighting = _pair(groups, "光影氛围") or "主光随动作轻微移动，环境反射保留空间层次"
+    scene = _first(groups, "场景背景") or "当前主场景"
+    action = _first(groups, "动作姿态") or ("完成一次有明确方向的状态变化" if non_person else "先停下确认线索，再做出一个明确动作")
+    outfit = _first(groups, "服装造型")
+    props = _first(groups, "道具世界观") or "场景中的关键线索"
+    lighting = _first(groups, "光影氛围") or "主光随动作轻微移动，环境反射保留空间层次"
     composition = _primary_composition(groups)
     brief = _source_brief(settings)
     seed = int(settings.get("运行时随机有效种子", 0) or settings.get("seed", 0) or 0)
@@ -325,7 +329,7 @@ def _build_chinese_video_prompt(
     outfit_clause = f"身穿{outfit}，" if outfit and not non_person else ""
     brief_clause = f"这一小段围绕“{brief}”展开。" if brief else ""
     text = (
-        f"这是一段约{VIDEO_PROMPT_DURATION_SECONDS}秒的{style}单镜头视频。{brief_clause}"
+        f"这是一段采用{style}表现的连续单镜头视频。{brief_clause}"
         f"{scene}里，{subject}{outfit_clause}把{props}当作眼前唯一需要确认的线索。"
         f"起初，{reference}只是停下来观察；但因为{trigger}，{reference}立刻{action}。"
         f"这个动作随即带来可见结果：{escalation}。{feedback}。"
@@ -334,13 +338,13 @@ def _build_chinese_video_prompt(
         f"{_audio_zh(scene, action, non_person)}。最后，{ending}，让故事停在结果已经出现、下一步仍可继续的时刻。"
     )
     details = (
-        f"前两秒只交代{scene}的空间关系：{reference}位于画面中心偏前，{props}留在视线能够回到的位置，背景始终保持同一处空间，不用新的地点解释变化。",
-        f"第三秒左右，{reference}先收紧动作再改变方向，手部、肩膀和脚步按照同一个重心完成转身，{action}不是突然跳切，而是由前一刻的观察自然接上。",
+        f"开场先交代{scene}的空间关系：{reference}位于画面中心偏前，{props}留在视线能够回到的位置，背景始终保持同一处空间，不用新的地点解释变化。",
+        f"随后，{reference}先收紧动作再改变方向，手部、肩膀和脚步按照同一个重心完成转身，{action}不是突然跳切，而是由前一刻的观察自然接上。",
         f"动作推进时，镜头保留足够的前方空间，让观众先看见{reference}要去哪里，再看见{reference}如何到达；画面不使用快速摇晃、无理由变焦或额外的蒙太奇切换。",
         f"中段的重点不是堆放更多物件，而是让{props}与{scene}中已有的表面、遮挡和距离变化共同证明刚才发生过什么；环境反馈只在{action}之后出现，不凭空抢在动作前面。",
         f"焦点可以从{reference}的表情和手部短暂移到{props}，随后回到{reference}，景深变化保持缓慢；{outfit or '主体外观'}的材质、边缘和运动方向在前后画面中保持一致。",
         f"声音也按同一条因果线推进：{_audio_zh(scene, action, non_person)}；动作结束后只保留当前空间自然产生的短暂余音，不加入旁白、字幕或突然出现的对白。",
-        f"最后两秒不再安排新的任务，镜头继续观察已经产生的结果；{reference}的视线、{props}的位置和背景灯光共同指向下一步，让定格像故事暂停，而不是把剧情强行结束。",
+        f"结尾不再安排新的任务，镜头继续观察已经产生的结果；{reference}的视线、{props}的位置和背景灯光共同指向下一步，让定格像故事暂停，而不是把剧情强行结束。",
     )
     return _fit_chinese_video_prompt(text, details)
 
@@ -359,7 +363,7 @@ def _build_english_video_prompt(settings: Mapping[str, Any], *, primary_prompt: 
     ending = ending[:1].lower() + ending[1:]
     camera = _camera_move_en(primary_prompt, seed=seed)
     text = (
-        f"An {VIDEO_PROMPT_DURATION_SECONDS}-second single-take video continues this established visual world: {source}. "
+        f"A continuous single-take video continues this established visual world: {source}. "
         f"At first, {opening}. When {trigger}, the previous rhythm breaks and {response}. "
         f"That decision causes a visible response in the location: {feedback}. "
         f"The camera begins on a readable medium-wide view and {camera}, using only this one motivated movement without changing location or introducing another subject. "
@@ -375,7 +379,11 @@ def is_natural_video_prompt(text: str, *, language: str = "纯中文") -> bool:
 
     prompt = str(text or "").strip()
     mode = str(language or "纯中文").strip()
-    if not prompt or any(marker in prompt.casefold() for marker in _META_MARKERS):
+    if (
+        not prompt
+        or any(marker in prompt.casefold() for marker in _META_MARKERS)
+        or _DURATION_EXPRESSION_PATTERN.search(prompt)
+    ):
         return False
     if mode == "英文提示词+中文说明":
         english, marker, chinese = prompt.partition("中文说明：")

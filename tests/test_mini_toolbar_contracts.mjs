@@ -114,9 +114,11 @@ class MockElement {
 	}
 }
 
-async function loadMiniToolbarExports() {
+async function loadMiniToolbarExports(contextOverrides = {}) {
 	const rawSource = await fs.readFile(MINI_TOOLBAR_PATH, "utf8");
-	const source = rawSource.replace('import { app } from "/scripts/app.js";', "const app = globalThis.__testApp;");
+	const source = rawSource
+		.replace('import { app } from "../../scripts/app.js";', "const app = globalThis.__testApp;")
+		.replace('const MINI_TOOLBAR_MODULE_URL = import.meta.url;', 'const MINI_TOOLBAR_MODULE_URL = globalThis.__testModuleUrl;');
 	const registeredExtensions = [];
 	const exportTail = `
 globalThis.__miniToolbarTestExports = {
@@ -128,6 +130,7 @@ globalThis.__miniToolbarTestExports = {
 	clearMiniHandoffTimer,
 	scheduleMiniFallback,
 	getSiblingMainUiScriptUrl,
+	resolveComfyRoute,
 	startMainUiBootstrap,
 	shouldDeferMiniForMainUi,
 	enhanceExistingNodes,
@@ -157,6 +160,7 @@ globalThis.__miniToolbarTestExports = {
 		clearTimeout,
 		setInterval,
 		clearInterval,
+		URL,
 		requestAnimationFrame: (fn) => {
 			if (typeof fn === "function") fn();
 			return 0;
@@ -180,7 +184,9 @@ globalThis.__miniToolbarTestExports = {
 			registerExtension(extension) { registeredExtensions.push(extension); },
 			graph: { _nodes: [], setDirtyCanvas() {} },
 		},
+		__testModuleUrl: "http://127.0.0.1:8188/extensions/ComfyUI-RealMan-Prompt-Stage-Generator/stage_prompt_generator_mini_toolbar.js",
 	};
+	Object.assign(context, contextOverrides);
 	context.globalThis = context;
 	context.window = context;
 	vm.runInNewContext(`${source}\n${exportTail}`, context, { filename: MINI_TOOLBAR_PATH });
@@ -189,7 +195,7 @@ globalThis.__miniToolbarTestExports = {
 
 async function loadPreflightExports() {
 	const rawSource = await fs.readFile(PREFLIGHT_PATH, "utf8");
-	const source = rawSource.replace('import { app } from "/scripts/app.js";', "const app = globalThis.__testApp;");
+	const source = rawSource.replace('import { app } from "../../scripts/app.js";', "const app = globalThis.__testApp;");
 	const registeredExtensions = [];
 	const exportTail = `
 globalThis.__preflightTestExports = {
@@ -409,6 +415,30 @@ test("mini bootstrap loads its sibling main UI script when extension discovery m
 	assert.equal(injected?.src, "http://127.0.0.1:8188/extensions/ComfyUI-RealMan-Prompt-Stage-Generator/stage_prompt_generator_ui_v2.js");
 	assert.equal(timers.length, 1);
 	assert.equal(timers[0].delayMs, 1000);
+});
+
+test("mini bootstrap survives a reverse-proxy prefix and arbitrary GitHub checkout folder", async () => {
+	const exports = await loadMiniToolbarExports({
+		__testModuleUrl: "https://example.test/comfy/extensions/custom-checkout-4973b37/stage_prompt_generator_mini_toolbar.js",
+	});
+	exports.__context.document.querySelectorAll = () => [];
+
+	assert.equal(exports.resolveComfyRoute("/qwen_te/frontend_probe?kind=mini_toolbar"), "/comfy/qwen_te/frontend_probe?kind=mini_toolbar");
+	assert.equal(
+		exports.getSiblingMainUiScriptUrl(),
+		"https://example.test/comfy/extensions/custom-checkout-4973b37/stage_prompt_generator_ui_v2.js",
+	);
+	assert.equal(exports.startMainUiBootstrap(), true);
+	const injected = exports.__context.document.head.children.find((element) => element.dataset.qwenTeMainUiBootstrap === "true");
+	assert.equal(injected?.src, "https://example.test/comfy/extensions/custom-checkout-4973b37/stage_prompt_generator_ui_v2.js");
+});
+
+test("all frontend entries import the Comfy app relative to their extension URL", async () => {
+	for (const scriptPath of [PREFLIGHT_PATH, MINI_TOOLBAR_PATH, path.join(ROOT, "web", "stage_prompt_generator_ui_v2.js")]) {
+		const source = await fs.readFile(scriptPath, "utf8");
+		assert.equal(source.startsWith('import { app } from "../../scripts/app.js";'), true, scriptPath);
+		assert.equal(source.includes('from "/scripts/app.js"'), false, scriptPath);
+	}
 });
 
 test("buildMiniBaseStatus prefers operational state over fold state noise", async () => {

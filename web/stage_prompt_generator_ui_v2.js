@@ -1,4 +1,6 @@
-import { app } from "/scripts/app.js";
+import { app } from "../../scripts/app.js";
+
+const STAGE_PROMPT_MODULE_URL = import.meta.url;
 
 window.__QWEN_TE_STAGE_MAIN_UI_LOADED__ = true;
 window.__QWEN_TE_STAGE_MAIN_UI__ = true;
@@ -1348,6 +1350,22 @@ const PROMPT_LIBRARY_MUTATION_ROUTES = new Set([
 const OWNED_FETCH_REQUESTS = new WeakMap();
 const BOUNDED_NODE_HISTORY_ARRAYS = new WeakSet();
 
+function resolveComfyRoute(input) {
+	if (typeof input !== "string" || !input.startsWith("/") || input.startsWith("//")) return input;
+	try {
+		const moduleUrl = new URL(STAGE_PROMPT_MODULE_URL);
+		const routeUrl = new URL(input, "http://qwen-te.invalid");
+		const extensionIndex = moduleUrl.pathname.lastIndexOf("/extensions/");
+		if (extensionIndex < 0) return input;
+		moduleUrl.pathname = `${moduleUrl.pathname.slice(0, extensionIndex + 1)}${routeUrl.pathname.slice(1)}`;
+		moduleUrl.search = routeUrl.search;
+		moduleUrl.hash = routeUrl.hash;
+		return `${moduleUrl.pathname}${moduleUrl.search}${moduleUrl.hash}`;
+	} catch (_error) {
+		return input;
+	}
+}
+
 function isAbortLikeError(error) {
 	const name = String(error?.name ?? "");
 	const message = String(error?.message ?? error ?? "");
@@ -1387,9 +1405,10 @@ function abortOwnedRequests(owner) {
 async function runOwnedFetch(input, init = {}, options = {}, consume = async (response) => response) {
 	const owner = options.owner;
 	const key = String(options.key ?? input ?? "request");
+	const requestInput = resolveComfyRoute(input);
 	const timeoutMs = Math.max(250, Number(options.timeoutMs ?? UI_FETCH_DEFAULT_TIMEOUT_MS) || UI_FETCH_DEFAULT_TIMEOUT_MS);
 	const Controller = globalThis.AbortController;
-	if (typeof Controller !== "function") return await consume(await fetch(input, init));
+	if (typeof Controller !== "function") return await consume(await fetch(requestInput, init));
 	if (owner && options.replace !== false) abortOwnedRequest(owner, key);
 	const controller = new Controller();
 	const externalSignal = init?.signal;
@@ -1412,7 +1431,7 @@ async function runOwnedFetch(input, init = {}, options = {}, consume = async (re
 	}, timeoutMs);
 	timeoutId?.unref?.();
 	try {
-		const response = await fetch(input, { ...init, signal: controller.signal });
+		const response = await fetch(requestInput, { ...init, signal: controller.signal });
 		return await consume(response);
 	} catch (error) {
 		if (timedOut && isAbortLikeError(error)) {
