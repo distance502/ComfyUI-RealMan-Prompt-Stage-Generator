@@ -127,6 +127,9 @@ globalThis.__miniToolbarTestExports = {
 	pruneOrphanMiniToolbarDom,
 	clearMiniHandoffTimer,
 	scheduleMiniFallback,
+	getSiblingMainUiScriptUrl,
+	startMainUiBootstrap,
+	shouldDeferMiniForMainUi,
 	enhanceExistingNodes,
 	clearMiniWidgetReconcile,
 	startMiniWidgetReconcile,
@@ -384,6 +387,28 @@ test("startup scans share one main UI handoff timer instead of creating mini imm
 	assert.equal(node.widgets.some((widget) => widget.name === "qwen_te_mini_toolbar_dom"), false);
 	assert.equal(timers.length, 1);
 	assert.equal(timers[0].delayMs, exports.MINI_MAIN_HANDOFF_DELAY_MS);
+});
+
+test("mini bootstrap loads its sibling main UI script when extension discovery misses it", async () => {
+	const exports = await loadMiniToolbarExports();
+	const miniScript = new MockElement("script");
+	miniScript.src = "http://127.0.0.1:8188/extensions/ComfyUI-RealMan-Prompt-Stage-Generator/stage_prompt_generator_mini_toolbar.js";
+	exports.__context.document.querySelectorAll = (selector) => selector === "script[src]" ? [miniScript] : [];
+	const timers = [];
+	exports.__context.setTimeout = (callback, delayMs) => {
+		const timer = { callback, delayMs, unref() {} };
+		timers.push(timer);
+		return timer;
+	};
+
+	assert.equal(exports.getSiblingMainUiScriptUrl(), "http://127.0.0.1:8188/extensions/ComfyUI-RealMan-Prompt-Stage-Generator/stage_prompt_generator_ui_v2.js");
+	assert.equal(exports.startMainUiBootstrap(), true);
+	assert.equal(exports.shouldDeferMiniForMainUi(), true);
+	const injected = exports.__context.document.head.children.find((element) => element.dataset.qwenTeMainUiBootstrap === "true");
+	assert.equal(injected?.type, "module");
+	assert.equal(injected?.src, "http://127.0.0.1:8188/extensions/ComfyUI-RealMan-Prompt-Stage-Generator/stage_prompt_generator_ui_v2.js");
+	assert.equal(timers.length, 1);
+	assert.equal(timers[0].delayMs, 1000);
 });
 
 test("buildMiniBaseStatus prefers operational state over fold state noise", async () => {

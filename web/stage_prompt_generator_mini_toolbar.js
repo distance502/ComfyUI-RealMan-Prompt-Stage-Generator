@@ -32,10 +32,12 @@ const MINI_NODE_DEF_HOOK_KEY = Symbol.for("qwenTeMiniNodeDefHook");
 const MINI_GRAPH_HOOK_KEY = Symbol.for("qwenTeMiniGraphHook");
 const MINI_HANDOFF_TIMER_KEY = Symbol.for("qwenTeMiniMainHandoffTimer");
 const MINI_OWNER_NODE_KEY = Symbol.for("qwenTeMiniOwnerNode");
+const MAIN_UI_BOOTSTRAP_STATE_KEY = "__qwenTeStageMainUiBootstrapState";
 const MINI_STARTUP_SCAN_TIMER_KEY = "__qwenTeMiniToolbarStartupScanTimer";
 const MINI_STARTUP_SCAN_LIMIT = 8;
 const MINI_STARTUP_SCAN_INTERVAL_MS = 1200;
 const MINI_MAIN_HANDOFF_DELAY_MS = 1200;
+const MAIN_UI_BOOTSTRAP_GRACE_MS = 1000;
 const MINI_WIDGET_RECONCILE_LIMIT = 64;
 const MINI_WIDGET_RECONCILE_INTERVAL_MS = 160;
 const MINI_FRONTEND_PROBE_QUERY_PATTERN = /(?:^|[?&])qwen_te_probe=(?:1|true|on)(?:&|$)/iu;
@@ -189,6 +191,59 @@ function cleanupIncompleteMainPanel(node) {
 	} catch (_error) {}
 	const orphan = getWidget(node, "qwen_te_tag_panel");
 	return orphan ? removeNodeWidgetSafely(node, orphan) : false;
+}
+
+function getSiblingMainUiScriptUrl() {
+	const scripts = Array.from(document.querySelectorAll?.("script[src]") ?? []);
+	for (const script of scripts) {
+		const source = String(script?.src ?? script?.getAttribute?.("src") ?? "");
+		if (!source.includes("stage_prompt_generator_mini_toolbar.js")) continue;
+		return source.replace("stage_prompt_generator_mini_toolbar.js", "stage_prompt_generator_ui_v2.js");
+	}
+	return "";
+}
+
+function hasPendingMainUiBootstrap() {
+	return globalThis[MAIN_UI_BOOTSTRAP_STATE_KEY]?.pending === true;
+}
+
+function startMainUiBootstrap() {
+	if (globalThis.__QWEN_TE_STAGE_MAIN_UI__ === true) return false;
+	if (hasPendingMainUiBootstrap()) return true;
+	const source = getSiblingMainUiScriptUrl();
+	if (!source || !document.head?.appendChild) return false;
+	const state = { pending: true, source, injected: false };
+	globalThis[MAIN_UI_BOOTSTRAP_STATE_KEY] = state;
+	const finish = (error = null) => {
+		if (globalThis[MAIN_UI_BOOTSTRAP_STATE_KEY] !== state) return;
+		state.pending = false;
+		state.error = error ? String(error?.message ?? error) : "";
+	};
+	const existingMainScript = Array.from(document.querySelectorAll?.("script[src]") ?? []).some((script) => (
+		String(script?.src ?? script?.getAttribute?.("src") ?? "") === source
+	));
+	if (!existingMainScript) {
+		const script = document.createElement("script");
+		script.type = "module";
+		script.src = source;
+		script.dataset.qwenTeMainUiBootstrap = "true";
+		script.addEventListener?.("load", () => finish());
+		script.addEventListener?.("error", () => finish(new Error("main UI script failed to load")));
+		try {
+			document.head.appendChild(script);
+			state.injected = true;
+		} catch (error) {
+			finish(error);
+			return false;
+		}
+	}
+	const timer = setTimeout(() => finish(), MAIN_UI_BOOTSTRAP_GRACE_MS);
+	timer?.unref?.();
+	return true;
+}
+
+function shouldDeferMiniForMainUi() {
+	return globalThis.__QWEN_TE_STAGE_MAIN_UI__ === true || hasPendingMainUiBootstrap();
 }
 
 function getWidget(node, name) {
@@ -1056,7 +1111,7 @@ function enhanceExistingNodes() {
 			cleanupMiniToolbar(node);
 			continue;
 		}
-		if (globalThis.__QWEN_TE_STAGE_MAIN_UI__ === true) scheduleMiniFallback(node);
+		if (shouldDeferMiniForMainUi()) scheduleMiniFallback(node);
 		else {
 			ensureMiniToolbar(node);
 			refreshMiniToolbar(node);
@@ -1103,7 +1158,7 @@ function installMiniGraphNodeAddedHook() {
 		delete node[MINI_NODE_REMOVED_KEY];
 		setTimeout(() => {
 			if (node?.[MINI_NODE_REMOVED_KEY]) return;
-			if (globalThis.__QWEN_TE_STAGE_MAIN_UI__ === true) scheduleMiniFallback(node);
+			if (shouldDeferMiniForMainUi()) scheduleMiniFallback(node);
 			else {
 				ensureMiniToolbar(node);
 				refreshMiniToolbar(node);
@@ -1135,7 +1190,7 @@ function installMiniNodeLifecycleHooks(nodeType) {
 		const result = originalOnNodeCreated?.apply(this, arguments);
 		setTimeout(() => {
 			if (this[MINI_NODE_REMOVED_KEY]) return;
-			if (globalThis.__QWEN_TE_STAGE_MAIN_UI__ === true) scheduleMiniFallback(this);
+			if (shouldDeferMiniForMainUi()) scheduleMiniFallback(this);
 			else ensureMiniToolbar(this);
 		}, 0);
 		return result;
@@ -1180,7 +1235,8 @@ app.registerExtension({
 	async setup() {
 		sendFrontendProbe("setup");
 		clearMiniStartupScanTimer();
-		if (globalThis.__QWEN_TE_STAGE_MAIN_UI__ !== true) enhanceExistingNodes();
+		startMainUiBootstrap();
+		if (!shouldDeferMiniForMainUi()) enhanceExistingNodes();
 		installMiniGraphNodeAddedHook();
 		startMiniStartupScan();
 	},
@@ -1188,7 +1244,7 @@ app.registerExtension({
 		if (!isStagePromptNode(node)) return;
 		delete node[MINI_NODE_REMOVED_KEY];
 		sendFrontendProbe("nodeCreated");
-		if (globalThis.__QWEN_TE_STAGE_MAIN_UI__ === true) scheduleMiniFallback(node);
+		if (shouldDeferMiniForMainUi()) scheduleMiniFallback(node);
 		else {
 			ensureMiniToolbar(node);
 			refreshMiniToolbar(node);
