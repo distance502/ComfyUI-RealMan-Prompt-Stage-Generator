@@ -68,6 +68,16 @@ DEFAULT_STAGE_PROMPT_SYSTEM_TEMPLATE = (
 )
 
 _DEFAULT_IMAGE_REFINER_SYSTEM = DEFAULT_STAGE_PROMPT_SYSTEM_TEMPLATE
+_QWEN35_LOCAL_IMAGE_INCREMENTAL_SYSTEM = """
+你是 Qwen TE 的 Qwen3.5 本地图像提示词增量润色器。输入已经是 Skill 生成并通过合同校验的 800-1200 字成品底稿，不要重写整篇。
+
+只输出 2-4 句可以直接融入原底稿的自然语言新增细节：中文控制在 120-260 字，英文控制在 70-130 words。新增内容必须是镜头可见的动作因果、材质变化、空间反馈或光影变化，并严格沿用底稿中的主体、服装、场景、动作、道具、媒介风格和构图。不要输出分析、标题、标签列表、规则复述、负面词、Markdown 或占位符，也不要复述整份底稿。
+""".strip()
+_QWEN35_LOCAL_VIDEO_INCREMENTAL_SYSTEM = """
+你是 Qwen TE 的视频提示词后置导演，也是 Qwen3.5 本地增量润色器。输入已经是 Skill 生成并通过单镜头合同校验的 800-1200 字视频底稿，不要重写整篇。
+
+只输出 2-4 句可以直接融入原底稿的连续动作细节：中文控制在 120-260 字，英文控制在 70-130 words。新增内容必须发生在同一地点、同一主体和同一个连续镜头内，写清动作触发、材质或环境响应、光线或声音变化；不得增加人物、地点、第二镜头、具体秒数或新剧情线。不要输出分析、标题、标签列表、规则复述、Markdown 或占位符，也不要复述整份底稿。
+""".strip()
 _PROMPT_LABEL_PATTERN = re.compile(
     r"^\s*(?:成品提示词|最终提示词|图像提示词|提示词|Prompt|prompt|image prompt|final prompt)\s*[:：]\s*",
     flags=re.IGNORECASE,
@@ -296,6 +306,27 @@ def _normalize_model_source_label(value: Any) -> str:
         suffix = source[suffix_index:] if suffix_index >= 0 else ""
         return f"本地模型{suffix}"
     return source
+
+
+def _uses_qwen35_local_incremental_refinement(settings: dict[str, Any]) -> bool:
+    """Use a small, blendable task for the local Qwen3.5 prompt model."""
+
+    if str(settings.get("提示词语言", "纯中文") or "纯中文").strip() != "纯中文":
+        return False
+    source = _normalize_model_source_label(
+        settings.get("模型调用基础来源") or settings.get("模型来源") or settings.get("模型来源实际")
+    )
+    if not source.startswith("本地模型"):
+        return False
+    descriptor = re.sub(
+        r"[^a-z0-9]+",
+        "",
+        " ".join(
+            str(settings.get(key, "") or "")
+            for key in ("内置模型系列", "内置主模型", "模型系列", "模型名称")
+        ).casefold(),
+    )
+    return "qwen35" in descriptor
 
 
 _SEMANTIC_REPEAT_FAMILIES: tuple[tuple[str, int, tuple[str, ...]], ...] = (
@@ -892,7 +923,16 @@ def _blend_model_draft_with_skill_prompt(original_prompt: str, model_prompt: str
     if excerpt:
         original_units.insert(insert_at, excerpt)
     else:
-        protected = ("故事", "事件", "因此", "于是", "因为", "情绪", "镜头", "最终画面", "最后一帧", "结尾", "定格")
+        required_anchors = tuple(
+            str(item).strip()
+            for item in settings.get("视频提示词必保留锚点", [])
+            if str(item).strip()
+        )
+        protected = (
+            "故事", "事件", "起初", "因此", "于是", "因为", "随即", "结果", "情绪",
+            "环境", "空间", "光线", "声音", "镜头", "最终画面", "最后一帧", "最后", "结尾", "定格",
+            *required_anchors,
+        )
         replace_candidates = [
             (index, unit)
             for index, unit in enumerate(original_units[1:-1], start=1)
@@ -961,6 +1001,11 @@ def _resolve_model_prompt_candidate(
         if blended != str(original_prompt or "").strip():
             return blended, "blended", ""
         return original_prompt, "rejected", spine_violation
+    if _uses_qwen35_local_incremental_refinement(settings):
+        blended = _validated_model_blend(original_prompt, cleaned, settings, layout_mode=layout_mode)
+        if blended != str(original_prompt or "").strip():
+            return blended, "blended", ""
+        return original_prompt, "rejected", "Qwen3.5 本地增量正文未能安全融入 Skill 长段骨架。"
     if not _looks_like_narrative_prompt(cleaned, settings):
         blended = _validated_model_blend(original_prompt, cleaned, settings, layout_mode=layout_mode)
         if blended != str(original_prompt or "").strip():
@@ -1111,6 +1156,8 @@ def _language_instruction(settings: dict[str, Any]) -> str:
 
 def _resolve_system_prompt(settings: dict[str, Any]) -> str:
     if str(settings.get("模型任务", "") or "").strip() == "视频提示词":
+        if _uses_qwen35_local_incremental_refinement(settings):
+            return _QWEN35_LOCAL_VIDEO_INCREMENTAL_SYSTEM
         video_prompt = str(settings.get("视频提示词模型系统提示", "") or "").strip()
         if video_prompt:
             language = _prompt_language_mode(settings)
@@ -1121,6 +1168,16 @@ def _resolve_system_prompt(settings: dict[str, Any]) -> str:
             else:
                 video_prompt += "\n\n英文正文后必须保留完整的中文说明，中文说明必须为 800-1200 字。"
             return video_prompt
+    if _uses_qwen35_local_incremental_refinement(settings) and not str(settings.get("系统提示词覆盖") or "").strip():
+        layout_mode = resolve_visual_layout_mode(settings=settings)
+        layout_contract = visual_layout_contract(
+            layout_mode,
+            english=_prompt_language_mode(settings) in {"纯英文", "英文提示词+中文说明"},
+        )
+        return (
+            f"{_QWEN35_LOCAL_IMAGE_INCREMENTAL_SYSTEM}\n\n"
+            f"当前画面结构硬约束：{layout_contract}\n最终只输出中文自然语言新增句子。"
+        )
     base_prompt = str(settings.get("系统提示词覆盖") or _DEFAULT_IMAGE_REFINER_SYSTEM)
     narrative_contract = "" if GLOBAL_NARRATIVE_MODEL_CONTRACT in base_prompt else f"\n\n{GLOBAL_NARRATIVE_MODEL_CONTRACT}"
     layout_mode = resolve_visual_layout_mode(settings=settings)
@@ -1506,7 +1563,14 @@ def _refiner_sampling_params(settings: dict[str, Any], *, prompt_count: int = 1)
     presence_penalty = _safe_float_setting(settings, "存在惩罚", 0.0, -2.0, 2.0)
     diversity_context = _is_runtime_diversity_context(settings, prompt_count=prompt_count)
 
-    if diversity_context:
+    incremental_qwen35 = _uses_qwen35_local_incremental_refinement(settings)
+    if incremental_qwen35:
+        temperature = min(max(temperature, 0.35), 0.65)
+        top_p = min(max(top_p, 0.75), 0.9)
+        repeat_penalty = max(repeat_penalty, 1.08)
+        frequency_penalty = max(frequency_penalty, 0.12)
+        presence_penalty = max(presence_penalty, 0.06)
+    elif diversity_context:
         temperature = max(temperature, 0.72)
         top_p = max(top_p, 0.9)
         repeat_penalty = max(repeat_penalty, 1.1)
@@ -1517,8 +1581,11 @@ def _refiner_sampling_params(settings: dict[str, Any], *, prompt_count: int = 1)
         frequency_penalty = max(frequency_penalty, 0.08)
         presence_penalty = max(presence_penalty, 0.04)
 
+    max_tokens = _refiner_token_limit(settings, prompt_count=prompt_count)
+    if incremental_qwen35:
+        max_tokens = min(max_tokens, 640 * max(1, int(prompt_count or 1)))
     params: dict[str, Any] = {
-        "max_tokens": _refiner_token_limit(settings, prompt_count=prompt_count),
+        "max_tokens": max_tokens,
         "temperature": temperature,
         "top_p": top_p,
         "top_k": top_k,
@@ -1724,6 +1791,28 @@ def _compose_model_user_prompt(prompt: str, settings: dict[str, Any]) -> str:
             "上一次响应为空、只有分析/占位符，或未满足成品正文要求。请重新读取下面的 Skill 底稿，"
             "直接输出一份完整可用正文；不得复述任务、解释规则、输出思考过程或标签列表。\n"
         )
+    if _uses_qwen35_local_incremental_refinement(settings):
+        contract_summary = str(settings.get("全局创作主线摘要", "") or "").strip()
+        if not contract_summary:
+            contract_summary = summarize_global_creative_spine_contract(settings.get("全局创作主线合同"))
+        anchors = [
+            str(item).strip()
+            for item in settings.get("视频提示词必保留锚点", [])
+            if str(item).strip()
+        ]
+        task_name = "视频单镜头增量润色" if str(settings.get("模型任务", "") or "").strip() == "视频提示词" else "图像提示词增量润色"
+        retry_note = (
+            "上一次输出不可用；这次立即给出 2-4 句自然语言新增细节，不要分析或重写全文。\n"
+            if bool(settings.get("模型输出修复请求", False))
+            else ""
+        )
+        anchor_line = f"必须保留的原文锚点：{'、'.join(dict.fromkeys(anchors))}\n" if anchors else ""
+        spine_line = f"全局创作主线：{contract_summary}\n" if contract_summary else ""
+        return (
+            f"{retry_note}任务：{task_name}。只返回可插入底稿的新增句子。\n"
+            f"{spine_line}{anchor_line}"
+            f"Skill 已校验底稿：\n{str(prompt or '').strip()}"
+        )
     if str(settings.get("模型任务", "") or "").strip() == "视频提示词":
         anchors = [str(item).strip() for item in settings.get("视频提示词必保留锚点", []) if str(item).strip()]
         anchor_text = "、".join(dict.fromkeys(anchors)) or "无额外锚点"
@@ -1756,6 +1845,17 @@ def _prompt_signature(prompt: str, *, limit: int = 14) -> str:
 
 
 def _compose_batch_prompt(prompts: list[str], settings: dict[str, Any]) -> str:
+    if _uses_qwen35_local_incremental_refinement(settings):
+        contract_summary = str(settings.get("全局创作主线摘要", "") or "").strip()
+        if not contract_summary:
+            contract_summary = summarize_global_creative_spine_contract(settings.get("全局创作主线合同"))
+        spine_line = f"共同创作主线：{contract_summary}\n" if contract_summary else ""
+        return (
+            f"请按原顺序为以下 {len(prompts)} 份 Skill 已校验底稿分别输出 2-4 句中文新增细节。\n"
+            f"{spine_line}每份结果只补充可见的动作因果、材质、空间或光影变化，不重写全文，不输出分析、标题或标签列表。\n"
+            f"结果之间只使用 `{_BATCH_SEPARATOR}` 分隔，不要添加序号或其他前后缀。\n\n"
+            + f"\n{_BATCH_SEPARATOR}\n".join(prompts)
+        )
     diversity_lines = []
     narrative_plans = [str(item).strip() for item in settings.get("全局剧情规划", []) if str(item).strip()]
     for index, prompt in enumerate(prompts, start=1):

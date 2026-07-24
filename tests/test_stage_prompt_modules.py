@@ -15489,6 +15489,74 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertEqual(settings.get("模型来源实际"), "API接口")
         self.assertTrue(any("短草稿" in note for note in settings.get("推理纠偏说明", [])))
 
+    def test_qwen35_local_refiner_retries_with_compact_incremental_request(self) -> None:
+        class LocalQwen35:
+            def __init__(self):
+                self.calls = []
+
+            def create_chat_completion(self, messages=None, **params):
+                self.calls.append((messages, params))
+                if len(self.calls) == 1:
+                    return {"choices": [{"message": {"content": "分析用户请求：先拆解全部规则，再决定如何输出。"}}]}
+                return {
+                    "choices": [{
+                        "message": {
+                            "content": (
+                                "她收紧风衣袖口时，湿布料沿手腕形成更清楚的受力褶皱，站台冷风随后把衣摆推向轨道一侧。"
+                                "列车灯尚未出现，玻璃挡板上的青蓝反光却先被远处震动打散，迫使她把视线从旧站牌移向隧道。"
+                                "镜头保持全景全身，让脚边积水、候车座椅和远处轨道共同说明这次停步的原因。"
+                            )
+                        }
+                    }]
+                }
+
+        llm = LocalQwen35()
+        original = build_long_test_skill_prompt()
+        settings = {
+            "提示词语言": "纯中文",
+            "主体类型": "人物角色",
+            "主体类型解析结果": "人物角色",
+            "模型来源": "本地模型",
+            "模型调用基础来源": "本地模型",
+            "内置模型系列": "Qwen3.5-VL",
+            "内置主模型": "Qwen3.5-4B-Q4_K_M.gguf",
+            "最大生成token": 2200,
+            "模型输出修复重试次数": 1,
+        }
+        result = model_refiner.maybe_model_refine(
+            llm,
+            original,
+            settings,
+            chat_completion=lambda model, messages, params: model.create_chat_completion(
+                messages=messages,
+                **params,
+            ),
+            clean_think_text=lambda value: value,
+        )
+
+        self.assertEqual(len(llm.calls), 2)
+        self.assertNotEqual(result, original)
+        self.assertIn("湿布料", result)
+        self.assertGreaterEqual(len(result), 800)
+        self.assertLessEqual(len(result), 1200)
+        for messages, params in llm.calls:
+            sent = "\n".join(str(message.get("content", "")) for message in messages)
+            self.assertIn("Qwen3.5 本地图像提示词增量润色器", sent)
+            self.assertIn("Skill 已校验底稿", sent)
+            self.assertNotIn("Skill前置上下文", sent)
+            self.assertEqual(params["max_tokens"], 640)
+        second_user = str(llm.calls[1][0][-1].get("content", ""))
+        self.assertIn("上一次输出不可用", second_user)
+        batch_prompt = model_refiner._compose_batch_prompt([original, original], settings)
+        self.assertIn("分别输出 2-4 句中文新增细节", batch_prompt)
+        self.assertNotIn("Skill前置上下文", batch_prompt)
+        self.assertEqual(
+            model_refiner._refiner_sampling_params(settings, prompt_count=2)["max_tokens"],
+            1280,
+        )
+        self.assertEqual(settings.get("模型活动回退数量", 0), 0)
+        self.assertEqual(settings.get("模型来源实际"), "本地模型")
+
     def test_model_refiner_retries_transient_timeout_and_recovers_without_skill_fallback(self) -> None:
         class FlakyLLM:
             def __init__(self):
@@ -15869,6 +15937,79 @@ class TestStagePromptModules(unittest.TestCase):
             self.assertIn(anchor, result)
         self.assertEqual(model_settings["模型调用采纳次数"], 1)
         self.assertEqual(model_settings.get("模型活动回退数量", 0), 0)
+
+    def test_qwen35_local_video_refiner_uses_compact_incremental_contract(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["女冒险者"],
+                "场景背景": ["地下城遗迹"],
+                "动作姿态": ["坐姿慵懒"],
+                "服装造型": ["皮革护甲"],
+                "道具世界观": ["火炬"],
+                "光影氛围": ["冷雾惊悚侧光"],
+                "构图视角": ["全景全身"],
+            }
+        )
+        base_settings = {
+            "提示词语言": "纯中文",
+            "模型来源": "本地模型",
+            "模型调用基础来源": "本地模型",
+            "内置模型系列": "Qwen3.5-VL",
+            "内置主模型": "Qwen3.5-4B-Q4_K_M.gguf",
+            "最大生成token": 2200,
+            "seed": 25,
+        }
+        original = video_prompt_skill.build_video_prompt(selected, [], base_settings)
+        short_candidate = (
+            "火炬内部先传出一声短促爆裂，女冒险者才收紧握柄，皮革护甲的肩带随重心前移发出轻微摩擦声。"
+            "冷雾被热流推开后又贴着石阶回卷，侧光在潮湿墙面留下连续移动的反射，镜头仍停留在同一处地下城空间。"
+        )
+
+        class LocalQwen35Video:
+            def __init__(self):
+                self.messages = []
+                self.params = {}
+
+            def create_chat_completion(self, messages=None, **params):
+                self.messages = messages
+                self.params = params
+                return {"choices": [{"message": {"content": short_candidate}}]}
+
+        model = LocalQwen35Video()
+        settings = {
+            **base_settings,
+            "模型任务": "视频提示词",
+            "视频提示词模型系统提示": video_prompt_skill.VIDEO_PROMPT_MODEL_SYSTEM_TEMPLATE,
+            "视频提示词必保留锚点": video_prompt_skill.video_prompt_required_anchors(
+                selected,
+                [],
+                base_settings,
+            ),
+        }
+        result = model_refiner.maybe_model_refine_video(
+            model,
+            original,
+            settings,
+            chat_completion=lambda active_model, messages, params: active_model.create_chat_completion(
+                messages=messages,
+                **params,
+            ),
+            clean_think_text=lambda value: value,
+            validator=video_prompt_skill.is_natural_video_prompt,
+        )
+
+        sent = "\n".join(str(message.get("content", "")) for message in model.messages)
+        self.assertIn("视频提示词后置导演", sent)
+        self.assertIn("Qwen3.5 本地增量润色器", sent)
+        self.assertIn("女冒险者、地下城遗迹、坐姿慵懒、皮革护甲、火炬", sent)
+        self.assertNotIn("完整的中文说明", sent)
+        self.assertEqual(model.params["max_tokens"], 640)
+        self.assertNotEqual(result, original)
+        self.assertIn("短促爆裂", result)
+        self.assertTrue(video_prompt_skill.is_natural_video_prompt(result, language="纯中文"))
+        for anchor in ("女冒险者", "地下城遗迹", "坐姿慵懒", "皮革护甲", "火炬"):
+            self.assertIn(anchor, result)
+        self.assertEqual(settings.get("模型活动回退数量", 0), 0)
 
     def test_video_model_refiner_repairs_common_local_fragment_omissions(self) -> None:
         fragmented = (
