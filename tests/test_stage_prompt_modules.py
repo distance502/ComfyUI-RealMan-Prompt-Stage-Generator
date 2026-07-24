@@ -72,6 +72,9 @@ def load_nodes_for_storage_test(models_dir: pathlib.Path, runtime: dict[str, obj
 
             def __init__(self, model_path=None, **_kwargs):
                 self.model_path = model_path
+                self.init_kwargs = dict(_kwargs)
+                self.chat_format = _kwargs.get("chat_format")
+                self.chat_handler = _kwargs.get("chat_handler")
                 self.closed = False
                 self.fail_once = False
                 self.reset_count = 0
@@ -437,6 +440,61 @@ class TestStagePromptModules(unittest.TestCase):
             self.assertTrue(unload_done.is_set())
             self.assertTrue(active_model.llm.closed)
             self.assertIsNone(module._QwenStorage.model)
+
+    def test_qwen35_text_model_uses_embedded_template_instead_of_legacy_qwen_format(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            models_dir = pathlib.Path(temp_dir)
+            llm_dir = models_dir / "LLM"
+            llm_dir.mkdir()
+            (llm_dir / "Qwen3.5-4B-Q4_K_M.gguf").touch()
+            module, fake_llama, _runtime = load_nodes_for_storage_test(models_dir)
+
+            model = module._QwenStorage.load(
+                {
+                    "model": "Qwen3.5-4B-Q4_K_M.gguf",
+                    "family": "Qwen3.5-VL",
+                    "think": False,
+                }
+            )
+
+            self.assertEqual(len(fake_llama.created), 1)
+            self.assertNotIn("chat_format", model.llm.init_kwargs)
+            self.assertIsNone(model.llm.chat_format)
+            self.assertIsNone(
+                module._推断llama默认聊天格式(
+                    family="Qwen3.5-VL",
+                    model_name="Qwen3.5-4B-Q4_K_M.gguf",
+                )
+            )
+            self.assertEqual(
+                module._推断llama默认聊天格式(family="Qwen3-VL", model_name="Qwen3-4B.gguf"),
+                "qwen",
+            )
+
+    def test_qwen35_managed_call_repairs_legacy_cached_chat_format(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            models_dir = pathlib.Path(temp_dir)
+            llm_dir = models_dir / "LLM"
+            llm_dir.mkdir()
+            (llm_dir / "Qwen3.5-4B-Q4_K_M.gguf").touch()
+            module, _fake_llama, _runtime = load_nodes_for_storage_test(models_dir)
+            model = module._QwenStorage.load(
+                {
+                    "model": "Qwen3.5-4B-Q4_K_M.gguf",
+                    "family": "Qwen3.5-VL",
+                    "think": False,
+                }
+            )
+            model.llm.chat_format = "qwen"
+
+            result = module._调用chat_completion(
+                model.llm,
+                messages=[{"role": "user", "content": "return final text"}],
+                params={},
+            )
+
+            self.assertEqual(result["choices"][0]["message"]["content"], "ok")
+            self.assertIsNone(model.llm.chat_format)
 
     def test_model_recovery_uses_recorded_owner_storage(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -551,8 +551,21 @@ def _执行chat_completion(
             getattr(llm, "_model_path", None),
             getattr(llm, "__class__", type(llm)).__name__,
         ]
-        guessed_chat_format = _推断llama默认聊天格式(model_name=" ".join(str(item) for item in candidates if item))
-        _应用llama聊天格式兜底(llm, guessed_chat_format)
+        model_descriptor = " ".join(str(item) for item in candidates if item)
+        managed_settings = getattr(llm, "_qwen_te_settings", None)
+        prefer_embedded_template = isinstance(managed_settings, dict) and _应使用llama内置聊天模板(
+            family=managed_settings.get("family"),
+            model_name=managed_settings.get("model") or model_descriptor,
+        )
+        guessed_chat_format = _推断llama默认聊天格式(
+            family=managed_settings.get("family") if isinstance(managed_settings, dict) else None,
+            model_name=managed_settings.get("model") if isinstance(managed_settings, dict) else model_descriptor,
+        )
+        _应用llama聊天格式兜底(
+            llm,
+            guessed_chat_format,
+            prefer_embedded_template=prefer_embedded_template,
+        )
     except Exception:
         pass
 
@@ -751,8 +764,15 @@ def _llama构造参数是否可用(param_name: str) -> bool | None:
     return param_name in _LLAMA_INIT_PARAMS_CACHE
 
 
+def _应使用llama内置聊天模板(*, family: str | None = None, model_name: str | None = None) -> bool:
+    haystack = re.sub(r"[^a-z0-9]+", "", f"{family or ''} {model_name or ''}".lower())
+    return "qwen35" in haystack
+
+
 def _推断llama默认聊天格式(*, family: str | None = None, model_name: str | None = None) -> str | None:
     haystack = f"{family or ''} {model_name or ''}".lower()
+    if _应使用llama内置聊天模板(family=family, model_name=model_name):
+        return None
     if "gemma" in haystack:
         return "gemma"
     if "qwen" in haystack:
@@ -764,14 +784,29 @@ def _推断llama默认聊天格式(*, family: str | None = None, model_name: str
     return None
 
 
-def _应用llama聊天格式兜底(llm: object, chat_format: str | None) -> None:
+def _应用llama聊天格式兜底(
+    llm: object,
+    chat_format: str | None,
+    *,
+    prefer_embedded_template: bool = False,
+) -> None:
     if not chat_format:
         chat_format = None
     try:
         current = getattr(llm, "chat_format", None)
     except Exception:
         current = None
-    if not current and chat_format:
+    try:
+        chat_handler = getattr(llm, "chat_handler", None)
+    except Exception:
+        chat_handler = None
+    if prefer_embedded_template and chat_handler is None:
+        if current:
+            try:
+                llm.chat_format = None
+            except Exception:
+                pass
+    elif not current and chat_format:
         try:
             llm.chat_format = chat_format
         except Exception:
@@ -1056,6 +1091,10 @@ class _QwenStorage:
 
         n_ctx = int(config.get("n_ctx", 8192))
         n_gpu_layers = int(config.get("n_gpu_layers", -1))
+        prefer_embedded_template = _应使用llama内置聊天模板(
+            family=family,
+            model_name=config.get("model"),
+        )
         chat_format = _推断llama默认聊天格式(family=family, model_name=config.get("model"))
 
         llama_kwargs = {
@@ -1096,7 +1135,11 @@ class _QwenStorage:
                 f"\n原始错误：{exc}"
             ) from exc
 
-        _应用llama聊天格式兜底(llm, chat_format)
+        _应用llama聊天格式兜底(
+            llm,
+            chat_format,
+            prefer_embedded_template=prefer_embedded_template,
+        )
         _标记llm托管元数据(llm, config, owner_storage=cls)
 
         model = _QwenModel(llm=llm, settings=dict(config), chat_handler=chat_handler)
