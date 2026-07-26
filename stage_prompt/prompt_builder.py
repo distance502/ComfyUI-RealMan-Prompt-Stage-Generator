@@ -5577,6 +5577,23 @@ def build_prompt_list(
     infer_subject_type: Callable[[list[str], str], str],
     infer_output_structure: Callable[[str, str], str],
 ) -> list[str]:
+    selected = OrderedDict(
+        (str(group), [_clean_fragment(value) for value in values if _clean_fragment(value)])
+        for group, values in selected.items()
+    )
+    preference_hints = settings.get("智能偏好应用")
+    if isinstance(preference_hints, dict):
+        for group, values in preference_hints.items():
+            group_name = str(group)
+            if selected.get(group_name):
+                continue
+            hints = [
+                _clean_fragment(value)
+                for value in (values if isinstance(values, (list, tuple)) else [])
+                if _clean_fragment(value)
+            ][:1]
+            if hints:
+                selected[group_name] = hints
     custom_tags = [_clean_fragment(tag) for tag in custom_tags if _clean_fragment(tag)]
     tags = [tag for group_tags in selected.values() for tag in group_tags] + list(custom_tags)
     style = infer_template_style(tags, str(settings["模板风格"]))

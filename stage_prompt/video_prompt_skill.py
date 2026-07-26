@@ -97,6 +97,8 @@ def _normalized_groups(
     selected: Mapping[str, Sequence[Any]] | None,
     custom_tags: Sequence[Any] | None,
     settings: Mapping[str, Any],
+    *,
+    include_preferences: bool = False,
 ) -> dict[str, list[str]]:
     groups: dict[str, list[str]] = {}
     contract = settings.get("全局创作主线合同")
@@ -109,6 +111,15 @@ def _normalized_groups(
     custom = _unique_values(custom_tags, limit=4)
     if custom and "自定义补充" not in groups:
         groups["自定义补充"] = custom
+    preference_hints = settings.get("智能偏好应用")
+    if include_preferences and isinstance(preference_hints, dict):
+        for name, values in preference_hints.items():
+            group_name = str(name)
+            if groups.get(group_name):
+                continue
+            cleaned = _unique_values(values, limit=1)
+            if cleaned:
+                groups[group_name] = cleaned
     return groups
 
 
@@ -466,7 +477,7 @@ def build_video_prompt(
 ) -> str:
     """Build one multi-paragraph storyboard whose shots form a complete story."""
 
-    groups = _normalized_groups(selected, custom_tags, settings)
+    groups = _normalized_groups(selected, custom_tags, settings, include_preferences=True)
     language = str(settings.get("提示词语言", "纯中文") or "纯中文").strip()
     if language in {"纯英文", "英文提示词+中文说明"}:
         english = _build_english_video_prompt(settings, primary_prompt=primary_prompt)

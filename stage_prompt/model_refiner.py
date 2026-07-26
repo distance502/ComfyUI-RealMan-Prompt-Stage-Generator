@@ -18,7 +18,7 @@ try:
         resolve_visual_layout_mode,
         visual_layout_contract,
     )
-    from .intelligence import candidate_world_violation
+    from .intelligence import candidate_world_violation, classify_repair_reason
 except Exception:  # pragma: no cover - exercised by direct import tests
     from stage_prompt_narrative_test import (  # type: ignore
         GLOBAL_NARRATIVE_MODEL_CONTRACT,
@@ -26,7 +26,7 @@ except Exception:  # pragma: no cover - exercised by direct import tests
         resolve_visual_layout_mode,
         visual_layout_contract,
     )
-    from stage_prompt_intelligence_test import candidate_world_violation  # type: ignore
+    from stage_prompt_intelligence_test import candidate_world_violation, classify_repair_reason  # type: ignore
 
 DEFAULT_STAGE_PROMPT_SYSTEM_TEMPLATE = """
 你是 Qwen TE 阶段式提示词生成器的默认图像提示词整理模板，兼具资深视觉艺术总监、电影摄影指导、高端人像修图审美和生成式图像 Prompt 工程能力。
@@ -1770,6 +1770,7 @@ def _skill_context_for_model(settings: dict[str, Any]) -> str:
     dynamic_strategy = str(settings.get("Skill动态变化策略", "") or "").strip()
     intelligence_summary = str(settings.get("智能编排摘要", "") or "").strip()
     preference_summary = str(settings.get("智能偏好摘要", "") or "").strip()
+    applied_preference_summary = str(settings.get("智能偏好应用摘要", "") or "").strip()
     scene_graph = settings.get("智能场景关系图")
     narrative_plans = [
         str(item).strip()
@@ -1855,9 +1856,23 @@ def _skill_context_for_model(settings: dict[str, Any]) -> str:
                 extra_lines.append(
                     f"智能关系图硬锚点：{anchor_text}。所有关系必须属于同一场景，禁止引入关系图之外的世界族。"
                 )
+        coherence_issues = [
+            str(item.get("message", "") or "").strip()
+            for item in list(scene_graph.get("coherence_issues", []) or [])
+            if isinstance(item, dict) and str(item.get("message", "") or "").strip()
+        ]
+        if coherence_issues:
+            extra_lines.append(
+                "智能关系诊断：" + "；".join(coherence_issues[:3])
+                + "。不得利用冲突补入第三套场景；只沿当前明确主线收敛。"
+            )
     if preference_summary:
         extra_lines.append(
             f"连续使用软偏好：{preference_summary}。只可用于用户未锁定的细节，不得覆盖主体、场景或任何硬锚点。"
+        )
+    if applied_preference_summary:
+        extra_lines.append(
+            f"本次软偏好应用：{applied_preference_summary}。它只填充原本为空的维度，优先级低于全部显式输入和锁定项。"
         )
     if dynamic_strategy:
         extra_lines.append(f"Skill动态变化策略：{dynamic_strategy}")
@@ -1916,10 +1931,11 @@ def _compose_model_user_prompt(prompt: str, settings: dict[str, Any]) -> str:
     repair_instruction = ""
     if bool(settings.get("模型输出修复请求", False)):
         repair_reason = str(settings.get("智能定向修复原因", "") or "").strip()
+        repair_focus = str(settings.get("智能定向修复指令", "") or "").strip()
         reason_line = f"上一次失败的具体原因：{repair_reason}\n" if repair_reason else ""
         repair_instruction = (
-            f"{reason_line}只修复该问题：补回缺失锚点、删除错误场景或世界族、纠正语言、修正画面结构，"
-            "或去掉分析包装与标签串；其他已经正确的主体、服装、动作、场景、道具、光影和剧情不得改写。"
+            f"{reason_line}本次唯一修复目标：{repair_focus or '只修复校验指出的问题。'}"
+            "其他已经正确的主体、服装、动作、场景、道具、光影和剧情不得改写。"
             "不得复述任务、解释规则或输出思考过程。\n"
         )
     if _uses_qwen35_local_incremental_refinement(settings):
@@ -2536,12 +2552,16 @@ def _retry_invalid_model_output(
     repair_settings = dict(settings)
     repair_settings["模型输出修复请求"] = True
     repair_reason = str(reason or "").strip()
+    repair_focus = classify_repair_reason(repair_reason)
     repair_settings["智能定向修复原因"] = repair_reason
+    repair_settings["智能定向修复类型"] = repair_focus["kind"]
+    repair_settings["智能定向修复指令"] = repair_focus["instruction"]
     settings["智能定向修复次数"] = max(
         0,
         int(settings.get("智能定向修复次数", 0) or 0),
     ) + 1
     settings["智能定向修复最近原因"] = repair_reason
+    settings["智能定向修复最近类型"] = repair_focus["kind"]
     try:
         text = _call_model_text_with_retry(
             llm,

@@ -8,7 +8,7 @@ import re
 from typing import Any, Iterable
 
 
-INTELLIGENCE_PROFILE_VERSION = "qwen-te-intelligence-v1"
+INTELLIGENCE_PROFILE_VERSION = "qwen-te-intelligence-v2"
 
 _GROUP_LIMITS = {
     "主体": 6,
@@ -27,6 +27,36 @@ _PREFERENCE_EXCLUSIONS = {
     "无", "自动", "自动判断", "高细节", "清晰对焦", "人物完整入镜", "全身完整入镜",
     "主体轮廓清晰", "空间层次明确", "无文字", "无水印", "无logo",
 }
+
+_LOCATION_WORLD_FAMILIES = {
+    "underground_ruin", "ancient_human", "sacred_place", "urban_space", "industrial_scifi",
+    "private_interior", "natural_wilderness", "underwater", "rural_life", "neutral_studio",
+}
+_INTENT_PATTERNS: dict[str, tuple[str, ...]] = {
+    "character_sheet": (
+        "角色设定图", "人物设定图", "角色设定表", "三视图", "正侧背", "正面侧面背面",
+        "character sheet", "character turnaround", "front side back", "orthographic views",
+    ),
+    "video_first": (
+        "视频提示词", "连续分镜", "镜头脚本", "故事分镜", "动态镜头", "运镜",
+        "video prompt", "storyboard", "shot sequence", "camera movement",
+    ),
+    "non_person": (
+        "非人物主体", "无人场景", "产品摄影", "产品设定图", "建筑概念图", "载具设定图",
+        "non-human subject", "product shot", "vehicle design", "environment concept",
+    ),
+}
+_ACTION_PROP_REQUIREMENTS: tuple[tuple[tuple[str, ...], tuple[str, ...], str], ...] = (
+    (("举起火炬", "点燃火炬", "torch"), ("火炬", "torch"), "火炬"),
+    (("挥剑", "拔剑", "持剑", "剑术", "sword"), ("长剑", "宝剑", "剑", "sword"), "剑"),
+    (("射箭", "拉弓", "搭箭", "archery"), ("弓箭", "弓", "箭", "bow", "arrow"), "弓箭"),
+    (("展开卷轴", "阅读卷轴", "scroll"), ("卷轴", "scroll"), "卷轴"),
+    (("拍摄", "摄影", "举起相机", "camera"), ("相机", "摄影机", "camera"), "相机"),
+)
+_STRONG_SCENE_CONFLICTS: tuple[tuple[str, tuple[str, ...], str], ...] = (
+    ("underwater", ("火炬", "篝火", "明火", "torch", "campfire", "open flame"), "水下场景与持续明火冲突"),
+    ("neutral_studio", ("暴雨", "暴雪", "沙尘暴", "雷暴", "storm", "blizzard", "sandstorm"), "中性影棚与户外极端天气冲突"),
+)
 
 WORLD_FAMILY_MARKERS: dict[str, tuple[str, ...]] = {
     "underground_ruin": (
@@ -132,6 +162,21 @@ def detect_world_families(text: Any) -> dict[str, list[str]]:
     return hits
 
 
+def _contains_any(text: Any, markers: Iterable[str]) -> bool:
+    source = _clean(text)
+    return any(_marker_present(source, marker) for marker in markers)
+
+
+def _intent_signals(settings: dict[str, Any]) -> tuple[str, list[str]]:
+    text = "，".join(
+        _clean(settings.get(key))
+        for key in ("智能文本输入", "额外要求", "图片反推附加要求")
+        if _clean(settings.get(key))
+    )
+    signals = [name for name, markers in _INTENT_PATTERNS.items() if _contains_any(text, markers)]
+    return text, signals
+
+
 def infer_task_intent(
     selected: OrderedDict[str, list[str]] | dict[str, list[str]],
     settings: dict[str, Any],
@@ -144,22 +189,27 @@ def infer_task_intent(
     character_sheet_enabled = bool(_clean(settings.get("角色设定图内部策略"))) or (
         image_reverse_enabled and reverse_mode == "角色设定图"
     )
+    intent_text, text_signals = _intent_signals(settings)
+    character_sheet_enabled = character_sheet_enabled or "character_sheet" in text_signals
     tag_block_enabled = bool(settings.get("标签块编排启用", False))
     smart_enabled = bool(settings.get("智能文本匹配", False)) and bool(
         _clean(settings.get("智能文本输入") or settings.get("额外要求"))
     )
     if character_sheet_enabled:
-        task_type = "character_sheet_from_reference" if has_reference_image else "character_sheet_from_text"
+        task_type = "character_sheet_from_reference" if has_reference_image and image_reverse_enabled else "character_sheet_from_text"
         confidence = 1.0
     elif image_reverse_enabled and has_reference_image:
         task_type = "image_reverse_description"
         confidence = 1.0
-    elif subject_type == "非人物主体":
+    elif subject_type == "非人物主体" or "non_person" in text_signals:
         task_type = "non_person_visual_story"
-        confidence = 0.96
+        confidence = 0.96 if subject_type == "非人物主体" else 0.88
     elif tag_block_enabled:
         task_type = "ordered_tag_block_story"
         confidence = 0.94
+    elif "video_first" in text_signals:
+        task_type = "video_first_story"
+        confidence = 0.86
     elif smart_enabled:
         task_type = "smart_text_visual_story"
         confidence = 0.9
@@ -173,6 +223,9 @@ def infer_task_intent(
         "has_reference_image": bool(has_reference_image),
         "image_reverse_mode": reverse_mode if image_reverse_enabled else "disabled",
         "character_sheet_enabled": character_sheet_enabled,
+        "text_signals": text_signals,
+        "intent_text_present": bool(intent_text),
+        "primary_channel": "video_storyboard" if "video_first" in text_signals else "image_prompt",
         "channels": ["image_prompt", "video_storyboard"],
     }
 
@@ -202,6 +255,29 @@ def build_scene_relationship_graph(
         if targets:
             relations.append({"source": subject or ["主主体"], "relation": relation, "target": targets})
 
+    action_text = "，".join(groups.get("动作姿态", []))
+    prop_text = "，".join(groups.get("道具世界观", []))
+    inferred_requirements: list[dict[str, Any]] = []
+    for action_markers, prop_markers, label in _ACTION_PROP_REQUIREMENTS:
+        if not _contains_any(action_text, action_markers):
+            continue
+        satisfied = _contains_any(prop_text, prop_markers)
+        inferred_requirements.append(
+            {
+                "source": groups.get("动作姿态", []) or [action_text],
+                "relation": "requires_prop",
+                "target": [label],
+                "satisfied": satisfied,
+            }
+        )
+        relations.append(
+            {
+                "source": groups.get("动作姿态", []) or [action_text],
+                "relation": "supported_by",
+                "target": [label],
+            }
+        )
+
     scene_text = "，".join([*groups.get("场景背景", []), *groups.get("道具世界观", []), *custom])
     explicit_hits = detect_world_families(scene_text)
     scene_only_hits = detect_world_families("，".join(groups.get("场景背景", [])))
@@ -216,11 +292,44 @@ def build_scene_relationship_graph(
         for group, values in groups.items()
         if values and group in {"主体", "服装造型", "场景背景", "动作姿态", "道具世界观", "画面风格", "构图视角"}
     }
+    coherence_issues: list[dict[str, str]] = []
+    location_families = [family for family in scene_only_hits if family in _LOCATION_WORLD_FAMILIES]
+    if len(location_families) > 1:
+        coherence_issues.append(
+            {
+                "kind": "multiple_scene_families",
+                "severity": "warning",
+                "message": f"场景同时包含多个世界族：{'、'.join(location_families)}；模型只能按用户主线融合，不得继续增加第三种场景。",
+            }
+        )
+    combined_text = "，".join(
+        [
+            *groups.get("场景背景", []),
+            *groups.get("道具世界观", []),
+            *groups.get("动作姿态", []),
+            *groups.get("光影氛围", []),
+        ]
+    )
+    for family, markers, message in _STRONG_SCENE_CONFLICTS:
+        if family in scene_only_hits and _contains_any(combined_text, markers):
+            coherence_issues.append({"kind": "scene_affordance_conflict", "severity": "error", "message": message})
+    for requirement in inferred_requirements:
+        if not requirement.get("satisfied"):
+            coherence_issues.append(
+                {
+                    "kind": "implicit_prop_anchor",
+                    "severity": "info",
+                    "message": f"动作已隐含道具“{requirement['target'][0]}”，生成时必须保持该动作-道具关系。",
+                }
+            )
     return {
         "nodes": groups,
         "custom_context": custom,
         "relations": relations,
         "hard_anchors": hard_anchors,
+        "inferred_requirements": inferred_requirements,
+        "coherence_issues": coherence_issues,
+        "coherence_status": "conflict" if any(item["severity"] == "error" for item in coherence_issues) else ("review" if coherence_issues else "coherent"),
         "primary_world_family": primary_family,
         "explicit_world_families": list(explicit_hits),
         "allowed_world_families": sorted(allowed),
@@ -228,18 +337,34 @@ def build_scene_relationship_graph(
     }
 
 
-def resolve_model_strategy(settings: dict[str, Any], task_intent: dict[str, Any]) -> dict[str, Any]:
+def resolve_model_strategy(
+    settings: dict[str, Any],
+    task_intent: dict[str, Any],
+    scene_graph: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     source = _clean(settings.get("模型调用基础来源") or settings.get("模型来源") or "仅Skill")
     task_type = _clean(task_intent.get("task_type"))
     strict = _clean(settings.get("风格隔离策略")) == "严格风格隔离"
     adult = bool(settings.get("NSFW工作台启用", False) or settings.get("NSFW策略启用", False))
+    coherence_issues = list((scene_graph or {}).get("coherence_issues", []) or [])
+    structure_sensitive = (
+        task_type.startswith("character_sheet")
+        or task_type in {"ordered_tag_block_story", "video_first_story"}
+    )
+    risk_score = min(
+        100,
+        (35 if source.startswith("本地") else 0)
+        + (25 if structure_sensitive else 0)
+        + (15 if strict else 0)
+        + (15 if adult else 0)
+        + min(20, len(coherence_issues) * 8),
+    )
     if source in {"", "仅Skill"}:
         mode = "skill_only"
         reason = "当前未启用模型，直接使用已校验 Skill 成品。"
     elif (
         source.startswith("本地")
-        or task_type.startswith("character_sheet")
-        or task_type == "ordered_tag_block_story"
+        or structure_sensitive
         or strict
         or adult
     ):
@@ -253,6 +378,8 @@ def resolve_model_strategy(settings: dict[str, Any], task_intent: dict[str, Any]
         "video_mode": "incremental_storyboard_blend" if mode != "skill_only" else "skill_only",
         "repair_mode": "targeted_patch",
         "preserve_skill_baseline": True,
+        "risk_score": risk_score,
+        "coherence_issue_count": len(coherence_issues),
         "reason": reason,
     }
 
@@ -262,10 +389,13 @@ def update_preference_memory(
     explicit_selected: OrderedDict[str, list[str]] | dict[str, list[str]],
     *,
     task_type: str,
+    context_key: str = "",
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     state = dict(memory) if isinstance(memory, dict) else {}
     channels = dict(state.get("channels")) if isinstance(state.get("channels"), dict) else {}
-    channel = dict(channels.get(task_type)) if isinstance(channels.get(task_type), dict) else {}
+    context = _clean(context_key) or "general"
+    channel_key = task_type if context == "general" else f"{task_type}::{context}"
+    channel = dict(channels.get(channel_key)) if isinstance(channels.get(channel_key), dict) else {}
     observations = max(0, int(channel.get("observations", 0) or 0)) + 1
     counts = {
         group: dict(values) if isinstance(values, dict) else {}
@@ -287,8 +417,8 @@ def update_preference_memory(
             for group, values in counts.items()
         }
     channel = {"observations": observations, "counts": counts}
-    channels[task_type] = channel
-    state = {"version": 1, "channels": channels}
+    channels[channel_key] = channel
+    state = {"version": 2, "channels": channels}
 
     stable: dict[str, list[str]] = {}
     for group in _PREFERENCE_GROUPS:
@@ -302,11 +432,76 @@ def update_preference_memory(
             stable[group] = [tag for tag, _count, _ratio in ranked[:3]]
     profile = {
         "task_type": task_type,
+        "context_key": context,
+        "channel_key": channel_key,
         "observations": observations,
         "stable_preferences": stable,
         "application": "soft_unlocked_details_only",
     }
     return state, profile
+
+
+def resolve_preference_hints(
+    preference_profile: Any,
+    selected: OrderedDict[str, list[str]] | dict[str, list[str]],
+    settings: dict[str, Any],
+    *,
+    scene_graph: Any = None,
+) -> dict[str, list[str]]:
+    if not isinstance(preference_profile, dict):
+        return {}
+    stable = preference_profile.get("stable_preferences")
+    if not isinstance(stable, dict):
+        return {}
+    task_type = _clean(preference_profile.get("task_type"))
+    subject_type = _clean(settings.get("主体类型解析结果") or settings.get("主体类型"))
+    template_style = _clean(settings.get("模板风格") or "自动")
+    hints: dict[str, list[str]] = {}
+    for group in _PREFERENCE_GROUPS:
+        if _unique(selected.get(group, []), 4):
+            continue
+        if group == "画面风格" and template_style not in {"", "自动"}:
+            continue
+        if group == "服装造型" and (subject_type == "非人物主体" or task_type.startswith("character_sheet")):
+            continue
+        if group == "构图视角" and task_type.startswith("character_sheet"):
+            continue
+        values = [
+            value
+            for value in _unique(stable.get(group, []), 3)
+            if value not in _PREFERENCE_EXCLUSIONS
+        ]
+        if not values:
+            continue
+        candidate = values[0]
+        scene_text = "，".join(_unique(selected.get("场景背景", []), 5))
+        if candidate_world_violation(scene_text, f"{scene_text}，{candidate}", scene_graph):
+            continue
+        hints[group] = [candidate]
+    return hints
+
+
+def classify_repair_reason(reason: Any) -> dict[str, str]:
+    text = _clean(reason)
+    folded = text.casefold()
+    rules = (
+        ("missing_anchor", ("缺少", "锚点"), "只补回缺失锚点，并保持其与主体、动作和场景的原有关联。"),
+        ("world_conflict", ("世界族",), "只删除越界世界族及其附属物件，再用当前场景已有材质或环境反馈补足语句。"),
+        ("scene_conflict", ("冲突场景",), "只移除错误场景，所有动作、道具和光线必须回到当前唯一主场景。"),
+        ("language", ("语言",), "只把正文改为当前要求的语言，不改变任何视觉事实与剧情顺序。"),
+        ("layout", ("画面结构",), "只修正单帧、人数或多视图结构，不增加人物副本、额外视角或分屏。"),
+        ("wrapper", ("分析", "占位符"), "删除分析、占位符、标题和标签包装，只返回可直接使用的自然语言正文。"),
+        ("narrative", ("自然语言",), "只补齐动作因果、环境反馈和完整句子，不替换已有视觉锚点。"),
+        ("duplicate", ("重复",), "只改写重复表达并恢复本条独有的主体、场景、动作与镜头差异。"),
+    )
+    for kind, markers, instruction in rules:
+        if all(marker.casefold() in folded for marker in markers):
+            return {"kind": kind, "instruction": instruction, "reason": text}
+    return {
+        "kind": "invalid_output",
+        "instruction": "只修复校验指出的问题，其他已经正确的视觉事实与剧情结构保持不变。",
+        "reason": text,
+    }
 
 
 def build_intelligence_profile(
@@ -319,7 +514,7 @@ def build_intelligence_profile(
 ) -> dict[str, Any]:
     task_intent = infer_task_intent(selected, settings, has_reference_image=has_reference_image)
     scene_graph = build_scene_relationship_graph(selected, custom_tags)
-    model_strategy = resolve_model_strategy(settings, task_intent)
+    model_strategy = resolve_model_strategy(settings, task_intent, scene_graph)
     return {
         "version": INTELLIGENCE_PROFILE_VERSION,
         "task_intent": task_intent,
@@ -352,16 +547,23 @@ def summarize_intelligence_profile(profile: Any) -> str:
     graph = dict(profile.get("scene_graph", {}))
     strategy = dict(profile.get("model_strategy", {}))
     preference = dict(profile.get("preference_profile", {}))
+    hints = dict(profile.get("preference_hints", {}))
     stable = dict(preference.get("stable_preferences", {}))
     stable_text = "、".join(
         f"{group}={','.join(str(item) for item in values)}"
         for group, values in stable.items()
         if values
     ) or "尚未形成"
+    hint_text = "、".join(
+        f"{group}={','.join(str(item) for item in values)}"
+        for group, values in hints.items()
+        if values
+    ) or "未应用"
     return (
         f"任务 {task.get('task_type', 'unknown')} ({float(task.get('confidence', 0) or 0):.2f}) | "
         f"世界族 {graph.get('primary_world_family') or '未限定'} | "
-        f"模型策略 {strategy.get('mode', 'skill_only')} | 偏好 {stable_text}"
+        f"模型策略 {strategy.get('mode', 'skill_only')} (风险 {int(strategy.get('risk_score', 0) or 0)}) | "
+        f"偏好 {stable_text} | 本次软应用 {hint_text}"
     )
 
 
@@ -371,9 +573,11 @@ __all__ = [
     "build_intelligence_profile",
     "build_scene_relationship_graph",
     "candidate_world_violation",
+    "classify_repair_reason",
     "detect_world_families",
     "infer_task_intent",
     "resolve_model_strategy",
+    "resolve_preference_hints",
     "summarize_intelligence_profile",
     "update_preference_memory",
 ]

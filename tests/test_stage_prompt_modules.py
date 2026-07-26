@@ -211,6 +211,9 @@ class TestStagePromptIntelligence(unittest.TestCase):
             ({"主体类型解析结果": "非人物主体"}, False, "non_person_visual_story"),
             ({"标签块编排启用": True}, False, "ordered_tag_block_story"),
             ({"智能文本匹配": True, "智能文本输入": "雨夜追踪"}, False, "smart_text_visual_story"),
+            ({"额外要求": "制作正面、侧面、背面三视图角色设定表"}, False, "character_sheet_from_text"),
+            ({"额外要求": "输出连续分镜和动态镜头的视频提示词"}, False, "video_first_story"),
+            ({"额外要求": "无人场景的建筑概念图"}, False, "non_person_visual_story"),
         ]
         for settings, has_reference, expected in cases:
             with self.subTest(expected=expected):
@@ -237,6 +240,8 @@ class TestStagePromptIntelligence(unittest.TestCase):
         self.assertTrue({"wears", "performs", "located_in", "uses_or_carries", "illuminated_by"} <= relations)
         self.assertEqual(graph["primary_world_family"], "underground_ruin")
         self.assertIn("fantasy_adventure_gear", graph["allowed_world_families"])
+        self.assertEqual(graph["coherence_status"], "coherent")
+        self.assertTrue(any(item["relation"] == "requires_prop" and item["satisfied"] for item in graph["inferred_requirements"]))
         original = "女冒险者穿着皮革护甲，在地下城遗迹举起火炬前行。"
         self.assertEqual(
             intelligence.candidate_world_violation(original, original + "火炬照亮石墙。", graph),
@@ -248,6 +253,18 @@ class TestStagePromptIntelligence(unittest.TestCase):
                     "越过场景关系图",
                     intelligence.candidate_world_violation(original, original + foreign, graph),
                 )
+
+    def test_scene_graph_explains_implicit_props_and_strong_affordance_conflicts(self) -> None:
+        implicit = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["游侠"], "动作姿态": ["拉弓瞄准"], "场景背景": ["森林"]})
+        )
+        self.assertEqual(implicit["coherence_status"], "review")
+        self.assertTrue(any(item["kind"] == "implicit_prop_anchor" for item in implicit["coherence_issues"]))
+        underwater = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["潜水员"], "场景背景": ["深海"], "道具世界观": ["火炬"]})
+        )
+        self.assertEqual(underwater["coherence_status"], "conflict")
+        self.assertTrue(any("持续明火" in item["message"] for item in underwater["coherence_issues"]))
 
     def test_model_strategy_adapts_without_new_ui_controls(self) -> None:
         task = {"task_type": "standard_visual_story"}
@@ -277,6 +294,108 @@ class TestStagePromptIntelligence(unittest.TestCase):
         self.assertEqual(second["stable_preferences"]["画面风格"], ["暗黑漫画"])
         self.assertNotIn("主体", second["stable_preferences"])
         self.assertNotIn("场景背景", second["stable_preferences"])
+
+    def test_preferences_are_context_partitioned_and_only_fill_empty_groups(self) -> None:
+        explicit = OrderedDict({"画面风格": ["暗黑漫画"], "光影氛围": ["冷雾惊悚侧光"]})
+        memory, _first = intelligence.update_preference_memory(
+            {}, explicit, task_type="standard_visual_story", context_key="underground_ruin"
+        )
+        memory, underground = intelligence.update_preference_memory(
+            memory, explicit, task_type="standard_visual_story", context_key="underground_ruin"
+        )
+        _memory, urban = intelligence.update_preference_memory(
+            memory, explicit, task_type="standard_visual_story", context_key="urban_space"
+        )
+        self.assertIn("画面风格", underground["stable_preferences"])
+        self.assertEqual(urban["stable_preferences"], {})
+
+        selected = OrderedDict({"主体": ["女冒险者"], "场景背景": ["地下城遗迹"]})
+        graph = intelligence.build_scene_relationship_graph(selected)
+        hints = intelligence.resolve_preference_hints(
+            underground,
+            selected,
+            {"模板风格": "自动", "主体类型解析结果": "人物角色"},
+            scene_graph=graph,
+        )
+        self.assertEqual(hints["画面风格"], ["暗黑漫画"])
+        explicit_style = OrderedDict({**selected, "画面风格": ["电影写实"]})
+        self.assertNotIn(
+            "画面风格",
+            intelligence.resolve_preference_hints(
+                underground,
+                explicit_style,
+                {"模板风格": "自动", "主体类型解析结果": "人物角色"},
+                scene_graph=graph,
+            ),
+        )
+
+    def test_soft_preferences_reach_image_and_video_skill_without_becoming_user_tags(self) -> None:
+        selected = OrderedDict({"主体": ["女冒险者"], "场景背景": ["地下城遗迹"]})
+        settings = {
+            "模板风格": "自动",
+            "主体类型": "人物角色",
+            "主体类型解析结果": "人物角色",
+            "案例输出结构": "案例长段版",
+            "标签反推模式": "自动平衡",
+            "生成数量": 1,
+            "额外要求": "",
+            "提示词语言": "纯中文",
+            "详细度": "标准",
+            "seed": 4,
+            "智能偏好应用": {"画面风格": ["暗黑漫画"], "光影氛围": ["冷雾惊悚侧光"]},
+        }
+        prompts = prompt_builder.build_prompt_list(
+            selected,
+            [],
+            settings,
+            uniq=uniq,
+            infer_template_style=lambda tags, explicit: "暗黑漫画" if "暗黑漫画" in tags else explicit,
+            infer_subject_type=lambda _tags, explicit: explicit,
+            infer_output_structure=lambda _subject, explicit: explicit,
+        )
+        video = video_prompt_skill.build_video_prompt(selected, [], settings, primary_prompt=prompts[0])
+        self.assertIn("暗黑漫画", prompts[0])
+        self.assertIn("冷雾惊悚侧光", prompts[0])
+        self.assertIn("暗黑漫画", video)
+        self.assertNotIn("画面风格", selected)
+        self.assertNotIn("光影氛围", selected)
+
+    def test_text_intent_activates_non_person_and_character_sheet_modes(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        common = {
+            "主体类型": "自动",
+            "模板风格": "自动",
+            "生成数量": 1,
+            "提示词语言": "纯中文",
+            "运行时随机标签": False,
+            "模型来源": "仅Skill",
+            "seed": 11,
+        }
+        non_person = module._run_stage(
+            None,
+            **{
+                **common,
+                "unique_id": "intelligence-text-non-person",
+                "额外要求": "无人场景的未来建筑概念图，强调结构与空间尺度",
+            },
+        )
+        non_person_payload = json.loads(non_person[3])
+        self.assertEqual(non_person_payload["subject_type"], "非人物主体")
+        self.assertEqual(non_person_payload["task_intent"]["task_type"], "non_person_visual_story")
+
+        sheet = module._run_stage(
+            None,
+            **{
+                **common,
+                "unique_id": "intelligence-text-character-sheet",
+                "主体标签1": "成年女性冒险者",
+                "额外要求": "制作正面、90度侧面、背面三视图角色设定图",
+            },
+        )
+        sheet_payload = json.loads(sheet[3])
+        self.assertEqual(sheet_payload["task_intent"]["task_type"], "character_sheet_from_text")
+        self.assertIn("视图比例1:1:1", sheet[1])
+        self.assertIn("简洁连续的中性背景", sheet[1])
 
     def test_invalid_world_candidate_triggers_reason_specific_repair(self) -> None:
         class RepairingModel:
@@ -344,6 +463,9 @@ class TestStagePromptIntelligence(unittest.TestCase):
         self.assertIn("具体原因", second_request)
         self.assertTrue("月球车" in second_request or "industrial_scifi" in second_request)
         self.assertEqual(settings["智能定向修复次数"], 1)
+        self.assertEqual(settings["智能定向修复最近类型"], "world_conflict")
+        self.assertIn("唯一修复目标", second_request)
+        self.assertIn("删除越界世界族", second_request)
         self.assertEqual(settings.get("模型活动回退数量", 0), 0)
 
     def test_formatter_exposes_intelligence_and_targeted_repair_diagnostics(self) -> None:
@@ -373,6 +495,8 @@ class TestStagePromptIntelligence(unittest.TestCase):
             "智能编排摘要": "任务 standard_visual_story | 世界族 underground_ruin | 模型策略 incremental_blend",
             "智能定向修复次数": 1,
             "智能定向修复最近原因": "缺少道具锚点“火炬”。",
+            "智能定向修复最近类型": "missing_anchor",
+            "智能偏好应用": {"光影氛围": ["冷雾惊悚侧光"]},
         }
         selected = OrderedDict({"主体": ["女冒险者"], "场景背景": ["地下城遗迹"]})
         readable = formatter.build_selected_tags_text(
@@ -418,6 +542,8 @@ class TestStagePromptIntelligence(unittest.TestCase):
         self.assertEqual(payload["adaptive_model_strategy"]["mode"], "incremental_blend")
         self.assertEqual(payload["targeted_repair_count"], 1)
         self.assertEqual(payload["targeted_repair_reason"], "缺少道具锚点“火炬”。")
+        self.assertEqual(payload["targeted_repair_type"], "missing_anchor")
+        self.assertEqual(payload["preference_hints_applied"]["光影氛围"], ["冷雾惊悚侧光"])
 
 
 def load_stage_prompt_generator_for_integration_test(*, nodes_available: bool = True):

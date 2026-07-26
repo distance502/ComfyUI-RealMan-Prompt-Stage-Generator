@@ -196,7 +196,7 @@ def apply_character_sheet_strategy(
     merge_requirement_text,
 ) -> bool:
     """Apply character-sheet strategy to settings only when enabled."""
-    if not bool(settings.get("图片反推生成", False)):
+    if not bool(settings.get("图片反推生成", False) or settings.get("智能设定图意图", False)):
         return False
     settings["图片反推模式"] = "角色设定图"
     settings["主体类型"] = "人物角色"

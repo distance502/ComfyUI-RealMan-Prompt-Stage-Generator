@@ -173,6 +173,8 @@ from .stage_prompt.model_refiner import (
 )
 from .stage_prompt.intelligence import (
     build_intelligence_profile as _build_intelligence_profile_impl,
+    infer_task_intent as _infer_task_intent_impl,
+    resolve_preference_hints as _resolve_preference_hints_impl,
     summarize_intelligence_profile as _summarize_intelligence_profile_impl,
     update_preference_memory as _update_preference_memory_impl,
 )
@@ -3152,6 +3154,7 @@ def _update_intelligence_preferences(
     explicit_selected: OrderedDict[str, list[str]],
     *,
     task_type: str,
+    context_key: str = "",
 ) -> dict[str, Any]:
     key = str(node_key or "").strip()
     if not key:
@@ -3164,6 +3167,7 @@ def _update_intelligence_preferences(
             cache.get("intelligence_preference_memory"),
             explicit_selected,
             task_type=task_type,
+            context_key=context_key,
         )
         cache["intelligence_preference_memory"] = memory
         return profile
@@ -4120,8 +4124,9 @@ def _apply_character_sheet_to_settings(
     image_reverse_text: str = "",
     has_reference_image: bool = False,
 ) -> bool:
-    if not bool(settings.get("图片反推生成", False)):
+    if not bool(settings.get("图片反推生成", False) or settings.get("智能设定图意图", False)):
         return False
+    reference_features_available = bool(has_reference_image and settings.get("图片反推生成", False))
     character_groups = OrderedDict(
         (group_name, list(values))
         for group_name, values in selected.items()
@@ -4139,7 +4144,7 @@ def _apply_character_sheet_to_settings(
         settings,
         source_text=source_text,
         reference_text=image_reverse_text,
-        has_reference_image=has_reference_image,
+        has_reference_image=reference_features_available,
         merge_requirement_text=_merge_requirement_text,
     )
     if applied:
@@ -4254,8 +4259,21 @@ def _run_stage_impl(
     )
     explicit_selected_snapshot = deepcopy(selected)
     settings["模型来源"] = _normalize_stage_model_source(settings.get("模型来源"))
-    _apply_adult_reverse_profile(settings)
     reference_image = kwargs.get("参考图片")
+    early_intent = _infer_task_intent_impl(
+        selected,
+        settings,
+        has_reference_image=reference_image is not None,
+    )
+    early_task_type = str(early_intent.get("task_type", "") or "")
+    if early_task_type == "non_person_visual_story" and str(settings.get("主体类型", "自动") or "自动").strip() in {"", "自动"}:
+        settings["主体类型"] = "非人物主体"
+        settings["主体类型解析结果"] = "非人物主体"
+    settings["智能设定图意图"] = bool(
+        early_task_type.startswith("character_sheet")
+        and not bool(settings.get("图片反推生成", False))
+    )
+    _apply_adult_reverse_profile(settings)
     image_reverse_text = _apply_image_reverse_to_settings(model, reference_image, settings)
     nsfw_workspace, nsfw_workspace_source = _resolve_nsfw_workspace_payload(kwargs, settings)
     settings["NSFW工作台状态来源"] = nsfw_workspace_source
@@ -4440,10 +4458,14 @@ def _run_stage_impl(
         has_reference_image=reference_image is not None,
     )
     task_type = str(initial_intelligence_profile.get("task_intent", {}).get("task_type", "standard_visual_story"))
+    preference_context = str(
+        initial_intelligence_profile.get("scene_graph", {}).get("primary_world_family", "") or "general"
+    )
     preference_profile = _update_intelligence_preferences(
         cache_key,
         explicit_selected_snapshot,
         task_type=task_type,
+        context_key=preference_context,
     )
     intelligence_profile = _build_intelligence_profile_impl(
         selected,
@@ -4452,6 +4474,14 @@ def _run_stage_impl(
         has_reference_image=reference_image is not None,
         preference_profile=preference_profile,
     )
+    preference_hints = _resolve_preference_hints_impl(
+        preference_profile,
+        selected,
+        settings,
+        scene_graph=intelligence_profile.get("scene_graph"),
+    )
+    intelligence_profile["preference_hints"] = preference_hints
+    settings["智能偏好应用"] = preference_hints
     settings["智能编排档案"] = intelligence_profile
     settings["智能任务意图"] = dict(intelligence_profile.get("task_intent", {}) or {})
     settings["智能场景关系图"] = dict(intelligence_profile.get("scene_graph", {}) or {})
@@ -4464,11 +4494,23 @@ def _run_stage_impl(
         for group, values in stable_preferences.items()
         if values
     )
+    settings["智能偏好应用摘要"] = "；".join(
+        f"{group}：{'、'.join(str(item) for item in values)}"
+        for group, values in preference_hints.items()
+        if values
+    )
+    coherence_issues = list(settings["智能场景关系图"].get("coherence_issues", []) or [])
     _merge_inference_notes(
         settings,
         [
             f"智能任务识别：{task_type}，模型策略 {settings['智能模型策略'].get('mode', 'skill_only')}。",
             "智能场景关系图：主体、服装、动作、场景、道具、光影与构图已建立从属关系；越界世界族会触发定向修复或 Skill 回退。",
+            *(
+                ["智能偏好软应用：" + settings["智能偏好应用摘要"] + "；只填充当前为空且未锁定的维度。"]
+                if settings["智能偏好应用摘要"]
+                else []
+            ),
+            *[f"智能关系诊断：{item.get('message')}" for item in coherence_issues[:3] if item.get("message")],
         ],
     )
     template_style = biased_template_style if str(settings.get("随机主题池", "自动")).strip() != "自动" else _infer_template_style(tags, str(settings["模板风格"]))
