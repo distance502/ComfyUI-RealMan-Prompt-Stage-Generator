@@ -171,6 +171,11 @@ from .stage_prompt.model_refiner import (
     stabilize_prompt_output as _stabilize_prompt_output_impl,
     summarize_global_creative_spine_contract as _summarize_global_creative_spine_contract_impl,
 )
+from .stage_prompt.intelligence import (
+    build_intelligence_profile as _build_intelligence_profile_impl,
+    summarize_intelligence_profile as _summarize_intelligence_profile_impl,
+    update_preference_memory as _update_preference_memory_impl,
+)
 from .stage_prompt.character_sheet_skill import (
     apply_character_sheet_strategy as _apply_character_sheet_strategy_impl,
 )
@@ -3142,6 +3147,28 @@ def _prompt_history_fingerprints(node_key: str) -> list[str]:
         return list((_cache_bucket_unlocked(key) or {}).get("recent_prompt_signatures", []))
 
 
+def _update_intelligence_preferences(
+    node_key: str,
+    explicit_selected: OrderedDict[str, list[str]],
+    *,
+    task_type: str,
+) -> dict[str, Any]:
+    key = str(node_key or "").strip()
+    if not key:
+        return {"task_type": task_type, "observations": 0, "stable_preferences": {}, "application": "disabled"}
+    with _CACHE_LOCK:
+        cache = _cache_bucket_unlocked(key, create=True)
+        if cache is None:
+            return {"task_type": task_type, "observations": 0, "stable_preferences": {}, "application": "disabled"}
+        memory, profile = _update_preference_memory_impl(
+            cache.get("intelligence_preference_memory"),
+            explicit_selected,
+            task_type=task_type,
+        )
+        cache["intelligence_preference_memory"] = memory
+        return profile
+
+
 def _update_prompt_history(node_key: str, prompt_list: list[str]) -> list[str]:
     key = str(node_key or "").strip()
     if not key:
@@ -4225,6 +4252,7 @@ def _run_stage_impl(
         tag_group_index=tag_group_index,
         tag_group_memberships=tag_group_memberships,
     )
+    explicit_selected_snapshot = deepcopy(selected)
     settings["模型来源"] = _normalize_stage_model_source(settings.get("模型来源"))
     _apply_adult_reverse_profile(settings)
     reference_image = kwargs.get("参考图片")
@@ -4383,6 +4411,8 @@ def _run_stage_impl(
         if post_nsfw_notes:
             _merge_inference_notes(settings, post_nsfw_notes)
     tags = _collect_all_tags(selected, custom_tags)
+    subject_type = _infer_subject_type(tags, str(settings["主体类型"]))
+    settings["主体类型解析结果"] = subject_type
     if generated:
         active_tags = set(tags)
         generated = [tag for tag in _uniq(generated) if tag in active_tags]
@@ -4403,8 +4433,45 @@ def _run_stage_impl(
         generated=generated,
         nsfw_summary=nsfw_model_summary,
     )
+    initial_intelligence_profile = _build_intelligence_profile_impl(
+        selected,
+        custom_tags,
+        settings,
+        has_reference_image=reference_image is not None,
+    )
+    task_type = str(initial_intelligence_profile.get("task_intent", {}).get("task_type", "standard_visual_story"))
+    preference_profile = _update_intelligence_preferences(
+        cache_key,
+        explicit_selected_snapshot,
+        task_type=task_type,
+    )
+    intelligence_profile = _build_intelligence_profile_impl(
+        selected,
+        custom_tags,
+        settings,
+        has_reference_image=reference_image is not None,
+        preference_profile=preference_profile,
+    )
+    settings["智能编排档案"] = intelligence_profile
+    settings["智能任务意图"] = dict(intelligence_profile.get("task_intent", {}) or {})
+    settings["智能场景关系图"] = dict(intelligence_profile.get("scene_graph", {}) or {})
+    settings["智能模型策略"] = dict(intelligence_profile.get("model_strategy", {}) or {})
+    settings["智能偏好档案"] = dict(intelligence_profile.get("preference_profile", {}) or {})
+    settings["智能编排摘要"] = _summarize_intelligence_profile_impl(intelligence_profile)
+    stable_preferences = dict(preference_profile.get("stable_preferences", {}) or {})
+    settings["智能偏好摘要"] = "；".join(
+        f"{group}：{'、'.join(str(item) for item in values)}"
+        for group, values in stable_preferences.items()
+        if values
+    )
+    _merge_inference_notes(
+        settings,
+        [
+            f"智能任务识别：{task_type}，模型策略 {settings['智能模型策略'].get('mode', 'skill_only')}。",
+            "智能场景关系图：主体、服装、动作、场景、道具、光影与构图已建立从属关系；越界世界族会触发定向修复或 Skill 回退。",
+        ],
+    )
     template_style = biased_template_style if str(settings.get("随机主题池", "自动")).strip() != "自动" else _infer_template_style(tags, str(settings["模板风格"]))
-    subject_type = _infer_subject_type(tags, str(settings["主体类型"]))
     output_structure = _infer_output_structure(subject_type, str(settings["案例输出结构"]))
     creative_spine_contract = _build_global_creative_spine_contract_impl(
         selected,

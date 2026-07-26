@@ -144,6 +144,7 @@ def load_nodes_for_storage_test(models_dir: pathlib.Path, runtime: dict[str, obj
 
 
 narrative = load_module("stage_prompt/narrative.py", "stage_prompt_narrative_test")
+intelligence = load_module("stage_prompt/intelligence.py", "stage_prompt_intelligence_test")
 video_prompt_skill = load_module("stage_prompt/video_prompt_skill.py", "stage_prompt_video_prompt_skill_test")
 skills = load_module("stage_prompt/skills.py", "stage_prompt_skills_test")
 normalizer = load_module("stage_prompt/normalizer.py", "stage_prompt_normalizer_test")
@@ -200,6 +201,225 @@ def collect_all_tags(selected: OrderedDict[str, list[str]], custom: list[str]) -
     return uniq([tag for values in selected.values() for tag in values] + list(custom))
 
 
+class TestStagePromptIntelligence(unittest.TestCase):
+    def test_task_intent_covers_all_generation_entry_modes(self) -> None:
+        selected = OrderedDict({"主体": ["女冒险者"]})
+        cases = [
+            ({"图片反推生成": True, "图片反推模式": "角色设定图"}, True, "character_sheet_from_reference"),
+            ({"角色设定图内部策略": "正面、侧面、背面三视图"}, False, "character_sheet_from_text"),
+            ({"图片反推生成": True, "图片反推模式": "画面描述"}, True, "image_reverse_description"),
+            ({"主体类型解析结果": "非人物主体"}, False, "non_person_visual_story"),
+            ({"标签块编排启用": True}, False, "ordered_tag_block_story"),
+            ({"智能文本匹配": True, "智能文本输入": "雨夜追踪"}, False, "smart_text_visual_story"),
+        ]
+        for settings, has_reference, expected in cases:
+            with self.subTest(expected=expected):
+                profile = intelligence.infer_task_intent(
+                    selected,
+                    settings,
+                    has_reference_image=has_reference,
+                )
+                self.assertEqual(profile["task_type"], expected)
+
+    def test_scene_graph_connects_anchors_and_rejects_foreign_worlds(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["女冒险者"],
+                "服装造型": ["皮革护甲"],
+                "动作姿态": ["举起火炬前行"],
+                "场景背景": ["地下城遗迹"],
+                "道具世界观": ["火炬"],
+                "光影氛围": ["冷雾惊悚侧光"],
+            }
+        )
+        graph = intelligence.build_scene_relationship_graph(selected)
+        relations = {item["relation"] for item in graph["relations"]}
+        self.assertTrue({"wears", "performs", "located_in", "uses_or_carries", "illuminated_by"} <= relations)
+        self.assertEqual(graph["primary_world_family"], "underground_ruin")
+        self.assertIn("fantasy_adventure_gear", graph["allowed_world_families"])
+        original = "女冒险者穿着皮革护甲，在地下城遗迹举起火炬前行。"
+        self.assertEqual(
+            intelligence.candidate_world_violation(original, original + "火炬照亮石墙。", graph),
+            "",
+        )
+        for foreign in ("监控屏幕", "月球车", "浴缸", "列车"):
+            with self.subTest(foreign=foreign):
+                self.assertIn(
+                    "越过场景关系图",
+                    intelligence.candidate_world_violation(original, original + foreign, graph),
+                )
+
+    def test_model_strategy_adapts_without_new_ui_controls(self) -> None:
+        task = {"task_type": "standard_visual_story"}
+        local = intelligence.resolve_model_strategy({"模型来源": "本地模型"}, task)
+        api = intelligence.resolve_model_strategy({"模型来源": "API接口"}, task)
+        strict_api = intelligence.resolve_model_strategy(
+            {"模型来源": "API接口", "风格隔离策略": "严格风格隔离"},
+            task,
+        )
+        self.assertEqual(local["mode"], "incremental_blend")
+        self.assertEqual(api["mode"], "conservative_rewrite")
+        self.assertEqual(strict_api["mode"], "incremental_blend")
+        self.assertEqual(local["video_mode"], "incremental_storyboard_blend")
+
+    def test_preference_memory_requires_repeated_explicit_choices(self) -> None:
+        explicit = OrderedDict(
+            {
+                "主体": ["女冒险者"],
+                "场景背景": ["地下城遗迹"],
+                "画面风格": ["暗黑漫画"],
+                "服装造型": ["皮革护甲"],
+            }
+        )
+        memory, first = intelligence.update_preference_memory({}, explicit, task_type="standard_visual_story")
+        _memory, second = intelligence.update_preference_memory(memory, explicit, task_type="standard_visual_story")
+        self.assertEqual(first["stable_preferences"], {})
+        self.assertEqual(second["stable_preferences"]["画面风格"], ["暗黑漫画"])
+        self.assertNotIn("主体", second["stable_preferences"])
+        self.assertNotIn("场景背景", second["stable_preferences"])
+
+    def test_invalid_world_candidate_triggers_reason_specific_repair(self) -> None:
+        class RepairingModel:
+            def __init__(self):
+                self.messages = []
+
+            def create_chat_completion(self, messages=None, **_kwargs):
+                self.messages.append(messages or [])
+                if len(self.messages) == 1:
+                    text = (
+                        "女冒险者穿着皮革护甲进入地下城遗迹，举起火炬查看潮湿石墙。"
+                        "她停步判断前方回声，冷雾沿地面移动，侧光压出谨慎神情。"
+                        "一辆月球车突然停在拱门旁，监控屏幕照亮机械接口。"
+                    )
+                else:
+                    text = (
+                        "她抬高火炬时，暖光沿皮革护甲的磨损边缘移动，石墙上的潮气随热流轻轻退开。"
+                        "脚步声从拱门深处返回，她随即压低重心，让冷雾与侧光共同标明下一步路线。"
+                    )
+                return {"choices": [{"message": {"content": text}}]}
+
+        selected = OrderedDict(
+            {
+                "主体": ["女冒险者"],
+                "服装造型": ["皮革护甲"],
+                "动作姿态": ["举起火炬前行"],
+                "场景背景": ["地下城遗迹"],
+                "道具世界观": ["火炬"],
+            }
+        )
+        original = narrative.render_narrative_prompt(
+            {
+                "subject": "女冒险者",
+                "style": "暗黑漫画",
+                "scene": "地下城遗迹",
+                "outfit": "皮革护甲",
+                "action": "举起火炬前行",
+                "light": "冷雾惊悚侧光",
+                "prop": "火炬",
+                "composition": "全景全身",
+            },
+            narrative.build_narrative_plan({"subject": "女冒险者", "scene": "地下城遗迹"}, seed=7),
+            language="纯中文",
+            detail_level="标准",
+        )
+        settings = {
+            "提示词语言": "纯中文",
+            "主体类型解析结果": "人物角色",
+            "模型来源": "本地模型",
+            "智能模型策略": {"mode": "incremental_blend"},
+            "智能场景关系图": intelligence.build_scene_relationship_graph(selected),
+            "模型输出修复重试次数": 1,
+        }
+        model = RepairingModel()
+        result = model_refiner.maybe_model_refine(
+            model,
+            original,
+            settings,
+            chat_completion=lambda backend, messages, params: backend.create_chat_completion(messages=messages, **params),
+            clean_think_text=lambda value: value,
+        )
+        second_request = "\n".join(str(item.get("content", "")) for item in model.messages[1])
+        self.assertNotEqual(result, original)
+        self.assertNotIn("月球车", result)
+        self.assertIn("具体原因", second_request)
+        self.assertTrue("月球车" in second_request or "industrial_scifi" in second_request)
+        self.assertEqual(settings["智能定向修复次数"], 1)
+        self.assertEqual(settings.get("模型活动回退数量", 0), 0)
+
+    def test_formatter_exposes_intelligence_and_targeted_repair_diagnostics(self) -> None:
+        profile = {
+            "task_intent": {"task_type": "standard_visual_story"},
+            "scene_graph": {"primary_world_family": "underground_ruin"},
+            "model_strategy": {"mode": "incremental_blend"},
+            "preference_profile": {"stable_preferences": {"画面风格": ["暗黑漫画"]}},
+        }
+        settings = {
+            "运行时随机模式": "自动判断",
+            "运行时随机强度": "中",
+            "随机主题池": "地下城冒险",
+            "标签反推模式": "自动平衡",
+            "核心标签锁定数量": 0,
+            "生成数量": 1,
+            "优先柔和肤质": False,
+            "抑制文字伪影": True,
+            "提示词语言": "纯中文",
+            "详细度": "标准",
+            "输出模式": "完整结果",
+            "智能编排档案": profile,
+            "智能任务意图": profile["task_intent"],
+            "智能场景关系图": profile["scene_graph"],
+            "智能模型策略": profile["model_strategy"],
+            "智能偏好档案": profile["preference_profile"],
+            "智能编排摘要": "任务 standard_visual_story | 世界族 underground_ruin | 模型策略 incremental_blend",
+            "智能定向修复次数": 1,
+            "智能定向修复最近原因": "缺少道具锚点“火炬”。",
+        }
+        selected = OrderedDict({"主体": ["女冒险者"], "场景背景": ["地下城遗迹"]})
+        readable = formatter.build_selected_tags_text(
+            template_style="暗黑漫画",
+            subject_type="人物角色",
+            output_structure="案例长段版",
+            runtime_random_enabled=False,
+            settings=settings,
+            adult_subpool="",
+            scene_group="other",
+            identity="女冒险者",
+            style_track="暗黑漫画",
+            selected=selected,
+            custom_tags=[],
+            recent_tracks=[],
+            negative_prompt="",
+            format_grouped_summary=lambda *_args: "主体：女冒险者",
+        )
+        payload = formatter.build_json_payload(
+            full_text="正文",
+            prompt_only="正文",
+            prompt_list=["正文"],
+            selected_tags_text=readable,
+            selected=selected,
+            tags=["女冒险者", "地下城遗迹"],
+            template_style="暗黑漫画",
+            subject_type="人物角色",
+            output_structure="案例长段版",
+            runtime_random_enabled=False,
+            settings=settings,
+            generated=[],
+            lock_tag_whitelist=[],
+            random_exclude_tags=[],
+            scene_group="other",
+            identity="女冒险者",
+            adult_subpool="",
+            style_track="暗黑漫画",
+            recent_tracks=[],
+            negative_prompt="",
+        )
+        self.assertIn("智能编排：任务 standard_visual_story", readable)
+        self.assertIn("智能定向修复：1 次", readable)
+        self.assertEqual(payload["adaptive_model_strategy"]["mode"], "incremental_blend")
+        self.assertEqual(payload["targeted_repair_count"], 1)
+        self.assertEqual(payload["targeted_repair_reason"], "缺少道具锚点“火炬”。")
+
+
 def load_stage_prompt_generator_for_integration_test(*, nodes_available: bool = True):
     package_name = "comfyui_qwen3_5_llama_te_stage_prompt_testpkg"
     package_prefix = f"{package_name}"
@@ -218,6 +438,7 @@ def load_stage_prompt_generator_for_integration_test(*, nodes_available: bool = 
             f"{package_prefix}.stage_prompt.nsfw_presets",
             f"{package_prefix}.stage_prompt.nsfw_workspace",
             f"{package_prefix}.stage_prompt.formatter",
+            f"{package_prefix}.stage_prompt.intelligence",
             f"{package_prefix}.stage_prompt.model_refiner",
             f"{package_prefix}.stage_prompt.narrative",
             f"{package_prefix}.stage_prompt.normalizer",
@@ -254,6 +475,7 @@ def load_stage_prompt_generator_for_integration_test(*, nodes_available: bool = 
     sys.modules[f"{package_prefix}.stage_prompt.nsfw_presets"] = nsfw_presets
     sys.modules[f"{package_prefix}.stage_prompt.nsfw_workspace"] = nsfw_workspace
     sys.modules[f"{package_prefix}.stage_prompt.formatter"] = formatter
+    sys.modules[f"{package_prefix}.stage_prompt.intelligence"] = intelligence
     sys.modules[f"{package_prefix}.stage_prompt.model_refiner"] = model_refiner
     sys.modules[f"{package_prefix}.stage_prompt.narrative"] = narrative
     sys.modules[f"{package_prefix}.stage_prompt.normalizer"] = normalizer
@@ -1350,6 +1572,7 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertIn("机甲", payload["selected_tags_flat"])
         self.assertNotIn("成年女性", payload["selected_tags_flat"])
         self.assertEqual(payload["subject_type"], "非人物主体")
+        self.assertEqual(payload["task_intent"]["task_type"], "non_person_visual_story")
 
     def test_tag_library_enriches_practical_hair_tags(self) -> None:
         library = tag_library.当前标签库()
