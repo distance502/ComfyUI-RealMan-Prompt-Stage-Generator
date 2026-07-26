@@ -18,6 +18,7 @@ try:
         resolve_visual_layout_mode,
         visual_layout_contract,
     )
+    from .intelligence import candidate_world_violation, classify_repair_reason
 except Exception:  # pragma: no cover - exercised by direct import tests
     from stage_prompt_narrative_test import (  # type: ignore
         GLOBAL_NARRATIVE_MODEL_CONTRACT,
@@ -25,6 +26,7 @@ except Exception:  # pragma: no cover - exercised by direct import tests
         resolve_visual_layout_mode,
         visual_layout_contract,
     )
+    from stage_prompt_intelligence_test import candidate_world_violation, classify_repair_reason  # type: ignore
 
 DEFAULT_STAGE_PROMPT_SYSTEM_TEMPLATE = """
 你是 Qwen TE 阶段式提示词生成器的默认图像提示词整理模板，兼具资深视觉艺术总监、电影摄影指导、高端人像修图审美和生成式图像 Prompt 工程能力。
@@ -34,7 +36,7 @@ DEFAULT_STAGE_PROMPT_SYSTEM_TEMPLATE = """
 输出硬规则：
 1. 只输出最终提示词正文，不输出标题、解释、分析、参数、表格、Markdown、代码块、引号、前后缀或“提示词：”。
 2. 默认跟随输入语言；中文输入输出中文，英文输入输出英文，中英混合时优先保留可出图的英文美学词。
-3. 输出为一段自然完整的提示词正文；不要分条，不要换行，不要写成教程或摄影分析。中文成品必须为 800-1200 字自然语言；英文目标 420-560 words。
+3. 输出为一段自然完整的提示词正文；不要分条，不要换行，不要写成教程或摄影分析。正文不限制中文字符数或英文单词数，长度只由剧情和可见细节需要决定。
 4. 保留主体身份、年龄锚点、人数、服装、动作、场景、构图景别、镜头、光影、材质、风格、画质和负面规避意图；尤其不要删除“中景半身、全景全身、近景、侧逆光、古风、CG感、神话感、NSFW”等关键锚点。
 5. 同一批多条提示词必须保持各自差异，不要合并成同一条，也不要把不同随机主题池改成相同画面。
 6. 先建立事件与因果，再自然展开主体身份、服装材质、动作目的、情绪转折、场景空间、环境反馈、光影迁移、镜头时机和画质稳定性。不要按固定维度逐段点名，不要用近义词反复灌水。
@@ -68,6 +70,16 @@ DEFAULT_STAGE_PROMPT_SYSTEM_TEMPLATE = (
 )
 
 _DEFAULT_IMAGE_REFINER_SYSTEM = DEFAULT_STAGE_PROMPT_SYSTEM_TEMPLATE
+_QWEN35_LOCAL_IMAGE_INCREMENTAL_SYSTEM = """
+你是 Qwen TE 的 Qwen3.5 本地图像提示词增量润色器。输入已经是 Skill 生成并通过自然语言、剧情、场景和画面结构合同校验的成品底稿，不要重写整篇。
+
+只输出 2-4 句可以直接融入原底稿的自然语言新增细节，不设字数限制。新增内容必须是镜头可见的动作因果、材质变化、空间反馈或光影变化，并严格沿用底稿中的主体、服装、场景、动作、道具、媒介风格和构图。不得引入底稿之外的人物、地点、服装、道具或世界观。不要输出分析、标题、标签列表、规则复述、负面词、Markdown 或占位符，也不要复述整份底稿。
+""".strip()
+_QWEN35_LOCAL_VIDEO_INCREMENTAL_SYSTEM = """
+你是 Qwen TE 的视频提示词后置导演，也是 Qwen3.5 本地增量润色器。输入已经是 Skill 生成并通过分镜故事合同校验的多段视频底稿，不要重写整篇。
+
+只输出 2-4 句可以直接融入现有分镜的连续动作细节，不设字数限制。新增内容必须沿用同一主体与故事主线，写清动作触发、材质或环境响应、光线或声音变化以及它属于哪一段剧情；不得增加无关人物、地点、道具、世界观、具体秒数或新剧情线。不要输出分析、标题、标签列表、规则复述、Markdown 或占位符，也不要复述整份底稿。
+""".strip()
 _PROMPT_LABEL_PATTERN = re.compile(
     r"^\s*(?:成品提示词|最终提示词|图像提示词|提示词|Prompt|prompt|image prompt|final prompt)\s*[:：]\s*",
     flags=re.IGNORECASE,
@@ -221,7 +233,7 @@ _CREATIVE_SPINE_GROUP_LIMITS: tuple[tuple[str, int], ...] = (
     ("技术画质", 4),
     ("成人向表达", 4),
 )
-_CREATIVE_SPINE_REQUIRED_ANCHOR_GROUPS = ("主体", "服装造型", "场景背景", "动作姿态")
+_CREATIVE_SPINE_REQUIRED_ANCHOR_GROUPS = ("主体", "服装造型", "场景背景", "动作姿态", "道具世界观")
 _CREATIVE_SPINE_STYLE_FAMILIES: dict[str, tuple[str, ...]] = {
     "真实感": (
         "照片级", "写实摄影", "摄影写实", "电影写实", "纪实抓拍", "商业摄影", "杂志摄影",
@@ -253,17 +265,20 @@ _CREATIVE_SPINE_SCENE_FAMILIES: dict[str, tuple[str, ...]] = {
     ),
     "私密室内": (
         "卧室", "酒店套房", "浴室", "浴缸", "淋浴", "温泉", "更衣室", "床边", "落地窗夜景",
-        "bedroom", "hotel suite", "bathroom", "bathtub", "shower room", "dressing room",
+        "沙发", "双人床", "梳妆台", "bedroom", "hotel suite", "bathroom", "bathtub", "shower room",
+        "dressing room", "sofa", "double bed", "vanity table",
     ),
     "都市空间": (
-        "城市街道", "城市街边", "街头", "街巷", "小巷", "站台", "车站", "地铁", "天台", "停车场",
+        "城市街道", "城市街边", "街头", "街巷", "街区", "小巷", "站台", "车站", "列车", "地铁", "公交车", "汽车", "站牌", "天台", "停车场",
         "办公室", "咖啡厅", "便利店", "酒吧", "夜店", "urban street", "city street", "alley", "station",
-        "subway", "rooftop", "parking garage", "office", "cafe", "bar",
+        "train", "subway", "bus", "car", "rooftop", "parking garage", "office", "cafe", "bar",
     ),
     "工业科幻": (
         "机库", "维修舱", "太空船", "飞船", "工业废墟", "未来都市", "霓虹街区", "机械舱", "轨道空间站",
+        "监控屏幕", "显示屏", "控制台", "机械关节", "机械臂", "义体接口", "月球车", "机器人", "全息界面",
         "hangar", "maintenance bay", "spaceship", "spacecraft", "industrial ruin", "futuristic city",
-        "mechanical bay", "orbital station",
+        "mechanical bay", "orbital station", "monitor screen", "control console", "mechanical joint", "robotic arm",
+        "cybernetic interface", "lunar rover", "robot", "holographic interface",
     ),
     "自然荒野": (
         "森林", "竹林", "山谷", "草原", "草甸", "沙漠", "荒野", "海滩", "海岸", "湖畔", "溪流", "瀑布",
@@ -273,6 +288,16 @@ _CREATIVE_SPINE_SCENE_FAMILIES: dict[str, tuple[str, ...]] = {
     "神圣场所": (
         "神殿", "祭坛", "教堂", "圣所", "寺庙", "神社", "宗教空间", "throne temple", "temple", "altar",
         "church", "cathedral", "sanctuary", "shrine",
+    ),
+    "地下遗迹": (
+        "地下城", "地牢", "地下遗迹", "洞窟", "洞穴", "矿井", "墓穴", "陵墓", "石窟",
+        "dungeon", "underground ruin", "cavern", "cave", "mine shaft", "crypt", "tomb",
+    ),
+    "海洋水下": (
+        "海底", "水下", "深海", "珊瑚礁", "沉船", "海沟", "underwater", "deep sea", "coral reef", "shipwreck", "ocean trench",
+    ),
+    "乡村生活": (
+        "农舍", "农场", "乡村小道", "田野", "谷仓", "厨房", "餐厅", "farmhouse", "farm", "country road", "field", "barn", "kitchen", "dining room",
     ),
     "影棚极简": (
         "摄影棚", "影棚", "白棚", "纯色背景", "无缝背景", "极简背景", "白色背景", "studio",
@@ -296,6 +321,32 @@ def _normalize_model_source_label(value: Any) -> str:
         suffix = source[suffix_index:] if suffix_index >= 0 else ""
         return f"本地模型{suffix}"
     return source
+
+
+def _uses_qwen35_local_incremental_refinement(settings: dict[str, Any]) -> bool:
+    """Use a small, blendable task for the local Qwen3.5 prompt model."""
+
+    if str(settings.get("提示词语言", "纯中文") or "纯中文").strip() != "纯中文":
+        return False
+    source = _normalize_model_source_label(
+        settings.get("模型调用基础来源") or settings.get("模型来源") or settings.get("模型来源实际")
+    )
+    if not source.startswith("本地模型"):
+        return False
+    descriptor = re.sub(
+        r"[^a-z0-9]+",
+        "",
+        " ".join(
+            str(settings.get(key, "") or "")
+            for key in ("内置模型系列", "内置主模型", "模型系列", "模型名称")
+        ).casefold(),
+    )
+    return "qwen35" in descriptor
+
+
+def _uses_incremental_refinement(settings: dict[str, Any]) -> bool:
+    strategy = settings.get("智能模型策略")
+    return bool(isinstance(strategy, dict) and strategy.get("mode") == "incremental_blend")
 
 
 _SEMANTIC_REPEAT_FAMILIES: tuple[tuple[str, int, tuple[str, ...]], ...] = (
@@ -494,8 +545,8 @@ def _looks_like_natural_prose_prompt(text: str) -> bool:
     marker_hits = sum(1 for marker in _NATURAL_PROSE_MARKERS if marker in lowered)
     terminator_count = len(re.findall(r"[。！？.!?]", body))
     if re.search(r"[\u4e00-\u9fff]", body):
-        return marker_hits >= 2 or (terminator_count >= 2 and len(body) >= 60)
-    return marker_hits >= 2 or (terminator_count >= 2 and len(body.split()) >= 18)
+        return marker_hits >= 2 or terminator_count >= 2
+    return marker_hits >= 2 or terminator_count >= 2
 
 
 def _dedupe_natural_prompt_units(text: str) -> str:
@@ -620,6 +671,85 @@ def _repair_common_video_fragment_errors(text: str) -> str:
     result = result.replace("在前后保持一致", "在前后画面中保持一致")
     result = result.replace("前后保持一致", "前后画面中保持一致")
     return result
+
+
+_VIDEO_STORYBOARD_LABEL_PATTERN = re.compile(
+    r"^(?:(?:分镜|镜头)\s*[一二三四五六七八九十百0-9]+|(?:shot|scene)\s*\d+)"
+    r"(?:\s*[（(][^）)]+[）)])?\s*[:：]\s*",
+    flags=re.IGNORECASE,
+)
+
+
+def _video_storyboard_paragraphs(text: str) -> list[str]:
+    source = str(text or "").strip().replace("\r\n", "\n").replace("\r", "\n")
+    if not source:
+        return []
+    paragraphs = [part.strip() for part in re.split(r"\n\s*\n+", source) if part.strip()]
+    if len(paragraphs) >= 3:
+        return paragraphs
+    lines = [line.strip() for line in source.split("\n") if line.strip()]
+    if sum(bool(_VIDEO_STORYBOARD_LABEL_PATTERN.match(line)) for line in lines) >= 3:
+        return lines
+    return paragraphs
+
+
+def _postprocess_video_prompt_text(text: str) -> str:
+    """Clean model wrappers while preserving storyboard paragraph boundaries."""
+
+    normalized = str(text or "").strip().replace("\r\n", "\n").replace("\r", "\n")
+    normalized = re.sub(r"^\s*```[a-zA-Z0-9_-]*\s*", "", normalized)
+    normalized = re.sub(r"\s*```\s*$", "", normalized)
+    paragraphs = _video_storyboard_paragraphs(normalized)
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for paragraph in paragraphs:
+        lines = [line.strip().lstrip("#*> \t") for line in paragraph.split("\n") if line.strip()]
+        collapsed = " ".join(lines).strip("“”\"'` ")
+        collapsed = _PROMPT_LABEL_PATTERN.sub("", collapsed).strip()
+        collapsed = re.sub(r"\s+", " ", collapsed)
+        collapsed = re.sub(r"\s*([，。；！？])\s*", r"\1", collapsed)
+        key = _normalize_for_compare(collapsed)
+        if not collapsed or not key or key in seen:
+            continue
+        seen.add(key)
+        cleaned.append(collapsed)
+    return "\n\n".join(cleaned)
+
+
+def _blend_video_draft_with_storyboard(original_prompt: str, model_prompt: str) -> str:
+    """Merge useful model prose into existing shots without flattening the storyboard."""
+
+    original = str(original_prompt or "").strip()
+    candidate = str(model_prompt or "").strip()
+    original_paragraphs = _video_storyboard_paragraphs(original)
+    candidate_paragraphs = _video_storyboard_paragraphs(candidate)
+    if len(original_paragraphs) < 3 or not candidate_paragraphs:
+        return original
+    if _looks_like_broken_prompt(candidate) or _looks_like_tag_chain_prompt(candidate):
+        return original
+    if len(re.findall(r"[。！？.!?]", candidate)) < 1:
+        return original
+
+    additions: list[str] = []
+    for paragraph in candidate_paragraphs:
+        body = _VIDEO_STORYBOARD_LABEL_PATTERN.sub("", paragraph).strip()
+        if body:
+            additions.append(body)
+    if not additions:
+        return original
+
+    merged = list(original_paragraphs)
+    if len(candidate_paragraphs) >= 3:
+        for index, addition in enumerate(additions):
+            target = min(index, len(merged) - 1)
+            if _normalize_for_compare(addition) not in _normalize_for_compare(merged[target]):
+                merged[target] = f"{merged[target].rstrip()} {addition}"
+    else:
+        target = max(1, len(merged) - 2)
+        addition = " ".join(additions)
+        if _normalize_for_compare(addition) not in _normalize_for_compare(merged[target]):
+            merged[target] = f"{merged[target].rstrip()} {addition}"
+    return "\n\n".join(merged).strip()
 
 
 def _dedupe_prompt_fragments(text: str) -> str:
@@ -885,27 +1015,12 @@ def _blend_model_draft_with_skill_prompt(original_prompt: str, model_prompt: str
     if len(original_units) < 3:
         return original
 
-    original_length = len(re.sub(r"\s+", "", original))
-    insert_budget = min(260, max(0, 1200 - original_length))
-    excerpt = _bounded_cjk_excerpt(candidate_text, insert_budget)
+    excerpt = _postprocess_natural_prompt_text(candidate_text)
     insert_at = max(1, len(original_units) - 1)
     if excerpt:
         original_units.insert(insert_at, excerpt)
     else:
-        protected = ("故事", "事件", "因此", "于是", "因为", "情绪", "镜头", "最终画面", "最后一帧", "结尾", "定格")
-        replace_candidates = [
-            (index, unit)
-            for index, unit in enumerate(original_units[1:-1], start=1)
-            if not any(marker in unit for marker in protected)
-        ]
-        if not replace_candidates:
-            return original
-        replace_index, replace_unit = max(replace_candidates, key=lambda item: len(item[1]))
-        replace_budget = min(260, max(24, 1200 - original_length + len(re.sub(r"\s+", "", replace_unit))))
-        excerpt = _bounded_cjk_excerpt(candidate_text, replace_budget)
-        if not excerpt:
-            return original
-        original_units[replace_index] = excerpt
+        return original
 
     blended = _postprocess_natural_prompt_text("".join(original_units))
     blended = _restore_composition_anchors(original, blended)
@@ -961,11 +1076,23 @@ def _resolve_model_prompt_candidate(
         if blended != str(original_prompt or "").strip():
             return blended, "blended", ""
         return original_prompt, "rejected", spine_violation
+    if _uses_incremental_refinement(settings) or _uses_qwen35_local_incremental_refinement(settings):
+        blended = _validated_model_blend(original_prompt, cleaned, settings, layout_mode=layout_mode)
+        if blended != str(original_prompt or "").strip():
+            return blended, "blended", ""
+        return original_prompt, "rejected", "模型增量正文未能安全融入 Skill 长段骨架。"
     if not _looks_like_narrative_prompt(cleaned, settings):
         blended = _validated_model_blend(original_prompt, cleaned, settings, layout_mode=layout_mode)
         if blended != str(original_prompt or "").strip():
             return blended, "blended", ""
-        return original_prompt, "rejected", "模型正文可读，但缺少完整剧情链或未达到当前 800-1200 字合同。"
+        return original_prompt, "rejected", "模型正文可读，但缺少完整自然语言剧情链。"
+    original_units = _split_prompt_sentences(original_prompt)
+    candidate_units = _split_prompt_sentences(cleaned)
+    if _requires_narrative_contract(settings) and len(original_units) >= 4 and len(candidate_units) < len(original_units):
+        blended = _validated_model_blend(original_prompt, cleaned, settings, layout_mode=layout_mode)
+        if blended != str(original_prompt or "").strip():
+            return blended, "blended", ""
+        return original_prompt, "rejected", "模型正文虽可读，但压缩了 Skill 剧情骨架且无法安全融合。"
     return cleaned, ("cleaned" if recovered else "direct"), ""
 
 
@@ -1096,31 +1223,48 @@ def _language_instruction(settings: dict[str, Any]) -> str:
     if language == "纯英文":
         return (
             "\n\nLanguage override: The final positive prompt must be English only. "
-            "Target 420-560 English words. Do not output Chinese characters, Chinese labels, explanations, headings, Markdown, or bilingual notes."
+            "There is no word-count limit. Do not output Chinese characters, Chinese labels, explanations, headings, Markdown, or bilingual notes."
         )
     if language == "英文提示词+中文说明":
         return (
-            "\n\nLanguage override: Output an English prompt body first, targeting 420-560 English words, "
+            "\n\nLanguage override: Output an English prompt body first with no word-count limit, "
             "then append one short Chinese companion note beginning with `中文说明：` to summarize the visual direction. "
             "Keep the English prompt usable by itself; do not add headings, Markdown, or analysis."
         )
     if language == "纯中文":
-        return "\n\n语言覆盖：最终正向提示词正文必须使用中文，不要改成英文提示词；中文成品必须为 800-1200 字自然语言。"
+        return "\n\n语言覆盖：最终正向提示词正文必须使用中文自然语言，不要改成英文提示词；正文不限制字数。"
     return ""
 
 
 def _resolve_system_prompt(settings: dict[str, Any]) -> str:
     if str(settings.get("模型任务", "") or "").strip() == "视频提示词":
+        if _uses_qwen35_local_incremental_refinement(settings):
+            return _QWEN35_LOCAL_VIDEO_INCREMENTAL_SYSTEM
         video_prompt = str(settings.get("视频提示词模型系统提示", "") or "").strip()
         if video_prompt:
             language = _prompt_language_mode(settings)
             if language == "纯中文":
-                video_prompt += "\n\n最终中文正文必须为 800-1200 字。"
+                video_prompt += "\n\n最终使用中文自然语言分段输出，每段都是可拍摄分镜；不限制字数。"
             elif language == "纯英文":
-                video_prompt += "\n\n最终英文正文必须为 90-230 个英文单词。"
+                video_prompt += "\n\nOutput natural English storyboard paragraphs; every paragraph must be a shootable shot. There is no word limit."
             else:
-                video_prompt += "\n\n英文正文后必须保留完整的中文说明，中文说明必须为 800-1200 字。"
+                video_prompt += "\n\n英文分镜正文后必须保留“中文说明：”以及完整中文分镜故事；两部分均不限制字数。"
+            if _uses_incremental_refinement(settings):
+                video_prompt += (
+                    "\n\n输入已经是 Skill 校验过的故事基线。只补充或修正同一故事中的分镜细节，"
+                    "不得替换主体、场景、服装、动作目标、道具、世界观或结尾。"
+                )
             return video_prompt
+    if _uses_qwen35_local_incremental_refinement(settings) and not str(settings.get("系统提示词覆盖") or "").strip():
+        layout_mode = resolve_visual_layout_mode(settings=settings)
+        layout_contract = visual_layout_contract(
+            layout_mode,
+            english=_prompt_language_mode(settings) in {"纯英文", "英文提示词+中文说明"},
+        )
+        return (
+            f"{_QWEN35_LOCAL_IMAGE_INCREMENTAL_SYSTEM}\n\n"
+            f"当前画面结构硬约束：{layout_contract}\n最终只输出中文自然语言新增句子。"
+        )
     base_prompt = str(settings.get("系统提示词覆盖") or _DEFAULT_IMAGE_REFINER_SYSTEM)
     narrative_contract = "" if GLOBAL_NARRATIVE_MODEL_CONTRACT in base_prompt else f"\n\n{GLOBAL_NARRATIVE_MODEL_CONTRACT}"
     layout_mode = resolve_visual_layout_mode(settings=settings)
@@ -1128,7 +1272,13 @@ def _resolve_system_prompt(settings: dict[str, Any]) -> str:
         layout_mode,
         english=_prompt_language_mode(settings) in {"纯英文", "英文提示词+中文说明"},
     )
-    return f"{base_prompt}{narrative_contract}\n\n当前画面结构硬约束：{layout_contract}{_language_instruction(settings)}"
+    incremental_contract = ""
+    if _uses_incremental_refinement(settings):
+        incremental_contract = (
+            "\n\n当前采用 Skill 基线增量融合：只输出能安全插回原文的自然语言补充内容，"
+            "不得另起主体、服装、动作、场景、道具或世界观，不得删除原文锚点。"
+        )
+    return f"{base_prompt}{narrative_contract}\n\n当前画面结构硬约束：{layout_contract}{incremental_contract}{_language_instruction(settings)}"
 
 
 def _violates_language(text: str, settings: dict[str, Any]) -> bool:
@@ -1291,7 +1441,11 @@ def _creative_family_hits(text: str, families: dict[str, tuple[str, ...]]) -> di
 def _creative_spine_violation(original_prompt: str, candidate_prompt: str, settings: dict[str, Any]) -> str:
     contract = settings.get("全局创作主线合同")
     if not isinstance(contract, dict):
-        return ""
+        return candidate_world_violation(
+            original_prompt,
+            candidate_prompt,
+            settings.get("智能场景关系图"),
+        )
     groups = contract.get("groups")
     if not isinstance(groups, dict):
         groups = {}
@@ -1335,6 +1489,13 @@ def _creative_spine_violation(original_prompt: str, candidate_prompt: str, setti
             if family_name in allowed_scene_hits:
                 continue
             return f"模型响应改变了当前创作主线：引入冲突场景“{markers[0]}”。"
+    world_reason = candidate_world_violation(
+        original_prompt,
+        candidate_prompt,
+        settings.get("智能场景关系图"),
+    )
+    if world_reason:
+        return world_reason
     return ""
 _NARRATIVE_MARKER_GROUPS_EN = (
     ("story", "event", "begins", "opens", "then", "during"),
@@ -1358,11 +1519,10 @@ def _looks_like_narrative_prompt(text: str, settings: dict[str, Any]) -> bool:
         return False
     if _CJK_PATTERN.search(body):
         hits = sum(any(marker in body for marker in group) for group in _NARRATIVE_MARKER_GROUPS_ZH)
-        compact_length = len(re.sub(r"\s+", "", body))
-        return hits >= 5 and 800 <= compact_length <= 1200
+        return hits >= 5
     lowered = body.casefold()
     hits = sum(any(marker in lowered for marker in group) for group in _NARRATIVE_MARKER_GROUPS_EN)
-    return hits >= 5 and len(_ENGLISH_WORD_PATTERN.findall(body)) >= 150
+    return hits >= 5
 
 
 _NON_PERSON_HUMAN_INTRUSION_TERMS = (
@@ -1444,11 +1604,11 @@ def _violates_subject_type(original_prompt: str, candidate_prompt: str, settings
 def _batch_language_instruction(settings: dict[str, Any]) -> str:
     language = _prompt_language_mode(settings)
     if language == "纯英文":
-        return "Language requirement: output every final prompt body in English only, 420-560 words per item, with no Chinese characters.\n"
+        return "Language requirement: output every final prompt body in natural English only, with no word-count limit and no Chinese characters.\n"
     if language == "英文提示词+中文说明":
-        return "Language requirement: each item outputs an English prompt body first, 420-560 words per item, then one short Chinese note beginning with 中文说明： before the separator.\n"
+        return "Language requirement: each item outputs an English prompt body first with no word-count limit, then one short Chinese note beginning with 中文说明： before the separator.\n"
     if language == "纯中文":
-        return "语言要求：每条成品提示词正文必须使用中文，不要改成英文提示词；每条必须为 800-1200 字自然语言。\n"
+        return "语言要求：每条成品提示词正文必须使用中文自然语言，不要改成英文提示词；不限制字数。\n"
     return ""
 
 
@@ -1506,7 +1666,15 @@ def _refiner_sampling_params(settings: dict[str, Any], *, prompt_count: int = 1)
     presence_penalty = _safe_float_setting(settings, "存在惩罚", 0.0, -2.0, 2.0)
     diversity_context = _is_runtime_diversity_context(settings, prompt_count=prompt_count)
 
-    if diversity_context:
+    incremental_qwen35 = _uses_qwen35_local_incremental_refinement(settings)
+    incremental = incremental_qwen35 or _uses_incremental_refinement(settings)
+    if incremental:
+        temperature = min(max(temperature, 0.35), 0.65)
+        top_p = min(max(top_p, 0.75), 0.9)
+        repeat_penalty = max(repeat_penalty, 1.08)
+        frequency_penalty = max(frequency_penalty, 0.12)
+        presence_penalty = max(presence_penalty, 0.06)
+    elif diversity_context:
         temperature = max(temperature, 0.72)
         top_p = max(top_p, 0.9)
         repeat_penalty = max(repeat_penalty, 1.1)
@@ -1517,8 +1685,11 @@ def _refiner_sampling_params(settings: dict[str, Any], *, prompt_count: int = 1)
         frequency_penalty = max(frequency_penalty, 0.08)
         presence_penalty = max(presence_penalty, 0.04)
 
+    max_tokens = _refiner_token_limit(settings, prompt_count=prompt_count)
+    if incremental_qwen35:
+        max_tokens = min(max_tokens, 640 * max(1, int(prompt_count or 1)))
     params: dict[str, Any] = {
-        "max_tokens": _refiner_token_limit(settings, prompt_count=prompt_count),
+        "max_tokens": max_tokens,
         "temperature": temperature,
         "top_p": top_p,
         "top_k": top_k,
@@ -1597,6 +1768,10 @@ def _skill_context_for_model(settings: dict[str, Any]) -> str:
     if not creative_spine_context:
         creative_spine_context = summarize_global_creative_spine_contract(settings.get("全局创作主线合同"))
     dynamic_strategy = str(settings.get("Skill动态变化策略", "") or "").strip()
+    intelligence_summary = str(settings.get("智能编排摘要", "") or "").strip()
+    preference_summary = str(settings.get("智能偏好摘要", "") or "").strip()
+    applied_preference_summary = str(settings.get("智能偏好应用摘要", "") or "").strip()
+    scene_graph = settings.get("智能场景关系图")
     narrative_plans = [
         str(item).strip()
         for item in settings.get("全局剧情规划", [])
@@ -1664,6 +1839,41 @@ def _skill_context_for_model(settings: dict[str, Any]) -> str:
             "本次全局创作主线：" + creative_spine_context
             + "。这是所有生成渠道共用的已解析合同；只能补全未指定细节，不得另起媒介、场景、服装或动作主线。"
         )
+    if intelligence_summary:
+        extra_lines.append(
+            "智能编排：" + intelligence_summary
+            + "。任务类型和模型策略已经确定，不得在润色时改换任务。"
+        )
+    if isinstance(scene_graph, dict):
+        hard_anchors = scene_graph.get("hard_anchors")
+        if isinstance(hard_anchors, dict):
+            anchor_text = "；".join(
+                f"{group}={'、'.join(str(item) for item in values if str(item).strip())}"
+                for group, values in hard_anchors.items()
+                if isinstance(values, list) and values
+            )
+            if anchor_text:
+                extra_lines.append(
+                    f"智能关系图硬锚点：{anchor_text}。所有关系必须属于同一场景，禁止引入关系图之外的世界族。"
+                )
+        coherence_issues = [
+            str(item.get("message", "") or "").strip()
+            for item in list(scene_graph.get("coherence_issues", []) or [])
+            if isinstance(item, dict) and str(item.get("message", "") or "").strip()
+        ]
+        if coherence_issues:
+            extra_lines.append(
+                "智能关系诊断：" + "；".join(coherence_issues[:3])
+                + "。不得利用冲突补入第三套场景；只沿当前明确主线收敛。"
+            )
+    if preference_summary:
+        extra_lines.append(
+            f"连续使用软偏好：{preference_summary}。只可用于用户未锁定的细节，不得覆盖主体、场景或任何硬锚点。"
+        )
+    if applied_preference_summary:
+        extra_lines.append(
+            f"本次软偏好应用：{applied_preference_summary}。它只填充原本为空的维度，优先级低于全部显式输入和锁定项。"
+        )
     if dynamic_strategy:
         extra_lines.append(f"Skill动态变化策略：{dynamic_strategy}")
     if narrative_plans:
@@ -1720,22 +1930,61 @@ def _skill_context_for_model(settings: dict[str, Any]) -> str:
 def _compose_model_user_prompt(prompt: str, settings: dict[str, Any]) -> str:
     repair_instruction = ""
     if bool(settings.get("模型输出修复请求", False)):
+        repair_reason = str(settings.get("智能定向修复原因", "") or "").strip()
+        repair_focus = str(settings.get("智能定向修复指令", "") or "").strip()
+        reason_line = f"上一次失败的具体原因：{repair_reason}\n" if repair_reason else ""
         repair_instruction = (
-            "上一次响应为空、只有分析/占位符，或未满足成品正文要求。请重新读取下面的 Skill 底稿，"
-            "直接输出一份完整可用正文；不得复述任务、解释规则、输出思考过程或标签列表。\n"
+            f"{reason_line}本次唯一修复目标：{repair_focus or '只修复校验指出的问题。'}"
+            "其他已经正确的主体、服装、动作、场景、道具、光影和剧情不得改写。"
+            "不得复述任务、解释规则或输出思考过程。\n"
+        )
+    if _uses_qwen35_local_incremental_refinement(settings):
+        contract_summary = str(settings.get("全局创作主线摘要", "") or "").strip()
+        if not contract_summary:
+            contract_summary = summarize_global_creative_spine_contract(settings.get("全局创作主线合同"))
+        anchors = [
+            str(item).strip()
+            for item in settings.get("视频提示词必保留锚点", [])
+            if str(item).strip()
+        ]
+        task_name = "视频分镜剧情增量润色" if str(settings.get("模型任务", "") or "").strip() == "视频提示词" else "图像提示词增量润色"
+        retry_note = (
+            "上一次输出不可用。\n" + repair_instruction + "这次立即给出 2-4 句自然语言新增细节，不要分析或重写全文。\n"
+            if bool(settings.get("模型输出修复请求", False))
+            else ""
+        )
+        anchor_line = f"必须保留的原文锚点：{'、'.join(dict.fromkeys(anchors))}\n" if anchors else ""
+        spine_line = f"全局创作主线：{contract_summary}\n" if contract_summary else ""
+        return (
+            f"{retry_note}任务：{task_name}。只返回可插入底稿的新增句子。\n"
+            f"{spine_line}{anchor_line}"
+            f"Skill 已校验底稿：\n{str(prompt or '').strip()}"
         )
     if str(settings.get("模型任务", "") or "").strip() == "视频提示词":
         anchors = [str(item).strip() for item in settings.get("视频提示词必保留锚点", []) if str(item).strip()]
         anchor_text = "、".join(dict.fromkeys(anchors)) or "无额外锚点"
         spine = str(settings.get("全局创作主线摘要", "") or "").strip() or "按视频 Skill 底稿为准"
         return repair_instruction + (
-            "视频 Skill 已先生成一条可直接使用的单镜头底稿。你只能在这条底稿内部润色，不能另起主线。\n"
+            "视频 Skill 已先生成一份可直接使用的多段分镜故事底稿。你只能沿这条故事主线润色，不能另起无关剧情。\n"
             f"必须原样保留的主体、场景、动作等锚点：{anchor_text}\n"
             f"全局创作主线摘要：{spine}\n"
-            "请把底稿写成自然、连贯、按时间顺序发生的可拍摄正文；变化必须有原因，不能增加人物、地点或第二个镜头，正文不得写具体秒数或时长参数。\n"
-            "只输出最终正文，不输出分析、标题、列表或 Markdown。\n\n"
+            "请按时间顺序输出至少三段分镜，每段用完整自然语言写清镜头、动作、环境反馈和承接关系；所有分镜必须组成同一个有开端、触发、行动、升级和结尾的故事。不得写具体秒数或时长参数，不限制字数。\n"
+            "只输出最终分镜正文，不输出分析、规则解释、标签列表或 Markdown。\n\n"
             f"视频 Skill 底稿：\n{str(prompt or '').strip()}"
         )
+    if _uses_incremental_refinement(settings):
+        language = _prompt_language_mode(settings)
+        if language == "纯英文":
+            instruction = (
+                "Return only natural-language additions that can be merged into the validated Skill draft. "
+                "Preserve every subject, outfit, action, scene, prop, composition, and style anchor; do not introduce another setting or world family."
+            )
+        else:
+            instruction = (
+                "只输出可安全融入 Skill 底稿的自然语言补充句。保留全部主体、服装、动作、场景、道具、构图和风格锚点；"
+                "只扩写同一场景内的动作因果、材质、空间或光影，不得引入另一套场景或世界观。"
+            )
+        return repair_instruction + f"{_skill_context_for_model(settings)}\n\n{instruction}\n\nSkill 已校验底稿：\n{str(prompt or '').strip()}"
     return repair_instruction + f"{_skill_context_for_model(settings)}\n\n待整理提示词正文：\n{str(prompt or '').strip()}"
 
 
@@ -1756,6 +2005,22 @@ def _prompt_signature(prompt: str, *, limit: int = 14) -> str:
 
 
 def _compose_batch_prompt(prompts: list[str], settings: dict[str, Any]) -> str:
+    if _uses_qwen35_local_incremental_refinement(settings) or _uses_incremental_refinement(settings):
+        contract_summary = str(settings.get("全局创作主线摘要", "") or "").strip()
+        if not contract_summary:
+            contract_summary = summarize_global_creative_spine_contract(settings.get("全局创作主线合同"))
+        spine_line = f"共同创作主线：{contract_summary}\n" if contract_summary else ""
+        detail_contract = (
+            "2-4 句中文新增细节"
+            if _uses_qwen35_local_incremental_refinement(settings)
+            else "自然语言新增细节"
+        )
+        return (
+            f"请按原顺序为以下 {len(prompts)} 份 Skill 已校验底稿分别输出 {detail_contract}。\n"
+            f"{spine_line}每份结果只补充同一场景内可见的动作因果、材质、空间或光影变化，不重写全文，不引入其他世界族，不输出分析、标题或标签列表。\n"
+            f"结果之间只使用 `{_BATCH_SEPARATOR}` 分隔，不要添加序号或其他前后缀。\n\n"
+            + f"\n{_BATCH_SEPARATOR}\n".join(prompts)
+        )
     diversity_lines = []
     narrative_plans = [str(item).strip() for item in settings.get("全局剧情规划", []) if str(item).strip()]
     for index, prompt in enumerate(prompts, start=1):
@@ -2279,12 +2544,24 @@ def _retry_invalid_model_output(
     *,
     chat_completion: Callable[..., Any],
     clean_think_text: Callable[[str], str],
+    reason: str = "",
 ) -> str:
     retry_limit = _safe_int_setting(settings, "模型输出修复重试次数", 1, 0, 1)
     if retry_limit <= 0:
         return ""
     repair_settings = dict(settings)
     repair_settings["模型输出修复请求"] = True
+    repair_reason = str(reason or "").strip()
+    repair_focus = classify_repair_reason(repair_reason)
+    repair_settings["智能定向修复原因"] = repair_reason
+    repair_settings["智能定向修复类型"] = repair_focus["kind"]
+    repair_settings["智能定向修复指令"] = repair_focus["instruction"]
+    settings["智能定向修复次数"] = max(
+        0,
+        int(settings.get("智能定向修复次数", 0) or 0),
+    ) + 1
+    settings["智能定向修复最近原因"] = repair_reason
+    settings["智能定向修复最近类型"] = repair_focus["kind"]
     try:
         text = _call_model_text_with_retry(
             llm,
@@ -2328,12 +2605,14 @@ def maybe_model_refine(
         return prompt
     resolved, mode, reason = _resolve_model_prompt_candidate(prompt, raw_text, settings)
     if mode == "rejected":
+        rejection_reason = reason
         repaired_raw = _retry_invalid_model_output(
             llm,
             prompt,
             settings,
             chat_completion=chat_completion,
             clean_think_text=clean_think_text,
+            reason=rejection_reason,
         )
         if repaired_raw:
             repaired, repaired_mode, repaired_reason = _resolve_model_prompt_candidate(prompt, repaired_raw, settings)
@@ -2341,7 +2620,7 @@ def maybe_model_refine(
                 resolved, mode, reason = repaired, repaired_mode, repaired_reason
                 _append_model_runtime_note(
                     settings,
-                    "模型首次正文不合格，已通过一次简化正文请求恢复，并继续沿用 Skill 的主线合同。",
+                    f"模型首次正文不合格，已针对“{rejection_reason}”完成定向修复，并继续沿用 Skill 的主线合同。",
                 )
     if mode == "rejected":
         _record_model_call_result(
@@ -2355,7 +2634,7 @@ def maybe_model_refine(
     if mode == "cleaned":
         _append_model_runtime_note(settings, "模型响应中的思考、分析或包装字段已清洗，仅采用最终提示词正文。")
     elif mode == "blended":
-        _append_model_runtime_note(settings, "模型返回了可用短草稿，已融入 Skill 的 800-1200 字剧情骨架，未触发输出回退。")
+        _append_model_runtime_note(settings, "模型返回了可用短草稿，已融入 Skill 的自然语言剧情骨架，未触发输出回退。")
     _record_model_call_result(settings, outcome="success", changed=resolved != str(prompt or "").strip())
     return resolved
 
@@ -2388,36 +2667,93 @@ def maybe_model_refine_video(
         )
     except Exception as exc:
         _record_model_call_result(video_settings, outcome="failure", reason=exc)
-        settings.update({key: value for key, value in video_settings.items() if key.startswith("模型") or key == "推理纠偏说明"})
+        settings.update({key: value for key, value in video_settings.items() if key.startswith(("模型", "智能定向修复")) or key == "推理纠偏说明"})
         return original
 
     prepared, recovered = _prepare_model_response_text(raw_text)
-    candidate = _repair_common_video_fragment_errors(_postprocess_prompt_text(prepared))
+    candidate = _repair_common_video_fragment_errors(_postprocess_video_prompt_text(prepared))
     language = str(settings.get("提示词语言", "纯中文") or "纯中文")
     anchors = [str(item).strip() for item in settings.get("视频提示词必保留锚点", []) if str(item).strip()]
     missing = [anchor for anchor in anchors if anchor not in candidate]
+    world_reason = candidate_world_violation(
+        original,
+        candidate,
+        video_settings.get("智能场景关系图"),
+    )
     candidate_valid = not (
         not candidate
         or _looks_like_broken_prompt(candidate)
         or missing
+        or world_reason
         or not bool(validator(candidate, language=language))
     )
+
+    invalid_reason = ""
+    if not candidate or _looks_like_broken_prompt(candidate):
+        invalid_reason = "视频模型候选只有分析、占位符、标签串或不可用正文。"
+    elif missing:
+        invalid_reason = f"视频模型候选缺少锚点：{'、'.join(missing[:3])}。"
+    elif world_reason:
+        invalid_reason = world_reason
+    elif not bool(validator(candidate, language=language)):
+        invalid_reason = "视频模型候选未通过自然语言、分镜段落或完整剧情校验。"
+
+    def adopt_blended(draft: str) -> str:
+        blended_prompt = _blend_video_draft_with_storyboard(original, draft)
+        blended_missing = [anchor for anchor in anchors if anchor not in blended_prompt]
+        blended_world_reason = candidate_world_violation(
+            original,
+            blended_prompt,
+            video_settings.get("智能场景关系图"),
+        )
+        if (
+            blended_prompt == original
+            or blended_missing
+            or blended_world_reason
+            or not bool(validator(blended_prompt, language=language))
+        ):
+            return ""
+        _append_model_runtime_note(
+            video_settings,
+            "视频模型返回了可用短草稿，已融入 Skill 的多段分镜故事，主体、场景、动作与结尾锚点保持不变。",
+        )
+        _record_model_call_result(video_settings, outcome="success", changed=True)
+        settings.update({key: value for key, value in video_settings.items() if key.startswith(("模型", "智能定向修复")) or key == "推理纠偏说明"})
+        return blended_prompt
+
+    if candidate_valid and _uses_incremental_refinement(video_settings):
+        blended = adopt_blended(candidate)
+        if blended:
+            return blended
+        candidate_valid = False
+        invalid_reason = "视频模型增量正文未能安全融入 Skill 分镜故事基线。"
+
     if not candidate_valid:
+        blended = adopt_blended(candidate)
+        if blended:
+            return blended
         repaired_raw = _retry_invalid_model_output(
             llm,
             original,
             video_settings,
             chat_completion=chat_completion,
             clean_think_text=clean_think_text,
+            reason=invalid_reason,
         )
         if repaired_raw:
             repaired_prepared, repaired_recovered = _prepare_model_response_text(repaired_raw)
-            repaired_candidate = _repair_common_video_fragment_errors(_postprocess_prompt_text(repaired_prepared))
+            repaired_candidate = _repair_common_video_fragment_errors(_postprocess_video_prompt_text(repaired_prepared))
             repaired_missing = [anchor for anchor in anchors if anchor not in repaired_candidate]
+            repaired_world_reason = candidate_world_violation(
+                original,
+                repaired_candidate,
+                video_settings.get("智能场景关系图"),
+            )
             if (
                 repaired_candidate
                 and not _looks_like_broken_prompt(repaired_candidate)
                 and not repaired_missing
+                and not repaired_world_reason
                 and bool(validator(repaired_candidate, language=language))
             ):
                 candidate = repaired_candidate
@@ -2426,24 +2762,20 @@ def maybe_model_refine_video(
                 candidate_valid = True
                 _append_model_runtime_note(
                     video_settings,
-                    "视频模型首次正文不合格，已通过一次简化正文请求恢复，并保留 Skill 的单镜头与必需锚点。",
+                    f"视频模型首次正文不合格，已针对“{invalid_reason}”完成定向修复，并保留 Skill 的分镜故事结构与必需锚点。",
                 )
+                if _uses_incremental_refinement(video_settings):
+                    blended = adopt_blended(candidate)
+                    if blended:
+                        return blended
+                    candidate_valid = False
+                    invalid_reason = "视频模型定向修复正文仍未能安全融入 Skill 分镜故事基线。"
+            else:
+                blended = adopt_blended(repaired_candidate)
+                if blended:
+                    return blended
     if not candidate_valid:
-        blended = _blend_model_draft_with_skill_prompt(original, candidate, video_settings)
-        blended_missing = [anchor for anchor in anchors if anchor not in blended]
-        if (
-            blended != original
-            and not blended_missing
-            and bool(validator(blended, language=language))
-        ):
-            _append_model_runtime_note(
-                video_settings,
-                "视频模型返回了可用短草稿，已融入 Skill 的 800-1200 字单镜头骨架，主体、场景、动作与结尾锚点保持不变。",
-            )
-            _record_model_call_result(video_settings, outcome="success", changed=True)
-            settings.update({key: value for key, value in video_settings.items() if key.startswith("模型") or key == "推理纠偏说明"})
-            return blended
-        reason = "视频模型候选未通过 800-1200 字、自然语言、单镜头或锚点校验。"
+        reason = invalid_reason or "视频模型候选未通过自然语言、分镜段落、完整剧情或锚点校验。"
         if missing:
             reason += f" 缺少锚点：{'、'.join(missing[:3])}。"
         _record_model_call_result(
@@ -2453,7 +2785,7 @@ def maybe_model_refine_video(
             output_count=1,
             reason=reason,
         )
-        settings.update({key: value for key, value in video_settings.items() if key.startswith("模型") or key == "推理纠偏说明"})
+        settings.update({key: value for key, value in video_settings.items() if key.startswith(("模型", "智能定向修复")) or key == "推理纠偏说明"})
         return original
     if recovered:
         _append_model_runtime_note(video_settings, "视频模型响应中的思考或包装字段已清洗，仅采用最终正文。")
@@ -2463,7 +2795,7 @@ def maybe_model_refine_video(
         changed=candidate != original,
         adopted_outputs=1 if candidate != original else 0,
     )
-    settings.update({key: value for key, value in video_settings.items() if key.startswith("模型") or key == "推理纠偏说明"})
+    settings.update({key: value for key, value in video_settings.items() if key.startswith(("模型", "智能定向修复")) or key == "推理纠偏说明"})
     return candidate
 
 
@@ -2562,12 +2894,33 @@ def maybe_model_refine_batch(
     for original_prompt, part in zip(clean_prompts, parts):
         candidate, mode, reason = _resolve_model_prompt_candidate(original_prompt, part, settings)
         if mode == "rejected":
-            resolved.append(original_prompt)
-            seen_keys.add(_normalize_for_compare(original_prompt))
-            rejected_count += 1
-            if reason and reason not in rejection_reasons:
-                rejection_reasons.append(reason)
-            continue
+            repaired_raw = _retry_invalid_model_output(
+                llm,
+                original_prompt,
+                settings,
+                chat_completion=chat_completion,
+                clean_think_text=clean_think_text,
+                reason=reason,
+            )
+            if repaired_raw:
+                repaired, repaired_mode, _repaired_reason = _resolve_model_prompt_candidate(
+                    original_prompt,
+                    repaired_raw,
+                    settings,
+                )
+                if repaired_mode != "rejected":
+                    candidate, mode = repaired, repaired_mode
+                    _append_model_runtime_note(
+                        settings,
+                        f"批量候选已针对“{reason}”完成定向修复，未回退对应 Skill 结果。",
+                    )
+            if mode == "rejected":
+                resolved.append(original_prompt)
+                seen_keys.add(_normalize_for_compare(original_prompt))
+                rejected_count += 1
+                if reason and reason not in rejection_reasons:
+                    rejection_reasons.append(reason)
+                continue
         resolution_modes.add(mode)
         rejected = False
         candidate_key = _normalize_for_compare(candidate)
@@ -2584,7 +2937,7 @@ def maybe_model_refine_batch(
     if "cleaned" in resolution_modes:
         _append_model_runtime_note(settings, "批量模型响应中的思考、分析或包装字段已清洗，仅采用最终提示词正文。")
     if "blended" in resolution_modes:
-        _append_model_runtime_note(settings, "批量模型短草稿已分别融入 Skill 的 800-1200 字剧情骨架，未将可用草稿误判为调用失败。")
+        _append_model_runtime_note(settings, "批量模型短草稿已分别融入 Skill 的自然语言剧情骨架，未将可用草稿误判为调用失败。")
     changed = any(candidate != original for candidate, original in zip(resolved, clean_prompts))
     if rejected_count:
         _record_model_call_result(

@@ -11,22 +11,27 @@ CHARACTER_SHEET_STRATEGY_NOTE = "角色设定图策略：启用时将当前节�
 CHARACTER_SHEET_PROMPT_BRIEF = (
     "角色设定图，标准角色三视图，从左到右依次为正面全身、90度标准侧面全身、背面全身，"
     "横向三栏等宽布局，视图比例1:1:1，相同人物高度，同一头顶线与地面基线，统一镜头高度，"
-    "正交投影视角，中性自然站姿，全身从头顶到鞋底完整入镜，同一角色身份、脸部结构、体型、"
-    "服装、发型、配色与材质一致，简洁连续背景；头像或材质细节仅在用户明确要求时作为独立辅助带"
+    "正交投影视角，中性自然站姿，全身从头顶到鞋底完整入镜；正面栏人物直视镜头，正脸完整清晰且五官可读；"
+    "同一角色身份、脸部结构、体型、服装、发型、配色与材质一致，三栏共用简洁连续的中性背景；"
+    "参考图中的地点和背景物件只用于提取配色、光感与材质，不得带入三视图主背景；"
+    "头像或材质细节仅在用户明确要求时作为独立辅助带"
 )
 CHARACTER_SHEET_PROMPT_BRIEF_EN = (
     "character sheet, multi-view character turnaround, standard three-view character turnaround, exactly three primary full-body views ordered "
     "left to right as front full-body view, true 90-degree side full-body view, and back full-body view, "
     "three equal-width columns in a 1:1:1 layout, identical character height, shared head line and ground baseline, "
     "matching camera height and orthographic projection, neutral natural stance, complete framing from head to footwear, "
+    "the front column looking directly at the camera with a complete clear frontal face and readable facial features, "
     "consistent identity, facial structure, body proportions, clothing, hairstyle, palette, and materials across all views, "
-    "with a simple continuous background; headshots or material details appear only in a separate support strip when explicitly requested"
+    "with one simple continuous neutral background; locations and background objects in a reference image may inform only palette, lighting, and material, "
+    "and must not enter the primary three-view backdrop; headshots or material details appear only in a separate support strip when explicitly requested"
 )
 CHARACTER_SHEET_INTERNAL_POLICY = (
     "角色设定图内部策略：只把参考图可见角色特征、当前节点标签和用户补充整理成画面素材；"
     "参考图模式下以可见角色的脸型、发型、服装结构、主配色和材质逻辑优先，节点标签只作为风格、场景、光影和气氛补充；"
     "默认版式严格固定为正面全身、90度标准侧面全身、背面全身三幅等宽主视图，统一人物高度、头顶线、脚底基线、镜头高度和正交投影；"
-    "所有主视图使用同一中性站姿与同一角色设定，场景信息只转化为简洁背景的配色和材质线索；头像、表情或材质细节仅在用户明确要求时进入独立辅助带；"
+    "正面栏人物必须直视镜头，完整正脸清晰且五官可读；所有主视图使用同一中性站姿与同一角色设定，三栏共用简洁连续中性背景；"
+    "参考图地点和背景物件不得带入主背景，只能转化为配色、光感和材质线索；头像、表情或材质细节仅在用户明确要求时进入独立辅助带；"
     "不要把策略说明、Thinking Process、任务分析、输出要求或规则文本写进最终提示词。"
 )
 
@@ -86,6 +91,25 @@ def _strip_reasoning_preamble(text: str) -> str:
         cleaned,
     )
     return cleaned
+
+
+def _strip_reference_background_sections(value: Any) -> str:
+    text = _clean_text(value).replace("\r\n", "\n").replace("\r", "\n")
+    if not text:
+        return ""
+    text = re.sub(
+        r"(?im)^\s*(?:[-*]\s*)?(?:background|scene|背景|场景)\s*[:：][^\n]*$",
+        "",
+        text,
+    )
+    text = re.sub(
+        r"(?i)(?:(?<=^)|(?<=[；;]))\s*(?:background|scene|背景|场景)\s*[:：][^；;\n]*",
+        "",
+        text,
+    )
+    text = re.sub(r"(?:参考图)?(?:背景|场景)(?:为|是|包含|可见)[^；;。！？\n]*[；;。！？]?", "", text)
+    text = re.sub(r"[；;]{2,}", "；", text)
+    return text.strip("；; \n")
 
 
 def _clean_visual_context(value: Any, *, max_fragments: int = 28, max_chars: int = 1400) -> str:
@@ -150,7 +174,7 @@ def build_character_sheet_instruction(*, has_reference_image: bool, source_text:
         else "纯提示词模式，使用当前节点标签和用户补充生成角色设定展示"
     )
     source_line = _clean_visual_context(source_text, max_fragments=16)
-    reference_line = _clean_visual_context(reference_text, max_fragments=18)
+    reference_line = _clean_visual_context(_strip_reference_background_sections(reference_text), max_fragments=18)
     context_lines = []
     if source_line:
         context_lines.append(source_line)
@@ -172,7 +196,7 @@ def apply_character_sheet_strategy(
     merge_requirement_text,
 ) -> bool:
     """Apply character-sheet strategy to settings only when enabled."""
-    if not bool(settings.get("图片反推生成", False)):
+    if not bool(settings.get("图片反推生成", False) or settings.get("智能设定图意图", False)):
         return False
     settings["图片反推模式"] = "角色设定图"
     settings["主体类型"] = "人物角色"
@@ -185,7 +209,11 @@ def apply_character_sheet_strategy(
     settings["角色设定图内部策略"] = CHARACTER_SHEET_INTERNAL_POLICY
     clean_user_text = _clean_visual_context(settings.get("智能文本输入"), max_fragments=10, max_chars=700)
     clean_extra = _clean_visual_context(settings.get("额外要求"), max_fragments=10, max_chars=700)
-    clean_reference = _clean_visual_context(reference_text, max_fragments=18, max_chars=1200)
+    clean_reference = _clean_visual_context(
+        _strip_reference_background_sections(reference_text),
+        max_fragments=18,
+        max_chars=1200,
+    )
     instruction = build_character_sheet_instruction(
         has_reference_image=has_reference_image,
         source_text=source_text,

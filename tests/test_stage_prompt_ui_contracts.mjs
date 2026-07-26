@@ -200,6 +200,7 @@ globalThis.__stagePromptUiTestExports = {
 	resolveEmbeddedBrowserViewport,
 	getEmbeddedBrowserFrameCaptureProfile,
 	getEmbeddedBrowserFramePollDelay,
+	preloadEmbeddedBrowserFrame,
 	openPromptBrowserExternal,
 	launchPromptCompanionBrowser,
 	getModelRuntimeStatusSummary,
@@ -1379,6 +1380,60 @@ test("embedded browser frame profile switches from responsive preview to sharp s
 	assert.equal(exports.getEmbeddedBrowserFramePollDelay({ mediaActive: true }), 64);
 	assert.equal(exports.getEmbeddedBrowserFramePollDelay({ hidden: true, mediaActive: true }), 4000);
 	assert.equal(exports.getEmbeddedBrowserFramePollDelay({ pageReady: true, hasFrame: true, unchangedFrameCount: 4 }), 1600);
+});
+
+test("embedded browser frame preloader waits for decode before allowing a frame swap", async () => {
+	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	const events = [];
+	let releaseDecode;
+	const decoded = new Promise((resolve) => { releaseDecode = resolve; });
+	const image = {
+		set src(value) { events.push(`src:${value}`); },
+		async decode() {
+			events.push("decode:start");
+			await decoded;
+			events.push("decode:done");
+		},
+	};
+	let settled = false;
+	const preload = exports.preloadEmbeddedBrowserFrame("blob:next-frame", { createImage: () => image })
+		.then(() => { settled = true; });
+	await Promise.resolve();
+	assert.equal(settled, false);
+	assert.deepEqual(events, ["src:blob:next-frame", "decode:start"]);
+	releaseDecode();
+	await preload;
+	assert.equal(settled, true);
+	assert.deepEqual(events, ["src:blob:next-frame", "decode:start", "decode:done"]);
+});
+
+test("embedded browser frame preloader rejects failed decode so the current frame can stay visible", async () => {
+	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	await assert.rejects(
+		exports.preloadEmbeddedBrowserFrame("blob:broken-frame", {
+			createImage: () => ({
+				set src(_value) {},
+				async decode() { throw new Error("corrupt jpeg"); },
+			}),
+		}),
+		/corrupt jpeg/u,
+	);
+});
+
+test("embedded browser swaps only after preload and keeps a dark first-frame surface", async () => {
+	const source = await fs.readFile(UI_PATH, "utf8");
+	const pollStart = source.indexOf("const pollEmbeddedBrowserFrame = async () => {");
+	const pollEnd = source.indexOf("const pollEmbeddedBrowserStatus = async () => {", pollStart);
+	const pollSource = source.slice(pollStart, pollEnd);
+	const preloadIndex = pollSource.indexOf("await preloadEmbeddedBrowserFrame(nextUrl)");
+	const activeUrlIndex = pollSource.indexOf("embeddedFrameObjectUrl = nextUrl");
+	const visibleFrameIndex = pollSource.indexOf("webFrame.src = nextUrl");
+	assert.ok(pollStart >= 0 && pollEnd > pollStart);
+	assert.ok(preloadIndex >= 0);
+	assert.ok(preloadIndex < activeUrlIndex);
+	assert.ok(activeUrlIndex < visibleFrameIndex);
+	assert.match(source, /qwen-te-online-search__web-frame-shell\{[^}]*background:#0f1318/u);
+	assert.match(source, /qwen-te-online-search__web-frame\{[^}]*background:#0f1318/u);
 });
 
 test("embedded prompt browser maps object-fit image coordinates to the CDP viewport", async () => {

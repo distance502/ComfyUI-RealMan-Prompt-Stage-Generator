@@ -171,6 +171,13 @@ from .stage_prompt.model_refiner import (
     stabilize_prompt_output as _stabilize_prompt_output_impl,
     summarize_global_creative_spine_contract as _summarize_global_creative_spine_contract_impl,
 )
+from .stage_prompt.intelligence import (
+    build_intelligence_profile as _build_intelligence_profile_impl,
+    infer_task_intent as _infer_task_intent_impl,
+    resolve_preference_hints as _resolve_preference_hints_impl,
+    summarize_intelligence_profile as _summarize_intelligence_profile_impl,
+    update_preference_memory as _update_preference_memory_impl,
+)
 from .stage_prompt.character_sheet_skill import (
     apply_character_sheet_strategy as _apply_character_sheet_strategy_impl,
 )
@@ -3142,6 +3149,30 @@ def _prompt_history_fingerprints(node_key: str) -> list[str]:
         return list((_cache_bucket_unlocked(key) or {}).get("recent_prompt_signatures", []))
 
 
+def _update_intelligence_preferences(
+    node_key: str,
+    explicit_selected: OrderedDict[str, list[str]],
+    *,
+    task_type: str,
+    context_key: str = "",
+) -> dict[str, Any]:
+    key = str(node_key or "").strip()
+    if not key:
+        return {"task_type": task_type, "observations": 0, "stable_preferences": {}, "application": "disabled"}
+    with _CACHE_LOCK:
+        cache = _cache_bucket_unlocked(key, create=True)
+        if cache is None:
+            return {"task_type": task_type, "observations": 0, "stable_preferences": {}, "application": "disabled"}
+        memory, profile = _update_preference_memory_impl(
+            cache.get("intelligence_preference_memory"),
+            explicit_selected,
+            task_type=task_type,
+            context_key=context_key,
+        )
+        cache["intelligence_preference_memory"] = memory
+        return profile
+
+
 def _update_prompt_history(node_key: str, prompt_list: list[str]) -> list[str]:
     key = str(node_key or "").strip()
     if not key:
@@ -3759,16 +3790,19 @@ def _build_image_reverse_prompt(settings: dict[str, Any]) -> str:
         "请反推这张参考图，输出一段中文结构化描述，用于后续生成AI绘画正向提示词。"
         "只描述可见画面，不要编造身份和剧情，不要输出负面词，不要输出JSON。"
         "重点包括：主体年龄段与气质、发型发色、服装版型和材质、主配色、构图景别、视角、"
-        "姿态、光影、背景简洁度、画质风格。"
+        "姿态、光影和画质风格。"
     )
     if mode == "仅反推描述":
-        return base + "请保持为一段自然语言描述，便于智能文本匹配。"
+        return base + "同时描述背景简洁度；请保持为一段自然语言描述，便于智能文本匹配。"
     return (
         base
-        + "当前目标是生成标准角色三视图：请准确提取同一角色的脸型、发型、体型、服装结构、主配色和材质逻辑，"
+        + "不要输出参考图的具体地点、场景名称或背景物件；背景只可概括为配色、光感与材质线索。"
+        "当前目标是生成标准角色三视图：请准确提取同一角色的脸型、发型、体型、服装结构、主配色和材质逻辑，"
         "并为后续从左到右的正面全身、90度标准侧面全身、背面全身三幅等宽视图提供一致设定；三幅人物使用相同高度、"
-        "同一头顶线和脚底基线、统一镜头高度、正交投影、中性站姿与完整头脚构图。背景、风格、服装和配色跟随参考图与用户输入，"
-        "除非用户明确要求，不要锁定白底、古风、汉服或固定颜色；不要文字标注。头像或材质细节只在用户明确要求时作为独立辅助信息。"
+        "同一头顶线和脚底基线、统一镜头高度、正交投影、中性站姿与完整头脚构图；正面栏人物直视镜头，正脸完整清晰且五官可读。"
+        "三栏共用简洁连续的中性背景；参考图中的地点和背景物件只用于提取配色、光感和材质，不得带入三视图主背景。"
+        "风格、服装和配色跟随参考图与用户输入，除非用户明确要求，不要锁定白底、古风、汉服或固定颜色；不要文字标注。"
+        "头像或材质细节只在用户明确要求时作为独立辅助信息。"
     )
 
 
@@ -4090,23 +4124,33 @@ def _apply_character_sheet_to_settings(
     image_reverse_text: str = "",
     has_reference_image: bool = False,
 ) -> bool:
-    if not bool(settings.get("图片反推生成", False)):
+    if not bool(settings.get("图片反推生成", False) or settings.get("智能设定图意图", False)):
         return False
-    tag_context = "，".join(_collect_all_tags(selected, custom_tags)[:80])
-    grouped_context = _format_grouped_summary(selected, custom_tags)
+    reference_features_available = bool(has_reference_image and settings.get("图片反推生成", False))
+    character_groups = OrderedDict(
+        (group_name, list(values))
+        for group_name, values in selected.items()
+        if group_name not in {"场景背景", "动作姿态", "构图视角"}
+    )
+    tag_context = "，".join(_collect_all_tags(character_groups, custom_tags)[:80])
+    grouped_context = _format_grouped_summary(character_groups, custom_tags)
     source_text = _merge_requirement_text(
         settings.get("智能文本输入"),
         settings.get("额外要求"),
         tag_context,
         grouped_context,
     )
-    return _apply_character_sheet_strategy_impl(
+    applied = _apply_character_sheet_strategy_impl(
         settings,
         source_text=source_text,
         reference_text=image_reverse_text,
-        has_reference_image=has_reference_image,
+        has_reference_image=reference_features_available,
         merge_requirement_text=_merge_requirement_text,
     )
+    if applied:
+        selected["场景背景"] = ["简洁连续中性背景"]
+        selected["动作姿态"] = ["中性自然站姿"]
+    return applied
 
 
 def _extract_nsfw_workspace_from_extra_pnginfo(extra_pnginfo: Any, node_id: Any) -> dict[str, Any] | None:
@@ -4213,9 +4257,23 @@ def _run_stage_impl(
         tag_group_index=tag_group_index,
         tag_group_memberships=tag_group_memberships,
     )
+    explicit_selected_snapshot = deepcopy(selected)
     settings["模型来源"] = _normalize_stage_model_source(settings.get("模型来源"))
-    _apply_adult_reverse_profile(settings)
     reference_image = kwargs.get("参考图片")
+    early_intent = _infer_task_intent_impl(
+        selected,
+        settings,
+        has_reference_image=reference_image is not None,
+    )
+    early_task_type = str(early_intent.get("task_type", "") or "")
+    if early_task_type == "non_person_visual_story" and str(settings.get("主体类型", "自动") or "自动").strip() in {"", "自动"}:
+        settings["主体类型"] = "非人物主体"
+        settings["主体类型解析结果"] = "非人物主体"
+    settings["智能设定图意图"] = bool(
+        early_task_type.startswith("character_sheet")
+        and not bool(settings.get("图片反推生成", False))
+    )
+    _apply_adult_reverse_profile(settings)
     image_reverse_text = _apply_image_reverse_to_settings(model, reference_image, settings)
     nsfw_workspace, nsfw_workspace_source = _resolve_nsfw_workspace_payload(kwargs, settings)
     settings["NSFW工作台状态来源"] = nsfw_workspace_source
@@ -4371,6 +4429,8 @@ def _run_stage_impl(
         if post_nsfw_notes:
             _merge_inference_notes(settings, post_nsfw_notes)
     tags = _collect_all_tags(selected, custom_tags)
+    subject_type = _infer_subject_type(tags, str(settings["主体类型"]))
+    settings["主体类型解析结果"] = subject_type
     if generated:
         active_tags = set(tags)
         generated = [tag for tag in _uniq(generated) if tag in active_tags]
@@ -4391,8 +4451,69 @@ def _run_stage_impl(
         generated=generated,
         nsfw_summary=nsfw_model_summary,
     )
+    initial_intelligence_profile = _build_intelligence_profile_impl(
+        selected,
+        custom_tags,
+        settings,
+        has_reference_image=reference_image is not None,
+    )
+    task_type = str(initial_intelligence_profile.get("task_intent", {}).get("task_type", "standard_visual_story"))
+    preference_context = str(
+        initial_intelligence_profile.get("scene_graph", {}).get("primary_world_family", "") or "general"
+    )
+    preference_profile = _update_intelligence_preferences(
+        cache_key,
+        explicit_selected_snapshot,
+        task_type=task_type,
+        context_key=preference_context,
+    )
+    intelligence_profile = _build_intelligence_profile_impl(
+        selected,
+        custom_tags,
+        settings,
+        has_reference_image=reference_image is not None,
+        preference_profile=preference_profile,
+    )
+    preference_hints = _resolve_preference_hints_impl(
+        preference_profile,
+        selected,
+        settings,
+        scene_graph=intelligence_profile.get("scene_graph"),
+    )
+    intelligence_profile["preference_hints"] = preference_hints
+    settings["智能偏好应用"] = preference_hints
+    settings["智能编排档案"] = intelligence_profile
+    settings["智能任务意图"] = dict(intelligence_profile.get("task_intent", {}) or {})
+    settings["智能场景关系图"] = dict(intelligence_profile.get("scene_graph", {}) or {})
+    settings["智能模型策略"] = dict(intelligence_profile.get("model_strategy", {}) or {})
+    settings["智能偏好档案"] = dict(intelligence_profile.get("preference_profile", {}) or {})
+    settings["智能编排摘要"] = _summarize_intelligence_profile_impl(intelligence_profile)
+    stable_preferences = dict(preference_profile.get("stable_preferences", {}) or {})
+    settings["智能偏好摘要"] = "；".join(
+        f"{group}：{'、'.join(str(item) for item in values)}"
+        for group, values in stable_preferences.items()
+        if values
+    )
+    settings["智能偏好应用摘要"] = "；".join(
+        f"{group}：{'、'.join(str(item) for item in values)}"
+        for group, values in preference_hints.items()
+        if values
+    )
+    coherence_issues = list(settings["智能场景关系图"].get("coherence_issues", []) or [])
+    _merge_inference_notes(
+        settings,
+        [
+            f"智能任务识别：{task_type}，模型策略 {settings['智能模型策略'].get('mode', 'skill_only')}。",
+            "智能场景关系图：主体、服装、动作、场景、道具、光影与构图已建立从属关系；越界世界族会触发定向修复或 Skill 回退。",
+            *(
+                ["智能偏好软应用：" + settings["智能偏好应用摘要"] + "；只填充当前为空且未锁定的维度。"]
+                if settings["智能偏好应用摘要"]
+                else []
+            ),
+            *[f"智能关系诊断：{item.get('message')}" for item in coherence_issues[:3] if item.get("message")],
+        ],
+    )
     template_style = biased_template_style if str(settings.get("随机主题池", "自动")).strip() != "自动" else _infer_template_style(tags, str(settings["模板风格"]))
-    subject_type = _infer_subject_type(tags, str(settings["主体类型"]))
     output_structure = _infer_output_structure(subject_type, str(settings["案例输出结构"]))
     creative_spine_contract = _build_global_creative_spine_contract_impl(
         selected,
@@ -5197,13 +5318,21 @@ def _serialize_prompt_dedupe_cache(state: dict[str, Any]) -> str:
 def _strip_strict_variation_clause(text: str, *, channel: str = "prompt") -> str:
     prompt = str(text or "").strip()
     if channel == "video":
+        english, marker, chinese = prompt.partition("中文说明：")
+        if marker:
+            return (
+                f"{_strip_strict_variation_clause(english, channel='video')}\n中文说明："
+                f"{_strip_strict_variation_clause(chinese, channel='video')}"
+            )
         prompt = re.sub(
-            r"(?:镜头在这次连续行动中|Within this continuous take, the camera)"
-            r"[^。.!?]*[。.!?]?\s*$",
+            r"(?:\n\s*)*(?:"
+            r"(?:分镜|镜头)\s*[一二三四五六七八九十百0-9]+\s*[（(]连续避重[）)]\s*[:：]"
+            r"|(?:shot|scene)\s*\d+\s*\(continuity variation\)\s*:"
+            r").*?\s*$",
             "",
             prompt,
-            flags=re.IGNORECASE,
-        ).strip("，,。；;.!? \t\n")
+            flags=re.IGNORECASE | re.DOTALL,
+        ).strip()
     marker_pattern = re.compile(
         r"(?:[，,；;]\s*)?(?:画面变化方向|visual\s+variation)(?:\s*[（(][^）)]*[）)])?\s*[:：]",
         re.IGNORECASE,
@@ -5280,8 +5409,9 @@ _STRICT_VIDEO_SOUND_VARIATIONS_EN: tuple[str, ...] = (
 def _append_video_variation_clause(text: str, cursor: int, settings: dict[str, Any]) -> str:
     prompt = _strip_strict_variation_clause(text, channel="video")
     index = max(0, int(cursor))
-    english = str(settings.get("提示词语言", "纯中文") or "纯中文").strip() == "纯英文"
-    if english:
+    language = str(settings.get("提示词语言", "纯中文") or "纯中文").strip()
+
+    def append_english(body: str) -> str:
         camera = _STRICT_VIDEO_CAMERA_VARIATIONS_EN[index % len(_STRICT_VIDEO_CAMERA_VARIATIONS_EN)]
         feedback = _STRICT_VIDEO_FEEDBACK_VARIATIONS_EN[
             (index // len(_STRICT_VIDEO_CAMERA_VARIATIONS_EN)) % len(_STRICT_VIDEO_FEEDBACK_VARIATIONS_EN)
@@ -5290,53 +5420,47 @@ def _append_video_variation_clause(text: str, cursor: int, settings: dict[str, A
             (index // (len(_STRICT_VIDEO_CAMERA_VARIATIONS_EN) * len(_STRICT_VIDEO_FEEDBACK_VARIATIONS_EN)))
             % len(_STRICT_VIDEO_SOUND_VARIATIONS_EN)
         ]
-        return f"{prompt.rstrip(' ,.;')} Within this continuous take, the camera {camera}, while {feedback}, and {sound}."
-    camera = _STRICT_VIDEO_CAMERA_VARIATIONS_ZH[index % len(_STRICT_VIDEO_CAMERA_VARIATIONS_ZH)]
-    feedback = _STRICT_VIDEO_FEEDBACK_VARIATIONS_ZH[
-        (index // len(_STRICT_VIDEO_CAMERA_VARIATIONS_ZH)) % len(_STRICT_VIDEO_FEEDBACK_VARIATIONS_ZH)
-    ]
-    sound = _STRICT_VIDEO_SOUND_VARIATIONS_ZH[
-        (index // (len(_STRICT_VIDEO_CAMERA_VARIATIONS_ZH) * len(_STRICT_VIDEO_FEEDBACK_VARIATIONS_ZH)))
-        % len(_STRICT_VIDEO_SOUND_VARIATIONS_ZH)
-    ]
-    return f"{prompt.rstrip('，。；,.;')}。镜头在这次连续行动中{camera}，{feedback}，{sound}。"
+        shot_count = len(re.findall(r"(?im)^\s*(?:shot|scene)\s*\d+", body))
+        paragraph = (
+            f"Shot {shot_count + 1} (continuity variation): The camera {camera}, carrying forward the visible "
+            f"result of the previous shot instead of starting a new storyline. As {feedback}, the subject's "
+            f"next response remains causally tied to that result. The shot resolves with {sound}, leaving the "
+            "story in a changed but coherent state."
+        )
+        return f"{body.rstrip()}\n\n{paragraph}"
 
+    def append_chinese(body: str) -> str:
+        camera = _STRICT_VIDEO_CAMERA_VARIATIONS_ZH[index % len(_STRICT_VIDEO_CAMERA_VARIATIONS_ZH)]
+        feedback = _STRICT_VIDEO_FEEDBACK_VARIATIONS_ZH[
+            (index // len(_STRICT_VIDEO_CAMERA_VARIATIONS_ZH)) % len(_STRICT_VIDEO_FEEDBACK_VARIATIONS_ZH)
+        ]
+        sound = _STRICT_VIDEO_SOUND_VARIATIONS_ZH[
+            (index // (len(_STRICT_VIDEO_CAMERA_VARIATIONS_ZH) * len(_STRICT_VIDEO_FEEDBACK_VARIATIONS_ZH)))
+            % len(_STRICT_VIDEO_SOUND_VARIATIONS_ZH)
+        ]
+        shot_count = len(re.findall(r"(?m)^\s*(?:分镜|镜头)\s*[一二三四五六七八九十百0-9]+", body))
+        numerals = ("一", "二", "三", "四", "五", "六", "七", "八", "九", "十")
+        label = numerals[shot_count] if shot_count < len(numerals) else str(shot_count + 1)
+        paragraph = (
+            f"分镜{label}（连续避重）：镜头承接上一分镜已经造成的结果，{camera}，不另起无关剧情。"
+            f"随着{feedback}，主体针对这一变化作出下一步回应，动作仍沿用前文的因果方向。"
+            f"画面最后让{sound}，使故事停在发生变化但仍然连贯的状态。"
+        )
+        return f"{body.rstrip()}\n\n{paragraph}"
 
-def _fit_strict_video_variation(text: str, settings: dict[str, Any]) -> str:
-    """Trim one expendable middle sentence if a video variation exceeds its contract."""
-
-    prompt = str(text or "").strip()
-    language = str(settings.get("提示词语言", "纯中文") or "纯中文").strip()
-    anchors = [
-        str(anchor).strip().casefold()
-        for anchor in settings.get("视频提示词必保留锚点", [])
-        if str(anchor).strip()
-    ]
-
-    def trim_body(body: str, *, english: bool) -> str:
-        sentences = [part.strip() for part in re.split(r"(?<=[。！？.!?])\s*", body) if part.strip()]
-        critical = ("at first", "camera", "finally") if english else ("起初", "镜头", "最后")
-        measure = lambda value: len(re.findall(r"\b[A-Za-z][A-Za-z'-]*\b", value)) if english else len(value)
-        maximum = 230 if english else 1200
-        separator = " " if english else ""
-        while len(sentences) > 4 and measure(separator.join(sentences)) > maximum:
-            removable = [
-                index
-                for index, sentence in enumerate(sentences[:-1])
-                if index > 0
-                and not any(marker in sentence.casefold() for marker in critical)
-                and not any(anchor in sentence.casefold() for anchor in anchors)
-            ]
-            if not removable:
-                break
-            sentences.pop(max(removable, key=lambda index: measure(sentences[index])))
-        return separator.join(sentences).strip()
-
+    if language == "纯英文":
+        return append_english(prompt)
     if language == "英文提示词+中文说明":
         english, marker, chinese = prompt.partition("中文说明：")
         if marker:
-            return f"{trim_body(english, english=True)}\n中文说明：{trim_body(chinese, english=False)}"
-    return trim_body(prompt, english=language == "纯英文")
+            return f"{append_english(english.strip())}\n中文说明：{append_chinese(chinese.strip())}"
+    return append_chinese(prompt)
+
+
+def _fit_strict_video_variation(text: str, settings: dict[str, Any]) -> str:
+    """Keep the complete storyboard; video prompts have no length ceiling."""
+
+    return str(text or "").strip()
 
 
 def _append_strict_variation_clause(
@@ -5966,7 +6090,7 @@ _阶段输入参数说明 = {
     "智能文本风格优先": "自动判断最通用；节点优先保持已选风格，文本优先更尊重输入描述中的媒介和题材。",
     "标签块编排启用": "按标签块顺序组织提示词。锁定块会作为高优先级事实保留。",
     "标签块编排JSON": "由编排面板维护的结构化数据；建议通过界面编辑，不要手工截断或填写无效 JSON。",
-    "图片反推模式": "角色设定图默认生成正面、90度侧面、背面三幅等宽全身视图，并统一人物高度、基线和正交镜头；仅反推描述只提取参考图中的可见事实。",
+    "图片反推模式": "角色设定图默认生成1:1:1等宽的正面、90度侧面、背面三幅全身视图；正面栏直视镜头且正脸五官清晰，三栏统一人物高度、基线、正交镜头和连续中性背景；仅反推描述只提取参考图中的可见事实。",
     "图片反推最大边长": "送入视觉模型前的最长边。默认 960；越大细节越多，但编码和推理更慢、占用更高。",
     "系统提示词覆盖": "高级模型合同。默认模板已包含自然语言、剧情、语言和长度约束；只有明确了解后果时修改。",
     "最大生成token": "每条模型输出的 token 上限。默认 1800；太低可能截断长提示词，太高会增加本地/API 耗时和费用。",
