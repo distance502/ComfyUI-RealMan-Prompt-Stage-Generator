@@ -892,6 +892,9 @@ const CHARACTER_SHEET_BASE_TAGS = [
 	"正面全身",
 	"标准侧面全身",
 	"背面全身",
+	"正面直视镜头",
+	"正脸完整清晰",
+	"五官清楚可读",
 	"横向三栏等宽布局",
 	"视图比例1:1:1",
 	"相同人物高度",
@@ -912,8 +915,8 @@ const CHARACTER_SHEET_BASE_TAGS = [
 ];
 const CHARACTER_SHEET_STYLE_TAGS = ["高细节", "主体轮廓清晰", "人物完整入镜", "空间层次明确"];
 const CHARACTER_SHEET_PROMPTS = {
-	reference: "角色设定图模式：接入单人参考图作为唯一角色来源，保持同一成年角色的脸型、发型、体型、关键服装结构、主配色和材质逻辑一致；默认严格生成从左到右排列的正面全身、90度标准侧面全身、背面全身三幅主视图，三栏等宽且比例为1:1:1，三幅视图使用相同人物高度、同一头顶线和脚底基线、统一镜头高度与正交投影，采用中性自然站姿并让头顶到鞋底完整入镜；背景使用与参考配色协调的简洁连续表面，头像或材质细节仅在用户明确提出时放入独立辅助带，辅助带保持独立，三幅主视图尺寸与等宽比例保持不变；风格、服装和色彩跟随参考图与用户补充，画面保持单一角色身份与清晰服装结构。",
-	prompt: "角色设定图模式：根据当前文字生成同一成年角色的标准三视图；默认严格生成从左到右排列的正面全身、90度标准侧面全身、背面全身三幅主视图，三栏等宽且比例为1:1:1，三幅视图使用相同人物高度、同一头顶线和脚底基线、统一镜头高度与正交投影，采用中性自然站姿并让头顶到鞋底完整入镜；角色身份、脸部结构、体型、服装、发型、配色和材质在三幅视图中保持一致，背景使用与当前主题协调的简洁连续表面；头像或材质细节仅在用户明确提出时放入独立辅助带，辅助带保持独立，三幅主视图尺寸与等宽比例保持不变；风格与题材跟随用户输入和当前节点标签，重点呈现准确比例、轮廓转折、服装结构和材质关系。",
+	reference: "角色设定图模式：接入单人参考图作为唯一角色来源，保持同一成年角色的脸型、发型、体型、关键服装结构、主配色和材质逻辑一致；严格生成从左到右排列的正面全身、90度标准侧面全身、背面全身三幅主视图，三栏等宽且比例为1:1:1，三幅视图使用相同人物高度、同一头顶线和脚底基线、统一镜头高度与正交投影，采用中性自然站姿并让头顶到鞋底完整入镜；正面栏人物直视镜头，正脸完整清晰且五官可读；三栏共用简洁连续的中性背景，参考图地点和背景物件只用于提取配色、光感与材质，不得带入三视图主背景；头像或材质细节仅在用户明确提出时放入独立辅助带，辅助带保持独立，三幅主视图尺寸与等宽比例保持不变；风格、服装和色彩跟随参考图与用户补充，画面保持单一角色身份与清晰服装结构。",
+	prompt: "角色设定图模式：根据当前文字生成同一成年角色的标准三视图；严格生成从左到右排列的正面全身、90度标准侧面全身、背面全身三幅主视图，三栏等宽且比例为1:1:1，三幅视图使用相同人物高度、同一头顶线和脚底基线、统一镜头高度与正交投影，采用中性自然站姿并让头顶到鞋底完整入镜；正面栏人物直视镜头，正脸完整清晰且五官可读；角色身份、脸部结构、体型、服装、发型、配色和材质在三幅视图中保持一致，三栏共用简洁连续的中性背景；头像或材质细节仅在用户明确提出时放入独立辅助带，辅助带保持独立，三幅主视图尺寸与等宽比例保持不变；风格与题材跟随用户输入和当前节点标签，重点呈现准确比例、轮廓转折、服装结构和材质关系。",
 };
 const CHARACTER_SHEET_PROMPT_PREFIX = "角色设定图模式：";
 const CHARACTER_SHEET_STRATEGY_PREFIX = "角色设定图策略：";
@@ -929,6 +932,9 @@ const CHARACTER_SHEET_LEGACY_CLEANUP_TAGS = new Set([
 	"正面全身",
 	"标准侧面全身",
 	"背面全身",
+	"正面直视镜头",
+	"正脸完整清晰",
+	"五官清楚可读",
 	"横向三栏等宽布局",
 	"视图比例1:1:1",
 	"相同人物高度",
@@ -2004,8 +2010,8 @@ function injectStyles() {
 	.qwen-te-online-search__site-button:focus-visible{outline:2px solid #83a9d3;outline-offset:2px}
 	.qwen-te-online-search__site-icon{display:inline-flex;width:28px;height:28px;align-items:center;justify-content:center;border:1px solid #526478;border-radius:50%;background:#24303d;color:#dceafa;font-size:12px;font-weight:700}
 	.qwen-te-online-search__site-label{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10.5px}
-	.qwen-te-online-search__web-frame-shell{position:relative;display:flex;align-items:center;justify-content:center;flex:1 1 auto;min-width:0;min-height:0;background:#fff;overflow:hidden;isolation:isolate;contain:paint}
-	.qwen-te-online-search__web-frame{position:relative;z-index:1;width:100%;height:100%;flex:1 1 auto;min-width:0;min-height:0;border:0;background:#fff;object-fit:contain;image-rendering:auto;pointer-events:auto;touch-action:none;user-select:none;-webkit-user-drag:none;outline:none;cursor:default}
+	.qwen-te-online-search__web-frame-shell{position:relative;display:flex;align-items:center;justify-content:center;flex:1 1 auto;min-width:0;min-height:0;background:#0f1318;overflow:hidden;isolation:isolate;contain:paint}
+	.qwen-te-online-search__web-frame{position:relative;z-index:1;width:100%;height:100%;flex:1 1 auto;min-width:0;min-height:0;border:0;background:#0f1318;object-fit:contain;image-rendering:auto;pointer-events:auto;touch-action:none;user-select:none;-webkit-user-drag:none;outline:none;cursor:default}
 	.qwen-te-online-search__web-frame:focus-visible{box-shadow:inset 0 0 0 2px #78a6df}
 	.qwen-te-online-search__frame-overlay{position:absolute;inset:0;z-index:2;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(15,19,24,.82);color:#dbe5f1;font-size:12px;line-height:1.5;text-align:center;pointer-events:none}
 	.qwen-te-online-search__frame-overlay.is-passive{background:rgba(15,19,24,.38);align-items:flex-end;justify-content:flex-start;text-align:left}
@@ -2839,6 +2845,28 @@ function getEmbeddedBrowserFramePollDelay(options = {}) {
 	if (!options.pageReady || !options.hasFrame) return 120;
 	if (Number(options.unchangedFrameCount) >= 4) return 1600;
 	return 420;
+}
+async function preloadEmbeddedBrowserFrame(url, options = {}) {
+	const source = String(url ?? "").trim();
+	if (!source) throw new Error("内嵌浏览器画面地址为空。");
+	const image = typeof options.createImage === "function" ? options.createImage() : new Image();
+	if (!image) throw new Error("无法创建内嵌浏览器画面预加载器。");
+	try { image.decoding = "async"; } catch (_error) {}
+	if (typeof image.decode === "function") {
+		image.src = source;
+		await image.decode();
+		return image;
+	}
+	await new Promise((resolve, reject) => {
+		const handleLoad = () => resolve();
+		const handleError = () => reject(new Error("内嵌浏览器新画面解码失败。"));
+		image.addEventListener?.("load", handleLoad, { once: true });
+		image.addEventListener?.("error", handleError, { once: true });
+		image.onload = handleLoad;
+		image.onerror = handleError;
+		image.src = source;
+	});
+	return image;
 }
 function mapEmbeddedBrowserPointerPoint(clientX, clientY, rect, frameWidth, frameHeight, viewportWidth, viewportHeight) {
 	const box = rect ?? {};
@@ -16162,8 +16190,19 @@ const getEffectiveSelectionCounts = () => {
 			}
 			embeddedUnchangedFrameCount = 0;
 			embeddedMotionHintUntil = Math.max(embeddedMotionHintUntil, Date.now() + 1500);
-			if (frameResult.frameId) embeddedLastFrameId = frameResult.frameId;
 			const nextUrl = URL.createObjectURL(frameResult.blob);
+			try {
+				await preloadEmbeddedBrowserFrame(nextUrl);
+			} catch (decodeError) {
+				try { URL.revokeObjectURL(nextUrl); } catch (_error) {}
+				setWebFrameOverlay(`画面解码失败：${decodeError?.message ?? decodeError}`, { passive: !!embeddedFrameObjectUrl });
+				return;
+			}
+			if (overlay.__qwenDisposed || sessionId !== embeddedBrowserSessionId) {
+				try { URL.revokeObjectURL(nextUrl); } catch (_error) {}
+				return;
+			}
+			if (frameResult.frameId) embeddedLastFrameId = frameResult.frameId;
 			const previousUrl = embeddedFrameObjectUrl;
 			embeddedFrameObjectUrl = nextUrl;
 			if (previousUrl) {
@@ -17367,7 +17406,7 @@ function openCharacterSheetDialog(node, library) {
 
 	const promptInput = document.createElement("textarea");
 	promptInput.className = "qwen-te-modal__textarea";
-	promptInput.placeholder = "可选：补充要保留的服装、发型、配色和材质；默认输出等宽正面、侧面、背面三视图。";
+	promptInput.placeholder = "可选：补充要保留的服装、发型、配色和材质；默认输出1:1:1等宽正面、侧面、背面三视图。";
 	body.appendChild(promptInput);
 	const preview = document.createElement("div");
 	preview.className = "qwen-te-modal__status";

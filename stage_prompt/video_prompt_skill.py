@@ -14,20 +14,21 @@ except Exception:  # pragma: no cover - direct file loading in focused tests
     from stage_prompt_narrative_test import build_narrative_plan  # type: ignore
 
 
-VIDEO_PROMPT_SKILL_VERSION = "video-prompt-skill-v3"
+VIDEO_PROMPT_SKILL_VERSION = "video-prompt-skill-v4"
 VIDEO_PROMPT_DURATION_SECONDS = 8
-VIDEO_PROMPT_MIN_CHARS_ZH = 800
-VIDEO_PROMPT_MAX_CHARS_ZH = 1200
+VIDEO_PROMPT_MIN_CHARS_ZH = 0  # Compatibility export: v4 no longer enforces text length.
+VIDEO_PROMPT_MAX_CHARS_ZH = 0  # Zero means unbounded.
+VIDEO_PROMPT_MIN_STORYBOARD_PARAGRAPHS = 3
 VIDEO_PROMPT_MODEL_SYSTEM_TEMPLATE = """
-你是 Qwen TE 的视频提示词后置导演 Skill。输入已经是独立视频 Skill 生成的可靠底稿，你只负责把它润色得更自然、更具体、更适合视频生成，不得另起故事。
+你是 Qwen TE 的视频提示词后置导演 Skill。输入已经是独立视频 Skill 生成的可靠分镜故事底稿，你负责在同一剧情主线上把它润色得更自然、更具体、更适合视频生成。
 
 硬规则：
-1. 只输出最终视频提示词正文，不输出标题、分析、思考过程、Markdown、标签列表、参数或“提示词：”。
-2. 严格保留底稿中的主体、服装、场景、动作、道具、镜头方向、光影、声音和最终定格；不得更换地点、增加人物或制造第二条剧情线。
-3. 按可见时间顺序写清起因、触发、动作、环境反馈和结果。所有变化都要有前因，不使用互相冲突的动作、机位或时间描述。
-4. 使用连贯自然语言，不堆关键词，不复述规则，不写模型无法直接拍摄的抽象评价。
-5. 保持连续单镜头，只允许一个主要运镜。可以优化措辞和补足连续性，但不能把底稿改成分镜表、多镜头剪辑或旁白脚本；正文不得出现具体秒数或时长参数。
-6. 中文正文必须为 800-1200 字；纯英文正文保持 90-230 个英文单词；双语模式的英文正文后必须保留“中文说明：”，且中文说明为 800-1200 字。
+1. 只输出最终视频提示词正文，不输出分析、思考过程、Markdown、标签列表、参数或“提示词：”。
+2. 输出至少三段分镜；每段以“分镜一/二/三……”或“Shot 1/2/3...”开头，并使用完整自然语言写清景别或机位、镜头运动、主体动作、环境或光影反馈以及与前后分镜的承接关系。
+3. 所有分镜共同组成一条完整故事：建立处境与动机，出现触发事件，主体作出回应，局势升级并形成视觉高潮，最后给出结果或开放结尾。不得把互不相关的镜头拼在一起。
+4. 严格保留底稿中的主体、服装、场景、动作、道具、风格、光影和声音锚点；可以在故事需要时改变景别和机位，但不得无理由更换人物、世界观或主线。
+5. 使用连贯自然语言，不堆关键词，不复述规则，不写无法直接拍摄的抽象评价。每段必须是可独立拍摄、又能承接下一段的分镜描述。
+6. 不限制正文总字数、单段字数或英文单词数；长度由剧情和分镜需要决定。正文仍不得写具体秒数或时长参数。
 """.strip()
 
 _EMPTY_VALUES = {"", "无", "自动", "未启用", "none", "null", "undefined"}
@@ -195,12 +196,16 @@ def _audio_zh(scene: str, action: str, non_person: bool) -> str:
 def _subject_reference_zh(subject: str, non_person: bool) -> str:
     if non_person:
         return "它"
+    if any(marker in subject for marker in ("两人", "众人", "人群", "团队", "一行人")):
+        return "他们"
     if any(marker in subject for marker in ("女性", "女人", "女孩", "少女", "母亲", "姐姐", "妹妹", "女主")):
+        return "她"
+    if re.search(r"(?:^|[、，,\s])女[^、，,\s]{1,12}(?:$|[、，,\s])", subject):
         return "她"
     if any(marker in subject for marker in ("男性", "男人", "男孩", "少年", "父亲", "哥哥", "弟弟", "男主")):
         return "他"
-    if any(marker in subject for marker in ("两人", "众人", "人群", "团队", "一行人")):
-        return "他们"
+    if re.search(r"(?:^|[、，,\s])男[^、，,\s]{1,12}(?:$|[、，,\s])", subject):
+        return "他"
     return "这个人物"
 
 
@@ -253,23 +258,13 @@ def _dedupe_sentences(text: str) -> str:
     return separator.join(result)
 
 
-def _fit_chinese_video_prompt(text: str, details: Sequence[str]) -> str:
-    """Keep Chinese video prose in the requested range without cutting a sentence in half."""
-
-    result = _dedupe_sentences(text)
-    for detail in details:
-        if len(result) >= VIDEO_PROMPT_MIN_CHARS_ZH:
-            break
-        candidate = _dedupe_sentences(f"{result}{detail}")
-        if candidate == result:
-            continue
-        result = candidate
-    if len(result) <= VIDEO_PROMPT_MAX_CHARS_ZH:
-        return result
-    sentences = [part.strip() for part in re.split(r"(?<=[。！？.!?])\s*", result) if part.strip()]
-    while sentences and len("".join(sentences)) > VIDEO_PROMPT_MAX_CHARS_ZH:
-        sentences.pop()
-    return "".join(sentences).strip()
+def _join_storyboard_paragraphs(paragraphs: Sequence[str]) -> str:
+    result: list[str] = []
+    for paragraph in paragraphs:
+        cleaned = _dedupe_sentences(paragraph)
+        if cleaned:
+            result.append(cleaned)
+    return "\n\n".join(result)
 
 
 def _english_source_clause(primary_prompt: str) -> str:
@@ -321,32 +316,48 @@ def _build_chinese_video_prompt(
         "source": primary_prompt[:600],
     }
     plan = build_narrative_plan(anchors, seed=seed, output_count=1)
+    opening = _personalize(plan.get("opening_zh"), reference, scene)
+    motive = _personalize(plan.get("motive_zh"), reference, scene)
     trigger = _personalize(plan.get("trigger_zh"), reference, scene)
+    response = _personalize(plan.get("response_zh"), reference, scene)
     escalation = _personalize(plan.get("escalation_zh"), reference, scene)
+    feedback_plan = _personalize(plan.get("feedback_zh"), reference, scene)
+    climax = _personalize(plan.get("climax_zh"), reference, scene)
+    turn = _personalize(plan.get("turn_zh"), reference, scene)
     ending = _personalize(plan.get("ending_zh"), reference, scene)
     camera = _camera_move_zh(action, composition, scene, seed=seed).replace("主体", subject)
     feedback = _environment_feedback_zh(scene, action, reference, outfit)
     outfit_clause = f"身穿{outfit}，" if outfit and not non_person else ""
-    brief_clause = f"这一小段围绕“{brief}”展开。" if brief else ""
-    text = (
-        f"这是一段采用{style}表现的连续单镜头视频。{brief_clause}"
-        f"{scene}里，{subject}{outfit_clause}把{props}当作眼前唯一需要确认的线索。"
-        f"起初，{reference}只是停下来观察；但因为{trigger}，{reference}立刻{action}。"
-        f"这个动作随即带来可见结果：{escalation}。{feedback}。"
-        f"镜头从{composition}开始，{camera}，全程只围绕这一次行动，不切换地点，也不突然增加人物。"
-        f"{lighting}贯穿镜头，明暗和色温随着{reference}的位置自然变化。"
-        f"{_audio_zh(scene, action, non_person)}。最后，{ending}，让故事停在结果已经出现、下一步仍可继续的时刻。"
+    brief_clause = f"这条故事围绕“{brief}”展开，" if brief else ""
+    audio = _audio_zh(scene, action, non_person)
+    paragraphs = (
+        (
+            f"分镜一（建立）：镜头以{composition}建立{scene}的空间关系，{subject}{outfit_clause}位于画面中心偏前，"
+            f"{props}留在视线能够回到的位置。{brief_clause}{opening}；{motive}。"
+            f"{style}决定画面的线条、色彩与材质表达，{lighting}先把主体与关键线索从背景中分离，{audio}。"
+        ),
+        (
+            f"分镜二（触发）：镜头从环境关系推进到{reference}的视线、手部与{props}之间，先让观众读懂线索，再发生变化。"
+            f"起初{reference}只是在确认现场，因为{trigger}，原有节奏被打破；焦点短暂落到{props}，随后回到{reference}的反应。"
+            f"这一分镜承接开场动机，并把问题明确推向下一步行动，光线和环境声先出现细微偏移。"
+        ),
+        (
+            f"分镜三（行动）：镜头{camera}，在完整记录重心变化的同时保持{scene}方向清楚。"
+            f"{reference}随即{action}，{response}；{outfit or '主体外观'}的边缘、接触点与受力方向跟随动作变化，{feedback}。"
+            f"动作不是孤立展示，而是对上一分镜线索的直接回应，并由{props}的位置变化把故事带向更大的后果。"
+        ),
+        (
+            f"分镜四（升级）：镜头改变景别观察行动造成的连锁结果，前景遮挡、中景动作和背景信息沿同一方向展开。"
+            f"{escalation}，{feedback_plan}；与此同时{turn}。{climax}，{lighting}随局势重新分配明暗与色温。"
+            f"声音从近处材质接触扩展到{scene}的空间回声，让视觉高潮既有来源，也为最后一段留下可继续追踪的结果。"
+        ),
+        (
+            f"分镜五（收束）：镜头在高潮之后放慢观察，不再引入无关人物或新地点，而是回看{subject}、{props}与环境后果之间的新关系。"
+            f"最后，{ending}；{reference}的视线、{props}的状态和背景光共同说明这次选择已经改变局势。"
+            f"结尾保留清楚结果与开放余韵，使五段分镜组成一条完整剧情，也让下一次行动拥有自然入口。"
+        ),
     )
-    details = (
-        f"开场先交代{scene}的空间关系：{reference}位于画面中心偏前，{props}留在视线能够回到的位置，背景始终保持同一处空间，不用新的地点解释变化。",
-        f"随后，{reference}先收紧动作再改变方向，手部、肩膀和脚步按照同一个重心完成转身，{action}不是突然跳切，而是由前一刻的观察自然接上。",
-        f"动作推进时，镜头保留足够的前方空间，让观众先看见{reference}要去哪里，再看见{reference}如何到达；画面不使用快速摇晃、无理由变焦或额外的蒙太奇切换。",
-        f"中段的重点不是堆放更多物件，而是让{props}与{scene}中已有的表面、遮挡和距离变化共同证明刚才发生过什么；环境反馈只在{action}之后出现，不凭空抢在动作前面。",
-        f"焦点可以从{reference}的表情和手部短暂移到{props}，随后回到{reference}，景深变化保持缓慢；{outfit or '主体外观'}的材质、边缘和运动方向在前后画面中保持一致。",
-        f"声音也按同一条因果线推进：{_audio_zh(scene, action, non_person)}；动作结束后只保留当前空间自然产生的短暂余音，不加入旁白、字幕或突然出现的对白。",
-        f"结尾不再安排新的任务，镜头继续观察已经产生的结果；{reference}的视线、{props}的位置和背景灯光共同指向下一步，让定格像故事暂停，而不是把剧情强行结束。",
-    )
-    return _fit_chinese_video_prompt(text, details)
+    return _join_storyboard_paragraphs(paragraphs)
 
 
 def _build_english_video_prompt(settings: Mapping[str, Any], *, primary_prompt: str) -> str:
@@ -354,28 +365,58 @@ def _build_english_video_prompt(settings: Mapping[str, Any], *, primary_prompt: 
     source = _english_source_clause(primary_prompt)
     plan = build_narrative_plan({"source": source}, seed=seed, output_count=1)
     opening = _clean(plan.get("opening_en"), limit=220)
+    motive = _clean(plan.get("motive_en"), limit=200)
     trigger = _clean(plan.get("trigger_en"), limit=180)
     response = _clean(plan.get("response_en"), limit=180)
+    escalation = _clean(plan.get("escalation_en"), limit=200)
     feedback = _clean(plan.get("feedback_en"), limit=200)
+    climax = _clean(plan.get("climax_en"), limit=200)
+    turn = _clean(plan.get("turn_en"), limit=160)
     ending = _clean(plan.get("ending_en"), limit=180)
     opening = opening[:1].lower() + opening[1:]
     feedback = feedback[:1].lower() + feedback[1:]
     ending = ending[:1].lower() + ending[1:]
     camera = _camera_move_en(primary_prompt, seed=seed)
-    text = (
-        f"A continuous single-take video continues this established visual world: {source}. "
-        f"At first, {opening}. When {trigger}, the previous rhythm breaks and {response}. "
-        f"That decision causes a visible response in the location: {feedback}. "
-        f"The camera begins on a readable medium-wide view and {camera}, using only this one motivated movement without changing location or introducing another subject. "
-        "Light, reflections, fabric, dust, or moisture react after the movement so every change has a visible cause. "
-        "Sound stays grounded in footsteps, material contact, breathing, and the natural ambience of the location, with no narration. "
-        f"Finally, {ending}, holding long enough for the consequence to register while leaving the next action open."
+    paragraphs = (
+        f"Shot 1 (setup): The camera opens on a readable wide view of this established visual world: {source}. {opening}. {motive}. Light, material, and ambient sound establish the location before the conflict begins.",
+        f"Shot 2 (trigger): The camera moves from the location to the subject's attention and the key visual clue. At first the rhythm remains controlled; when {trigger}, that rhythm breaks and the focus returns to the subject's reaction. This shot turns the setup into a clear question that the next action must answer.",
+        f"Shot 3 (action): The camera {camera} while preserving a readable direction of travel. The subject responds: {response}. Material contact, reflections, and spatial sound follow the movement in causal order, so the action grows directly from the preceding clue.",
+        f"Shot 4 (escalation): The camera changes scale to reveal the consequence across foreground, middle ground, and background. {escalation}; {feedback}. The emotion shifts as {turn}, and {climax}. Light and sound expand the result without introducing an unrelated storyline.",
+        f"Shot 5 (resolution): The camera settles after the climax and observes the new relationship between subject, clue, and location. Finally, {ending}. The final image makes the consequence readable, preserves an open emotional aftertone, and gives the complete storyboard a natural path into whatever happens next.",
     )
-    return _dedupe_sentences(text)
+    return _join_storyboard_paragraphs(paragraphs)
+
+
+_STORYBOARD_LABEL_ZH = re.compile(r"^(?:分镜|镜头)\s*[一二三四五六七八九十百0-9]+(?:[（(][^）)]+[）)])?\s*[:：]")
+_STORYBOARD_LABEL_EN = re.compile(r"^(?:shot|scene)\s*\d+(?:\s*[（(][^）)]+[）)])?\s*:", flags=re.IGNORECASE)
+
+
+def _storyboard_paragraphs(text: str) -> list[str]:
+    source = str(text or "").strip().replace("\r\n", "\n").replace("\r", "\n")
+    if not source:
+        return []
+    paragraphs = [part.strip() for part in re.split(r"\n\s*\n+", source) if part.strip()]
+    if len(paragraphs) >= VIDEO_PROMPT_MIN_STORYBOARD_PARAGRAPHS:
+        return paragraphs
+    lines = [line.strip() for line in source.split("\n") if line.strip()]
+    if len(lines) >= VIDEO_PROMPT_MIN_STORYBOARD_PARAGRAPHS:
+        return lines
+    return paragraphs
+
+
+def _valid_storyboard_paragraph(paragraph: str, *, english: bool) -> bool:
+    label_pattern = _STORYBOARD_LABEL_EN if english else _STORYBOARD_LABEL_ZH
+    if not label_pattern.match(paragraph):
+        return False
+    if len(re.findall(r"[。！？.!?]", paragraph)) < 2:
+        return False
+    lowered = paragraph.casefold()
+    camera_markers = ("camera", "frame", "focus", "shot") if english else ("镜头", "画面", "焦点", "景别", "机位")
+    return any(marker in lowered for marker in camera_markers)
 
 
 def is_natural_video_prompt(text: str, *, language: str = "纯中文") -> bool:
-    """Validate prose, temporal continuity, camera intent, and anti-tag-chain rules."""
+    """Validate an unbounded natural-language storyboard with one causal story arc."""
 
     prompt = str(text or "").strip()
     mode = str(language or "纯中文").strip()
@@ -393,22 +434,24 @@ def is_natural_video_prompt(text: str, *, language: str = "纯中文") -> bool:
             and is_natural_video_prompt(chinese.strip(), language="纯中文")
             and is_natural_video_prompt(english.strip(), language="纯英文")
         )
-    if "\n" in prompt:
-        return False
     if prompt.count("、") > 18 or len(re.findall(r"(?:^|[，,])[^。.!?]{0,18}(?:[，,]|$)", prompt)) > 48:
         return False
     if mode == "纯英文":
         lowered = prompt.casefold()
+        paragraphs = _storyboard_paragraphs(prompt)
         return (
             not re.search(r"[\u4e00-\u9fff]", prompt)
-            and 90 <= len(re.findall(r"\b[A-Za-z][A-Za-z'-]*\b", prompt)) <= 230
-            and all(marker in lowered for marker in ("at first", "camera", "finally"))
-            and any(marker in lowered for marker in ("when", "because", "causes"))
+            and len(paragraphs) >= VIDEO_PROMPT_MIN_STORYBOARD_PARAGRAPHS
+            and all(_valid_storyboard_paragraph(paragraph, english=True) for paragraph in paragraphs)
+            and all(marker in lowered for marker in ("setup", "trigger", "action", "resolution"))
+            and any(marker in lowered for marker in ("when", "because", "causes", "consequence"))
         )
     body = prompt.split("中文说明：", 1)[-1] if mode == "英文提示词+中文说明" else prompt
+    paragraphs = _storyboard_paragraphs(body)
     return (
-        VIDEO_PROMPT_MIN_CHARS_ZH <= len(body) <= VIDEO_PROMPT_MAX_CHARS_ZH
-        and all(marker in body for marker in ("起初", "镜头", "最后"))
+        len(paragraphs) >= VIDEO_PROMPT_MIN_STORYBOARD_PARAGRAPHS
+        and all(_valid_storyboard_paragraph(paragraph, english=False) for paragraph in paragraphs)
+        and all(marker in body for marker in ("建立", "触发", "行动", "收束"))
         and any(marker in body for marker in ("因为", "带来", "随即", "结果"))
         and any(marker in body for marker in ("环境", "光", "声音"))
     )
@@ -421,7 +464,7 @@ def build_video_prompt(
     *,
     primary_prompt: str = "",
 ) -> str:
-    """Build one independent, single-shot video prompt from the shared creative spine."""
+    """Build one multi-paragraph storyboard whose shots form a complete story."""
 
     groups = _normalized_groups(selected, custom_tags, settings)
     language = str(settings.get("提示词语言", "纯中文") or "纯中文").strip()
@@ -438,6 +481,7 @@ __all__ = [
     "VIDEO_PROMPT_DURATION_SECONDS",
     "VIDEO_PROMPT_MAX_CHARS_ZH",
     "VIDEO_PROMPT_MIN_CHARS_ZH",
+    "VIDEO_PROMPT_MIN_STORYBOARD_PARAGRAPHS",
     "VIDEO_PROMPT_MODEL_SYSTEM_TEMPLATE",
     "VIDEO_PROMPT_SKILL_VERSION",
     "build_video_prompt",

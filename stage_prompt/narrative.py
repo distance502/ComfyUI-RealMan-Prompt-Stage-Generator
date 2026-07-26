@@ -41,8 +41,8 @@ class NarrativePlan(TypedDict):
     organization: int
 
 
-CHINESE_NARRATIVE_LENGTH_CONTRACT = "中文成品必须为 800-1200 字自然语言"
-ENGLISH_NARRATIVE_LENGTH_CONTRACT = "English target 420-560 words"
+CHINESE_NARRATIVE_LENGTH_CONTRACT = "中文成品使用完整自然语言，字数不设上限或下限"
+ENGLISH_NARRATIVE_LENGTH_CONTRACT = "English output uses complete natural prose with no word-count limit"
 
 VISUAL_LAYOUT_SINGLE_PERSON = "single_person"
 VISUAL_LAYOUT_SINGLE_NON_PERSON = "single_non_person"
@@ -71,6 +71,18 @@ _MULTI_VIEW_ANGLE_MARKERS = (
     "front view",
     "side view",
     "back view",
+)
+_CHARACTER_SHEET_MARKERS = (
+    "角色设定图", "角色三视图", "标准三视图", "character sheet", "character turnaround", "three-view",
+)
+_THREE_VIEW_FRONT_MARKERS = ("正面0度", "正面全身", "正面视图", "front at 0 degrees", "front full-body view", "front view")
+_THREE_VIEW_SIDE_MARKERS = ("90度标准侧面", "标准侧面全身", "侧面视图", "side profile at 90 degrees", "90-degree side", "side full-body view")
+_THREE_VIEW_BACK_MARKERS = ("背面180度", "背面全身", "背面视图", "back at 180 degrees", "back full-body view", "back view")
+_THREE_VIEW_RATIO_MARKERS = ("1:1:1", "三栏等宽", "three equal-width columns", "equal-width columns")
+_THREE_VIEW_FACE_MARKERS = (
+    "正脸清晰", "正脸完整清晰", "正面脸部清晰", "五官清楚", "五官可读",
+    "clear frontal face", "complete clear frontal face", "readable frontal face", "readable facial features",
+    "facial features clearly visible",
 )
 _MULTI_SUBJECT_MARKERS = (
     "双人",
@@ -283,7 +295,8 @@ def visual_layout_contract(mode: str, *, english: bool = False) -> str:
                 "For a standard three-view character turnaround, place exactly three primary full-body views from left to right: front at 0 degrees, "
                 "one true side profile at 90 degrees, and back at 180 degrees. Give them three equal-width columns in a balanced 1:1:1 layout, "
                 "with identical character height, one shared head line and ground baseline, matching camera height, orthographic projection, neutral stance, "
-                "complete head-to-foot framing, equal margins, and clearly separated silhouettes. Preserve one continuous identity with matching face, anatomy, hairstyle, wardrobe, palette, and materials. "
+                "complete head-to-foot framing, equal margins, and clearly separated silhouettes. The front column faces the camera with a clear frontal face and readable facial features. "
+                "Preserve one continuous identity with matching face, anatomy, hairstyle, wardrobe, palette, and materials. "
                 "Only an explicitly requested headshot or material detail may enter a separate support strip without reducing the three primary views; "
                 "an explicitly requested alternative multi-view structure keeps its requested count but distributes every view evenly."
             )
@@ -305,7 +318,8 @@ def visual_layout_contract(mode: str, *, english: bool = False) -> str:
     if resolved == VISUAL_LAYOUT_MULTI_VIEW:
         return (
             "标准三视图从左到右为正面0度、单个90度标准侧面、背面180度三幅全身，横向三栏等宽且1:1:1均衡布局。"
-            "人物等高，同一头顶线与脚底基线、统一镜头高度、正交投影、中性站姿和完整头脚。各视图共享同一身份、服装和脸部结构，"
+            "人物等高，同一头顶线与脚底基线、统一镜头高度、正交投影、中性站姿和完整头脚；正面栏人物直视镜头，正脸清晰且五官清楚。"
+            "各视图共享同一身份、服装和脸部结构，"
             "体型、发型、配色、材质一致；要求的细节另置且不改变主视图尺寸。其他多视图按指定数量均分。"
         )
     if resolved == VISUAL_LAYOUT_MULTI_SUBJECT:
@@ -345,6 +359,15 @@ def prompt_preserves_visual_layout(text: str, mode: str) -> bool:
     if not source or not resolved or not prompt_is_positive_layout_safe(source, resolved):
         return False
     if resolved == VISUAL_LAYOUT_MULTI_VIEW:
+        if any(marker.casefold() in source for marker in _CHARACTER_SHEET_MARKERS):
+            required_groups = (
+                _THREE_VIEW_FRONT_MARKERS,
+                _THREE_VIEW_SIDE_MARKERS,
+                _THREE_VIEW_BACK_MARKERS,
+                _THREE_VIEW_RATIO_MARKERS,
+                _THREE_VIEW_FACE_MARKERS,
+            )
+            return all(any(marker.casefold() in source for marker in group) for group in required_groups)
         return bool(_positive_marker_hits([source], _MULTI_VIEW_CONTAINER_MARKERS)) or len(
             _positive_marker_hits([source], _MULTI_VIEW_ANGLE_MARKERS)
         ) >= 2
@@ -385,7 +408,7 @@ GLOBAL_NARRATIVE_MODEL_CONTRACT = f"""
 - 所有渠道共用同一画面结构合同：默认人物模式是一张连续画面、一个决定性时刻、同一人物仅出现一次且只有一个清晰头部和一张脸；显式双人/群像保留用户人数，但每人只出现一次且站位可读；只有显式角色设定图、三视图、四联画或镜中视图允许多视图。除显式多视图外，禁止上下/左右分屏、双联画、三联画、拼贴、故事板、漫画分格、堆叠肖像、画中画、复制倒影和时间切片。
 - 上一条中的排除词只属于创作指令和推荐负面提示词，最终正向正文不得复述“分屏、克隆、重复脸、额外头部、重影、拼贴”等错误视觉概念，也不得把它们包装在“不要/避免/无”后面。正向正文只写唯一主体、完整身体、清晰脸部、准确数量、同一透视和干净表面等期望结果。
 - 剧情链是创作推理，不是要求模型同时画出开端、经过和结尾。最终画面只显示最有信息量的当前瞬间；此前与此后的事件只能通过姿态余势、道具状态、衣料变化、环境痕迹、视线和光线结果暗示，不能让同一主体以多个姿势、多个年龄或多个镜头重复出现。
-- {CHINESE_NARRATIVE_LENGTH_CONTRACT}；{ENGLISH_NARRATIVE_LENGTH_CONTRACT}。简洁档靠近下限，标准档建议 900-1050 字，详细档靠近上限，但所有中文成品仍须处于 800-1200 字范围。长度必须来自新信息、空间关系和事件推进，禁止近义反复灌水。
+- {CHINESE_NARRATIVE_LENGTH_CONTRACT}；{ENGLISH_NARRATIVE_LENGTH_CONTRACT}。简洁、标准和详细只控制信息密度，不设任何总字数或单段字数门槛；正文长度由剧情、空间关系和可见细节决定，禁止近义反复灌水。
 """.strip()
 
 
@@ -806,33 +829,14 @@ def _anchor(anchors: Mapping[str, Any], key: str, fallback: str = "") -> str:
     return _clean(anchors.get(key)) or fallback
 
 
-_CHINESE_NARRATIVE_MAX_CHARS = 1200
-
-
 def _fit_chinese_narrative_sections(
     sections: list[str],
     replacements: list[tuple[str, str]],
 ) -> str:
-    """Compact optional prose by whole sentence while preserving the narrative spine."""
+    """Render the complete narrative without a character-count ceiling."""
 
-    fitted = list(sections)
-
-    def render() -> str:
-        return "".join(section.strip() for section in fitted if section.strip())
-
-    prompt = render()
-    if len(prompt) <= _CHINESE_NARRATIVE_MAX_CHARS:
-        return prompt
-    for full, compact in replacements:
-        try:
-            index = fitted.index(full)
-        except ValueError:
-            continue
-        fitted[index] = compact
-        prompt = render()
-        if len(prompt) <= _CHINESE_NARRATIVE_MAX_CHARS:
-            return prompt
-    return prompt
+    del replacements  # Kept in the signature for compatibility with existing renderers.
+    return "".join(section.strip() for section in sections if section.strip())
 
 
 def _render_chinese(
