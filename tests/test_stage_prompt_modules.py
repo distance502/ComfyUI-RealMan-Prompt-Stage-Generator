@@ -429,6 +429,94 @@ class TestStagePromptIntelligence(unittest.TestCase):
         targets = [item["target"][0] for item in active["inferred_requirements"]]
         self.assertEqual(targets, ["火炬", "剑", "卷轴"])
 
+    def test_natural_language_scene_context_tightens_world_family_without_tags(self) -> None:
+        selected = OrderedDict({"主体": ["成年女性侦探"]})
+        urban = intelligence.build_scene_relationship_graph(
+            selected,
+            context_text="成年女性侦探站在城市天台观察远处的霓虹街区。",
+        )
+        self.assertEqual(urban["primary_world_family"], "urban_space")
+        self.assertIn("urban_space", urban["natural_context_world_families"])
+        self.assertIn("urban_space", urban["allowed_world_families"])
+        self.assertIn("underground_ruin", urban["forbidden_world_families"])
+        self.assertIn(
+            "越过场景关系图",
+            intelligence.candidate_world_violation(
+                "成年女性侦探站在城市天台。",
+                "成年女性侦探站在城市天台，地下城遗迹的石墙出现在身后。",
+                urban,
+            ),
+        )
+
+        natural = intelligence.build_scene_relationship_graph(
+            selected,
+            context_text="不是城市街道，而是森林中的小路。",
+        )
+        self.assertEqual(natural["primary_world_family"], "natural_wilderness")
+        self.assertNotIn("urban_space", natural["natural_context_world_families"])
+
+    def test_primary_world_family_follows_scene_and_text_order(self) -> None:
+        subject = ["成年女性旅人"]
+        forest_first = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": subject, "场景背景": ["森林边缘", "古城回廊"]}),
+        )
+        ancient_first = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": subject, "场景背景": ["古城回廊", "森林边缘"]}),
+        )
+        context_only = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": subject}),
+            context_text="森林边缘连接着一座古城。",
+        )
+        self.assertEqual(forest_first["primary_world_family"], "natural_wilderness")
+        self.assertEqual(forest_first["primary_world_evidence_source"], "selected_scene")
+        self.assertEqual(forest_first["primary_world_evidence"], "森林")
+        self.assertEqual(ancient_first["primary_world_family"], "ancient_human")
+        self.assertEqual(context_only["primary_world_family"], "natural_wilderness")
+        self.assertEqual(context_only["primary_world_evidence_source"], "natural_context")
+
+    def test_explicit_primary_scene_cues_override_incidental_location_order(self) -> None:
+        selected = OrderedDict({"主体": ["成年女性旅人"]})
+        chinese = intelligence.build_scene_relationship_graph(
+            selected,
+            context_text="角色从古城出发，主要场景设在森林深处，远处仍能看见城墙。",
+        )
+        english = intelligence.build_scene_relationship_graph(
+            selected,
+            context_text="The traveler leaves an old town; the main setting is a deep sea shipwreck.",
+        )
+        takes_place = intelligence.build_scene_relationship_graph(
+            selected,
+            context_text="A train appears in the prologue, but the story takes place in a forest valley.",
+        )
+        self.assertEqual(chinese["primary_world_family"], "natural_wilderness")
+        self.assertEqual(chinese["primary_world_evidence_source"], "natural_context_cue")
+        self.assertEqual(english["primary_world_family"], "underwater")
+        self.assertEqual(english["primary_world_evidence_source"], "natural_context_cue")
+        self.assertEqual(takes_place["primary_world_family"], "natural_wilderness")
+        self.assertEqual(takes_place["primary_world_evidence_source"], "natural_context_cue")
+
+    def test_negated_primary_scene_cues_do_not_override_the_requested_replacement(self) -> None:
+        selected = OrderedDict({"主体": ["成年女性旅人"]})
+        chinese = intelligence.build_scene_relationship_graph(
+            selected,
+            context_text="不要把主要场景设在森林深处，改为城市天台。",
+        )
+        english = intelligence.build_scene_relationship_graph(
+            selected,
+            context_text="Do not set the main setting in a forest valley; use an urban street instead.",
+        )
+        long_english = intelligence.build_scene_relationship_graph(
+            selected,
+            context_text=(
+                "Do not place the primary scene anywhere inside the ancient old town district; "
+                "the story takes place in a deep sea shipwreck."
+            ),
+        )
+        self.assertEqual(chinese["primary_world_family"], "urban_space")
+        self.assertEqual(english["primary_world_family"], "urban_space")
+        self.assertEqual(long_english["primary_world_family"], "underwater")
+        self.assertEqual(long_english["primary_world_evidence_source"], "natural_context_cue")
+
     def test_natural_language_relation_hint_reaches_full_stage_outputs(self) -> None:
         module = load_stage_prompt_generator_for_integration_test()
         result = module._run_stage(
@@ -494,6 +582,55 @@ class TestStagePromptIntelligence(unittest.TestCase):
         self.assertEqual(api["mode"], "conservative_rewrite")
         self.assertEqual(strict_api["mode"], "incremental_blend")
         self.assertEqual(local["video_mode"], "incremental_storyboard_blend")
+
+        conflict_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["潜水员"], "场景背景": ["深海"], "道具世界观": ["火炬"]})
+        )
+        guarded = intelligence.resolve_model_strategy(
+            {"模型来源": "本地模型"},
+            task,
+            conflict_graph,
+        )
+        self.assertEqual(guarded["mode"], "skill_only_guarded")
+        self.assertEqual(guarded["video_mode"], "skill_only_guarded")
+
+    def test_unresolved_strong_conflict_skips_all_model_refinement(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+
+        class CountingModel:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def create_chat_completion(self, *args, **kwargs):
+                self.calls += 1
+                return {"choices": [{"message": {"content": "不应被调用"}}]}
+
+        model = CountingModel()
+        result = module._run_stage(
+            model,
+            **{
+                "unique_id": "intelligence-v11-guarded-skill-only",
+                "模型来源": "本地模型",
+                "模型来源实际": "外接本地模型",
+                "模型调用基础来源": "本地模型",
+                "主体标签1": "潜水员",
+                "场景背景标签1": "深海",
+                "动作姿态标签1": "举起火炬",
+                "道具世界观标签1": "火炬",
+                "运行时随机标签": False,
+                "生成数量": 1,
+                "提示词语言": "纯中文",
+                "seed": 41,
+            },
+        )
+        payload = json.loads(result[3])
+        self.assertEqual(model.calls, 0)
+        self.assertEqual(payload["adaptive_model_strategy"]["mode"], "skill_only_guarded")
+        self.assertGreaterEqual(payload["model_intelligence_skip_count"], 2)
+        self.assertIn("强语义冲突", payload["model_intelligence_skip_reason"])
+        self.assertEqual(payload["model_call_attempt_count"], 0)
+        self.assertEqual(payload["video_prompt_model_status"], "智能保护跳过模型，保留 Skill 结果")
+        self.assertIn("智能保护", payload["model_skill_pipeline"])
 
     def test_preference_memory_requires_repeated_explicit_choices(self) -> None:
         explicit = OrderedDict(

@@ -9,7 +9,7 @@ import re
 from typing import Any, Iterable
 
 
-INTELLIGENCE_PROFILE_VERSION = "qwen-te-intelligence-v6"
+INTELLIGENCE_PROFILE_VERSION = "qwen-te-intelligence-v11"
 
 _GROUP_LIMITS = {
     "主体": 6,
@@ -161,16 +161,39 @@ _BROAD_NEGATION_RE = re.compile(
     r"(?:不要|不需要|不必|无需|不能|别(?:再)?|未(?:启用|使用|包含|生成)?|避免|禁止|排除|移除|去掉|不是|并非|不得|不可|"
     r"\b(?:do\s+not|don't|does\s+not|doesn't|cannot|can't|should\s+not|shouldn't|must\s+not|"
     r"will\s+not|won't|not|never|without|avoid|exclude|remove|omit)\b)"
-    r"[^，,；;。！？.!?\n]{0,24}$",
+    r"[^，,；;。！？.!?\n]{0,48}$",
     flags=re.IGNORECASE,
 )
 _NEGATION_CANCEL_RE = re.compile(
-    r"(?:不仅|不只|不止|不光|\bnot\s+only\b)[^，,；;。！？.!?\n]{0,24}$",
+    r"(?:不仅|不只|不止|不光|\bnot\s+only\b)[^，,；;。！？.!?\n]{0,48}$",
     flags=re.IGNORECASE,
 )
 _DIRECT_NEGATION_RE = re.compile(
     r"(?:没有|不含|无|非|\bno\b)\s*(?:任何|任意|any)?\s*$",
     flags=re.IGNORECASE,
+)
+_PRIMARY_SCENE_CUE_PATTERNS = (
+    re.compile(
+        r"(?:主场景|主要场景|核心地点|主要地点|故事发生地)\s*"
+        r"(?:设(?:定|置)?\s*)?(?:在|为|是|位于|放在|选在|[:：])\s*"
+        r"([^；;。！？!?\n]{1,64})",
+        flags=re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:故事|画面|镜头)\s*(?:发生|展开|定格)\s*(?:在|于)\s*"
+        r"([^；;。！？!?\n]{1,64})",
+        flags=re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:primary|main|core)\s+(?:scene|setting|location)\s*"
+        r"(?:is|at|in|:)?\s*([^;.!?\n]{1,80})",
+        flags=re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:the\s+)?(?:story|scene)\s+(?:takes\s+place|is\s+set)\s+"
+        r"(?:in|at)\s+([^;.!?\n]{1,80})",
+        flags=re.IGNORECASE,
+    ),
 )
 
 
@@ -184,15 +207,22 @@ def _marker_matches(text: str, marker: str) -> list[re.Match[str]]:
     return list(re.finditer(re.escape(needle), source))
 
 
+def _marker_match_is_negated(source: str, match_start: int) -> bool:
+    prefix = source[max(0, match_start - 80) : match_start]
+    clause_prefix = _CLAUSE_BOUNDARY_RE.split(prefix)[-1][-48:]
+    broad_negation = _BROAD_NEGATION_RE.search(clause_prefix)
+    return bool(
+        (broad_negation and not _NEGATION_CANCEL_RE.search(clause_prefix))
+        or _DIRECT_NEGATION_RE.search(clause_prefix)
+    )
+
+
 def _marker_polarity(text: str, marker: str) -> tuple[bool, bool]:
     source = str(text or "").casefold()
     positive = False
     negated = False
     for match in _marker_matches(source, marker):
-        prefix = source[max(0, match.start() - 80) : match.start()]
-        clause_prefix = _CLAUSE_BOUNDARY_RE.split(prefix)[-1][-48:]
-        broad_negation = _BROAD_NEGATION_RE.search(clause_prefix)
-        if (broad_negation and not _NEGATION_CANCEL_RE.search(clause_prefix)) or _DIRECT_NEGATION_RE.search(clause_prefix):
+        if _marker_match_is_negated(source, match.start()):
             negated = True
             continue
         positive = True
@@ -211,6 +241,47 @@ def detect_world_families(text: Any) -> dict[str, list[str]]:
         if matched:
             hits[family] = matched
     return hits
+
+
+def _primary_world_family_in_text(text: Any) -> tuple[str, str]:
+    source = _clean(text).casefold()
+    ranked: list[tuple[int, int, int, str, str]] = []
+    for family_index, (family, markers) in enumerate(WORLD_FAMILY_MARKERS.items()):
+        for marker in markers:
+            for match in _marker_matches(source, marker):
+                if _marker_match_is_negated(source, match.start()):
+                    continue
+                ranked.append((match.start(), -len(marker), family_index, family, marker))
+    if not ranked:
+        return "", ""
+    _position, _specificity, _family_index, family, marker = min(ranked)
+    return family, marker
+
+
+def _resolve_primary_world_family(
+    scene_values: Iterable[Any],
+    natural_context: Any,
+) -> tuple[str, str, str]:
+    for scene in _unique(scene_values, 8):
+        family, marker = _primary_world_family_in_text(scene)
+        if family:
+            return family, marker, "selected_scene"
+    context = _clean(natural_context)
+    folded_context = context.casefold()
+    cue_matches: list[tuple[int, str]] = []
+    for pattern in _PRIMARY_SCENE_CUE_PATTERNS:
+        cue_matches.extend(
+            (match.start(), _clean(match.group(1)))
+            for match in pattern.finditer(context)
+            if _clean(match.group(1))
+            and not _marker_match_is_negated(folded_context, match.start())
+        )
+    for _position, cue_text in sorted(cue_matches, key=lambda item: item[0]):
+        family, marker = _primary_world_family_in_text(cue_text)
+        if family:
+            return family, marker, "natural_context_cue"
+    family, marker = _primary_world_family_in_text(natural_context)
+    return (family, marker, "natural_context") if family else ("", "", "")
 
 
 def _contains_any(text: Any, markers: Iterable[str]) -> bool:
@@ -368,11 +439,16 @@ def build_scene_relationship_graph(
             *groups.get("道具世界观", []),
             *groups.get("动作姿态", []),
             *custom,
+            natural_context,
         ]
     )
     explicit_hits = detect_world_families(scene_text)
     scene_only_hits = detect_world_families("，".join(groups.get("场景背景", [])))
-    primary_family = next(iter(scene_only_hits), "")
+    context_world_hits = detect_world_families(natural_context)
+    primary_family, primary_world_evidence, primary_world_source = _resolve_primary_world_family(
+        groups.get("场景背景", []),
+        natural_context,
+    )
     allowed = set(explicit_hits)
     inferred_world_hits = detect_world_families(
         "，".join(
@@ -426,6 +502,7 @@ def build_scene_relationship_graph(
         "nodes": groups,
         "custom_context": custom,
         "natural_context_present": bool(natural_context),
+        "natural_context_world_families": list(context_world_hits),
         "relations": relations,
         "hard_anchors": hard_anchors,
         "inferred_requirements": inferred_requirements,
@@ -434,6 +511,8 @@ def build_scene_relationship_graph(
         "resolved_issue_count": 0,
         "coherence_status": "conflict" if any(item["severity"] == "error" for item in coherence_issues) else ("review" if coherence_issues else "coherent"),
         "primary_world_family": primary_family,
+        "primary_world_evidence": primary_world_evidence,
+        "primary_world_evidence_source": primary_world_source,
         "explicit_world_families": list(explicit_hits),
         "inferred_world_families": list(inferred_world_hits),
         "allowed_world_families": sorted(allowed),
@@ -451,6 +530,10 @@ def resolve_model_strategy(
     strict = _clean(settings.get("风格隔离策略")) == "严格风格隔离"
     adult = bool(settings.get("NSFW工作台启用", False) or settings.get("NSFW策略启用", False))
     coherence_issues = list((scene_graph or {}).get("coherence_issues", []) or [])
+    has_unresolved_error = any(
+        isinstance(item, dict) and item.get("severity") == "error"
+        for item in coherence_issues
+    )
     structure_sensitive = (
         task_type.startswith("character_sheet")
         or task_type in {"ordered_tag_block_story", "video_first_story"}
@@ -466,6 +549,9 @@ def resolve_model_strategy(
     if source in {"", "仅Skill"}:
         mode = "skill_only"
         reason = "当前未启用模型，直接使用已校验 Skill 成品。"
+    elif has_unresolved_error:
+        mode = "skill_only_guarded"
+        reason = "场景关系图仍有强语义冲突；为避免模型擅自改写显式选择，本次跳过后置模型并保留 Skill 成品。"
     elif (
         source.startswith("本地")
         or structure_sensitive
@@ -479,7 +565,11 @@ def resolve_model_strategy(
         reason = "API 可整理完整自然语言，但必须保留全部关系图锚点并通过场景校验。"
     return {
         "mode": mode,
-        "video_mode": "incremental_storyboard_blend" if mode != "skill_only" else "skill_only",
+        "video_mode": (
+            "skill_only_guarded"
+            if mode == "skill_only_guarded"
+            else ("incremental_storyboard_blend" if mode != "skill_only" else "skill_only")
+        ),
         "repair_mode": "targeted_patch",
         "preserve_skill_baseline": True,
         "risk_score": risk_score,

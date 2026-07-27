@@ -79,6 +79,10 @@ def _model_skill_pipeline_label(settings: dict[str, Any]) -> str:
     source = _normalize_model_source_label(settings.get("模型来源", "仅Skill"))
     fallback_note = str(settings.get("模型回退说明", "") or "").strip()
     call_status = str(settings.get("模型调用状态", "") or "").strip()
+    intelligence_skip_count = int(settings.get("模型智能跳过次数", 0) or 0)
+    if intelligence_skip_count:
+        reason = str(settings.get("模型智能跳过原因", "") or "").strip()
+        return f"{call_status or '智能保护跳过模型'}：{reason or '保留已校验 Skill 成品'}"
     if fallback_note:
         return f"{call_status or '已回退仅Skill'}：{fallback_note}"
     if source == "仅Skill":
@@ -290,6 +294,8 @@ def build_json_payload(
         "model_active_fallback_count": int(settings.get("模型活动回退数量", 0) or 0),
         "model_transport_retry_count": int(settings.get("模型传输重试次数", 0) or 0),
         "model_last_transient_error": str(settings.get("模型最近瞬时错误", "") or ""),
+        "model_intelligence_skip_count": int(settings.get("模型智能跳过次数", 0) or 0),
+        "model_intelligence_skip_reason": str(settings.get("模型智能跳过原因", "") or ""),
         "image_reverse_status": str(settings.get("图片反推状态", "未启用") or "未启用"),
         "image_reverse_error": str(settings.get("图片反推错误", "") or ""),
         "model_call_errors": [str(item) for item in settings.get("模型调用错误", []) if str(item).strip()],
