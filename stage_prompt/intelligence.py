@@ -4,11 +4,12 @@
 from __future__ import annotations
 
 from collections import OrderedDict
+from copy import deepcopy
 import re
 from typing import Any, Iterable
 
 
-INTELLIGENCE_PROFILE_VERSION = "qwen-te-intelligence-v5"
+INTELLIGENCE_PROFILE_VERSION = "qwen-te-intelligence-v6"
 
 _GROUP_LIMITS = {
     "主体": 6,
@@ -348,6 +349,8 @@ def build_scene_relationship_graph(
                 "relation": "requires_prop",
                 "target": [label],
                 "satisfied": satisfied,
+                "effective_satisfied": satisfied,
+                "resolution": "explicit" if satisfied else "pending",
                 "evidence": evidence[:3],
             }
         )
@@ -388,7 +391,7 @@ def build_scene_relationship_graph(
         for group, values in groups.items()
         if values and group in {"主体", "服装造型", "场景背景", "动作姿态", "道具世界观", "画面风格", "构图视角"}
     }
-    coherence_issues: list[dict[str, str]] = []
+    coherence_issues: list[dict[str, Any]] = []
     location_families = [family for family in scene_only_hits if family in _LOCATION_WORLD_FAMILIES]
     if len(location_families) > 1:
         coherence_issues.append(
@@ -415,6 +418,7 @@ def build_scene_relationship_graph(
                 {
                     "kind": "implicit_prop_anchor",
                     "severity": "info",
+                    "target": requirement["target"][0],
                     "message": f"动作已隐含道具“{requirement['target'][0]}”，生成时必须保持该动作-道具关系。",
                 }
             )
@@ -426,6 +430,8 @@ def build_scene_relationship_graph(
         "hard_anchors": hard_anchors,
         "inferred_requirements": inferred_requirements,
         "coherence_issues": coherence_issues,
+        "resolved_coherence_issues": [],
+        "resolved_issue_count": 0,
         "coherence_status": "conflict" if any(item["severity"] == "error" for item in coherence_issues) else ("review" if coherence_issues else "coherent"),
         "primary_world_family": primary_family,
         "explicit_world_families": list(explicit_hits),
@@ -608,6 +614,72 @@ def resolve_relation_hints(
     return {"道具世界观": allowed} if allowed else {}
 
 
+def apply_relation_hint_resolution(scene_graph: Any, relation_hints: Any) -> dict[str, Any]:
+    if not isinstance(scene_graph, dict):
+        return {}
+    resolved_graph = deepcopy(scene_graph)
+    hint_groups = relation_hints if isinstance(relation_hints, dict) else {}
+    hinted_props = {
+        value.casefold()
+        for value in _unique(hint_groups.get("道具世界观", []), 8)
+    }
+    resolved_targets: set[str] = set()
+    requirements: list[dict[str, Any]] = []
+    for raw_requirement in list(resolved_graph.get("inferred_requirements", []) or []):
+        if not isinstance(raw_requirement, dict):
+            continue
+        requirement = dict(raw_requirement)
+        targets = _unique(requirement.get("target", []), 4)
+        resolved_by_hint = bool(
+            not requirement.get("satisfied")
+            and any(target.casefold() in hinted_props for target in targets)
+        )
+        requirement["resolved_by_hint"] = resolved_by_hint
+        requirement["effective_satisfied"] = bool(requirement.get("satisfied") or resolved_by_hint)
+        requirement["resolution"] = (
+            "explicit"
+            if requirement.get("satisfied")
+            else ("relation_hint" if resolved_by_hint else "pending")
+        )
+        if resolved_by_hint:
+            resolved_targets.update(targets)
+        requirements.append(requirement)
+    resolved_graph["inferred_requirements"] = requirements
+
+    unresolved_issues: list[dict[str, Any]] = []
+    resolved_issues = [
+        dict(item)
+        for item in list(resolved_graph.get("resolved_coherence_issues", []) or [])
+        if isinstance(item, dict)
+    ]
+    for raw_issue in list(resolved_graph.get("coherence_issues", []) or []):
+        if not isinstance(raw_issue, dict):
+            continue
+        issue = dict(raw_issue)
+        target = _clean(issue.get("target"))
+        if issue.get("kind") == "implicit_prop_anchor" and target in resolved_targets:
+            issue["resolved"] = True
+            issue["resolution"] = "relation_hint"
+            issue["message"] = f"动作隐含道具“{target}”已由关系软补全加入本次 Skill 成品。"
+            resolved_issues.append(issue)
+        else:
+            unresolved_issues.append(issue)
+    resolved_graph["coherence_issues"] = unresolved_issues
+    resolved_graph["resolved_coherence_issues"] = resolved_issues
+    resolved_graph["resolved_issue_count"] = len(resolved_issues)
+    resolved_graph["coherence_status"] = (
+        "conflict"
+        if any(item.get("severity") == "error" for item in unresolved_issues)
+        else ("review" if unresolved_issues else "coherent")
+    )
+    resolved_graph["resolution_status"] = (
+        "partially_resolved"
+        if resolved_issues and unresolved_issues
+        else ("resolved" if resolved_issues else "unchanged")
+    )
+    return resolved_graph
+
+
 def classify_repair_reason(reason: Any) -> dict[str, str]:
     text = _clean(reason)
     folded = text.casefold()
@@ -725,6 +797,7 @@ def summarize_intelligence_profile(profile: Any) -> str:
 __all__ = [
     "INTELLIGENCE_PROFILE_VERSION",
     "WORLD_FAMILY_MARKERS",
+    "apply_relation_hint_resolution",
     "build_intelligence_profile",
     "build_scene_relationship_graph",
     "candidate_world_violation",

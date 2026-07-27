@@ -275,6 +275,7 @@ def build_json_payload(
         "relation_hints_merged_with_explicit_props": bool(settings.get("智能关系补全并入显式道具", False)),
         "scene_coherence_status": str(dict(settings.get("智能场景关系图", {}) or {}).get("coherence_status", "") or ""),
         "scene_coherence_issues": list(dict(settings.get("智能场景关系图", {}) or {}).get("coherence_issues", []) or []),
+        "scene_coherence_resolved_issues": list(dict(settings.get("智能场景关系图", {}) or {}).get("resolved_coherence_issues", []) or []),
         "targeted_repair_count": int(settings.get("智能定向修复次数", 0) or 0),
         "targeted_repair_reason": str(settings.get("智能定向修复最近原因", "") or ""),
         "targeted_repair_type": str(settings.get("智能定向修复最近类型", "") or ""),

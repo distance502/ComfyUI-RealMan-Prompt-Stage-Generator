@@ -338,6 +338,27 @@ class TestStagePromptIntelligence(unittest.TestCase):
             ),
             {"道具世界观": ["弓箭"]},
         )
+        resolved = intelligence.apply_relation_hint_resolution(
+            implicit,
+            {"道具世界观": ["弓箭"]},
+        )
+        self.assertEqual(resolved["coherence_status"], "coherent")
+        self.assertEqual(resolved["coherence_issues"], [])
+        self.assertEqual(resolved["resolved_issue_count"], 1)
+        self.assertEqual(resolved["inferred_requirements"][0]["resolution"], "relation_hint")
+        self.assertTrue(resolved["inferred_requirements"][0]["effective_satisfied"])
+        unresolved_strategy = intelligence.resolve_model_strategy(
+            {"模型来源": "API接口"},
+            {"task_type": "standard_visual_story"},
+            implicit,
+        )
+        resolved_strategy = intelligence.resolve_model_strategy(
+            {"模型来源": "API接口"},
+            {"task_type": "standard_visual_story"},
+            resolved,
+        )
+        self.assertGreater(unresolved_strategy["risk_score"], resolved_strategy["risk_score"])
+        self.assertEqual(resolved_strategy["coherence_issue_count"], 0)
         urban_archer_selected = OrderedDict(
             {"主体": ["都市游侠"], "动作姿态": ["拉弓瞄准"], "场景背景": ["城市天台"]}
         )
@@ -427,6 +448,9 @@ class TestStagePromptIntelligence(unittest.TestCase):
         )
         payload = json.loads(result[3])
         self.assertEqual(payload["relation_hints_applied"], {"道具世界观": ["雨伞"]})
+        self.assertEqual(payload["scene_coherence_status"], "coherent")
+        self.assertEqual(payload["scene_coherence_issues"], [])
+        self.assertEqual(len(payload["scene_coherence_resolved_issues"]), 1)
         self.assertIn("雨伞", result[1])
         self.assertIn("雨伞", result[7])
         self.assertIn("证据", result[2])
@@ -451,6 +475,8 @@ class TestStagePromptIntelligence(unittest.TestCase):
         payload = json.loads(result[3])
         self.assertEqual(payload["relation_hints_applied"], {"道具世界观": ["弓箭"]})
         self.assertTrue(payload["relation_hints_merged_with_explicit_props"])
+        self.assertEqual(payload["scene_coherence_status"], "coherent")
+        self.assertEqual(len(payload["scene_coherence_resolved_issues"]), 1)
         self.assertEqual(payload["selected_tags_by_category"]["道具世界观"], ["短剑"])
         for output in (result[1], result[7]):
             self.assertIn("短剑", output)

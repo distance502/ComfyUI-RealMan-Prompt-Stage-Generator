@@ -172,8 +172,10 @@ from .stage_prompt.model_refiner import (
     summarize_global_creative_spine_contract as _summarize_global_creative_spine_contract_impl,
 )
 from .stage_prompt.intelligence import (
+    apply_relation_hint_resolution as _apply_relation_hint_resolution_impl,
     build_intelligence_profile as _build_intelligence_profile_impl,
     infer_task_intent as _infer_task_intent_impl,
+    resolve_model_strategy as _resolve_model_strategy_impl,
     resolve_preference_hints as _resolve_preference_hints_impl,
     resolve_relation_hints as _resolve_relation_hints_impl,
     summarize_intelligence_profile as _summarize_intelligence_profile_impl,
@@ -4485,6 +4487,16 @@ def _run_stage_impl(
         intelligence_profile.get("scene_graph"),
         selected,
         settings,
+    )
+    resolved_scene_graph = _apply_relation_hint_resolution_impl(
+        intelligence_profile.get("scene_graph"),
+        relation_hints,
+    )
+    intelligence_profile["scene_graph"] = resolved_scene_graph
+    intelligence_profile["model_strategy"] = _resolve_model_strategy_impl(
+        settings,
+        intelligence_profile.get("task_intent", {}),
+        resolved_scene_graph,
     )
     intelligence_profile["preference_hints"] = preference_hints
     intelligence_profile["relation_hints"] = relation_hints
