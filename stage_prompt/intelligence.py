@@ -9,7 +9,7 @@ import re
 from typing import Any, Iterable
 
 
-INTELLIGENCE_PROFILE_VERSION = "qwen-te-intelligence-v7"
+INTELLIGENCE_PROFILE_VERSION = "qwen-te-intelligence-v8"
 
 _GROUP_LIMITS = {
     "主体": 6,
@@ -184,15 +184,22 @@ def _marker_matches(text: str, marker: str) -> list[re.Match[str]]:
     return list(re.finditer(re.escape(needle), source))
 
 
+def _marker_match_is_negated(source: str, match_start: int) -> bool:
+    prefix = source[max(0, match_start - 80) : match_start]
+    clause_prefix = _CLAUSE_BOUNDARY_RE.split(prefix)[-1][-48:]
+    broad_negation = _BROAD_NEGATION_RE.search(clause_prefix)
+    return bool(
+        (broad_negation and not _NEGATION_CANCEL_RE.search(clause_prefix))
+        or _DIRECT_NEGATION_RE.search(clause_prefix)
+    )
+
+
 def _marker_polarity(text: str, marker: str) -> tuple[bool, bool]:
     source = str(text or "").casefold()
     positive = False
     negated = False
     for match in _marker_matches(source, marker):
-        prefix = source[max(0, match.start() - 80) : match.start()]
-        clause_prefix = _CLAUSE_BOUNDARY_RE.split(prefix)[-1][-48:]
-        broad_negation = _BROAD_NEGATION_RE.search(clause_prefix)
-        if (broad_negation and not _NEGATION_CANCEL_RE.search(clause_prefix)) or _DIRECT_NEGATION_RE.search(clause_prefix):
+        if _marker_match_is_negated(source, match.start()):
             negated = True
             continue
         positive = True
@@ -211,6 +218,33 @@ def detect_world_families(text: Any) -> dict[str, list[str]]:
         if matched:
             hits[family] = matched
     return hits
+
+
+def _primary_world_family_in_text(text: Any) -> tuple[str, str]:
+    source = _clean(text).casefold()
+    ranked: list[tuple[int, int, int, str, str]] = []
+    for family_index, (family, markers) in enumerate(WORLD_FAMILY_MARKERS.items()):
+        for marker in markers:
+            for match in _marker_matches(source, marker):
+                if _marker_match_is_negated(source, match.start()):
+                    continue
+                ranked.append((match.start(), -len(marker), family_index, family, marker))
+    if not ranked:
+        return "", ""
+    _position, _specificity, _family_index, family, marker = min(ranked)
+    return family, marker
+
+
+def _resolve_primary_world_family(
+    scene_values: Iterable[Any],
+    natural_context: Any,
+) -> tuple[str, str, str]:
+    for scene in _unique(scene_values, 8):
+        family, marker = _primary_world_family_in_text(scene)
+        if family:
+            return family, marker, "selected_scene"
+    family, marker = _primary_world_family_in_text(natural_context)
+    return (family, marker, "natural_context") if family else ("", "", "")
 
 
 def _contains_any(text: Any, markers: Iterable[str]) -> bool:
@@ -374,7 +408,10 @@ def build_scene_relationship_graph(
     explicit_hits = detect_world_families(scene_text)
     scene_only_hits = detect_world_families("，".join(groups.get("场景背景", [])))
     context_world_hits = detect_world_families(natural_context)
-    primary_family = next(iter(scene_only_hits), "") or next(iter(context_world_hits), "")
+    primary_family, primary_world_evidence, primary_world_source = _resolve_primary_world_family(
+        groups.get("场景背景", []),
+        natural_context,
+    )
     allowed = set(explicit_hits)
     inferred_world_hits = detect_world_families(
         "，".join(
@@ -437,6 +474,8 @@ def build_scene_relationship_graph(
         "resolved_issue_count": 0,
         "coherence_status": "conflict" if any(item["severity"] == "error" for item in coherence_issues) else ("review" if coherence_issues else "coherent"),
         "primary_world_family": primary_family,
+        "primary_world_evidence": primary_world_evidence,
+        "primary_world_evidence_source": primary_world_source,
         "explicit_world_families": list(explicit_hits),
         "inferred_world_families": list(inferred_world_hits),
         "allowed_world_families": sorted(allowed),

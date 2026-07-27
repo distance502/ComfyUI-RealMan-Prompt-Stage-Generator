@@ -455,6 +455,25 @@ class TestStagePromptIntelligence(unittest.TestCase):
         self.assertEqual(natural["primary_world_family"], "natural_wilderness")
         self.assertNotIn("urban_space", natural["natural_context_world_families"])
 
+    def test_primary_world_family_follows_scene_and_text_order(self) -> None:
+        subject = ["成年女性旅人"]
+        forest_first = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": subject, "场景背景": ["森林边缘", "古城回廊"]}),
+        )
+        ancient_first = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": subject, "场景背景": ["古城回廊", "森林边缘"]}),
+        )
+        context_only = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": subject}),
+            context_text="森林边缘连接着一座古城。",
+        )
+        self.assertEqual(forest_first["primary_world_family"], "natural_wilderness")
+        self.assertEqual(forest_first["primary_world_evidence_source"], "selected_scene")
+        self.assertEqual(forest_first["primary_world_evidence"], "森林")
+        self.assertEqual(ancient_first["primary_world_family"], "ancient_human")
+        self.assertEqual(context_only["primary_world_family"], "natural_wilderness")
+        self.assertEqual(context_only["primary_world_evidence_source"], "natural_context")
+
     def test_natural_language_relation_hint_reaches_full_stage_outputs(self) -> None:
         module = load_stage_prompt_generator_for_integration_test()
         result = module._run_stage(
