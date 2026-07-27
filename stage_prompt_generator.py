@@ -4490,6 +4490,9 @@ def _run_stage_impl(
     intelligence_profile["relation_hints"] = relation_hints
     settings["智能偏好应用"] = preference_hints
     settings["智能关系补全"] = relation_hints
+    settings["智能关系补全并入显式道具"] = bool(
+        relation_hints.get("道具世界观") and selected.get("道具世界观")
+    )
     settings["智能编排档案"] = intelligence_profile
     settings["智能任务意图"] = dict(intelligence_profile.get("task_intent", {}) or {})
     settings["智能场景关系图"] = dict(intelligence_profile.get("scene_graph", {}) or {})

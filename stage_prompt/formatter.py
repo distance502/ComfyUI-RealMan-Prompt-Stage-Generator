@@ -272,6 +272,7 @@ def build_json_payload(
         "preference_profile": dict(settings.get("智能偏好档案", {}) or {}),
         "preference_hints_applied": dict(settings.get("智能偏好应用", {}) or {}),
         "relation_hints_applied": dict(settings.get("智能关系补全", {}) or {}),
+        "relation_hints_merged_with_explicit_props": bool(settings.get("智能关系补全并入显式道具", False)),
         "scene_coherence_status": str(dict(settings.get("智能场景关系图", {}) or {}).get("coherence_status", "") or ""),
         "scene_coherence_issues": list(dict(settings.get("智能场景关系图", {}) or {}).get("coherence_issues", []) or []),
         "targeted_repair_count": int(settings.get("智能定向修复次数", 0) or 0),

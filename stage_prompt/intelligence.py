@@ -8,7 +8,7 @@ import re
 from typing import Any, Iterable
 
 
-INTELLIGENCE_PROFILE_VERSION = "qwen-te-intelligence-v4"
+INTELLIGENCE_PROFILE_VERSION = "qwen-te-intelligence-v5"
 
 _GROUP_LIMITS = {
     "主体": 6,
@@ -47,10 +47,10 @@ _INTENT_PATTERNS: dict[str, tuple[str, ...]] = {
     ),
 }
 _ACTION_PROP_REQUIREMENTS: tuple[tuple[tuple[str, ...], tuple[str, ...], str], ...] = (
-    (("举起火炬", "点燃火炬", "torch"), ("火炬", "torch"), "火炬"),
-    (("挥剑", "拔剑", "持剑", "剑术", "sword"), ("长剑", "宝剑", "剑", "sword"), "剑"),
+    (("举起火炬", "点燃火炬", "torch", "raises a torch", "lights a torch", "holds a torch", "carries a torch"), ("火炬", "torch"), "火炬"),
+    (("挥剑", "拔剑", "持剑", "剑术", "sword", "swings a sword", "draws a sword", "holds a sword", "wields a sword"), ("长剑", "宝剑", "剑", "sword"), "剑"),
     (("射箭", "拉弓", "搭箭", "archery"), ("弓箭", "弓", "箭", "bow", "arrow"), "弓箭"),
-    (("展开卷轴", "阅读卷轴", "scroll"), ("卷轴", "scroll"), "卷轴"),
+    (("展开卷轴", "阅读卷轴", "scroll", "reads a scroll", "unrolls a scroll", "opens a scroll"), ("卷轴", "scroll"), "卷轴"),
     (("举起相机", "手持相机拍摄", "使用相机拍摄", "用相机拍摄", "camera in hand"), ("相机", "摄影机", "camera"), "相机"),
     (("手机拍摄", "举起手机", "查看手机", "用手机拍摄", "拍照手机", "holding a phone", "using a phone"), ("手机", "智能手机", "phone", "smartphone"), "手机"),
     (("撑伞", "举伞", "收伞", "holding an umbrella", "opens an umbrella"), ("雨伞", "伞", "umbrella"), "雨伞"),
@@ -61,6 +61,7 @@ _ACTION_PROP_REQUIREMENTS: tuple[tuple[tuple[str, ...], tuple[str, ...], str], .
     (("挥铲", "用铲挖掘", "持铲挖掘", "digging with a shovel"), ("铲子", "铁铲", "shovel"), "铲子"),
     (("挥杆钓鱼", "甩出鱼线", "抛出鱼线", "casting a fishing line"), ("钓竿", "鱼竿", "fishing rod"), "钓竿"),
 )
+_CONTEXT_NOUN_ONLY_ACTION_MARKERS = {"torch", "sword", "scroll"}
 _STRONG_SCENE_CONFLICTS: tuple[tuple[str, tuple[str, ...], str], ...] = (
     ("underwater", ("火炬", "篝火", "明火", "torch", "campfire", "open flame"), "水下场景与持续明火冲突"),
     ("neutral_studio", ("暴雨", "暴雪", "沙尘暴", "雷暴", "storm", "blizzard", "sandstorm"), "中性影棚与户外极端天气冲突"),
@@ -324,11 +325,20 @@ def build_scene_relationship_graph(
             relations.append({"source": subject or ["主主体"], "relation": relation, "target": targets})
 
     natural_context = _clean(context_text)
-    action_text = "，".join([*groups.get("动作姿态", []), natural_context])
+    selected_action_text = "，".join(groups.get("动作姿态", []))
+    action_text = "，".join([selected_action_text, natural_context])
     prop_text = "，".join(groups.get("道具世界观", []))
     inferred_requirements: list[dict[str, Any]] = []
     for action_markers, prop_markers, label in _ACTION_PROP_REQUIREMENTS:
-        evidence = [marker for marker in action_markers if _marker_present(action_text, marker)]
+        evidence = [
+            marker
+            for marker in action_markers
+            if _marker_present(selected_action_text, marker)
+            or (
+                marker.casefold() not in _CONTEXT_NOUN_ONLY_ACTION_MARKERS
+                and _marker_present(natural_context, marker)
+            )
+        ]
         if not evidence:
             continue
         satisfied = _contains_any(prop_text, prop_markers)
@@ -574,7 +584,7 @@ def resolve_relation_hints(
     selected: OrderedDict[str, list[str]] | dict[str, list[str]],
     settings: dict[str, Any],
 ) -> dict[str, list[str]]:
-    if not isinstance(scene_graph, dict) or _unique(selected.get("道具世界观", []), 4):
+    if not isinstance(scene_graph, dict):
         return {}
     issues = list(scene_graph.get("coherence_issues", []) or [])
     if any(isinstance(item, dict) and item.get("severity") == "error" for item in issues):
@@ -592,7 +602,8 @@ def resolve_relation_hints(
     allowed = [
         value
         for value in inferred[:2]
-        if not candidate_world_violation(scene_text, f"{scene_text}，{value}", scene_graph)
+        if value not in _unique(selected.get("道具世界观", []), 8)
+        and not candidate_world_violation(scene_text, f"{scene_text}，{value}", scene_graph)
     ]
     return {"道具世界观": allowed} if allowed else {}
 

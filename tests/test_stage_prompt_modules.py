@@ -385,6 +385,29 @@ class TestStagePromptIntelligence(unittest.TestCase):
         )["scene_graph"]
         self.assertFalse(any(item["target"] == ["雨伞"] for item in negated["inferred_requirements"]))
 
+    def test_natural_language_relation_requires_action_evidence_not_bare_english_nouns(self) -> None:
+        selected = OrderedDict({"主体": ["成年女性侦探"], "场景背景": ["旧档案室"]})
+        decorative = intelligence.build_intelligence_profile(
+            selected,
+            [],
+            {
+                "智能文本匹配": True,
+                "智能文本输入": "The wall has a sword emblem, a scroll pattern, and torch-shaped ornaments.",
+            },
+        )["scene_graph"]
+        self.assertEqual(decorative["inferred_requirements"], [])
+
+        active = intelligence.build_intelligence_profile(
+            selected,
+            [],
+            {
+                "智能文本匹配": True,
+                "智能文本输入": "She wields a sword, then reads a scroll while an assistant holds a torch.",
+            },
+        )["scene_graph"]
+        targets = [item["target"][0] for item in active["inferred_requirements"]]
+        self.assertEqual(targets, ["火炬", "剑", "卷轴"])
+
     def test_natural_language_relation_hint_reaches_full_stage_outputs(self) -> None:
         module = load_stage_prompt_generator_for_integration_test()
         result = module._run_stage(
@@ -407,6 +430,31 @@ class TestStagePromptIntelligence(unittest.TestCase):
         self.assertIn("雨伞", result[1])
         self.assertIn("雨伞", result[7])
         self.assertIn("证据", result[2])
+
+    def test_missing_action_prop_merges_in_full_stage_without_rewriting_selected_tags(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        result = module._run_stage(
+            None,
+            **{
+                "unique_id": "intelligence-v5-explicit-prop-merge",
+                "模型来源": "仅Skill",
+                "主体标签1": "森林游侠",
+                "场景背景标签1": "森林",
+                "动作姿态标签1": "拉弓瞄准",
+                "道具世界观标签1": "短剑",
+                "运行时随机标签": False,
+                "生成数量": 1,
+                "提示词语言": "纯中文",
+                "seed": 37,
+            },
+        )
+        payload = json.loads(result[3])
+        self.assertEqual(payload["relation_hints_applied"], {"道具世界观": ["弓箭"]})
+        self.assertTrue(payload["relation_hints_merged_with_explicit_props"])
+        self.assertEqual(payload["selected_tags_by_category"]["道具世界观"], ["短剑"])
+        for output in (result[1], result[7]):
+            self.assertIn("短剑", output)
+            self.assertIn("弓箭", output)
 
     def test_model_strategy_adapts_without_new_ui_controls(self) -> None:
         task = {"task_type": "standard_visual_story"}
@@ -542,6 +590,42 @@ class TestStagePromptIntelligence(unittest.TestCase):
         )[0]
         self.assertIn("复合弓", explicit_prompt)
         self.assertNotIn("弓箭已成线索", explicit_prompt)
+
+        mismatched = OrderedDict({
+            "主体": ["森林游侠"],
+            "动作姿态": ["拉弓瞄准"],
+            "场景背景": ["森林"],
+            "道具世界观": ["短剑", "火炬"],
+        })
+        mismatched_graph = intelligence.build_scene_relationship_graph(mismatched)
+        mismatched_hints = intelligence.resolve_relation_hints(mismatched_graph, mismatched, settings)
+        self.assertEqual(mismatched_hints, {"道具世界观": ["弓箭"]})
+        merged_settings = {
+            **settings,
+            "智能关系补全": mismatched_hints,
+            "智能关系补全并入显式道具": True,
+        }
+        merged_prompt = prompt_builder.build_prompt_list(
+            mismatched,
+            [],
+            merged_settings,
+            uniq=uniq,
+            infer_template_style=lambda _tags, value: value,
+            infer_subject_type=lambda _tags, value: value,
+            infer_output_structure=lambda _subject, value: value,
+        )[0]
+        merged_video = video_prompt_skill.build_video_prompt(
+            mismatched,
+            [],
+            merged_settings,
+            primary_prompt=merged_prompt,
+        )
+        self.assertIn("短剑", merged_prompt)
+        self.assertIn("火炬", merged_prompt)
+        self.assertIn("弓箭", merged_prompt)
+        self.assertIn("短剑", merged_video)
+        self.assertIn("火炬", merged_video)
+        self.assertIn("弓箭", merged_video)
 
     def test_text_intent_activates_non_person_and_character_sheet_modes(self) -> None:
         module = load_stage_prompt_generator_for_integration_test()
