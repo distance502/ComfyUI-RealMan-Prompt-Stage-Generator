@@ -749,7 +749,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
             )
 
         payload = json.loads(result[3])
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v17")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v18")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 2)
         self.assertEqual(payload["scene_coherence_status"], "coherent")
         self.assertEqual(payload["model_intelligence_skip_count"], 0)
@@ -865,7 +865,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
             )
 
         payload = json.loads(result[3])
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v17")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v18")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 2)
         self.assertEqual(payload["scene_relationship_graph"]["primary_world_family"], "natural_wilderness")
         self.assertEqual(payload["scene_coherence_status"], "coherent")
@@ -957,7 +957,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
             )
 
         payload = json.loads(result[3])
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v17")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v18")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(payload["scene_relationship_graph"]["primary_world_family"], "natural_wilderness")
         self.assertEqual(payload["scene_coherence_status"], "coherent")
@@ -1063,7 +1063,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
             )
 
         payload = json.loads(result[3])
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v17")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v18")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(payload["scene_coherence_status"], "coherent")
         self.assertNotIn("操作控制台", payload["selected_tags_flat"])
@@ -1153,7 +1153,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v17")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v18")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["primary_world_family"], "urban_space")
         self.assertEqual(graph["context_primary_world_source"], "natural_context_override")
@@ -1262,12 +1262,141 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v17")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v18")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["context_scene_attribute_constraints"]["time_of_day"]["required_value"], "day")
         self.assertEqual(graph["context_scene_attribute_constraints"]["precipitation"]["required_value"], "clear")
         self.assertEqual(payload["scene_coherence_status"], "coherent")
         self.assertNotIn("远景保持霓虹雨夜", payload["selected_tags_flat"])
+
+    def test_single_subject_context_removes_soft_multi_subject_anchors(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["成年女性冒险者"],
+                "画面风格": ["史诗群像"],
+                "动作姿态": ["双人互动"],
+                "构图视角": ["冒险队群像"],
+            }
+        )
+        custom = ["背景人物围观", "双人床"]
+        context = "画面只保留单人，角色独自行动，不要群像或双人。"
+        graph = intelligence.build_scene_relationship_graph(selected, custom, context_text=context)
+        issues = [
+            item for item in graph["coherence_issues"]
+            if item["kind"] == "context_subject_cardinality_conflict"
+        ]
+        constraint = graph["context_subject_cardinality_constraint"]
+        self.assertEqual(constraint["required_value"], "single")
+        self.assertEqual(set(constraint["negated_values"]), {"pair", "group"})
+        self.assertEqual(
+            [item["value"] for item in issues[0]["conflicting_anchors"]],
+            ["史诗群像", "双人互动", "冒险队群像", "背景人物围观"],
+        )
+
+        repaired, repaired_custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            custom,
+            graph,
+            soft_tags=["史诗群像", "双人互动", "冒险队群像", "背景人物围观", "双人床"],
+        )
+        rebuilt = intelligence.build_scene_relationship_graph(
+            repaired,
+            repaired_custom,
+            context_text=context,
+        )
+        self.assertEqual(repaired["画面风格"], [])
+        self.assertEqual(repaired["动作姿态"], [])
+        self.assertEqual(repaired["构图视角"], [])
+        self.assertEqual(repaired_custom, ["双人床"])
+        self.assertEqual(report["removed_count"], 4)
+        self.assertEqual(rebuilt["coherence_status"], "coherent")
+
+    def test_subject_cardinality_keeps_multi_stage_story_and_furniture_open(self) -> None:
+        transition = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"]}),
+            context_text="角色先独自侦察，随后与小队会合形成群像。",
+        )
+        furniture = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"], "场景背景": ["卧室"]}),
+            ["双人床"],
+            context_text="单人坐在双人床边整理地图。",
+        )
+        english = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["adult traveler"]}),
+            context_text="A single person takes a couple of steps toward the doorway.",
+        )
+        self.assertEqual(transition["context_subject_cardinality_constraint"], {})
+        self.assertEqual(furniture["context_subject_cardinality_constraint"]["required_value"], "single")
+        self.assertEqual(english["context_subject_cardinality_constraint"]["required_value"], "single")
+        self.assertFalse(
+            any(item["kind"] == "context_subject_cardinality_conflict" for item in furniture["coherence_issues"])
+        )
+
+    def test_explicit_subject_cardinality_conflict_is_guarded(self) -> None:
+        selected = OrderedDict({"主体": ["成年女性冒险者"], "构图视角": ["冒险队群像"]})
+        graph = intelligence.build_scene_relationship_graph(
+            selected,
+            context_text="画面只有单人，角色独自行动。",
+        )
+        unchanged, _custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            [],
+            graph,
+            soft_tags=[],
+        )
+        strategy = intelligence.resolve_model_strategy(
+            {"模型来源": "本地模型"},
+            {"task_type": "standard_visual_story"},
+            graph,
+        )
+        self.assertFalse(report["applied"])
+        self.assertEqual(unchanged, selected)
+        self.assertEqual(strategy["mode"], "skill_only_guarded")
+
+    def test_candidate_cannot_add_people_against_single_subject_constraint(self) -> None:
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"]}),
+            context_text="画面只保留单人，角色独自行动。",
+        )
+        violation = intelligence.candidate_world_violation(
+            "整张画面只有这一位人物，她独自穿过森林。",
+            "整张画面只有这一位人物，她独自穿过森林，背景人物与路人在远处围观。",
+            graph,
+        )
+        self.assertIn("人物数量约束", violation)
+        self.assertTrue("背景人物" in violation or "路人" in violation)
+
+    def test_subject_cardinality_repair_reaches_full_stage(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+
+        def inject_background_people(selected, custom_tags, settings, **_kwargs):
+            next_selected = OrderedDict((group, list(values)) for group, values in selected.items())
+            settings["运行时随机有效种子"] = 101
+            return next_selected, [*custom_tags, "背景人物围观"], ["背景人物围观"]
+
+        with mock.patch.object(module, "_build_runtime_tags", side_effect=inject_background_people):
+            result = module._run_stage(
+                None,
+                **{
+                    "unique_id": "intelligence-v18-subject-cardinality-repair",
+                    "模型来源": "仅Skill",
+                    "主体标签1": "成年女性冒险者",
+                    "额外要求": "画面只保留单人，角色独自行动，不要群像或双人。",
+                    "运行时随机标签": True,
+                    "运行时随机模式": "全随机",
+                    "生成数量": 1,
+                    "提示词语言": "纯中文",
+                    "seed": 101,
+                },
+            )
+
+        payload = json.loads(result[3])
+        graph = payload["scene_relationship_graph"]
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v18")
+        self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
+        self.assertEqual(graph["context_subject_cardinality_constraint"]["required_value"], "single")
+        self.assertEqual(payload["scene_coherence_status"], "coherent")
+        self.assertNotIn("背景人物围观", payload["selected_tags_flat"])
 
     def test_preference_memory_requires_repeated_explicit_choices(self) -> None:
         explicit = OrderedDict(

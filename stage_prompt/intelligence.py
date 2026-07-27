@@ -9,7 +9,7 @@ import re
 from typing import Any, Iterable
 
 
-INTELLIGENCE_PROFILE_VERSION = "qwen-te-intelligence-v17"
+INTELLIGENCE_PROFILE_VERSION = "qwen-te-intelligence-v18"
 
 _GROUP_LIMITS = {
     "主体": 6,
@@ -174,6 +174,33 @@ _SCENE_ATTRIBUTE_LABELS = {
     "rain": "降雨",
     "snow": "降雪",
 }
+SUBJECT_CARDINALITY_MARKERS: dict[str, tuple[str, ...]] = {
+    "single": (
+        "单人", "一个人", "一位人物", "独自一人", "独自",
+        "solo", "single person", "one person", "alone",
+    ),
+    "pair": (
+        "双人", "两人", "二人", "两位人物", "情侣", "伴侣", "夫妇",
+        "duo", "romantic couple", "adult couple", "couple portrait", "couple interaction",
+        "two people", "two women", "two men",
+    ),
+    "group": (
+        "多人", "群像", "团队", "队伍", "小队", "冒险队", "人群", "众人",
+        "背景人物", "路人", "旁观者", "每位人物", "每人",
+        "group portrait", "ensemble cast", "team", "crowd", "background person", "bystander", "passerby",
+    ),
+    "none": (
+        "无人场景", "无人物", "空无一人", "不出现人物", "无人荒城",
+        "no people", "without people", "empty scene",
+    ),
+}
+_SUBJECT_CARDINALITY_LABELS = {
+    "single": "单人",
+    "pair": "双人",
+    "group": "群像",
+    "none": "无人",
+}
+_CARDINALITY_FURNITURE_RE = re.compile(r"(?:单人|双人)(?:床|房|间|沙发|座椅|座位)", flags=re.IGNORECASE)
 
 
 def _clean(value: Any) -> str:
@@ -385,6 +412,50 @@ def _context_scene_attribute_constraints(text: Any) -> dict[str, dict[str, Any]]
             },
         }
     return constraints
+
+
+def _detect_subject_cardinality(text: Any, *, negated: bool) -> dict[str, list[str]]:
+    source = _CARDINALITY_FURNITURE_RE.sub("", _clean(text))
+    hits: dict[str, list[str]] = {}
+    for value, markers in SUBJECT_CARDINALITY_MARKERS.items():
+        matched = [
+            marker
+            for marker in markers
+            if _marker_polarity(source, marker)[1 if negated else 0]
+        ]
+        if matched:
+            hits[value] = matched
+    return hits
+
+
+def detect_subject_cardinality(text: Any) -> dict[str, list[str]]:
+    return _detect_subject_cardinality(text, negated=False)
+
+
+def detect_negated_subject_cardinality(text: Any) -> dict[str, list[str]]:
+    return _detect_subject_cardinality(text, negated=True)
+
+
+def _context_subject_cardinality_constraint(text: Any) -> dict[str, Any]:
+    positive = detect_subject_cardinality(text)
+    negated = detect_negated_subject_cardinality(text)
+    positive_values = list(positive)
+    negated_values = list(negated)
+    overlap = set(positive_values) & set(negated_values)
+    positive_values = [value for value in positive_values if value not in overlap]
+    negated_values = [value for value in negated_values if value not in overlap]
+    required = positive_values[0] if len(positive_values) == 1 else ""
+    if not required and not negated_values:
+        return {}
+    return {
+        "required_value": required,
+        "required_label": _SUBJECT_CARDINALITY_LABELS.get(required, "") if required else "",
+        "positive_values": positive_values,
+        "negated_values": negated_values,
+        "negated_labels": [_SUBJECT_CARDINALITY_LABELS.get(value, value) for value in negated_values],
+        "positive_evidence": {value: list(positive.get(value, [])) for value in positive_values},
+        "negated_evidence": {value: list(negated.get(value, [])) for value in negated_values},
+    }
 
 
 def _primary_world_family_in_text(text: Any) -> tuple[str, str]:
@@ -633,6 +704,9 @@ def build_scene_relationship_graph(
     context_scene_attributes = detect_scene_attributes(natural_context)
     negated_context_scene_attributes = detect_negated_scene_attributes(natural_context)
     context_scene_attribute_constraints = _context_scene_attribute_constraints(natural_context)
+    context_subject_cardinality = detect_subject_cardinality(natural_context)
+    negated_context_subject_cardinality = detect_negated_subject_cardinality(natural_context)
+    context_subject_cardinality_constraint = _context_subject_cardinality_constraint(natural_context)
     primary_family, primary_world_evidence, primary_world_source = _resolve_primary_world_family(
         groups.get("场景背景", []),
         natural_context,
@@ -768,6 +842,52 @@ def build_scene_relationship_graph(
                 ),
             }
         )
+    cardinality_anchors = [
+        {"group": group, "value": value}
+        for group in ("主体", "画面风格", "动作姿态", "构图视角")
+        for value in groups.get(group, [])
+    ] + [{"group": "自定义补充", "value": value} for value in custom]
+    conflicting_cardinality_anchors: list[dict[str, Any]] = []
+    if context_subject_cardinality_constraint:
+        required_cardinality = _clean(context_subject_cardinality_constraint.get("required_value"))
+        negated_cardinalities = set(context_subject_cardinality_constraint.get("negated_values", []) or [])
+        for anchor in cardinality_anchors:
+            anchor_hits = detect_subject_cardinality(anchor["value"])
+            conflicting_values = [
+                value
+                for value in anchor_hits
+                if value in negated_cardinalities or (required_cardinality and value != required_cardinality)
+            ]
+            if conflicting_values:
+                conflicting_cardinality_anchors.append(
+                    {
+                        **anchor,
+                        "actual_values": conflicting_values,
+                        "actual_labels": [
+                            _SUBJECT_CARDINALITY_LABELS.get(value, value) for value in conflicting_values
+                        ],
+                    }
+                )
+    if conflicting_cardinality_anchors:
+        required_label = _clean(context_subject_cardinality_constraint.get("required_label"))
+        negated_labels = list(context_subject_cardinality_constraint.get("negated_labels", []) or [])
+        cardinality_summary = (
+            f"固定为{required_label}"
+            if required_label
+            else "排除" + "/".join(str(item) for item in negated_labels)
+        )
+        coherence_issues.append(
+            {
+                "kind": "context_subject_cardinality_conflict",
+                "severity": "error",
+                "constraint": deepcopy(context_subject_cardinality_constraint),
+                "conflicting_anchors": conflicting_cardinality_anchors,
+                "message": (
+                    f"自然语言已明确人物数量“{cardinality_summary}”，"
+                    "但当前主体、风格、动作、构图或补充标签仍包含相反的人数结构。"
+                ),
+            }
+        )
     context_veto_anchor_keys: set[tuple[str, str]] = set()
     for family, negated_markers in negated_context_world_hits.items():
         family_wide_veto = bool(context_primary_family and context_primary_family != family)
@@ -880,6 +1000,9 @@ def build_scene_relationship_graph(
         "natural_context_scene_attributes": context_scene_attributes,
         "negated_context_scene_attributes": negated_context_scene_attributes,
         "context_scene_attribute_constraints": context_scene_attribute_constraints,
+        "natural_context_subject_cardinality": context_subject_cardinality,
+        "negated_context_subject_cardinality": negated_context_subject_cardinality,
+        "context_subject_cardinality_constraint": context_subject_cardinality_constraint,
         "context_primary_world_family": context_primary_family,
         "context_primary_world_evidence": context_primary_marker,
         "context_primary_world_source": context_primary_source,
@@ -1211,6 +1334,7 @@ def resolve_soft_scene_conflicts(
                 "context_primary_scene_conflict",
                 "context_primary_anchor_conflict",
                 "context_scene_attribute_conflict",
+                "context_subject_cardinality_conflict",
             }:
                 conflict_anchors = [
                     dict(item) for item in issue.get("conflicting_anchors", []) if isinstance(item, dict)
@@ -1221,6 +1345,7 @@ def resolve_soft_scene_conflicts(
                         "context_primary_scene_conflict": "context_primary_scene",
                         "context_primary_anchor_conflict": "context_primary_anchor",
                         "context_scene_attribute_conflict": "context_scene_attribute",
+                        "context_subject_cardinality_conflict": "context_subject_cardinality",
                     }[issue["kind"]]
                     remove_anchors(conflict_anchors, side=side, issue=issue)
                 continue
@@ -1254,6 +1379,7 @@ def classify_repair_reason(reason: Any) -> dict[str, str]:
         ("world_conflict", ("世界族",), "只删除越界世界族及其附属物件，再用当前场景已有材质或环境反馈补足语句。"),
         ("scene_conflict", ("冲突场景",), "只移除错误场景，所有动作、道具和光线必须回到当前唯一主场景。"),
         ("scene_attribute", ("场景属性",), "只移除与用户昼夜或天气要求相反的光影和环境状态，不改变主体、动作与剧情顺序。"),
+        ("subject_cardinality", ("人物数量",), "只修正人物数量与站位，不改变已有角色身份、服装、动作、场景或镜头顺序。"),
         ("language", ("语言",), "只把正文改为当前要求的语言，不改变任何视觉事实与剧情顺序。"),
         ("layout", ("画面结构",), "只修正单帧、人数或多视图结构，不增加人物副本、额外视角或分屏。"),
         ("wrapper", ("分析", "占位符"), "删除分析、占位符、标题和标签包装，只返回可直接使用的自然语言正文。"),
@@ -1327,6 +1453,21 @@ def candidate_world_violation(original: str, candidate: str, scene_graph: Any) -
                         f"模型响应越过场景属性约束：{axis_label}要求“{expected}”，"
                         f"却新增了“{marker}”。"
                     )
+    cardinality_constraint = dict(scene_graph.get("context_subject_cardinality_constraint", {}) or {})
+    if cardinality_constraint:
+        required = _clean(cardinality_constraint.get("required_value"))
+        negated_values = set(cardinality_constraint.get("negated_values", []) or [])
+        original_cardinality = set(detect_subject_cardinality(original))
+        candidate_cardinality = detect_subject_cardinality(candidate)
+        for value, markers in candidate_cardinality.items():
+            if value in original_cardinality:
+                continue
+            if value in negated_values or (required and value != required):
+                expected = _clean(cardinality_constraint.get("required_label")) or "排除人数"
+                return (
+                    f"模型响应越过人物数量约束：要求“{expected}”，"
+                    f"却新增了“{markers[0]}”。"
+                )
     return ""
 
 
@@ -1390,7 +1531,9 @@ __all__ = [
     "classify_repair_reason",
     "detect_negated_world_families",
     "detect_negated_scene_attributes",
+    "detect_negated_subject_cardinality",
     "detect_scene_attributes",
+    "detect_subject_cardinality",
     "detect_world_families",
     "infer_task_intent",
     "resolve_model_strategy",

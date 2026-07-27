@@ -1861,6 +1861,23 @@ def _skill_context_for_model(settings: dict[str, Any]) -> str:
             + "。任务类型和模型策略已经确定，不得在润色时改换任务。"
         )
     if isinstance(scene_graph, dict):
+        cardinality_constraint = dict(scene_graph.get("context_subject_cardinality_constraint", {}) or {})
+        if cardinality_constraint:
+            required_label = str(cardinality_constraint.get("required_label", "") or "").strip()
+            negated_labels = [
+                str(item).strip()
+                for item in list(cardinality_constraint.get("negated_labels", []) or [])
+                if str(item).strip()
+            ]
+            cardinality_text = (
+                f"人物数量固定为{required_label}"
+                if required_label
+                else "人物数量不得采用" + "、".join(negated_labels)
+            )
+            extra_lines.append(
+                "智能人物数量：" + cardinality_text
+                + "。不得增加路人、背景人物、同伴或额外主体；多视图只改变视角，不改变角色数量。"
+            )
         attribute_constraints = dict(scene_graph.get("context_scene_attribute_constraints", {}) or {})
         attribute_parts = []
         for constraint in attribute_constraints.values():
