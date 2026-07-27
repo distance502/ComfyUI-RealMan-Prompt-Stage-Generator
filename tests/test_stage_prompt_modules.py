@@ -1221,7 +1221,7 @@ class TestStagePromptModules(unittest.TestCase):
             self.assertTrue(active_model.llm.closed)
             self.assertIsNone(module._QwenStorage.model)
 
-    def test_qwen35_text_model_uses_embedded_template_instead_of_legacy_qwen_format(self) -> None:
+    def test_qwen35_text_model_uses_qwen_fallback_when_runtime_has_no_embedded_template(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             models_dir = pathlib.Path(temp_dir)
             llm_dir = models_dir / "LLM"
@@ -1239,7 +1239,7 @@ class TestStagePromptModules(unittest.TestCase):
 
             self.assertEqual(len(fake_llama.created), 1)
             self.assertNotIn("chat_format", model.llm.init_kwargs)
-            self.assertIsNone(model.llm.chat_format)
+            self.assertEqual(model.llm.chat_format, "qwen")
             self.assertIsNone(
                 module._推断llama默认聊天格式(
                     family="Qwen3.5-VL",
@@ -1251,7 +1251,7 @@ class TestStagePromptModules(unittest.TestCase):
                 "qwen",
             )
 
-    def test_qwen35_managed_call_repairs_legacy_cached_chat_format(self) -> None:
+    def test_qwen35_managed_call_keeps_compatible_cached_chat_format(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             models_dir = pathlib.Path(temp_dir)
             llm_dir = models_dir / "LLM"
@@ -1274,7 +1274,38 @@ class TestStagePromptModules(unittest.TestCase):
             )
 
             self.assertEqual(result["choices"][0]["message"]["content"], "ok")
-            self.assertIsNone(model.llm.chat_format)
+            self.assertEqual(model.llm.chat_format, "qwen")
+
+    def test_qwen35_managed_call_restores_registered_embedded_template(self) -> None:
+        module, _fake_llama, _runtime = load_nodes_for_storage_test(pathlib.Path("."))
+
+        class EmbeddedTemplateLlama:
+            model_path = "Qwen3.5-4B-Q4_K_M.gguf"
+            chat_format = None
+            chat_handler = None
+            _chat_handlers = {"chat_template.default": object()}
+            _qwen_te_settings = {
+                "model": "Qwen3.5-4B-Q4_K_M.gguf",
+                "family": "Qwen3.5-VL",
+            }
+
+            def reset(self):
+                return None
+
+            def create_chat_completion(self, **_kwargs):
+                if self.chat_format is None:
+                    raise RuntimeError("Invalid chat handler: None (valid formats: ['qwen'])")
+                return {"choices": [{"message": {"content": "embedded-ok"}}]}
+
+        llm = EmbeddedTemplateLlama()
+        result = module._执行chat_completion(
+            llm,
+            messages=[{"role": "user", "content": "return final text"}],
+            params={},
+        )
+
+        self.assertEqual(result["choices"][0]["message"]["content"], "embedded-ok")
+        self.assertEqual(llm.chat_format, "chat_template.default")
 
     def test_model_recovery_uses_recorded_owner_storage(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

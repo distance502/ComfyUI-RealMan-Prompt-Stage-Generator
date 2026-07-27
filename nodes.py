@@ -801,9 +801,26 @@ def _应用llama聊天格式兜底(
     except Exception:
         chat_handler = None
     if prefer_embedded_template and chat_handler is None:
-        if current:
+        try:
+            registered_handlers = getattr(llm, "_chat_handlers", None)
+        except Exception:
+            registered_handlers = None
+        embedded_format = None
+        if isinstance(registered_handlers, dict):
+            if "chat_template.default" in registered_handlers:
+                embedded_format = "chat_template.default"
+            elif current in registered_handlers:
+                embedded_format = current
+
+        # llama-cpp-python registers GGUF Jinja templates on the instance.  A
+        # previous compatibility pass cleared chat_format to None, which makes
+        # create_chat_completion fail with "Invalid chat handler: None".
+        # Restore that registered template; old runtimes without one can still
+        # use Qwen's ChatML-compatible formatter.
+        resolved_format = embedded_format or (current if current and current != "llama-2" else "qwen")
+        if current != resolved_format:
             try:
-                llm.chat_format = None
+                llm.chat_format = resolved_format
             except Exception:
                 pass
     elif not current and chat_format:
