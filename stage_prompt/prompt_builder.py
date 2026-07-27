@@ -5581,19 +5581,31 @@ def build_prompt_list(
         (str(group), [_clean_fragment(value) for value in values if _clean_fragment(value)])
         for group, values in selected.items()
     )
-    preference_hints = settings.get("智能偏好应用")
-    if isinstance(preference_hints, dict):
-        for group, values in preference_hints.items():
+    for hint_key in ("智能关系补全", "智能偏好应用"):
+        hint_groups = settings.get(hint_key)
+        if not isinstance(hint_groups, dict):
+            continue
+        merge_relation_hints = bool(
+            hint_key == "智能关系补全" and settings.get("智能关系补全并入显式道具", False)
+        )
+        for group, values in hint_groups.items():
             group_name = str(group)
-            if selected.get(group_name):
+            if selected.get(group_name) and (hint_key != "智能关系补全" or not merge_relation_hints):
                 continue
             hints = [
                 _clean_fragment(value)
                 for value in (values if isinstance(values, (list, tuple)) else [])
                 if _clean_fragment(value)
-            ][:1]
+            ][:2 if hint_key == "智能关系补全" else 1]
             if hints:
-                selected[group_name] = hints
+                if hint_key == "智能关系补全" and merge_relation_hints and selected.get(group_name):
+                    existing = list(selected.get(group_name, []))
+                    existing_keys = {str(item).casefold() for item in existing}
+                    selected[group_name] = (existing + [
+                        item for item in hints if item.casefold() not in existing_keys
+                    ])[:5]
+                else:
+                    selected[group_name] = hints
     custom_tags = [_clean_fragment(tag) for tag in custom_tags if _clean_fragment(tag)]
     tags = [tag for group_tags in selected.values() for tag in group_tags] + list(custom_tags)
     style = infer_template_style(tags, str(settings["模板风格"]))

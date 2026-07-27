@@ -111,15 +111,28 @@ def _normalized_groups(
     custom = _unique_values(custom_tags, limit=4)
     if custom and "自定义补充" not in groups:
         groups["自定义补充"] = custom
-    preference_hints = settings.get("智能偏好应用")
-    if include_preferences and isinstance(preference_hints, dict):
-        for name, values in preference_hints.items():
-            group_name = str(name)
-            if groups.get(group_name):
+    if include_preferences:
+        for hint_key, limit in (("智能关系补全", 2), ("智能偏好应用", 1)):
+            hint_groups = settings.get(hint_key)
+            if not isinstance(hint_groups, dict):
                 continue
-            cleaned = _unique_values(values, limit=1)
-            if cleaned:
-                groups[group_name] = cleaned
+            merge_relation_hints = bool(
+                hint_key == "智能关系补全" and settings.get("智能关系补全并入显式道具", False)
+            )
+            for name, values in hint_groups.items():
+                group_name = str(name)
+                if groups.get(group_name) and (hint_key != "智能关系补全" or not merge_relation_hints):
+                    continue
+                cleaned = _unique_values(values, limit=limit)
+                if cleaned:
+                    if hint_key == "智能关系补全" and merge_relation_hints and groups.get(group_name):
+                        existing = list(groups.get(group_name, []))
+                        existing_keys = {str(item).casefold() for item in existing}
+                        groups[group_name] = (existing + [
+                            item for item in cleaned if item.casefold() not in existing_keys
+                        ])[:5]
+                    else:
+                        groups[group_name] = cleaned
     return groups
 
 
@@ -147,11 +160,13 @@ def _first(groups: Mapping[str, list[str]], name: str, fallback: str = "") -> st
     return values[0] if values else fallback
 
 
-def _pair(groups: Mapping[str, list[str]], name: str) -> str:
-    values = groups.get(name, [])[:2]
+def _series(groups: Mapping[str, list[str]], name: str, *, limit: int = 4) -> str:
+    values = groups.get(name, [])[: max(1, int(limit))]
     if not values:
         return ""
-    return values[0] if len(values) == 1 else f"{values[0]}和{values[1]}"
+    if len(values) == 1:
+        return values[0]
+    return "、".join(values[:-1]) + "和" + values[-1]
 
 
 def _primary_composition(groups: Mapping[str, list[str]]) -> str:
@@ -310,7 +325,7 @@ def _build_chinese_video_prompt(
     scene = _first(groups, "场景背景") or "当前主场景"
     action = _first(groups, "动作姿态") or ("完成一次有明确方向的状态变化" if non_person else "先停下确认线索，再做出一个明确动作")
     outfit = _first(groups, "服装造型")
-    props = _first(groups, "道具世界观") or "场景中的关键线索"
+    props = _series(groups, "道具世界观") or "场景中的关键线索"
     lighting = _first(groups, "光影氛围") or "主光随动作轻微移动，环境反射保留空间层次"
     composition = _primary_composition(groups)
     brief = _source_brief(settings)

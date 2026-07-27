@@ -4,11 +4,12 @@
 from __future__ import annotations
 
 from collections import OrderedDict
+from copy import deepcopy
 import re
 from typing import Any, Iterable
 
 
-INTELLIGENCE_PROFILE_VERSION = "qwen-te-intelligence-v2"
+INTELLIGENCE_PROFILE_VERSION = "qwen-te-intelligence-v6"
 
 _GROUP_LIMITS = {
     "主体": 6,
@@ -47,12 +48,21 @@ _INTENT_PATTERNS: dict[str, tuple[str, ...]] = {
     ),
 }
 _ACTION_PROP_REQUIREMENTS: tuple[tuple[tuple[str, ...], tuple[str, ...], str], ...] = (
-    (("举起火炬", "点燃火炬", "torch"), ("火炬", "torch"), "火炬"),
-    (("挥剑", "拔剑", "持剑", "剑术", "sword"), ("长剑", "宝剑", "剑", "sword"), "剑"),
+    (("举起火炬", "点燃火炬", "torch", "raises a torch", "lights a torch", "holds a torch", "carries a torch"), ("火炬", "torch"), "火炬"),
+    (("挥剑", "拔剑", "持剑", "剑术", "sword", "swings a sword", "draws a sword", "holds a sword", "wields a sword"), ("长剑", "宝剑", "剑", "sword"), "剑"),
     (("射箭", "拉弓", "搭箭", "archery"), ("弓箭", "弓", "箭", "bow", "arrow"), "弓箭"),
-    (("展开卷轴", "阅读卷轴", "scroll"), ("卷轴", "scroll"), "卷轴"),
-    (("拍摄", "摄影", "举起相机", "camera"), ("相机", "摄影机", "camera"), "相机"),
+    (("展开卷轴", "阅读卷轴", "scroll", "reads a scroll", "unrolls a scroll", "opens a scroll"), ("卷轴", "scroll"), "卷轴"),
+    (("举起相机", "手持相机拍摄", "使用相机拍摄", "用相机拍摄", "camera in hand"), ("相机", "摄影机", "camera"), "相机"),
+    (("手机拍摄", "举起手机", "查看手机", "用手机拍摄", "拍照手机", "holding a phone", "using a phone"), ("手机", "智能手机", "phone", "smartphone"), "手机"),
+    (("撑伞", "举伞", "收伞", "holding an umbrella", "opens an umbrella"), ("雨伞", "伞", "umbrella"), "雨伞"),
+    (("提灯", "举起灯笼", "点亮灯笼", "holding a lantern", "raises a lantern"), ("灯笼", "提灯", "lantern"), "灯笼"),
+    (("举盾", "持盾", "用盾格挡", "shield block", "raises a shield"), ("盾牌", "盾", "shield"), "盾牌"),
+    (("翻书", "读书", "阅读书籍", "reading a book", "opens a book"), ("书本", "书籍", "书", "book"), "书本"),
+    (("举起望远镜", "用望远镜观察", "透过望远镜", "looking through binoculars"), ("望远镜", "binoculars"), "望远镜"),
+    (("挥铲", "用铲挖掘", "持铲挖掘", "digging with a shovel"), ("铲子", "铁铲", "shovel"), "铲子"),
+    (("挥杆钓鱼", "甩出鱼线", "抛出鱼线", "casting a fishing line"), ("钓竿", "鱼竿", "fishing rod"), "钓竿"),
 )
+_CONTEXT_NOUN_ONLY_ACTION_MARKERS = {"torch", "sword", "scroll"}
 _STRONG_SCENE_CONFLICTS: tuple[tuple[str, tuple[str, ...], str], ...] = (
     ("underwater", ("火炬", "篝火", "明火", "torch", "campfire", "open flame"), "水下场景与持续明火冲突"),
     ("neutral_studio", ("暴雨", "暴雪", "沙尘暴", "雷暴", "storm", "blizzard", "sandstorm"), "中性影棚与户外极端天气冲突"),
@@ -142,14 +152,55 @@ def _unique(values: Iterable[Any], limit: int = 12) -> list[str]:
     return result
 
 
-def _marker_present(text: str, marker: str) -> bool:
+_CLAUSE_BOUNDARY_RE = re.compile(
+    r"(?:[，,；;。！？.!?\n]+|(?:但(?:是|要)?|不过|然而|而是|反而)|"
+    r"\b(?:but|however|instead|yet)\b)",
+    flags=re.IGNORECASE,
+)
+_BROAD_NEGATION_RE = re.compile(
+    r"(?:不要|不需要|不必|无需|不能|别(?:再)?|未(?:启用|使用|包含|生成)?|避免|禁止|排除|移除|去掉|不是|并非|不得|不可|"
+    r"\b(?:do\s+not|don't|does\s+not|doesn't|cannot|can't|should\s+not|shouldn't|must\s+not|"
+    r"will\s+not|won't|not|never|without|avoid|exclude|remove|omit)\b)"
+    r"[^，,；;。！？.!?\n]{0,24}$",
+    flags=re.IGNORECASE,
+)
+_NEGATION_CANCEL_RE = re.compile(
+    r"(?:不仅|不只|不止|不光|\bnot\s+only\b)[^，,；;。！？.!?\n]{0,24}$",
+    flags=re.IGNORECASE,
+)
+_DIRECT_NEGATION_RE = re.compile(
+    r"(?:没有|不含|无|非|\bno\b)\s*(?:任何|任意|any)?\s*$",
+    flags=re.IGNORECASE,
+)
+
+
+def _marker_matches(text: str, marker: str) -> list[re.Match[str]]:
     source = str(text or "").casefold()
     needle = str(marker or "").casefold()
     if not source or not needle:
-        return False
+        return []
     if needle.isascii() and re.fullmatch(r"[a-z0-9][a-z0-9 ._-]*", needle):
-        return bool(re.search(rf"(?<![a-z0-9]){re.escape(needle)}(?![a-z0-9])", source))
-    return needle in source
+        return list(re.finditer(rf"(?<![a-z0-9]){re.escape(needle)}(?![a-z0-9])", source))
+    return list(re.finditer(re.escape(needle), source))
+
+
+def _marker_polarity(text: str, marker: str) -> tuple[bool, bool]:
+    source = str(text or "").casefold()
+    positive = False
+    negated = False
+    for match in _marker_matches(source, marker):
+        prefix = source[max(0, match.start() - 80) : match.start()]
+        clause_prefix = _CLAUSE_BOUNDARY_RE.split(prefix)[-1][-48:]
+        broad_negation = _BROAD_NEGATION_RE.search(clause_prefix)
+        if (broad_negation and not _NEGATION_CANCEL_RE.search(clause_prefix)) or _DIRECT_NEGATION_RE.search(clause_prefix):
+            negated = True
+            continue
+        positive = True
+    return positive, negated
+
+
+def _marker_present(text: str, marker: str) -> bool:
+    return _marker_polarity(text, marker)[0]
 
 
 def detect_world_families(text: Any) -> dict[str, list[str]]:
@@ -167,14 +218,29 @@ def _contains_any(text: Any, markers: Iterable[str]) -> bool:
     return any(_marker_present(source, marker) for marker in markers)
 
 
-def _intent_signals(settings: dict[str, Any]) -> tuple[str, list[str]]:
+def _intent_signals(
+    settings: dict[str, Any],
+) -> tuple[str, list[str], dict[str, list[str]], dict[str, list[str]]]:
     text = "，".join(
         _clean(settings.get(key))
         for key in ("智能文本输入", "额外要求", "图片反推附加要求")
         if _clean(settings.get(key))
     )
-    signals = [name for name, markers in _INTENT_PATTERNS.items() if _contains_any(text, markers)]
-    return text, signals
+    polarity = {
+        name: {marker: _marker_polarity(text, marker) for marker in markers}
+        for name, markers in _INTENT_PATTERNS.items()
+    }
+    evidence = {
+        name: [marker for marker, (positive, _negated) in markers.items() if positive]
+        for name, markers in polarity.items()
+    }
+    evidence = {name: markers for name, markers in evidence.items() if markers}
+    negated_evidence = {
+        name: [marker for marker, (_positive, negated) in markers.items() if negated]
+        for name, markers in polarity.items()
+    }
+    negated_evidence = {name: markers for name, markers in negated_evidence.items() if markers}
+    return text, list(evidence), evidence, negated_evidence
 
 
 def infer_task_intent(
@@ -189,7 +255,7 @@ def infer_task_intent(
     character_sheet_enabled = bool(_clean(settings.get("角色设定图内部策略"))) or (
         image_reverse_enabled and reverse_mode == "角色设定图"
     )
-    intent_text, text_signals = _intent_signals(settings)
+    intent_text, text_signals, text_evidence, negated_text_evidence = _intent_signals(settings)
     character_sheet_enabled = character_sheet_enabled or "character_sheet" in text_signals
     tag_block_enabled = bool(settings.get("标签块编排启用", False))
     smart_enabled = bool(settings.get("智能文本匹配", False)) and bool(
@@ -224,6 +290,8 @@ def infer_task_intent(
         "image_reverse_mode": reverse_mode if image_reverse_enabled else "disabled",
         "character_sheet_enabled": character_sheet_enabled,
         "text_signals": text_signals,
+        "text_evidence": text_evidence,
+        "negated_text_evidence": negated_text_evidence,
         "intent_text_present": bool(intent_text),
         "primary_channel": "video_storyboard" if "video_first" in text_signals else "image_prompt",
         "channels": ["image_prompt", "video_storyboard"],
@@ -233,6 +301,8 @@ def infer_task_intent(
 def build_scene_relationship_graph(
     selected: OrderedDict[str, list[str]] | dict[str, list[str]],
     custom_tags: Iterable[Any] = (),
+    *,
+    context_text: Any = "",
 ) -> dict[str, Any]:
     groups = {
         group: _unique(selected.get(group, []), limit)
@@ -255,11 +325,22 @@ def build_scene_relationship_graph(
         if targets:
             relations.append({"source": subject or ["主主体"], "relation": relation, "target": targets})
 
-    action_text = "，".join(groups.get("动作姿态", []))
+    natural_context = _clean(context_text)
+    selected_action_text = "，".join(groups.get("动作姿态", []))
+    action_text = "，".join([selected_action_text, natural_context])
     prop_text = "，".join(groups.get("道具世界观", []))
     inferred_requirements: list[dict[str, Any]] = []
     for action_markers, prop_markers, label in _ACTION_PROP_REQUIREMENTS:
-        if not _contains_any(action_text, action_markers):
+        evidence = [
+            marker
+            for marker in action_markers
+            if _marker_present(selected_action_text, marker)
+            or (
+                marker.casefold() not in _CONTEXT_NOUN_ONLY_ACTION_MARKERS
+                and _marker_present(natural_context, marker)
+            )
+        ]
+        if not evidence:
             continue
         satisfied = _contains_any(prop_text, prop_markers)
         inferred_requirements.append(
@@ -268,6 +349,9 @@ def build_scene_relationship_graph(
                 "relation": "requires_prop",
                 "target": [label],
                 "satisfied": satisfied,
+                "effective_satisfied": satisfied,
+                "resolution": "explicit" if satisfied else "pending",
+                "evidence": evidence[:3],
             }
         )
         relations.append(
@@ -278,11 +362,26 @@ def build_scene_relationship_graph(
             }
         )
 
-    scene_text = "，".join([*groups.get("场景背景", []), *groups.get("道具世界观", []), *custom])
+    scene_text = "，".join(
+        [
+            *groups.get("场景背景", []),
+            *groups.get("道具世界观", []),
+            *groups.get("动作姿态", []),
+            *custom,
+        ]
+    )
     explicit_hits = detect_world_families(scene_text)
     scene_only_hits = detect_world_families("，".join(groups.get("场景背景", [])))
     primary_family = next(iter(scene_only_hits), "")
     allowed = set(explicit_hits)
+    inferred_world_hits = detect_world_families(
+        "，".join(
+            str(value)
+            for requirement in inferred_requirements
+            for value in list(requirement.get("target", []) or [])
+        )
+    )
+    allowed.update(inferred_world_hits)
     if primary_family:
         allowed.add(primary_family)
         allowed.update(_WORLD_COMPATIBILITY.get(primary_family, ()))
@@ -292,7 +391,7 @@ def build_scene_relationship_graph(
         for group, values in groups.items()
         if values and group in {"主体", "服装造型", "场景背景", "动作姿态", "道具世界观", "画面风格", "构图视角"}
     }
-    coherence_issues: list[dict[str, str]] = []
+    coherence_issues: list[dict[str, Any]] = []
     location_families = [family for family in scene_only_hits if family in _LOCATION_WORLD_FAMILIES]
     if len(location_families) > 1:
         coherence_issues.append(
@@ -319,19 +418,24 @@ def build_scene_relationship_graph(
                 {
                     "kind": "implicit_prop_anchor",
                     "severity": "info",
+                    "target": requirement["target"][0],
                     "message": f"动作已隐含道具“{requirement['target'][0]}”，生成时必须保持该动作-道具关系。",
                 }
             )
     return {
         "nodes": groups,
         "custom_context": custom,
+        "natural_context_present": bool(natural_context),
         "relations": relations,
         "hard_anchors": hard_anchors,
         "inferred_requirements": inferred_requirements,
         "coherence_issues": coherence_issues,
+        "resolved_coherence_issues": [],
+        "resolved_issue_count": 0,
         "coherence_status": "conflict" if any(item["severity"] == "error" for item in coherence_issues) else ("review" if coherence_issues else "coherent"),
         "primary_world_family": primary_family,
         "explicit_world_families": list(explicit_hits),
+        "inferred_world_families": list(inferred_world_hits),
         "allowed_world_families": sorted(allowed),
         "forbidden_world_families": forbidden,
     }
@@ -481,6 +585,101 @@ def resolve_preference_hints(
     return hints
 
 
+def resolve_relation_hints(
+    scene_graph: Any,
+    selected: OrderedDict[str, list[str]] | dict[str, list[str]],
+    settings: dict[str, Any],
+) -> dict[str, list[str]]:
+    if not isinstance(scene_graph, dict):
+        return {}
+    issues = list(scene_graph.get("coherence_issues", []) or [])
+    if any(isinstance(item, dict) and item.get("severity") == "error" for item in issues):
+        return {}
+    inferred: list[str] = []
+    for requirement in list(scene_graph.get("inferred_requirements", []) or []):
+        if not isinstance(requirement, dict) or requirement.get("satisfied"):
+            continue
+        for value in _unique(requirement.get("target", []), 2):
+            if value not in inferred:
+                inferred.append(value)
+    if not inferred:
+        return {}
+    scene_text = "，".join(_unique(selected.get("场景背景", []), 5))
+    allowed = [
+        value
+        for value in inferred[:2]
+        if value not in _unique(selected.get("道具世界观", []), 8)
+        and not candidate_world_violation(scene_text, f"{scene_text}，{value}", scene_graph)
+    ]
+    return {"道具世界观": allowed} if allowed else {}
+
+
+def apply_relation_hint_resolution(scene_graph: Any, relation_hints: Any) -> dict[str, Any]:
+    if not isinstance(scene_graph, dict):
+        return {}
+    resolved_graph = deepcopy(scene_graph)
+    hint_groups = relation_hints if isinstance(relation_hints, dict) else {}
+    hinted_props = {
+        value.casefold()
+        for value in _unique(hint_groups.get("道具世界观", []), 8)
+    }
+    resolved_targets: set[str] = set()
+    requirements: list[dict[str, Any]] = []
+    for raw_requirement in list(resolved_graph.get("inferred_requirements", []) or []):
+        if not isinstance(raw_requirement, dict):
+            continue
+        requirement = dict(raw_requirement)
+        targets = _unique(requirement.get("target", []), 4)
+        resolved_by_hint = bool(
+            not requirement.get("satisfied")
+            and any(target.casefold() in hinted_props for target in targets)
+        )
+        requirement["resolved_by_hint"] = resolved_by_hint
+        requirement["effective_satisfied"] = bool(requirement.get("satisfied") or resolved_by_hint)
+        requirement["resolution"] = (
+            "explicit"
+            if requirement.get("satisfied")
+            else ("relation_hint" if resolved_by_hint else "pending")
+        )
+        if resolved_by_hint:
+            resolved_targets.update(targets)
+        requirements.append(requirement)
+    resolved_graph["inferred_requirements"] = requirements
+
+    unresolved_issues: list[dict[str, Any]] = []
+    resolved_issues = [
+        dict(item)
+        for item in list(resolved_graph.get("resolved_coherence_issues", []) or [])
+        if isinstance(item, dict)
+    ]
+    for raw_issue in list(resolved_graph.get("coherence_issues", []) or []):
+        if not isinstance(raw_issue, dict):
+            continue
+        issue = dict(raw_issue)
+        target = _clean(issue.get("target"))
+        if issue.get("kind") == "implicit_prop_anchor" and target in resolved_targets:
+            issue["resolved"] = True
+            issue["resolution"] = "relation_hint"
+            issue["message"] = f"动作隐含道具“{target}”已由关系软补全加入本次 Skill 成品。"
+            resolved_issues.append(issue)
+        else:
+            unresolved_issues.append(issue)
+    resolved_graph["coherence_issues"] = unresolved_issues
+    resolved_graph["resolved_coherence_issues"] = resolved_issues
+    resolved_graph["resolved_issue_count"] = len(resolved_issues)
+    resolved_graph["coherence_status"] = (
+        "conflict"
+        if any(item.get("severity") == "error" for item in unresolved_issues)
+        else ("review" if unresolved_issues else "coherent")
+    )
+    resolved_graph["resolution_status"] = (
+        "partially_resolved"
+        if resolved_issues and unresolved_issues
+        else ("resolved" if resolved_issues else "unchanged")
+    )
+    return resolved_graph
+
+
 def classify_repair_reason(reason: Any) -> dict[str, str]:
     text = _clean(reason)
     folded = text.casefold()
@@ -513,7 +712,12 @@ def build_intelligence_profile(
     preference_profile: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     task_intent = infer_task_intent(selected, settings, has_reference_image=has_reference_image)
-    scene_graph = build_scene_relationship_graph(selected, custom_tags)
+    context_text = "，".join(
+        _clean(settings.get(key))
+        for key in ("智能文本输入", "额外要求", "图片反推附加要求")
+        if _clean(settings.get(key))
+    )
+    scene_graph = build_scene_relationship_graph(selected, custom_tags, context_text=context_text)
     model_strategy = resolve_model_strategy(settings, task_intent, scene_graph)
     return {
         "version": INTELLIGENCE_PROFILE_VERSION,
@@ -548,6 +752,7 @@ def summarize_intelligence_profile(profile: Any) -> str:
     strategy = dict(profile.get("model_strategy", {}))
     preference = dict(profile.get("preference_profile", {}))
     hints = dict(profile.get("preference_hints", {}))
+    relation_hints = dict(profile.get("relation_hints", {}))
     stable = dict(preference.get("stable_preferences", {}))
     stable_text = "、".join(
         f"{group}={','.join(str(item) for item in values)}"
@@ -559,17 +764,40 @@ def summarize_intelligence_profile(profile: Any) -> str:
         for group, values in hints.items()
         if values
     ) or "未应用"
+    relation_text = "、".join(
+        f"{group}={','.join(str(item) for item in values)}"
+        for group, values in relation_hints.items()
+        if values
+    ) or "无需补全"
+    positive_evidence = _unique(
+        marker
+        for markers in dict(task.get("text_evidence", {}) or {}).values()
+        for marker in list(markers or [])
+    )[:3]
+    negated_evidence = _unique(
+        marker
+        for markers in dict(task.get("negated_text_evidence", {}) or {}).values()
+        for marker in list(markers or [])
+    )[:3]
+    evidence_parts = []
+    if positive_evidence:
+        evidence_parts.append("正向=" + ",".join(positive_evidence))
+    if negated_evidence:
+        evidence_parts.append("排除=" + ",".join(negated_evidence))
+    evidence_text = "；".join(evidence_parts) or "无文本触发"
     return (
         f"任务 {task.get('task_type', 'unknown')} ({float(task.get('confidence', 0) or 0):.2f}) | "
+        f"证据 {evidence_text} | "
         f"世界族 {graph.get('primary_world_family') or '未限定'} | "
         f"模型策略 {strategy.get('mode', 'skill_only')} (风险 {int(strategy.get('risk_score', 0) or 0)}) | "
-        f"偏好 {stable_text} | 本次软应用 {hint_text}"
+        f"偏好 {stable_text} | 本次软应用 {hint_text} | 关系补全 {relation_text}"
     )
 
 
 __all__ = [
     "INTELLIGENCE_PROFILE_VERSION",
     "WORLD_FAMILY_MARKERS",
+    "apply_relation_hint_resolution",
     "build_intelligence_profile",
     "build_scene_relationship_graph",
     "candidate_world_violation",
@@ -578,6 +806,7 @@ __all__ = [
     "infer_task_intent",
     "resolve_model_strategy",
     "resolve_preference_hints",
+    "resolve_relation_hints",
     "summarize_intelligence_profile",
     "update_preference_memory",
 ]

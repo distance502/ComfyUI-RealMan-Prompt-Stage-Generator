@@ -224,6 +224,68 @@ class TestStagePromptIntelligence(unittest.TestCase):
                 )
                 self.assertEqual(profile["task_type"], expected)
 
+    def test_text_intent_respects_negation_and_reports_positive_evidence(self) -> None:
+        selected = OrderedDict({"主体": ["成年女性"]})
+        negated_sheet = intelligence.infer_task_intent(
+            selected,
+            {"额外要求": "不要生成正面、侧面、背面三视图，只要单张正面角色"},
+        )
+        negated_video = intelligence.infer_task_intent(
+            selected,
+            {"额外要求": "不需要视频提示词，只输出静态画面"},
+        )
+        positive_after_comma = intelligence.infer_task_intent(
+            selected,
+            {"额外要求": "不要文字和水印，输出角色三视图"},
+        )
+        self.assertEqual(negated_sheet["task_type"], "standard_visual_story")
+        self.assertNotIn("character_sheet", negated_sheet["text_signals"])
+        self.assertEqual(negated_video["primary_channel"], "image_prompt")
+        self.assertEqual(positive_after_comma["task_type"], "character_sheet_from_text")
+        self.assertIn("三视图", positive_after_comma["text_evidence"]["character_sheet"])
+
+    def test_text_intent_handles_contrastive_negation_in_chinese_and_english(self) -> None:
+        selected = OrderedDict({"主体": ["成年女性"]})
+        chinese = intelligence.infer_task_intent(
+            selected,
+            {"额外要求": "不要三视图但要视频提示词，镜头围绕单一角色推进"},
+        )
+        english = intelligence.infer_task_intent(
+            selected,
+            {"额外要求": "Do not create a video prompt but make a character sheet."},
+        )
+        harmless_no_suffix = intelligence.infer_task_intent(
+            selected,
+            {"额外要求": "Create a piano character sheet with clean orthographic views."},
+        )
+        cannot_video = intelligence.infer_task_intent(
+            selected,
+            {"额外要求": "Cannot create a video prompt; return one still image."},
+        )
+        not_only = intelligence.infer_task_intent(
+            selected,
+            {"额外要求": "Create not only a character sheet but also a video prompt."},
+        )
+        chinese_cannot = intelligence.infer_task_intent(
+            selected,
+            {"额外要求": "不能生成三视图，只输出单张画面。"},
+        )
+        self.assertEqual(chinese["task_type"], "video_first_story")
+        self.assertIn("三视图", chinese["negated_text_evidence"]["character_sheet"])
+        self.assertNotIn("character_sheet", chinese["text_signals"])
+        self.assertEqual(english["task_type"], "character_sheet_from_text")
+        self.assertIn("video prompt", english["negated_text_evidence"]["video_first"])
+        self.assertEqual(harmless_no_suffix["task_type"], "character_sheet_from_text")
+        self.assertEqual(cannot_video["primary_channel"], "image_prompt")
+        self.assertEqual(chinese_cannot["task_type"], "standard_visual_story")
+        self.assertIn("character_sheet", not_only["text_signals"])
+        self.assertIn("video_first", not_only["text_signals"])
+
+        worlds = intelligence.detect_world_families("不是地下城而是森林，不要列车但保留林间小屋。")
+        self.assertIn("natural_wilderness", worlds)
+        self.assertNotIn("underground_ruin", worlds)
+        self.assertNotIn("urban_space", worlds)
+
     def test_scene_graph_connects_anchors_and_rejects_foreign_worlds(self) -> None:
         selected = OrderedDict(
             {
@@ -253,6 +315,14 @@ class TestStagePromptIntelligence(unittest.TestCase):
                     "越过场景关系图",
                     intelligence.candidate_world_violation(original, original + foreign, graph),
                 )
+        self.assertEqual(
+            intelligence.candidate_world_violation(original, original + "不要加入月球车或监控屏幕。", graph),
+            "",
+        )
+        negated_worlds = intelligence.detect_world_families("地下城遗迹里没有列车，也不要加入浴缸。")
+        self.assertIn("underground_ruin", negated_worlds)
+        self.assertNotIn("urban_space", negated_worlds)
+        self.assertNotIn("private_interior", negated_worlds)
 
     def test_scene_graph_explains_implicit_props_and_strong_affordance_conflicts(self) -> None:
         implicit = intelligence.build_scene_relationship_graph(
@@ -260,11 +330,157 @@ class TestStagePromptIntelligence(unittest.TestCase):
         )
         self.assertEqual(implicit["coherence_status"], "review")
         self.assertTrue(any(item["kind"] == "implicit_prop_anchor" for item in implicit["coherence_issues"]))
+        self.assertEqual(
+            intelligence.resolve_relation_hints(
+                implicit,
+                OrderedDict({"主体": ["游侠"], "动作姿态": ["拉弓瞄准"], "场景背景": ["森林"]}),
+                {},
+            ),
+            {"道具世界观": ["弓箭"]},
+        )
+        resolved = intelligence.apply_relation_hint_resolution(
+            implicit,
+            {"道具世界观": ["弓箭"]},
+        )
+        self.assertEqual(resolved["coherence_status"], "coherent")
+        self.assertEqual(resolved["coherence_issues"], [])
+        self.assertEqual(resolved["resolved_issue_count"], 1)
+        self.assertEqual(resolved["inferred_requirements"][0]["resolution"], "relation_hint")
+        self.assertTrue(resolved["inferred_requirements"][0]["effective_satisfied"])
+        unresolved_strategy = intelligence.resolve_model_strategy(
+            {"模型来源": "API接口"},
+            {"task_type": "standard_visual_story"},
+            implicit,
+        )
+        resolved_strategy = intelligence.resolve_model_strategy(
+            {"模型来源": "API接口"},
+            {"task_type": "standard_visual_story"},
+            resolved,
+        )
+        self.assertGreater(unresolved_strategy["risk_score"], resolved_strategy["risk_score"])
+        self.assertEqual(resolved_strategy["coherence_issue_count"], 0)
+        urban_archer_selected = OrderedDict(
+            {"主体": ["都市游侠"], "动作姿态": ["拉弓瞄准"], "场景背景": ["城市天台"]}
+        )
+        urban_archer = intelligence.build_scene_relationship_graph(urban_archer_selected)
+        self.assertIn("fantasy_adventure_gear", urban_archer["inferred_world_families"])
+        self.assertEqual(
+            intelligence.resolve_relation_hints(urban_archer, urban_archer_selected, {}),
+            {"道具世界观": ["弓箭"]},
+        )
         underwater = intelligence.build_scene_relationship_graph(
             OrderedDict({"主体": ["潜水员"], "场景背景": ["深海"], "道具世界观": ["火炬"]})
         )
         self.assertEqual(underwater["coherence_status"], "conflict")
         self.assertTrue(any("持续明火" in item["message"] for item in underwater["coherence_issues"]))
+        self.assertEqual(
+            intelligence.resolve_relation_hints(
+                underwater,
+                OrderedDict({"主体": ["潜水员"], "动作姿态": ["举起火炬"], "场景背景": ["深海"]}),
+                {},
+            ),
+            {},
+        )
+
+    def test_natural_language_context_infers_props_without_cross_contamination(self) -> None:
+        selected = OrderedDict({"主体": ["成年女性侦探"], "场景背景": ["雨夜街头"]})
+        settings = {
+            "智能文本匹配": True,
+            "智能文本输入": "成年女性侦探在雨夜街头撑伞，并举起手机拍摄门牌。",
+        }
+        profile = intelligence.build_intelligence_profile(selected, [], settings)
+        graph = profile["scene_graph"]
+        targets = [item["target"][0] for item in graph["inferred_requirements"]]
+        self.assertEqual(targets, ["手机", "雨伞"])
+        self.assertTrue(graph["natural_context_present"])
+        self.assertNotIn("相机", targets)
+        self.assertEqual(
+            intelligence.resolve_relation_hints(graph, selected, settings),
+            {"道具世界观": ["手机", "雨伞"]},
+        )
+
+        negated = intelligence.build_intelligence_profile(
+            selected,
+            [],
+            {"智能文本匹配": True, "智能文本输入": "侦探不要撑伞，只在屋檐下观察雨势。"},
+        )["scene_graph"]
+        self.assertFalse(any(item["target"] == ["雨伞"] for item in negated["inferred_requirements"]))
+
+    def test_natural_language_relation_requires_action_evidence_not_bare_english_nouns(self) -> None:
+        selected = OrderedDict({"主体": ["成年女性侦探"], "场景背景": ["旧档案室"]})
+        decorative = intelligence.build_intelligence_profile(
+            selected,
+            [],
+            {
+                "智能文本匹配": True,
+                "智能文本输入": "The wall has a sword emblem, a scroll pattern, and torch-shaped ornaments.",
+            },
+        )["scene_graph"]
+        self.assertEqual(decorative["inferred_requirements"], [])
+
+        active = intelligence.build_intelligence_profile(
+            selected,
+            [],
+            {
+                "智能文本匹配": True,
+                "智能文本输入": "She wields a sword, then reads a scroll while an assistant holds a torch.",
+            },
+        )["scene_graph"]
+        targets = [item["target"][0] for item in active["inferred_requirements"]]
+        self.assertEqual(targets, ["火炬", "剑", "卷轴"])
+
+    def test_natural_language_relation_hint_reaches_full_stage_outputs(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        result = module._run_stage(
+            None,
+            **{
+                "unique_id": "intelligence-v4-natural-relation",
+                "模型来源": "仅Skill",
+                "主体标签1": "成年女性侦探",
+                "场景背景标签1": "雨夜街头",
+                "额外要求": "成年女性侦探在雨夜街头撑伞观察门牌。",
+                "智能文本匹配": False,
+                "运行时随机标签": False,
+                "生成数量": 1,
+                "提示词语言": "纯中文",
+                "seed": 31,
+            },
+        )
+        payload = json.loads(result[3])
+        self.assertEqual(payload["relation_hints_applied"], {"道具世界观": ["雨伞"]})
+        self.assertEqual(payload["scene_coherence_status"], "coherent")
+        self.assertEqual(payload["scene_coherence_issues"], [])
+        self.assertEqual(len(payload["scene_coherence_resolved_issues"]), 1)
+        self.assertIn("雨伞", result[1])
+        self.assertIn("雨伞", result[7])
+        self.assertIn("证据", result[2])
+
+    def test_missing_action_prop_merges_in_full_stage_without_rewriting_selected_tags(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        result = module._run_stage(
+            None,
+            **{
+                "unique_id": "intelligence-v5-explicit-prop-merge",
+                "模型来源": "仅Skill",
+                "主体标签1": "森林游侠",
+                "场景背景标签1": "森林",
+                "动作姿态标签1": "拉弓瞄准",
+                "道具世界观标签1": "短剑",
+                "运行时随机标签": False,
+                "生成数量": 1,
+                "提示词语言": "纯中文",
+                "seed": 37,
+            },
+        )
+        payload = json.loads(result[3])
+        self.assertEqual(payload["relation_hints_applied"], {"道具世界观": ["弓箭"]})
+        self.assertTrue(payload["relation_hints_merged_with_explicit_props"])
+        self.assertEqual(payload["scene_coherence_status"], "coherent")
+        self.assertEqual(len(payload["scene_coherence_resolved_issues"]), 1)
+        self.assertEqual(payload["selected_tags_by_category"]["道具世界观"], ["短剑"])
+        for output in (result[1], result[7]):
+            self.assertIn("短剑", output)
+            self.assertIn("弓箭", output)
 
     def test_model_strategy_adapts_without_new_ui_controls(self) -> None:
         task = {"task_type": "standard_visual_story"}
@@ -359,6 +575,83 @@ class TestStagePromptIntelligence(unittest.TestCase):
         self.assertIn("暗黑漫画", video)
         self.assertNotIn("画面风格", selected)
         self.assertNotIn("光影氛围", selected)
+
+    def test_action_relation_hints_reach_image_and_video_but_explicit_props_win(self) -> None:
+        selected = OrderedDict({"主体": ["森林游侠"], "动作姿态": ["拉弓瞄准"], "场景背景": ["森林"]})
+        settings = {
+            "模板风格": "暗黑奇幻",
+            "主体类型": "人物角色",
+            "主体类型解析结果": "人物角色",
+            "案例输出结构": "案例长段版",
+            "标签反推模式": "自动平衡",
+            "生成数量": 1,
+            "额外要求": "",
+            "提示词语言": "纯中文",
+            "详细度": "标准",
+            "seed": 9,
+            "智能关系补全": {"道具世界观": ["弓箭"]},
+        }
+        prompt = prompt_builder.build_prompt_list(
+            selected,
+            [],
+            settings,
+            uniq=uniq,
+            infer_template_style=lambda _tags, explicit: explicit,
+            infer_subject_type=lambda _tags, explicit: explicit,
+            infer_output_structure=lambda _subject, explicit: explicit,
+        )[0]
+        video = video_prompt_skill.build_video_prompt(selected, [], settings, primary_prompt=prompt)
+        self.assertIn("弓箭", prompt)
+        self.assertIn("弓箭", video)
+
+        explicit = OrderedDict({**selected, "道具世界观": ["复合弓"]})
+        explicit_prompt = prompt_builder.build_prompt_list(
+            explicit,
+            [],
+            settings,
+            uniq=uniq,
+            infer_template_style=lambda _tags, value: value,
+            infer_subject_type=lambda _tags, value: value,
+            infer_output_structure=lambda _subject, value: value,
+        )[0]
+        self.assertIn("复合弓", explicit_prompt)
+        self.assertNotIn("弓箭已成线索", explicit_prompt)
+
+        mismatched = OrderedDict({
+            "主体": ["森林游侠"],
+            "动作姿态": ["拉弓瞄准"],
+            "场景背景": ["森林"],
+            "道具世界观": ["短剑", "火炬"],
+        })
+        mismatched_graph = intelligence.build_scene_relationship_graph(mismatched)
+        mismatched_hints = intelligence.resolve_relation_hints(mismatched_graph, mismatched, settings)
+        self.assertEqual(mismatched_hints, {"道具世界观": ["弓箭"]})
+        merged_settings = {
+            **settings,
+            "智能关系补全": mismatched_hints,
+            "智能关系补全并入显式道具": True,
+        }
+        merged_prompt = prompt_builder.build_prompt_list(
+            mismatched,
+            [],
+            merged_settings,
+            uniq=uniq,
+            infer_template_style=lambda _tags, value: value,
+            infer_subject_type=lambda _tags, value: value,
+            infer_output_structure=lambda _subject, value: value,
+        )[0]
+        merged_video = video_prompt_skill.build_video_prompt(
+            mismatched,
+            [],
+            merged_settings,
+            primary_prompt=merged_prompt,
+        )
+        self.assertIn("短剑", merged_prompt)
+        self.assertIn("火炬", merged_prompt)
+        self.assertIn("弓箭", merged_prompt)
+        self.assertIn("短剑", merged_video)
+        self.assertIn("火炬", merged_video)
+        self.assertIn("弓箭", merged_video)
 
     def test_text_intent_activates_non_person_and_character_sheet_modes(self) -> None:
         module = load_stage_prompt_generator_for_integration_test()
@@ -497,6 +790,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
             "智能定向修复最近原因": "缺少道具锚点“火炬”。",
             "智能定向修复最近类型": "missing_anchor",
             "智能偏好应用": {"光影氛围": ["冷雾惊悚侧光"]},
+            "智能关系补全": {"道具世界观": ["火炬"]},
         }
         selected = OrderedDict({"主体": ["女冒险者"], "场景背景": ["地下城遗迹"]})
         readable = formatter.build_selected_tags_text(
@@ -544,6 +838,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
         self.assertEqual(payload["targeted_repair_reason"], "缺少道具锚点“火炬”。")
         self.assertEqual(payload["targeted_repair_type"], "missing_anchor")
         self.assertEqual(payload["preference_hints_applied"]["光影氛围"], ["冷雾惊悚侧光"])
+        self.assertEqual(payload["relation_hints_applied"]["道具世界观"], ["火炬"])
 
 
 def load_stage_prompt_generator_for_integration_test(*, nodes_available: bool = True):

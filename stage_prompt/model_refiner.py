@@ -1771,6 +1771,7 @@ def _skill_context_for_model(settings: dict[str, Any]) -> str:
     intelligence_summary = str(settings.get("智能编排摘要", "") or "").strip()
     preference_summary = str(settings.get("智能偏好摘要", "") or "").strip()
     applied_preference_summary = str(settings.get("智能偏好应用摘要", "") or "").strip()
+    relation_hint_summary = str(settings.get("智能关系补全摘要", "") or "").strip()
     scene_graph = settings.get("智能场景关系图")
     narrative_plans = [
         str(item).strip()
@@ -1873,6 +1874,10 @@ def _skill_context_for_model(settings: dict[str, Any]) -> str:
     if applied_preference_summary:
         extra_lines.append(
             f"本次软偏好应用：{applied_preference_summary}。它只填充原本为空的维度，优先级低于全部显式输入和锁定项。"
+        )
+    if relation_hint_summary:
+        extra_lines.append(
+            f"动作关系软补全：{relation_hint_summary}。这些道具由明确动作推导，只服务当前动作，不得扩展成新的世界观。"
         )
     if dynamic_strategy:
         extra_lines.append(f"Skill动态变化策略：{dynamic_strategy}")
