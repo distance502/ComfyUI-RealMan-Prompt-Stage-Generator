@@ -178,6 +178,7 @@ from .stage_prompt.intelligence import (
     resolve_model_strategy as _resolve_model_strategy_impl,
     resolve_preference_hints as _resolve_preference_hints_impl,
     resolve_relation_hints as _resolve_relation_hints_impl,
+    resolve_soft_scene_conflicts as _resolve_soft_scene_conflicts_impl,
     summarize_intelligence_profile as _summarize_intelligence_profile_impl,
     update_preference_memory as _update_preference_memory_impl,
 )
@@ -4288,6 +4289,7 @@ def _run_stage_impl(
     nsfw_output: dict[str, Any] | None = None
     nsfw_enabled = isinstance(nsfw_workspace, dict) and bool(nsfw_workspace.get("enabled", False))
     settings["运行时随机保护标签"] = ""
+    settings["智能随机冲突修复"] = {}
     if nsfw_enabled:
         _apply_nsfw_generation_profile(settings)
         _remove_empty_skill_scaffold_for_nsfw(selected, custom_tags, settings)
@@ -4362,6 +4364,7 @@ def _run_stage_impl(
     biased_template_style = _infer_template_style(_collect_all_tags(selected, custom_tags), str(settings["模板风格"]))
     preview_has_profile_pipeline = bool(preview_marker and preview_marker.get("source") == "backend")
     if not preview_has_profile_pipeline:
+        tags_before_profile_bias = set(_collect_all_tags(selected, custom_tags))
         biased_template_style, selected, custom_tags = _apply_random_theme_pool_bias(
             biased_template_style,
             selected,
@@ -4378,6 +4381,17 @@ def _run_stage_impl(
             tag_group_index=tag_group_index,
             tag_group_memberships=tag_group_memberships,
         )
+        if runtime_random_enabled:
+            generated = _uniq(
+                [
+                    *generated,
+                    *[
+                        tag
+                        for tag in _collect_all_tags(selected, custom_tags)
+                        if tag not in tags_before_profile_bias
+                    ],
+                ]
+            )
     smart_text_input = str(settings.get("智能文本输入") or settings.get("额外要求") or "").strip()
     smart_text_enabled = bool(settings.get("智能文本匹配", False)) and bool(smart_text_input)
     if smart_text_enabled:
@@ -4464,6 +4478,57 @@ def _run_stage_impl(
         settings,
         has_reference_image=reference_image is not None,
     )
+    protected_conflict_tags = _uniq(
+        [
+            *_parse_tags(settings.get("锁定标签白名单")),
+            *_parse_tags(settings.get("运行时随机保护标签")),
+        ]
+    )
+    selected, custom_tags, soft_conflict_report = _resolve_soft_scene_conflicts_impl(
+        selected,
+        custom_tags,
+        initial_intelligence_profile.get("scene_graph"),
+        soft_tags=generated,
+        protected_tags=protected_conflict_tags,
+    )
+    settings["智能随机冲突修复"] = soft_conflict_report
+    if soft_conflict_report.get("applied"):
+        removed_labels = [
+            str(item.get("value", "")).strip()
+            for item in soft_conflict_report.get("removed", [])
+            if str(item.get("value", "")).strip()
+        ]
+        _merge_inference_notes(
+            settings,
+            ["智能随机冲突修复：仅移除随机派生冲突标签 " + "、".join(removed_labels) + "；用户显式锚点保持不变。"],
+        )
+        tags = _collect_all_tags(selected, custom_tags)
+        subject_type = _infer_subject_type(tags, str(settings["主体类型"]))
+        settings["主体类型解析结果"] = subject_type
+        generated = [tag for tag in _uniq(generated) if tag in set(tags)]
+        nsfw_model_summary = _build_nsfw_model_context_summary(
+            nsfw_workspace=nsfw_workspace,
+            nsfw_output=nsfw_output,
+            selected=selected,
+            custom_tags=custom_tags,
+        )
+        settings["NSFW工作台标签摘要"] = nsfw_model_summary
+        danbooru_general_tags = [tag for tag in tags if tag in DANBOORU_GENERAL_TAG_ALIASES]
+        settings["Danbooru通用视觉标签摘要"] = "、".join(
+            f"{tag} ({DANBOORU_GENERAL_TAG_ALIASES[tag]})" for tag in danbooru_general_tags[:16]
+        )
+        settings["模型后置素材摘要"] = _build_model_post_context_summary(
+            selected,
+            custom_tags,
+            generated=generated,
+            nsfw_summary=nsfw_model_summary,
+        )
+        initial_intelligence_profile = _build_intelligence_profile_impl(
+            selected,
+            custom_tags,
+            settings,
+            has_reference_image=reference_image is not None,
+        )
     task_type = str(initial_intelligence_profile.get("task_intent", {}).get("task_type", "standard_visual_story"))
     preference_context = str(
         initial_intelligence_profile.get("scene_graph", {}).get("primary_world_family", "") or "general"
@@ -4481,6 +4546,12 @@ def _run_stage_impl(
         has_reference_image=reference_image is not None,
         preference_profile=preference_profile,
     )
+    if soft_conflict_report.get("applied"):
+        repaired_graph = dict(intelligence_profile.get("scene_graph", {}) or {})
+        repaired_graph["resolved_coherence_issues"] = list(soft_conflict_report.get("resolved_issues", []) or [])
+        repaired_graph["resolved_issue_count"] = int(soft_conflict_report.get("resolved_issue_count", 0) or 0)
+        repaired_graph["resolution_status"] = "resolved"
+        intelligence_profile["scene_graph"] = repaired_graph
     preference_hints = _resolve_preference_hints_impl(
         preference_profile,
         selected,

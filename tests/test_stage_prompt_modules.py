@@ -632,6 +632,132 @@ class TestStagePromptIntelligence(unittest.TestCase):
         self.assertEqual(payload["video_prompt_model_status"], "智能保护跳过模型，保留 Skill 结果")
         self.assertIn("智能保护", payload["model_skill_pipeline"])
 
+    def test_soft_scene_conflicts_remove_only_random_derived_side(self) -> None:
+        explicit_scene = OrderedDict(
+            {
+                "主体": ["潜水员"],
+                "场景背景": ["深海"],
+                "动作姿态": ["举起火炬"],
+                "道具世界观": ["火炬"],
+            }
+        )
+        scene_graph = intelligence.build_scene_relationship_graph(explicit_scene)
+        repaired, _custom, report = intelligence.resolve_soft_scene_conflicts(
+            explicit_scene,
+            [],
+            scene_graph,
+            soft_tags=["举起火炬", "火炬"],
+        )
+        self.assertTrue(report["applied"])
+        self.assertEqual(report["removed_count"], 2)
+        self.assertEqual(repaired["场景背景"], ["深海"])
+        self.assertEqual(repaired["动作姿态"], [])
+        self.assertEqual(repaired["道具世界观"], [])
+        self.assertEqual(
+            intelligence.build_scene_relationship_graph(repaired)["coherence_status"],
+            "coherent",
+        )
+
+        explicit_fire = OrderedDict(
+            {
+                "主体": ["探险者"],
+                "场景背景": ["深海"],
+                "动作姿态": ["举起火炬"],
+                "道具世界观": ["火炬"],
+            }
+        )
+        repaired_scene, _custom, scene_report = intelligence.resolve_soft_scene_conflicts(
+            explicit_fire,
+            [],
+            intelligence.build_scene_relationship_graph(explicit_fire),
+            soft_tags=["深海"],
+        )
+        self.assertTrue(scene_report["applied"])
+        self.assertEqual(repaired_scene["场景背景"], [])
+        self.assertEqual(repaired_scene["道具世界观"], ["火炬"])
+
+    def test_explicit_or_protected_scene_conflicts_are_never_rewritten(self) -> None:
+        selected = OrderedDict(
+            {"主体": ["潜水员"], "场景背景": ["深海"], "道具世界观": ["火炬"]}
+        )
+        graph = intelligence.build_scene_relationship_graph(selected)
+        unchanged, _custom, explicit_report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            [],
+            graph,
+            soft_tags=[],
+        )
+        protected, _custom, protected_report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            [],
+            graph,
+            soft_tags=["火炬"],
+            protected_tags=["火炬"],
+        )
+        self.assertFalse(explicit_report["applied"])
+        self.assertFalse(protected_report["applied"])
+        self.assertEqual(unchanged, selected)
+        self.assertEqual(protected, selected)
+
+    def test_random_conflict_repair_reaches_full_stage_before_model_calls(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+
+        class CountingModel:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def create_chat_completion(self, *args, **kwargs):
+                self.calls += 1
+                return {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": (
+                                    "潜水员悬浮在深海沉船外，沿舷窗观察缓慢移动的鱼群。"
+                                    "冷蓝散射光穿过水体照亮潜水服接缝，气泡沿面罩边缘上升，"
+                                    "镜头保持全身与沉船入口处在同一连续空间。"
+                                )
+                            }
+                        }
+                    ]
+                }
+
+        def inject_random_conflict(selected, custom_tags, settings, **_kwargs):
+            next_selected = OrderedDict((group, list(values)) for group, values in selected.items())
+            next_selected["动作姿态"] = ["举起火炬"]
+            next_selected["道具世界观"] = ["火炬"]
+            settings["运行时随机有效种子"] = 71
+            return next_selected, list(custom_tags), ["举起火炬", "火炬"]
+
+        model = CountingModel()
+        with mock.patch.object(module, "_build_runtime_tags", side_effect=inject_random_conflict):
+            result = module._run_stage(
+                model,
+                **{
+                    "unique_id": "intelligence-v12-random-conflict-repair",
+                    "模型来源": "本地模型",
+                    "模型来源实际": "外接本地模型",
+                    "模型调用基础来源": "本地模型",
+                    "主体标签1": "潜水员",
+                    "场景背景标签1": "深海",
+                    "运行时随机标签": True,
+                    "运行时随机模式": "全随机",
+                    "生成数量": 1,
+                    "提示词语言": "纯中文",
+                    "seed": 71,
+                },
+            )
+
+        payload = json.loads(result[3])
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v12")
+        self.assertEqual(payload["random_conflict_repair"]["removed_count"], 2)
+        self.assertEqual(payload["scene_coherence_status"], "coherent")
+        self.assertEqual(payload["model_intelligence_skip_count"], 0)
+        self.assertGreater(payload["model_call_attempt_count"], 0)
+        self.assertNotIn("火炬", payload["selected_tags_flat"])
+        self.assertNotIn("举起火炬", payload["selected_tags_flat"])
+        self.assertIn("智能随机冲突修复：2 个标签", result[2])
+
     def test_preference_memory_requires_repeated_explicit_choices(self) -> None:
         explicit = OrderedDict(
             {

@@ -9,7 +9,7 @@ import re
 from typing import Any, Iterable
 
 
-INTELLIGENCE_PROFILE_VERSION = "qwen-te-intelligence-v11"
+INTELLIGENCE_PROFILE_VERSION = "qwen-te-intelligence-v12"
 
 _GROUP_LIMITS = {
     "主体": 6,
@@ -487,7 +487,27 @@ def build_scene_relationship_graph(
     )
     for family, markers, message in _STRONG_SCENE_CONFLICTS:
         if family in scene_only_hits and _contains_any(combined_text, markers):
-            coherence_issues.append({"kind": "scene_affordance_conflict", "severity": "error", "message": message})
+            scene_anchors = [
+                {"group": "场景背景", "value": value}
+                for value in groups.get("场景背景", [])
+                if family in detect_world_families(value)
+            ]
+            conflicting_anchors = [
+                {"group": group, "value": value}
+                for group in ("道具世界观", "动作姿态", "光影氛围")
+                for value in groups.get(group, [])
+                if _contains_any(value, markers)
+            ]
+            coherence_issues.append(
+                {
+                    "kind": "scene_affordance_conflict",
+                    "severity": "error",
+                    "world_family": family,
+                    "scene_anchors": scene_anchors,
+                    "conflicting_anchors": conflicting_anchors,
+                    "message": message,
+                }
+            )
     for requirement in inferred_requirements:
         if not requirement.get("satisfied"):
             coherence_issues.append(
@@ -770,6 +790,68 @@ def apply_relation_hint_resolution(scene_graph: Any, relation_hints: Any) -> dic
     return resolved_graph
 
 
+def resolve_soft_scene_conflicts(
+    selected: OrderedDict[str, list[str]] | dict[str, list[str]],
+    custom_tags: Iterable[Any],
+    scene_graph: Any,
+    *,
+    soft_tags: Iterable[Any] = (),
+    protected_tags: Iterable[Any] = (),
+) -> tuple[OrderedDict[str, list[str]], list[str], dict[str, Any]]:
+    """Remove only random/soft anchors when they cause a hard scene conflict."""
+    next_selected = OrderedDict((group, list(values or [])) for group, values in selected.items())
+    next_custom = _unique(custom_tags, 64)
+    soft_keys = {value.casefold() for value in _unique(soft_tags, 128)}
+    protected_keys = {value.casefold() for value in _unique(protected_tags, 128)}
+    removed: list[dict[str, str]] = []
+    resolved_issues: list[dict[str, Any]] = []
+
+    def removable(anchor: dict[str, Any]) -> bool:
+        key = _clean(anchor.get("value")).casefold()
+        return bool(key and key in soft_keys and key not in protected_keys)
+
+    def remove_anchors(anchors: list[dict[str, Any]], *, side: str, issue: dict[str, Any]) -> None:
+        for anchor in anchors:
+            group = _clean(anchor.get("group"))
+            value = _clean(anchor.get("value"))
+            if not group or not value:
+                continue
+            values = next_selected.get(group, [])
+            next_selected[group] = [item for item in values if _clean(item).casefold() != value.casefold()]
+            removed.append({"group": group, "value": value, "side": side})
+        resolved = dict(issue)
+        resolved["resolved"] = True
+        resolved["resolution"] = "soft_tag_removal"
+        resolved["removed_side"] = side
+        resolved["removed_anchors"] = [dict(item) for item in anchors]
+        resolved["message"] = f"{_clean(issue.get('message'))}；已仅移除随机派生侧标签。"
+        resolved_issues.append(resolved)
+
+    if isinstance(scene_graph, dict):
+        for raw_issue in list(scene_graph.get("coherence_issues", []) or []):
+            if not isinstance(raw_issue, dict) or raw_issue.get("kind") != "scene_affordance_conflict":
+                continue
+            issue = dict(raw_issue)
+            scene_anchors = [dict(item) for item in issue.get("scene_anchors", []) if isinstance(item, dict)]
+            conflict_anchors = [dict(item) for item in issue.get("conflicting_anchors", []) if isinstance(item, dict)]
+            can_remove_scene = bool(scene_anchors) and all(removable(item) for item in scene_anchors)
+            can_remove_conflict = bool(conflict_anchors) and all(removable(item) for item in conflict_anchors)
+            if can_remove_conflict:
+                remove_anchors(conflict_anchors, side="conflicting_affordance", issue=issue)
+            elif can_remove_scene:
+                remove_anchors(scene_anchors, side="scene", issue=issue)
+
+    report = {
+        "applied": bool(removed),
+        "removed_count": len(removed),
+        "removed": removed,
+        "resolved_issue_count": len(resolved_issues),
+        "resolved_issues": resolved_issues,
+        "policy": "soft_tags_only",
+    }
+    return next_selected, next_custom, report
+
+
 def classify_repair_reason(reason: Any) -> dict[str, str]:
     text = _clean(reason)
     folded = text.casefold()
@@ -897,6 +979,7 @@ __all__ = [
     "resolve_model_strategy",
     "resolve_preference_hints",
     "resolve_relation_hints",
+    "resolve_soft_scene_conflicts",
     "summarize_intelligence_profile",
     "update_preference_memory",
 ]

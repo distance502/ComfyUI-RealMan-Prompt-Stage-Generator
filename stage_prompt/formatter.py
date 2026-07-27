@@ -197,6 +197,7 @@ def build_selected_tags_text(
             f"图片反推状态：{settings.get('图片反推状态', '未启用')}",
             f"模型与Skill链路：{_model_skill_pipeline_label(settings)}",
             f"智能编排：{settings.get('智能编排摘要', '未建立') or '未建立'}",
+            f"智能随机冲突修复：{int(dict(settings.get('智能随机冲突修复', {}) or {}).get('removed_count', 0) or 0)} 个标签",
             f"智能定向修复：{int(settings.get('智能定向修复次数', 0) or 0)} 次"
             f"{' | 类型 ' + str(settings.get('智能定向修复最近类型', '') or '') if settings.get('智能定向修复最近类型') else ''}"
             f"{' | 最近原因 ' + str(settings.get('智能定向修复最近原因', '') or '') if settings.get('智能定向修复最近原因') else ''}",
@@ -280,6 +281,7 @@ def build_json_payload(
         "scene_coherence_status": str(dict(settings.get("智能场景关系图", {}) or {}).get("coherence_status", "") or ""),
         "scene_coherence_issues": list(dict(settings.get("智能场景关系图", {}) or {}).get("coherence_issues", []) or []),
         "scene_coherence_resolved_issues": list(dict(settings.get("智能场景关系图", {}) or {}).get("resolved_coherence_issues", []) or []),
+        "random_conflict_repair": dict(settings.get("智能随机冲突修复", {}) or {}),
         "targeted_repair_count": int(settings.get("智能定向修复次数", 0) or 0),
         "targeted_repair_reason": str(settings.get("智能定向修复最近原因", "") or ""),
         "targeted_repair_type": str(settings.get("智能定向修复最近类型", "") or ""),
