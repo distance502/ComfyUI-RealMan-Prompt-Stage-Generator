@@ -18,7 +18,7 @@ import urllib.request
 from collections import OrderedDict
 from contextlib import nullcontext
 from copy import deepcopy
-from typing import Any
+from typing import Any, Iterable
 
 try:
     import comfy.model_management as _comfy_mm
@@ -178,6 +178,7 @@ from .stage_prompt.intelligence import (
     resolve_model_strategy as _resolve_model_strategy_impl,
     resolve_preference_hints as _resolve_preference_hints_impl,
     resolve_relation_hints as _resolve_relation_hints_impl,
+    resolve_soft_scene_conflicts as _resolve_soft_scene_conflicts_impl,
     summarize_intelligence_profile as _summarize_intelligence_profile_impl,
     update_preference_memory as _update_preference_memory_impl,
 )
@@ -3444,6 +3445,67 @@ def _runtime_random_preview_state_fingerprint(
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
+_AUTO_SOFT_TAG_SOURCE_KEYS = (
+    "runtime_random",
+    "random_theme_pool",
+    "template_style_profile",
+)
+
+
+def _new_tags_after_state_change(
+    before_tags: Iterable[Any],
+    selected: OrderedDict[str, list[str]] | dict[str, list[str]],
+    custom_tags: Iterable[Any],
+) -> list[str]:
+    before_keys = {str(tag).strip().casefold() for tag in before_tags if str(tag).strip()}
+    return [
+        tag
+        for tag in _uniq(_collect_all_tags(selected, list(custom_tags)))
+        if tag.casefold() not in before_keys
+    ]
+
+
+def _normalize_auto_soft_tag_sources(
+    raw_sources: Any,
+    *,
+    active_tags: Iterable[Any] = (),
+    protected_tags: Iterable[Any] = (),
+) -> dict[str, list[str]]:
+    source_map = raw_sources if isinstance(raw_sources, dict) else {}
+    active_values = _uniq([str(tag).strip() for tag in active_tags if str(tag).strip()])
+    active_by_key = {tag.casefold(): tag for tag in active_values}
+    protected_keys = {str(tag).strip().casefold() for tag in protected_tags if str(tag).strip()}
+    normalized: dict[str, list[str]] = {}
+    for source_name in _AUTO_SOFT_TAG_SOURCE_KEYS:
+        values = source_map.get(source_name, [])
+        if not isinstance(values, (list, tuple, set)):
+            values = []
+        resolved: list[str] = []
+        for value in values:
+            key = str(value).strip().casefold()
+            if not key or key in protected_keys:
+                continue
+            tag = active_by_key.get(key)
+            if tag and tag not in resolved:
+                resolved.append(tag)
+            if len(resolved) >= 128:
+                break
+        normalized[source_name] = resolved
+    return normalized
+
+
+def _flatten_auto_soft_tag_sources(sources: Any) -> list[str]:
+    source_map = sources if isinstance(sources, dict) else {}
+    return _uniq(
+        [
+            tag
+            for source_name in _AUTO_SOFT_TAG_SOURCE_KEYS
+            for tag in source_map.get(source_name, [])
+            if str(tag).strip()
+        ]
+    )
+
+
 def _nsfw_workspace_state_fingerprint(workspace: Any) -> str:
     if not isinstance(workspace, dict):
         return ""
@@ -3461,9 +3523,14 @@ def _new_runtime_random_preview_marker(
 ) -> str:
     token_source = f"{settings.get('unique_id', '')}|{time.time_ns()}|{random.getrandbits(128)}"
     token = hashlib.sha256(token_source.encode("utf-8")).hexdigest()[:32]
+    active_tags = _collect_all_tags(selected, custom_tags)
+    soft_tag_sources = _normalize_auto_soft_tag_sources(
+        settings.get("智能软标签来源", {}),
+        active_tags=active_tags,
+    )
     return json.dumps(
         {
-            "v": 2,
+            "v": 3,
             "source": "backend",
             "token": token,
             "state_fingerprint": _runtime_random_preview_state_fingerprint(selected, custom_tags, settings),
@@ -3471,6 +3538,7 @@ def _new_runtime_random_preview_marker(
             "seed": int(settings.get("运行时随机有效种子", settings.get("seed", 0)) or 0),
             "theme_markers": list(settings.get("随机主题池档案标记", []) or []),
             "style_markers": list(settings.get("模板风格档案标记", []) or []),
+            "soft_tag_sources": soft_tag_sources,
         },
         ensure_ascii=False,
         separators=(",", ":"),
@@ -3493,7 +3561,7 @@ def _parse_runtime_random_preview_marker(raw_marker: Any) -> dict[str, Any] | No
         version = int(payload.get("v", 0) or 0)
     except (TypeError, ValueError):
         return None
-    if version != 2:
+    if version not in {2, 3}:
         return None
     token = str(payload.get("token") or "").strip()
     state_fingerprint = str(payload.get("state_fingerprint") or "").strip().lower()
@@ -3511,6 +3579,16 @@ def _parse_runtime_random_preview_marker(raw_marker: Any) -> dict[str, Any] | No
             [str(item).strip()[:256] for item in values[:64] if not isinstance(item, (dict, list)) and str(item).strip()]
         )
 
+    soft_tag_sources = _normalize_auto_soft_tag_sources(
+        payload.get("soft_tag_sources", {}),
+        active_tags=[
+            str(tag).strip()
+            for values in dict(payload.get("soft_tag_sources", {}) or {}).values()
+            if isinstance(values, (list, tuple, set))
+            for tag in values
+            if str(tag).strip()
+        ] if isinstance(payload.get("soft_tag_sources"), dict) else [],
+    )
     return {
         "token": token,
         "state_fingerprint": state_fingerprint,
@@ -3519,6 +3597,7 @@ def _parse_runtime_random_preview_marker(raw_marker: Any) -> dict[str, Any] | No
         "seed": _safe_int(payload.get("seed", 0), 0, 0, _SEED_MAX),
         "theme_markers": marker_list("theme_markers"),
         "style_markers": marker_list("style_markers"),
+        "soft_tag_sources": soft_tag_sources,
     }
 
 
@@ -4265,6 +4344,11 @@ def _run_stage_impl(
         tag_group_memberships=tag_group_memberships,
     )
     explicit_selected_snapshot = deepcopy(selected)
+    explicit_custom_tags_snapshot = list(custom_tags)
+    explicit_input_tags = _collect_all_tags(explicit_selected_snapshot, explicit_custom_tags_snapshot)
+    auto_soft_tag_sources: dict[str, list[str]] = {
+        source_name: [] for source_name in _AUTO_SOFT_TAG_SOURCE_KEYS
+    }
     settings["模型来源"] = _normalize_stage_model_source(settings.get("模型来源"))
     reference_image = kwargs.get("参考图片")
     early_intent = _infer_task_intent_impl(
@@ -4288,6 +4372,7 @@ def _run_stage_impl(
     nsfw_output: dict[str, Any] | None = None
     nsfw_enabled = isinstance(nsfw_workspace, dict) and bool(nsfw_workspace.get("enabled", False))
     settings["运行时随机保护标签"] = ""
+    settings["智能随机冲突修复"] = {}
     if nsfw_enabled:
         _apply_nsfw_generation_profile(settings)
         _remove_empty_skill_scaffold_for_nsfw(selected, custom_tags, settings)
@@ -4329,6 +4414,7 @@ def _run_stage_impl(
         settings,
     ) if runtime_random_enabled else ""
     if runtime_random_enabled and preview_marker is None:
+        tags_before_runtime_random = _collect_all_tags(selected, custom_tags)
         selected, custom_tags, generated = _build_runtime_tags(
             selected,
             custom_tags,
@@ -4338,6 +4424,11 @@ def _run_stage_impl(
         )
         settings["运行时随机模式解析结果"] = resolved_runtime_mode
         settings["运行时随机预览已消费"] = False
+        auto_soft_tag_sources["runtime_random"] = _new_tags_after_state_change(
+            tags_before_runtime_random,
+            selected,
+            custom_tags,
+        )
     elif runtime_random_enabled:
         active_tags = set(_collect_all_tags(selected, custom_tags))
         generated = [tag for tag in _parse_tags(settings.get("随机补充避重缓存")) if tag in active_tags]
@@ -4346,12 +4437,17 @@ def _run_stage_impl(
         settings["随机主题池档案标记"] = list(preview_marker.get("theme_markers", []))
         settings["模板风格档案标记"] = list(preview_marker.get("style_markers", []))
         settings["运行时随机预览已消费"] = True
+        auto_soft_tag_sources = _normalize_auto_soft_tag_sources(
+            preview_marker.get("soft_tag_sources", {}),
+            active_tags=_collect_all_tags(selected, custom_tags),
+        )
     else:
         generated = []
         settings["运行时随机模式解析结果"] = ""
         settings["运行时随机预览已消费"] = False
     settings["智能文本风格解析结果"] = ""
     settings["智能文本风格优先解析结果"] = str(settings.get("智能文本风格优先", "自动判断") or "自动判断")
+    tags_before_character_sheet = _collect_all_tags(selected, custom_tags)
     _apply_character_sheet_to_settings(
         settings,
         selected,
@@ -4359,9 +4455,15 @@ def _run_stage_impl(
         image_reverse_text=image_reverse_text,
         has_reference_image=reference_image is not None,
     )
+    character_sheet_protected_tags = _new_tags_after_state_change(
+        tags_before_character_sheet,
+        selected,
+        custom_tags,
+    )
     biased_template_style = _infer_template_style(_collect_all_tags(selected, custom_tags), str(settings["模板风格"]))
     preview_has_profile_pipeline = bool(preview_marker and preview_marker.get("source") == "backend")
     if not preview_has_profile_pipeline:
+        tags_before_theme_pool = _collect_all_tags(selected, custom_tags)
         biased_template_style, selected, custom_tags = _apply_random_theme_pool_bias(
             biased_template_style,
             selected,
@@ -4370,6 +4472,12 @@ def _run_stage_impl(
             tag_group_index=tag_group_index,
             tag_group_memberships=tag_group_memberships,
         )
+        auto_soft_tag_sources["random_theme_pool"] = _new_tags_after_state_change(
+            tags_before_theme_pool,
+            selected,
+            custom_tags,
+        )
+        tags_before_style_profile = _collect_all_tags(selected, custom_tags)
         selected, custom_tags = _apply_template_style_profile_bias(
             biased_template_style,
             selected,
@@ -4378,9 +4486,17 @@ def _run_stage_impl(
             tag_group_index=tag_group_index,
             tag_group_memberships=tag_group_memberships,
         )
+        auto_soft_tag_sources["template_style_profile"] = _new_tags_after_state_change(
+            tags_before_style_profile,
+            selected,
+            custom_tags,
+        )
+        generated = _uniq([*generated, *_flatten_auto_soft_tag_sources(auto_soft_tag_sources)])
     smart_text_input = str(settings.get("智能文本输入") or settings.get("额外要求") or "").strip()
     smart_text_enabled = bool(settings.get("智能文本匹配", False)) and bool(smart_text_input)
+    smart_text_protected_tags: list[str] = []
     if smart_text_enabled:
+        tags_before_smart_text = _collect_all_tags(selected, custom_tags)
         available_tag_names = set(tag_group_index)
         selected, custom_tags, smart_text_notes = _apply_smart_text_to_state_impl(
             selected,
@@ -4404,6 +4520,17 @@ def _run_stage_impl(
                 if text and text not in existing_notes:
                     existing_notes.append(text)
             settings["推理纠偏说明"] = existing_notes
+        smart_text_active_tags = _collect_all_tags(selected, custom_tags)
+        smart_text_protected_tags = _uniq(
+            [
+                *_new_tags_after_state_change(tags_before_smart_text, selected, custom_tags),
+                *[
+                    tag
+                    for tag in smart_text_active_tags
+                    if tag.casefold() in smart_text_input.casefold()
+                ],
+            ]
+        )
     selected, custom_tags, runtime_normalization_notes = _normalize_inference_state(
         selected,
         custom_tags,
@@ -4464,6 +4591,100 @@ def _run_stage_impl(
         settings,
         has_reference_image=reference_image is not None,
     )
+    explicit_template_style = str(settings.get("模板风格", "自动") or "自动").strip()
+    configured_style_protected_tags = (
+        [
+            tag
+            for tag in tags
+            if tag.casefold() in {
+                explicit_template_style.casefold(),
+                _base_template_style(explicit_template_style).casefold(),
+            }
+        ]
+        if explicit_template_style not in {"", "自动"}
+        else []
+    )
+    preview_soft_tags = _flatten_auto_soft_tag_sources(auto_soft_tag_sources) if preview_marker else []
+    preview_soft_keys = {tag.casefold() for tag in preview_soft_tags}
+    explicit_protected_tags = [
+        tag for tag in explicit_input_tags if tag.casefold() not in preview_soft_keys
+    ]
+    protected_conflict_tags = _uniq(
+        [
+            *explicit_protected_tags,
+            *character_sheet_protected_tags,
+            *smart_text_protected_tags,
+            *configured_style_protected_tags,
+            *_parse_tags(settings.get("锁定标签白名单")),
+            *_parse_tags(settings.get("运行时随机保护标签")),
+        ]
+    )
+    auto_soft_tag_sources = _normalize_auto_soft_tag_sources(
+        auto_soft_tag_sources,
+        active_tags=tags,
+    )
+    removable_soft_tag_sources = _normalize_auto_soft_tag_sources(
+        auto_soft_tag_sources,
+        active_tags=tags,
+        protected_tags=protected_conflict_tags,
+    )
+    removable_soft_tags = _flatten_auto_soft_tag_sources(removable_soft_tag_sources)
+    auto_soft_tags = _flatten_auto_soft_tag_sources(auto_soft_tag_sources)
+    protected_keys = {tag.casefold() for tag in protected_conflict_tags}
+    settings["智能软标签来源"] = auto_soft_tag_sources
+    settings["智能标签来源诊断"] = {
+        "sources": auto_soft_tag_sources,
+        "soft_tags": auto_soft_tags,
+        "removable_tags": removable_soft_tags,
+        "protected_overlaps": [tag for tag in auto_soft_tags if tag.casefold() in protected_keys],
+    }
+    selected, custom_tags, soft_conflict_report = _resolve_soft_scene_conflicts_impl(
+        selected,
+        custom_tags,
+        initial_intelligence_profile.get("scene_graph"),
+        soft_tags=removable_soft_tags,
+        protected_tags=protected_conflict_tags,
+    )
+    soft_conflict_report["soft_tag_sources"] = removable_soft_tag_sources
+    soft_conflict_report["protected_tag_count"] = len(protected_conflict_tags)
+    settings["智能随机冲突修复"] = soft_conflict_report
+    if soft_conflict_report.get("applied"):
+        removed_labels = [
+            str(item.get("value", "")).strip()
+            for item in soft_conflict_report.get("removed", [])
+            if str(item.get("value", "")).strip()
+        ]
+        _merge_inference_notes(
+            settings,
+            ["智能自动冲突修复：仅移除低优先级自动派生冲突标签 " + "、".join(removed_labels) + "；用户显式、智能文本、设定图与安全锚点保持不变。"],
+        )
+        tags = _collect_all_tags(selected, custom_tags)
+        subject_type = _infer_subject_type(tags, str(settings["主体类型"]))
+        settings["主体类型解析结果"] = subject_type
+        generated = [tag for tag in _uniq(generated) if tag in set(tags)]
+        nsfw_model_summary = _build_nsfw_model_context_summary(
+            nsfw_workspace=nsfw_workspace,
+            nsfw_output=nsfw_output,
+            selected=selected,
+            custom_tags=custom_tags,
+        )
+        settings["NSFW工作台标签摘要"] = nsfw_model_summary
+        danbooru_general_tags = [tag for tag in tags if tag in DANBOORU_GENERAL_TAG_ALIASES]
+        settings["Danbooru通用视觉标签摘要"] = "、".join(
+            f"{tag} ({DANBOORU_GENERAL_TAG_ALIASES[tag]})" for tag in danbooru_general_tags[:16]
+        )
+        settings["模型后置素材摘要"] = _build_model_post_context_summary(
+            selected,
+            custom_tags,
+            generated=generated,
+            nsfw_summary=nsfw_model_summary,
+        )
+        initial_intelligence_profile = _build_intelligence_profile_impl(
+            selected,
+            custom_tags,
+            settings,
+            has_reference_image=reference_image is not None,
+        )
     task_type = str(initial_intelligence_profile.get("task_intent", {}).get("task_type", "standard_visual_story"))
     preference_context = str(
         initial_intelligence_profile.get("scene_graph", {}).get("primary_world_family", "") or "general"
@@ -4481,6 +4702,12 @@ def _run_stage_impl(
         has_reference_image=reference_image is not None,
         preference_profile=preference_profile,
     )
+    if soft_conflict_report.get("applied"):
+        repaired_graph = dict(intelligence_profile.get("scene_graph", {}) or {})
+        repaired_graph["resolved_coherence_issues"] = list(soft_conflict_report.get("resolved_issues", []) or [])
+        repaired_graph["resolved_issue_count"] = int(soft_conflict_report.get("resolved_issue_count", 0) or 0)
+        repaired_graph["resolution_status"] = "resolved"
+        intelligence_profile["scene_graph"] = repaired_graph
     preference_hints = _resolve_preference_hints_impl(
         preference_profile,
         selected,
@@ -5975,6 +6202,9 @@ def 构建运行时随机预览状态(payload: dict[str, Any]) -> dict[str, Any]
         )
 
     generated: list[str] = []
+    auto_soft_tag_sources: dict[str, list[str]] = {
+        source_name: [] for source_name in _AUTO_SOFT_TAG_SOURCE_KEYS
+    }
     requested_seed = int(settings.get("seed", 0) or 0)
     effective_seed = requested_seed
     if bool(settings.get("运行时随机标签", False)):
@@ -5986,6 +6216,7 @@ def 构建运行时随机预览状态(payload: dict[str, Any]) -> dict[str, Any]
             selected,
             settings,
         )
+        tags_before_runtime_random = _collect_all_tags(selected, custom_tags)
         selected, custom_tags, generated = _build_runtime_tags(
             selected,
             custom_tags,
@@ -5995,7 +6226,13 @@ def 构建运行时随机预览状态(payload: dict[str, Any]) -> dict[str, Any]
         )
         effective_seed = int(settings.get("运行时随机有效种子", effective_seed) or effective_seed)
         settings["seed"] = requested_seed
+        auto_soft_tag_sources["runtime_random"] = _new_tags_after_state_change(
+            tags_before_runtime_random,
+            selected,
+            custom_tags,
+        )
     preview_template_style = _infer_template_style(_collect_all_tags(selected, custom_tags), str(settings["模板风格"]))
+    tags_before_theme_pool = _collect_all_tags(selected, custom_tags)
     _biased_style, selected, custom_tags = _apply_random_theme_pool_bias(
         preview_template_style,
         selected,
@@ -6004,6 +6241,12 @@ def 构建运行时随机预览状态(payload: dict[str, Any]) -> dict[str, Any]
         tag_group_index=tag_group_index,
         tag_group_memberships=tag_group_memberships,
     )
+    auto_soft_tag_sources["random_theme_pool"] = _new_tags_after_state_change(
+        tags_before_theme_pool,
+        selected,
+        custom_tags,
+    )
+    tags_before_style_profile = _collect_all_tags(selected, custom_tags)
     selected, custom_tags = _apply_template_style_profile_bias(
         _biased_style,
         selected,
@@ -6011,6 +6254,11 @@ def 构建运行时随机预览状态(payload: dict[str, Any]) -> dict[str, Any]
         settings,
         tag_group_index=tag_group_index,
         tag_group_memberships=tag_group_memberships,
+    )
+    auto_soft_tag_sources["template_style_profile"] = _new_tags_after_state_change(
+        tags_before_style_profile,
+        selected,
+        custom_tags,
     )
     selected, custom_tags, final_notes = _normalize_inference_state(
         selected,
@@ -6064,6 +6312,12 @@ def 构建运行时随机预览状态(payload: dict[str, Any]) -> dict[str, Any]
     if generated:
         active_tags = set(_collect_all_tags(selected, custom_tags))
         generated = [tag for tag in generated if tag in active_tags]
+    active_preview_tags = _collect_all_tags(selected, custom_tags)
+    auto_soft_tag_sources = _normalize_auto_soft_tag_sources(
+        auto_soft_tag_sources,
+        active_tags=active_preview_tags,
+    )
+    settings["智能软标签来源"] = auto_soft_tag_sources
     profile_markers = [
         *list(settings.get("随机主题池档案标记", []) or []),
         *list(settings.get("模板风格档案标记", []) or []),
@@ -6086,6 +6340,8 @@ def 构建运行时随机预览状态(payload: dict[str, Any]) -> dict[str, Any]
         "meta": {
             "runtime_random_enabled": bool(settings.get("运行时随机标签", False)),
             "runtime_random_generated_tags": list(generated),
+            "auto_soft_tags": _flatten_auto_soft_tag_sources(auto_soft_tag_sources),
+            "auto_soft_tag_sources": dict(auto_soft_tag_sources),
             "runtime_random_effective_seed": int(settings.get("运行时随机有效种子", settings.get("seed", 0)) or 0),
             "runtime_random_preview_marker": str(settings.get("运行时随机预览令牌", "") or ""),
             "normalization_notes": list(settings.get("推理纠偏说明", [])),

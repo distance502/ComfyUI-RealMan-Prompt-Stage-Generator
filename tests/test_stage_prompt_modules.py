@@ -632,6 +632,1057 @@ class TestStagePromptIntelligence(unittest.TestCase):
         self.assertEqual(payload["video_prompt_model_status"], "智能保护跳过模型，保留 Skill 结果")
         self.assertIn("智能保护", payload["model_skill_pipeline"])
 
+    def test_soft_scene_conflicts_remove_only_random_derived_side(self) -> None:
+        explicit_scene = OrderedDict(
+            {
+                "主体": ["潜水员"],
+                "场景背景": ["深海"],
+                "动作姿态": ["举起火炬"],
+                "道具世界观": ["火炬"],
+            }
+        )
+        scene_graph = intelligence.build_scene_relationship_graph(explicit_scene)
+        repaired, _custom, report = intelligence.resolve_soft_scene_conflicts(
+            explicit_scene,
+            [],
+            scene_graph,
+            soft_tags=["举起火炬", "火炬"],
+        )
+        self.assertTrue(report["applied"])
+        self.assertEqual(report["removed_count"], 2)
+        self.assertEqual(repaired["场景背景"], ["深海"])
+        self.assertEqual(repaired["动作姿态"], [])
+        self.assertEqual(repaired["道具世界观"], [])
+        self.assertEqual(
+            intelligence.build_scene_relationship_graph(repaired)["coherence_status"],
+            "coherent",
+        )
+
+        explicit_fire = OrderedDict(
+            {
+                "主体": ["探险者"],
+                "场景背景": ["深海"],
+                "动作姿态": ["举起火炬"],
+                "道具世界观": ["火炬"],
+            }
+        )
+        repaired_scene, _custom, scene_report = intelligence.resolve_soft_scene_conflicts(
+            explicit_fire,
+            [],
+            intelligence.build_scene_relationship_graph(explicit_fire),
+            soft_tags=["深海"],
+        )
+        self.assertTrue(scene_report["applied"])
+        self.assertEqual(repaired_scene["场景背景"], [])
+        self.assertEqual(repaired_scene["道具世界观"], ["火炬"])
+
+    def test_explicit_or_protected_scene_conflicts_are_never_rewritten(self) -> None:
+        selected = OrderedDict(
+            {"主体": ["潜水员"], "场景背景": ["深海"], "道具世界观": ["火炬"]}
+        )
+        graph = intelligence.build_scene_relationship_graph(selected)
+        unchanged, _custom, explicit_report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            [],
+            graph,
+            soft_tags=[],
+        )
+        protected, _custom, protected_report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            [],
+            graph,
+            soft_tags=["火炬"],
+            protected_tags=["火炬"],
+        )
+        self.assertFalse(explicit_report["applied"])
+        self.assertFalse(protected_report["applied"])
+        self.assertEqual(unchanged, selected)
+        self.assertEqual(protected, selected)
+
+    def test_random_conflict_repair_reaches_full_stage_before_model_calls(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+
+        class CountingModel:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def create_chat_completion(self, *args, **kwargs):
+                self.calls += 1
+                return {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": (
+                                    "潜水员悬浮在深海沉船外，沿舷窗观察缓慢移动的鱼群。"
+                                    "冷蓝散射光穿过水体照亮潜水服接缝，气泡沿面罩边缘上升，"
+                                    "镜头保持全身与沉船入口处在同一连续空间。"
+                                )
+                            }
+                        }
+                    ]
+                }
+
+        def inject_random_conflict(selected, custom_tags, settings, **_kwargs):
+            next_selected = OrderedDict((group, list(values)) for group, values in selected.items())
+            next_selected["动作姿态"] = ["举起火炬"]
+            next_selected["道具世界观"] = ["火炬"]
+            settings["运行时随机有效种子"] = 71
+            return next_selected, list(custom_tags), ["举起火炬", "火炬"]
+
+        model = CountingModel()
+        with mock.patch.object(module, "_build_runtime_tags", side_effect=inject_random_conflict):
+            result = module._run_stage(
+                model,
+                **{
+                    "unique_id": "intelligence-v12-random-conflict-repair",
+                    "模型来源": "本地模型",
+                    "模型来源实际": "外接本地模型",
+                    "模型调用基础来源": "本地模型",
+                    "主体标签1": "潜水员",
+                    "场景背景标签1": "深海",
+                    "运行时随机标签": True,
+                    "运行时随机模式": "全随机",
+                    "生成数量": 1,
+                    "提示词语言": "纯中文",
+                    "seed": 71,
+                },
+            )
+
+        payload = json.loads(result[3])
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v20")
+        self.assertEqual(payload["random_conflict_repair"]["removed_count"], 2)
+        self.assertEqual(payload["scene_coherence_status"], "coherent")
+        self.assertEqual(payload["model_intelligence_skip_count"], 0)
+        self.assertGreater(payload["model_call_attempt_count"], 0)
+        self.assertNotIn("火炬", payload["selected_tags_flat"])
+        self.assertNotIn("举起火炬", payload["selected_tags_flat"])
+        self.assertIn("智能随机冲突修复：2 个标签", result[2])
+
+    def test_automatic_template_profile_conflict_is_removed_by_provenance(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+
+        def inject_style_profile(template_style, selected, custom_tags, settings, **_kwargs):
+            next_selected = OrderedDict((group, list(values)) for group, values in selected.items())
+            next_selected["场景背景"] = [*next_selected.get("场景背景", []), "地铁站台"]
+            settings["模板风格档案标记"] = ["styletag:地铁站台"]
+            return next_selected, list(custom_tags)
+
+        with mock.patch.object(module, "_apply_template_style_profile_bias", side_effect=inject_style_profile):
+            result = module._run_stage(
+                None,
+                **{
+                    "unique_id": "intelligence-v20-auto-profile-provenance",
+                    "模型来源": "仅Skill",
+                    "主体标签1": "成年女性旅人",
+                    "模板风格": "真实感",
+                    "额外要求": "故事发生在森林深处，角色沿苔藓小路前进。",
+                    "运行时随机标签": False,
+                    "生成数量": 1,
+                    "提示词语言": "纯中文",
+                    "seed": 109,
+                },
+            )
+
+        payload = json.loads(result[3])
+        provenance = payload["automatic_tag_provenance"]
+        self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
+        self.assertEqual(provenance["sources"]["template_style_profile"], ["地铁站台"])
+        self.assertEqual(provenance["removable_tags"], ["地铁站台"])
+        self.assertNotIn("地铁站台", payload["selected_tags_flat"])
+        self.assertEqual(payload["scene_coherence_status"], "coherent")
+
+    def test_explicit_tag_matching_template_profile_stays_protected(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+
+        def replay_explicit_style_profile(template_style, selected, custom_tags, settings, **_kwargs):
+            settings["模板风格档案标记"] = ["styletag:地铁站台"]
+            return OrderedDict((group, list(values)) for group, values in selected.items()), list(custom_tags)
+
+        with mock.patch.object(module, "_apply_template_style_profile_bias", side_effect=replay_explicit_style_profile):
+            result = module._run_stage(
+                None,
+                **{
+                    "unique_id": "intelligence-v20-explicit-profile-protection",
+                    "模型来源": "仅Skill",
+                    "主体标签1": "成年女性旅人",
+                    "场景背景标签1": "地铁站台",
+                    "模板风格": "真实感",
+                    "额外要求": "故事发生在森林深处。",
+                    "运行时随机标签": False,
+                    "生成数量": 1,
+                    "提示词语言": "纯中文",
+                    "seed": 113,
+                },
+            )
+
+        payload = json.loads(result[3])
+        provenance = payload["automatic_tag_provenance"]
+        self.assertEqual(payload["random_conflict_repair"]["removed_count"], 0)
+        self.assertEqual(provenance["sources"]["template_style_profile"], [])
+        self.assertIn("地铁站台", payload["selected_tags_flat"])
+        self.assertEqual(payload["scene_coherence_status"], "conflict")
+
+    def test_runtime_preview_marker_preserves_soft_tag_sources(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        selected = OrderedDict(
+            {
+                "主体": ["成年女性旅人"],
+                "场景背景": ["地铁站台"],
+                "光影氛围": ["蓝灰月光"],
+            }
+        )
+        settings = {
+            "unique_id": "intelligence-v20-preview-provenance",
+            "seed": 127,
+            "运行时随机有效种子": 127,
+            "运行时随机模式解析结果": "补全缺失",
+            "智能软标签来源": {
+                "runtime_random": ["蓝灰月光"],
+                "random_theme_pool": ["地铁站台"],
+                "template_style_profile": [],
+            },
+        }
+        marker = module._parse_runtime_random_preview_marker(
+            module._new_runtime_random_preview_marker(settings, selected, [])
+        )
+        self.assertIsNotNone(marker)
+        self.assertEqual(marker["soft_tag_sources"]["runtime_random"], ["蓝灰月光"])
+        self.assertEqual(marker["soft_tag_sources"]["random_theme_pool"], ["地铁站台"])
+
+    def test_preview_provenance_reaches_generation_conflict_repair(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        module._CACHE.clear()
+        module._RUNTIME_RANDOM_PREVIEW_RESERVATIONS.clear()
+        node_id = "intelligence-v20-preview-generation-provenance"
+
+        def no_runtime_change(selected, custom_tags, settings, **_kwargs):
+            settings["运行时随机有效种子"] = 131
+            return selected, list(custom_tags), []
+
+        def inject_preview_style_profile(template_style, selected, custom_tags, settings, **_kwargs):
+            next_selected = OrderedDict((group, list(values)) for group, values in selected.items())
+            next_selected["场景背景"] = [*next_selected.get("场景背景", []), "地铁站台"]
+            settings["模板风格档案标记"] = ["styletag:地铁站台"]
+            return next_selected, list(custom_tags)
+
+        with (
+            mock.patch.object(module, "_build_runtime_tags", side_effect=no_runtime_change),
+            mock.patch.object(
+                module,
+                "_apply_template_style_profile_bias",
+                side_effect=inject_preview_style_profile,
+            ),
+        ):
+            preview = module.构建运行时随机预览状态(
+                {
+                    "unique_id": node_id,
+                    "selected": {"主体": ["成年女性旅人"]},
+                    "customTags": [],
+                    "settings": {
+                        "模板风格": "真实感",
+                        "主体类型": "人物角色",
+                        "运行时随机标签": True,
+                        "运行时随机模式": "补全缺失",
+                        "运行时随机强度": "弱",
+                        "随机主题池": "自动",
+                        "额外要求": "故事发生在森林深处。",
+                        "seed": 131,
+                    },
+                }
+            )
+            run_kwargs = dict(preview["settings"])
+            run_kwargs.update(
+                {
+                    "unique_id": node_id,
+                    "模型来源": "仅Skill",
+                    "生成数量": 1,
+                    "自定义补充标签": ", ".join(preview["customTags"]),
+                    "随机补充避重缓存": ", ".join(preview["_randomSupplementTags"]),
+                }
+            )
+            for group_name, slot_count, _options in module._all_tag_groups():
+                for index, tag in enumerate(preview["selected"].get(group_name, [])[:slot_count], start=1):
+                    run_kwargs[f"{group_name}标签{index}"] = tag
+            result = module._run_stage(None, **run_kwargs)
+
+        payload = json.loads(result[3])
+        self.assertTrue(payload["runtime_random_preview_consumed"])
+        self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
+        self.assertEqual(
+            payload["automatic_tag_provenance"]["sources"]["template_style_profile"],
+            ["地铁站台"],
+        )
+        self.assertNotIn("地铁站台", payload["selected_tags_flat"])
+        self.assertEqual(payload["scene_coherence_status"], "coherent")
+
+    def test_natural_language_veto_removes_only_matching_soft_world_anchors(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["成年女性旅人"],
+                "场景背景": ["森林小路", "地铁站台"],
+                "道具世界观": ["列车", "雨伞"],
+            }
+        )
+        graph = intelligence.build_scene_relationship_graph(
+            selected,
+            context_text="不要城市和列车，故事发生在森林深处。",
+        )
+        self.assertEqual(graph["coherence_status"], "conflict")
+        self.assertIn("urban_space", graph["negated_context_world_families"])
+        self.assertTrue(any(item["kind"] == "context_world_conflict" for item in graph["coherence_issues"]))
+        self.assertFalse(
+            any(
+                item["kind"] in {"context_primary_scene_conflict", "context_primary_anchor_conflict"}
+                for item in graph["coherence_issues"]
+            )
+        )
+
+        repaired, _custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            [],
+            graph,
+            soft_tags=["地铁站台", "列车"],
+        )
+        rebuilt = intelligence.build_scene_relationship_graph(
+            repaired,
+            context_text="不要城市和列车，故事发生在森林深处。",
+        )
+        self.assertTrue(report["applied"])
+        self.assertEqual(repaired["场景背景"], ["森林小路"])
+        self.assertEqual(repaired["道具世界观"], ["雨伞"])
+        self.assertEqual(rebuilt["coherence_status"], "coherent")
+
+    def test_specific_context_veto_does_not_remove_unrelated_same_world_tags(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["成年女性侦探"],
+                "场景背景": ["城市街道"],
+                "道具世界观": ["列车", "手机"],
+            }
+        )
+        graph = intelligence.build_scene_relationship_graph(
+            selected,
+            context_text="城市街道可以保留，但不要列车。",
+        )
+        repaired, _custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            [],
+            graph,
+            soft_tags=["城市街道", "列车", "手机"],
+        )
+        self.assertTrue(report["applied"])
+        self.assertEqual(repaired["场景背景"], ["城市街道"])
+        self.assertEqual(repaired["道具世界观"], ["手机"])
+
+    def test_explicit_context_veto_conflict_remains_guarded(self) -> None:
+        selected = OrderedDict({"主体": ["旅人"], "场景背景": ["地铁站台"]})
+        graph = intelligence.build_scene_relationship_graph(
+            selected,
+            context_text="不要城市，改为森林。",
+        )
+        unchanged, _custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            [],
+            graph,
+            soft_tags=[],
+        )
+        strategy = intelligence.resolve_model_strategy(
+            {"模型来源": "本地模型"},
+            {"task_type": "standard_visual_story"},
+            graph,
+        )
+        self.assertFalse(report["applied"])
+        self.assertEqual(unchanged, selected)
+        self.assertEqual(strategy["mode"], "skill_only_guarded")
+
+    def test_context_veto_repair_reaches_full_stage_relationship_graph(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+
+        def inject_random_city(selected, custom_tags, settings, **_kwargs):
+            next_selected = OrderedDict((group, list(values)) for group, values in selected.items())
+            next_selected["场景背景"] = ["地铁站台"]
+            next_selected["道具世界观"] = ["列车"]
+            settings["运行时随机有效种子"] = 73
+            return next_selected, list(custom_tags), ["地铁站台", "列车"]
+
+        with mock.patch.object(module, "_build_runtime_tags", side_effect=inject_random_city):
+            result = module._run_stage(
+                None,
+                **{
+                    "unique_id": "intelligence-v13-context-veto",
+                    "模型来源": "仅Skill",
+                    "主体标签1": "成年女性旅人",
+                    "额外要求": "不要城市和列车，故事发生在森林深处。",
+                    "运行时随机标签": True,
+                    "运行时随机模式": "全随机",
+                    "生成数量": 1,
+                    "提示词语言": "纯中文",
+                    "seed": 73,
+                },
+            )
+
+        payload = json.loads(result[3])
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v20")
+        self.assertEqual(payload["random_conflict_repair"]["removed_count"], 2)
+        self.assertEqual(payload["scene_relationship_graph"]["primary_world_family"], "natural_wilderness")
+        self.assertEqual(payload["scene_coherence_status"], "coherent")
+        self.assertNotIn("地铁站台", payload["selected_tags_flat"])
+        self.assertNotIn("列车", payload["selected_tags_flat"])
+
+    def test_explicit_primary_scene_cue_replaces_incompatible_soft_scene(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["成年女性旅人"],
+                "场景背景": ["森林小路", "地铁站台"],
+            }
+        )
+        graph = intelligence.build_scene_relationship_graph(
+            selected,
+            context_text="故事发生在森林深处，角色沿苔藓小路前行。",
+        )
+        issues = [item for item in graph["coherence_issues"] if item["kind"] == "context_primary_scene_conflict"]
+        self.assertEqual(graph["context_primary_world_family"], "natural_wilderness")
+        self.assertEqual(graph["context_primary_world_source"], "natural_context_cue")
+        self.assertEqual(issues[0]["conflicting_anchors"], [{"group": "场景背景", "value": "地铁站台"}])
+
+        repaired, _custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            [],
+            graph,
+            soft_tags=["地铁站台"],
+        )
+        self.assertTrue(report["applied"])
+        self.assertEqual(repaired["场景背景"], ["森林小路"])
+        self.assertEqual(report["removed"][0]["side"], "context_primary_scene")
+
+    def test_primary_scene_cue_keeps_compatible_worlds_and_ignores_incidental_context(self) -> None:
+        compatible = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["祭司"], "场景背景": ["古城回廊", "神殿祭坛"]}),
+            context_text="主要场景设在古城深处。",
+        )
+        incidental = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["旅人"], "场景背景": ["地铁站台"]}),
+            context_text="旅人离开城市后进入森林，回想起之前的车站。",
+        )
+        self.assertFalse(any(item["kind"] == "context_primary_scene_conflict" for item in compatible["coherence_issues"]))
+        self.assertFalse(any(item["kind"] == "context_primary_scene_conflict" for item in incidental["coherence_issues"]))
+
+    def test_explicit_primary_scene_conflict_is_guarded_not_deleted(self) -> None:
+        selected = OrderedDict({"主体": ["旅人"], "场景背景": ["地铁站台"]})
+        graph = intelligence.build_scene_relationship_graph(
+            selected,
+            context_text="故事发生在森林深处。",
+        )
+        unchanged, _custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            [],
+            graph,
+            soft_tags=[],
+        )
+        strategy = intelligence.resolve_model_strategy(
+            {"模型来源": "API接口"},
+            {"task_type": "standard_visual_story"},
+            graph,
+        )
+        self.assertFalse(report["applied"])
+        self.assertEqual(unchanged, selected)
+        self.assertEqual(strategy["mode"], "skill_only_guarded")
+
+    def test_primary_scene_cue_repair_reaches_full_stage(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+
+        def inject_random_station(selected, custom_tags, settings, **_kwargs):
+            next_selected = OrderedDict((group, list(values)) for group, values in selected.items())
+            next_selected["场景背景"] = ["地铁站台"]
+            settings["运行时随机有效种子"] = 79
+            return next_selected, list(custom_tags), ["地铁站台"]
+
+        with mock.patch.object(module, "_build_runtime_tags", side_effect=inject_random_station):
+            result = module._run_stage(
+                None,
+                **{
+                    "unique_id": "intelligence-v14-primary-scene",
+                    "模型来源": "仅Skill",
+                    "主体标签1": "成年女性旅人",
+                    "额外要求": "故事发生在森林深处，角色沿苔藓小路前行。",
+                    "运行时随机标签": True,
+                    "运行时随机模式": "全随机",
+                    "生成数量": 1,
+                    "提示词语言": "纯中文",
+                    "seed": 79,
+                },
+            )
+
+        payload = json.loads(result[3])
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v20")
+        self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
+        self.assertEqual(payload["scene_relationship_graph"]["primary_world_family"], "natural_wilderness")
+        self.assertEqual(payload["scene_coherence_status"], "coherent")
+        self.assertNotIn("地铁站台", payload["selected_tags_flat"])
+
+    def test_primary_scene_cue_removes_incompatible_soft_cross_group_anchors(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["成年女性旅人"],
+                "场景背景": ["森林小路"],
+                "道具世界观": ["列车", "火炬"],
+                "动作姿态": ["操作控制台"],
+            }
+        )
+        graph = intelligence.build_scene_relationship_graph(
+            selected,
+            ["霓虹街区"],
+            context_text="故事发生在森林深处。",
+        )
+        issues = [
+            item for item in graph["coherence_issues"]
+            if item["kind"] == "context_primary_anchor_conflict"
+        ]
+        self.assertEqual(
+            issues[0]["conflicting_anchors"],
+            [
+                {"group": "道具世界观", "value": "列车"},
+                {"group": "动作姿态", "value": "操作控制台"},
+                {"group": "自定义补充", "value": "霓虹街区"},
+            ],
+        )
+
+        repaired, custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            ["霓虹街区"],
+            graph,
+            soft_tags=["列车", "操作控制台", "霓虹街区"],
+        )
+        rebuilt = intelligence.build_scene_relationship_graph(
+            repaired,
+            custom,
+            context_text="故事发生在森林深处。",
+        )
+        self.assertEqual(repaired["道具世界观"], ["火炬"])
+        self.assertEqual(repaired["动作姿态"], [])
+        self.assertEqual(custom, [])
+        self.assertEqual(report["removed_count"], 3)
+        self.assertTrue(all(item["side"] == "context_primary_anchor" for item in report["removed"]))
+        self.assertEqual(rebuilt["coherence_status"], "coherent")
+
+    def test_explicit_cross_group_world_conflict_remains_guarded(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["旅人"],
+                "场景背景": ["森林小路"],
+                "道具世界观": ["列车"],
+            }
+        )
+        graph = intelligence.build_scene_relationship_graph(
+            selected,
+            context_text="主要场景设在森林深处。",
+        )
+        unchanged, _custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            [],
+            graph,
+            soft_tags=[],
+        )
+        strategy = intelligence.resolve_model_strategy(
+            {"模型来源": "本地模型"},
+            {"task_type": "standard_visual_story"},
+            graph,
+        )
+        self.assertFalse(report["applied"])
+        self.assertEqual(unchanged, selected)
+        self.assertEqual(strategy["mode"], "skill_only_guarded")
+
+    def test_primary_scene_cross_group_repair_reaches_full_stage(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+
+        def inject_cross_world_anchors(selected, custom_tags, settings, **_kwargs):
+            next_selected = OrderedDict((group, list(values)) for group, values in selected.items())
+            next_selected["道具世界观"] = ["火炬"]
+            next_selected["动作姿态"] = ["操作控制台"]
+            settings["运行时随机有效种子"] = 83
+            return next_selected, list(custom_tags), ["操作控制台"]
+
+        with mock.patch.object(module, "_build_runtime_tags", side_effect=inject_cross_world_anchors):
+            result = module._run_stage(
+                None,
+                **{
+                    "unique_id": "intelligence-v15-cross-group-world-repair",
+                    "模型来源": "仅Skill",
+                    "主体标签1": "成年女性旅人",
+                    "场景背景标签1": "森林小路",
+                    "额外要求": "故事发生在森林深处。",
+                    "运行时随机标签": True,
+                    "运行时随机模式": "全随机",
+                    "生成数量": 1,
+                    "提示词语言": "纯中文",
+                    "seed": 83,
+                },
+            )
+
+        payload = json.loads(result[3])
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v20")
+        self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
+        self.assertEqual(payload["scene_coherence_status"], "coherent")
+        self.assertNotIn("操作控制台", payload["selected_tags_flat"])
+        self.assertIn("火炬", payload["selected_tags_flat"])
+
+    def test_primary_scene_override_uses_last_explicit_replacement(self) -> None:
+        selected = OrderedDict({"主体": ["成年女性旅人"]})
+        chinese = intelligence.build_scene_relationship_graph(
+            selected,
+            context_text="主要场景设在森林深处，后来改为城市天台，再改为深海沉船。",
+        )
+        english = intelligence.build_scene_relationship_graph(
+            selected,
+            context_text="The main setting is a forest valley, but change it to an urban street.",
+        )
+        final_cue = intelligence.build_scene_relationship_graph(
+            selected,
+            context_text="主场景最初设在古城回廊，最后将主场景设在深海沉船。",
+        )
+        self.assertEqual(chinese["primary_world_family"], "underwater")
+        self.assertEqual(chinese["primary_world_evidence_source"], "natural_context_override")
+        self.assertEqual(chinese["context_primary_world_evidence"], "深海")
+        self.assertEqual(english["primary_world_family"], "urban_space")
+        self.assertEqual(final_cue["primary_world_family"], "underwater")
+
+    def test_non_scene_rewrite_does_not_override_primary_scene(self) -> None:
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性旅人"]}),
+            context_text="主要场景设在森林深处。服装改为城市机能风，角色继续沿林间小路前进。",
+        )
+        self.assertEqual(graph["primary_world_family"], "natural_wilderness")
+        self.assertEqual(graph["primary_world_evidence_source"], "natural_context_cue")
+        self.assertEqual(graph["context_primary_world_source"], "natural_context_cue")
+        self.assertEqual(graph["superseded_context_world_families"], [])
+
+    def test_primary_scene_override_replaces_soft_scene_and_forbids_old_world(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["成年女性旅人"],
+                "场景背景": ["森林小路"],
+                "道具世界观": ["列车"],
+            }
+        )
+        context = "主要场景设在森林深处，后来改为城市街道。"
+        graph = intelligence.build_scene_relationship_graph(selected, context_text=context)
+        repaired, _custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            [],
+            graph,
+            soft_tags=["森林小路"],
+        )
+        rebuilt = intelligence.build_scene_relationship_graph(repaired, context_text=context)
+        self.assertEqual(graph["context_primary_world_family"], "urban_space")
+        self.assertEqual(graph["context_primary_world_source"], "natural_context_override")
+        self.assertEqual(graph["superseded_context_world_families"], ["natural_wilderness"])
+        self.assertEqual(repaired["场景背景"], [])
+        self.assertEqual(repaired["道具世界观"], ["列车"])
+        self.assertEqual(report["removed"][0]["side"], "context_primary_scene")
+        self.assertIn("natural_wilderness", rebuilt["forbidden_world_families"])
+        self.assertEqual(rebuilt["primary_world_family"], "urban_space")
+        self.assertEqual(rebuilt["coherence_status"], "coherent")
+
+    def test_primary_scene_override_repair_reaches_full_stage(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+
+        def inject_superseded_scene(selected, custom_tags, settings, **_kwargs):
+            next_selected = OrderedDict((group, list(values)) for group, values in selected.items())
+            next_selected["场景背景"] = ["森林小路"]
+            settings["运行时随机有效种子"] = 89
+            return next_selected, list(custom_tags), ["森林小路"]
+
+        with mock.patch.object(module, "_build_runtime_tags", side_effect=inject_superseded_scene):
+            result = module._run_stage(
+                None,
+                **{
+                    "unique_id": "intelligence-v16-primary-scene-override",
+                    "模型来源": "仅Skill",
+                    "主体标签1": "成年女性旅人",
+                    "额外要求": "主要场景设在森林深处，后来改为城市街道。",
+                    "运行时随机标签": True,
+                    "运行时随机模式": "全随机",
+                    "生成数量": 1,
+                    "提示词语言": "纯中文",
+                    "seed": 89,
+                },
+            )
+
+        payload = json.loads(result[3])
+        graph = payload["scene_relationship_graph"]
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v20")
+        self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
+        self.assertEqual(graph["primary_world_family"], "urban_space")
+        self.assertEqual(graph["context_primary_world_source"], "natural_context_override")
+        self.assertIn("natural_wilderness", graph["forbidden_world_families"])
+        self.assertNotIn("森林小路", payload["selected_tags_flat"])
+
+    def test_context_scene_attributes_remove_conflicting_soft_light_and_weather(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["成年女性旅人"],
+                "场景背景": ["森林小路"],
+                "光影氛围": ["蓝灰月光", "霓虹雨夜", "硬日光"],
+            }
+        )
+        context = "画面明确保持正午晴天。"
+        graph = intelligence.build_scene_relationship_graph(selected, context_text=context)
+        issues = [
+            item for item in graph["coherence_issues"]
+            if item["kind"] == "context_scene_attribute_conflict"
+        ]
+        constraints = graph["context_scene_attribute_constraints"]
+        self.assertEqual(constraints["time_of_day"]["required_value"], "day")
+        self.assertEqual(constraints["precipitation"]["required_value"], "clear")
+        self.assertEqual(
+            [item["value"] for item in issues[0]["conflicting_anchors"]],
+            ["蓝灰月光", "霓虹雨夜"],
+        )
+
+        repaired, _custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            [],
+            graph,
+            soft_tags=["蓝灰月光", "霓虹雨夜"],
+        )
+        rebuilt = intelligence.build_scene_relationship_graph(repaired, context_text=context)
+        self.assertEqual(repaired["光影氛围"], ["硬日光"])
+        self.assertEqual(report["removed_count"], 2)
+        self.assertTrue(all(item["side"] == "context_scene_attribute" for item in report["removed"]))
+        self.assertEqual(rebuilt["coherence_status"], "coherent")
+
+    def test_context_scene_attributes_keep_multi_state_story_open(self) -> None:
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["旅人"]}),
+            context_text="故事从霓虹雨夜开始，随后在晴朗清晨结束。",
+        )
+        self.assertEqual(graph["context_scene_attribute_constraints"], {})
+        self.assertEqual(graph["coherence_status"], "coherent")
+
+    def test_explicit_scene_attribute_conflict_is_guarded(self) -> None:
+        selected = OrderedDict({"主体": ["旅人"], "光影氛围": ["蓝灰月光"]})
+        graph = intelligence.build_scene_relationship_graph(
+            selected,
+            context_text="画面明确保持正午晴天。",
+        )
+        unchanged, _custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            [],
+            graph,
+            soft_tags=[],
+        )
+        strategy = intelligence.resolve_model_strategy(
+            {"模型来源": "API接口"},
+            {"task_type": "standard_visual_story"},
+            graph,
+        )
+        self.assertFalse(report["applied"])
+        self.assertEqual(unchanged, selected)
+        self.assertEqual(strategy["mode"], "skill_only_guarded")
+
+    def test_candidate_cannot_reintroduce_conflicting_scene_attributes(self) -> None:
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["旅人"], "光影氛围": ["硬日光"]}),
+            context_text="画面明确保持正午晴天。",
+        )
+        violation = intelligence.candidate_world_violation(
+            "旅人在正午晴天的硬日光下穿过森林。",
+            "旅人在正午晴天的硬日光下穿过森林，远处又出现蓝灰月光与暴雨。",
+            graph,
+        )
+        self.assertIn("场景属性约束", violation)
+        self.assertTrue("月光" in violation or "暴雨" in violation)
+
+    def test_scene_attribute_repair_reaches_full_stage(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+
+        def inject_conflicting_light(selected, custom_tags, settings, **_kwargs):
+            next_selected = OrderedDict((group, list(values)) for group, values in selected.items())
+            settings["运行时随机有效种子"] = 97
+            return next_selected, [*custom_tags, "远景保持霓虹雨夜"], ["远景保持霓虹雨夜"]
+
+        with mock.patch.object(module, "_build_runtime_tags", side_effect=inject_conflicting_light):
+            result = module._run_stage(
+                None,
+                **{
+                    "unique_id": "intelligence-v17-scene-attribute-repair",
+                    "模型来源": "仅Skill",
+                    "主体标签1": "成年女性旅人",
+                    "额外要求": "画面明确保持正午晴天。",
+                    "运行时随机标签": True,
+                    "运行时随机模式": "全随机",
+                    "生成数量": 1,
+                    "提示词语言": "纯中文",
+                    "seed": 97,
+                },
+            )
+
+        payload = json.loads(result[3])
+        graph = payload["scene_relationship_graph"]
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v20")
+        self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
+        self.assertEqual(graph["context_scene_attribute_constraints"]["time_of_day"]["required_value"], "day")
+        self.assertEqual(graph["context_scene_attribute_constraints"]["precipitation"]["required_value"], "clear")
+        self.assertEqual(payload["scene_coherence_status"], "coherent")
+        self.assertNotIn("远景保持霓虹雨夜", payload["selected_tags_flat"])
+
+    def test_single_subject_context_removes_soft_multi_subject_anchors(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["成年女性冒险者"],
+                "画面风格": ["史诗群像"],
+                "动作姿态": ["双人互动"],
+                "构图视角": ["冒险队群像"],
+            }
+        )
+        custom = ["背景人物围观", "双人床"]
+        context = "画面只保留单人，角色独自行动，不要群像或双人。"
+        graph = intelligence.build_scene_relationship_graph(selected, custom, context_text=context)
+        issues = [
+            item for item in graph["coherence_issues"]
+            if item["kind"] == "context_subject_cardinality_conflict"
+        ]
+        constraint = graph["context_subject_cardinality_constraint"]
+        self.assertEqual(constraint["required_value"], "single")
+        self.assertEqual(set(constraint["negated_values"]), {"pair", "group"})
+        self.assertEqual(
+            [item["value"] for item in issues[0]["conflicting_anchors"]],
+            ["史诗群像", "双人互动", "冒险队群像", "背景人物围观"],
+        )
+
+        repaired, repaired_custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            custom,
+            graph,
+            soft_tags=["史诗群像", "双人互动", "冒险队群像", "背景人物围观", "双人床"],
+        )
+        rebuilt = intelligence.build_scene_relationship_graph(
+            repaired,
+            repaired_custom,
+            context_text=context,
+        )
+        self.assertEqual(repaired["画面风格"], [])
+        self.assertEqual(repaired["动作姿态"], [])
+        self.assertEqual(repaired["构图视角"], [])
+        self.assertEqual(repaired_custom, ["双人床"])
+        self.assertEqual(report["removed_count"], 4)
+        self.assertEqual(rebuilt["coherence_status"], "coherent")
+
+    def test_subject_cardinality_keeps_multi_stage_story_and_furniture_open(self) -> None:
+        transition = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"]}),
+            context_text="角色先独自侦察，随后与小队会合形成群像。",
+        )
+        furniture = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"], "场景背景": ["卧室"]}),
+            ["双人床"],
+            context_text="单人坐在双人床边整理地图。",
+        )
+        english = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["adult traveler"]}),
+            context_text="A single person takes a couple of steps toward the doorway.",
+        )
+        self.assertEqual(transition["context_subject_cardinality_constraint"], {})
+        self.assertEqual(furniture["context_subject_cardinality_constraint"]["required_value"], "single")
+        self.assertEqual(english["context_subject_cardinality_constraint"]["required_value"], "single")
+        self.assertFalse(
+            any(item["kind"] == "context_subject_cardinality_conflict" for item in furniture["coherence_issues"])
+        )
+
+    def test_explicit_subject_cardinality_conflict_is_guarded(self) -> None:
+        selected = OrderedDict({"主体": ["成年女性冒险者"], "构图视角": ["冒险队群像"]})
+        graph = intelligence.build_scene_relationship_graph(
+            selected,
+            context_text="画面只有单人，角色独自行动。",
+        )
+        unchanged, _custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            [],
+            graph,
+            soft_tags=[],
+        )
+        strategy = intelligence.resolve_model_strategy(
+            {"模型来源": "本地模型"},
+            {"task_type": "standard_visual_story"},
+            graph,
+        )
+        self.assertFalse(report["applied"])
+        self.assertEqual(unchanged, selected)
+        self.assertEqual(strategy["mode"], "skill_only_guarded")
+
+    def test_candidate_cannot_add_people_against_single_subject_constraint(self) -> None:
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"]}),
+            context_text="画面只保留单人，角色独自行动。",
+        )
+        violation = intelligence.candidate_world_violation(
+            "整张画面只有这一位人物，她独自穿过森林。",
+            "整张画面只有这一位人物，她独自穿过森林，背景人物与路人在远处围观。",
+            graph,
+        )
+        self.assertIn("人物数量约束", violation)
+        self.assertTrue("背景人物" in violation or "路人" in violation)
+
+    def test_subject_cardinality_repair_reaches_full_stage(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+
+        def inject_background_people(selected, custom_tags, settings, **_kwargs):
+            next_selected = OrderedDict((group, list(values)) for group, values in selected.items())
+            settings["运行时随机有效种子"] = 101
+            return next_selected, [*custom_tags, "背景人物围观"], ["背景人物围观"]
+
+        with mock.patch.object(module, "_build_runtime_tags", side_effect=inject_background_people):
+            result = module._run_stage(
+                None,
+                **{
+                    "unique_id": "intelligence-v18-subject-cardinality-repair",
+                    "模型来源": "仅Skill",
+                    "主体标签1": "成年女性冒险者",
+                    "额外要求": "画面只保留单人，角色独自行动，不要群像或双人。",
+                    "运行时随机标签": True,
+                    "运行时随机模式": "全随机",
+                    "生成数量": 1,
+                    "提示词语言": "纯中文",
+                    "seed": 101,
+                },
+            )
+
+        payload = json.loads(result[3])
+        graph = payload["scene_relationship_graph"]
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v20")
+        self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
+        self.assertEqual(graph["context_subject_cardinality_constraint"]["required_value"], "single")
+        self.assertEqual(payload["scene_coherence_status"], "coherent")
+        self.assertNotIn("背景人物围观", payload["selected_tags_flat"])
+
+    def test_back_orientation_context_removes_soft_front_and_side_anchors(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["成年女性冒险者"],
+                "动作姿态": ["正对镜头"],
+                "构图视角": ["正面视图", "侧面视图", "取景器视角", "背面视图"],
+            }
+        )
+        custom = ["侧脸轮廓", "皮革护甲"]
+        context = "主体保持背面并背对镜头，不要正面或侧面。"
+        graph = intelligence.build_scene_relationship_graph(selected, custom, context_text=context)
+        issues = [
+            item for item in graph["coherence_issues"]
+            if item["kind"] == "context_subject_orientation_conflict"
+        ]
+        constraint = graph["context_subject_orientation_constraint"]
+        self.assertEqual(constraint["required_value"], "back")
+        self.assertEqual(set(constraint["negated_values"]), {"front", "side"})
+        self.assertEqual(
+            [item["value"] for item in issues[0]["conflicting_anchors"]],
+            ["正对镜头", "正面视图", "侧面视图", "侧脸轮廓"],
+        )
+
+        repaired, repaired_custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            custom,
+            graph,
+            soft_tags=["正对镜头", "正面视图", "侧面视图", "侧脸轮廓"],
+        )
+        rebuilt = intelligence.build_scene_relationship_graph(
+            repaired,
+            repaired_custom,
+            context_text=context,
+        )
+        self.assertEqual(repaired["动作姿态"], [])
+        self.assertEqual(repaired["构图视角"], ["取景器视角", "背面视图"])
+        self.assertEqual(repaired_custom, ["皮革护甲"])
+        self.assertEqual(report["removed_count"], 4)
+        self.assertEqual(rebuilt["coherence_status"], "coherent")
+
+    def test_subject_orientation_keeps_three_view_and_turn_story_open(self) -> None:
+        three_view = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"]}),
+            context_text="角色设定图包含正面、标准侧面和背面三幅视图。",
+        )
+        turn_story = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"]}),
+            context_text="镜头先从背后拍摄，角色随后转身正对镜头。",
+        )
+        compact_three_view = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"]}),
+            context_text="输出正侧背角色三视图。",
+        )
+        semantic_front = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"]}),
+            context_text="角色的决定带来正面影响，剧情强调责任与后果。",
+        )
+        self.assertEqual(three_view["context_subject_orientation_constraint"], {})
+        self.assertEqual(turn_story["context_subject_orientation_constraint"], {})
+        self.assertEqual(compact_three_view["context_subject_orientation_constraint"], {})
+        self.assertEqual(semantic_front["context_subject_orientation_constraint"], {})
+
+    def test_explicit_subject_orientation_conflict_is_guarded(self) -> None:
+        selected = OrderedDict({"主体": ["成年女性冒险者"], "构图视角": ["正面视图"]})
+        graph = intelligence.build_scene_relationship_graph(
+            selected,
+            context_text="主体保持背面并背对镜头。",
+        )
+        unchanged, _custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            [],
+            graph,
+            soft_tags=[],
+        )
+        strategy = intelligence.resolve_model_strategy(
+            {"模型来源": "API接口"},
+            {"task_type": "standard_visual_story"},
+            graph,
+        )
+        self.assertFalse(report["applied"])
+        self.assertEqual(unchanged, selected)
+        self.assertEqual(strategy["mode"], "skill_only_guarded")
+
+    def test_candidate_cannot_change_required_subject_orientation(self) -> None:
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"], "构图视角": ["背面视图"]}),
+            context_text="主体保持背面并背对镜头。",
+        )
+        violation = intelligence.candidate_world_violation(
+            "镜头从背后拍摄，主体背对镜头站在森林里。",
+            "镜头从背后拍摄，主体背对镜头站在森林里，随后增加一幅正面视图。",
+            graph,
+        )
+        self.assertIn("主体朝向约束", violation)
+        self.assertIn("正面", violation)
+
+    def test_subject_orientation_repair_reaches_full_stage(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+
+        def inject_front_view(selected, custom_tags, settings, **_kwargs):
+            next_selected = OrderedDict((group, list(values)) for group, values in selected.items())
+            settings["运行时随机有效种子"] = 103
+            return next_selected, [*custom_tags, "远景补入正面视图"], ["远景补入正面视图"]
+
+        with mock.patch.object(module, "_build_runtime_tags", side_effect=inject_front_view):
+            result = module._run_stage(
+                None,
+                **{
+                    "unique_id": "intelligence-v19-subject-orientation-repair",
+                    "模型来源": "仅Skill",
+                    "主体标签1": "成年女性冒险者",
+                    "额外要求": "主体保持背面并背对镜头，不要正面或侧面。",
+                    "运行时随机标签": True,
+                    "运行时随机模式": "全随机",
+                    "生成数量": 1,
+                    "提示词语言": "纯中文",
+                    "seed": 103,
+                },
+            )
+
+        payload = json.loads(result[3])
+        graph = payload["scene_relationship_graph"]
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v20")
+        self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
+        self.assertEqual(graph["context_subject_orientation_constraint"]["required_value"], "back")
+        self.assertEqual(payload["scene_coherence_status"], "coherent")
+        self.assertNotIn("远景补入正面视图", payload["selected_tags_flat"])
+
     def test_preference_memory_requires_repeated_explicit_choices(self) -> None:
         explicit = OrderedDict(
             {
@@ -1221,7 +2272,7 @@ class TestStagePromptModules(unittest.TestCase):
             self.assertTrue(active_model.llm.closed)
             self.assertIsNone(module._QwenStorage.model)
 
-    def test_qwen35_text_model_uses_embedded_template_instead_of_legacy_qwen_format(self) -> None:
+    def test_qwen35_text_model_uses_qwen_fallback_when_runtime_has_no_embedded_template(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             models_dir = pathlib.Path(temp_dir)
             llm_dir = models_dir / "LLM"
@@ -1239,7 +2290,7 @@ class TestStagePromptModules(unittest.TestCase):
 
             self.assertEqual(len(fake_llama.created), 1)
             self.assertNotIn("chat_format", model.llm.init_kwargs)
-            self.assertIsNone(model.llm.chat_format)
+            self.assertEqual(model.llm.chat_format, "qwen")
             self.assertIsNone(
                 module._推断llama默认聊天格式(
                     family="Qwen3.5-VL",
@@ -1251,7 +2302,7 @@ class TestStagePromptModules(unittest.TestCase):
                 "qwen",
             )
 
-    def test_qwen35_managed_call_repairs_legacy_cached_chat_format(self) -> None:
+    def test_qwen35_managed_call_keeps_compatible_cached_chat_format(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             models_dir = pathlib.Path(temp_dir)
             llm_dir = models_dir / "LLM"
@@ -1274,7 +2325,104 @@ class TestStagePromptModules(unittest.TestCase):
             )
 
             self.assertEqual(result["choices"][0]["message"]["content"], "ok")
-            self.assertIsNone(model.llm.chat_format)
+            self.assertEqual(model.llm.chat_format, "qwen")
+
+    def test_qwen35_managed_call_restores_registered_embedded_template(self) -> None:
+        module, _fake_llama, _runtime = load_nodes_for_storage_test(pathlib.Path("."))
+
+        class EmbeddedTemplateLlama:
+            model_path = "Qwen3.5-4B-Q4_K_M.gguf"
+            chat_format = None
+            chat_handler = None
+            _chat_handlers = {"chat_template.default": object()}
+            _qwen_te_settings = {
+                "model": "Qwen3.5-4B-Q4_K_M.gguf",
+                "family": "Qwen3.5-VL",
+            }
+
+            def reset(self):
+                return None
+
+            def create_chat_completion(self, **_kwargs):
+                if self.chat_format is None:
+                    raise RuntimeError("Invalid chat handler: None (valid formats: ['qwen'])")
+                return {"choices": [{"message": {"content": "embedded-ok"}}]}
+
+        llm = EmbeddedTemplateLlama()
+        result = module._执行chat_completion(
+            llm,
+            messages=[{"role": "user", "content": "return final text"}],
+            params={},
+        )
+
+        self.assertEqual(result["choices"][0]["message"]["content"], "embedded-ok")
+        self.assertEqual(llm.chat_format, "chat_template.default")
+
+    def test_local_model_chat_formats_cover_supported_text_families(self) -> None:
+        module, _fake_llama, _runtime = load_nodes_for_storage_test(pathlib.Path("."))
+        cases = (
+            ("Qwen3-VL", "Qwen3-8B.gguf", "qwen"),
+            ("Gemma4", "gemma-4-12b.gguf", "gemma"),
+            ("Llama", "Llama-2-7B.gguf", "llama-2"),
+            ("Llama", "Llama-3.2-8B.gguf", "llama-3"),
+            ("Llama", "Llama-4-Scout.gguf", "llama-4"),
+            ("Mistral", "Mistral-7B-Instruct.gguf", "mistral-instruct"),
+            ("DeepSeek", "DeepSeek-V3.gguf", "chatml"),
+            ("通用GGUF", "deepseek-r1-distill.gguf", "chatml"),
+        )
+
+        for family, model_name, expected in cases:
+            with self.subTest(family=family, model_name=model_name):
+                self.assertEqual(
+                    module._推断llama默认聊天格式(family=family, model_name=model_name),
+                    expected,
+                )
+
+    def test_non_qwen_local_models_retry_an_invalid_chat_handler_once(self) -> None:
+        module, _fake_llama, _runtime = load_nodes_for_storage_test(pathlib.Path("."))
+        cases = (
+            ("Qwen3.5-VL", "Qwen3.5-4B.gguf", "qwen"),
+            ("Gemma4", "gemma-4.gguf", "gemma"),
+            ("Llama", "Llama-4.gguf", "llama-4"),
+            ("Mistral", "Mistral-7B.gguf", "mistral-instruct"),
+            ("DeepSeek", "DeepSeek-V3.gguf", "chatml"),
+        )
+
+        for family, model_name, expected in cases:
+            with self.subTest(family=family):
+                class InvalidFormatLlama:
+                    model_path = model_name
+                    chat_format = "unsupported-format"
+                    chat_handler = None
+                    _chat_handlers = {}
+                    _qwen_te_settings = {"model": model_name, "family": family}
+
+                    def __init__(self):
+                        self.calls = 0
+
+                    def reset(self):
+                        return None
+
+                    def create_chat_completion(self, **_kwargs):
+                        self.calls += 1
+                        if self.calls == 1:
+                            raise Exception(
+                                "Invalid chat handler: unsupported-format "
+                                "(valid formats: ['llama-2', 'llama-3', 'llama-4', 'qwen', "
+                                "'mistral-instruct', 'gemma', 'chatml'])"
+                            )
+                        return {"choices": [{"message": {"content": "recovered"}}]}
+
+                llm = InvalidFormatLlama()
+                result = module._执行chat_completion(
+                    llm,
+                    messages=[{"role": "user", "content": "return final text"}],
+                    params={},
+                )
+
+                self.assertEqual(result["choices"][0]["message"]["content"], "recovered")
+                self.assertEqual(llm.chat_format, expected)
+                self.assertEqual(llm.calls, 2)
 
     def test_model_recovery_uses_recorded_owner_storage(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

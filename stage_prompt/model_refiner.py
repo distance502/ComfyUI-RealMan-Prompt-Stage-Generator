@@ -1861,6 +1861,59 @@ def _skill_context_for_model(settings: dict[str, Any]) -> str:
             + "。任务类型和模型策略已经确定，不得在润色时改换任务。"
         )
     if isinstance(scene_graph, dict):
+        orientation_constraint = dict(scene_graph.get("context_subject_orientation_constraint", {}) or {})
+        if orientation_constraint:
+            required_label = str(orientation_constraint.get("required_label", "") or "").strip()
+            negated_labels = [
+                str(item).strip()
+                for item in list(orientation_constraint.get("negated_labels", []) or [])
+                if str(item).strip()
+            ]
+            orientation_text = (
+                f"主体朝向固定为{required_label}"
+                if required_label
+                else "主体朝向不得采用" + "、".join(negated_labels)
+            )
+            extra_lines.append(
+                "智能主体朝向：" + orientation_text
+                + "。单帧只能采用该朝向；显式三视图或连续转身剧情不受单朝向收敛影响。"
+            )
+        cardinality_constraint = dict(scene_graph.get("context_subject_cardinality_constraint", {}) or {})
+        if cardinality_constraint:
+            required_label = str(cardinality_constraint.get("required_label", "") or "").strip()
+            negated_labels = [
+                str(item).strip()
+                for item in list(cardinality_constraint.get("negated_labels", []) or [])
+                if str(item).strip()
+            ]
+            cardinality_text = (
+                f"人物数量固定为{required_label}"
+                if required_label
+                else "人物数量不得采用" + "、".join(negated_labels)
+            )
+            extra_lines.append(
+                "智能人物数量：" + cardinality_text
+                + "。不得增加路人、背景人物、同伴或额外主体；多视图只改变视角，不改变角色数量。"
+            )
+        attribute_constraints = dict(scene_graph.get("context_scene_attribute_constraints", {}) or {})
+        attribute_parts = []
+        for constraint in attribute_constraints.values():
+            if not isinstance(constraint, dict):
+                continue
+            axis_label = str(constraint.get("axis_label", "") or "").strip()
+            required_label = str(constraint.get("required_label", "") or "").strip()
+            negated_labels = [
+                str(item).strip() for item in list(constraint.get("negated_labels", []) or []) if str(item).strip()
+            ]
+            if axis_label and required_label:
+                attribute_parts.append(f"{axis_label}固定为{required_label}")
+            elif axis_label and negated_labels:
+                attribute_parts.append(f"{axis_label}不得出现{'、'.join(negated_labels)}")
+        if attribute_parts:
+            extra_lines.append(
+                "智能场景属性：" + "；".join(attribute_parts)
+                + "。图片、智能文本和视频必须保持同一昼夜与天气事实，不得新增相反状态。"
+            )
         hard_anchors = scene_graph.get("hard_anchors")
         if isinstance(hard_anchors, dict):
             anchor_text = "；".join(
