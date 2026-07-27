@@ -1861,6 +1861,23 @@ def _skill_context_for_model(settings: dict[str, Any]) -> str:
             + "。任务类型和模型策略已经确定，不得在润色时改换任务。"
         )
     if isinstance(scene_graph, dict):
+        orientation_constraint = dict(scene_graph.get("context_subject_orientation_constraint", {}) or {})
+        if orientation_constraint:
+            required_label = str(orientation_constraint.get("required_label", "") or "").strip()
+            negated_labels = [
+                str(item).strip()
+                for item in list(orientation_constraint.get("negated_labels", []) or [])
+                if str(item).strip()
+            ]
+            orientation_text = (
+                f"主体朝向固定为{required_label}"
+                if required_label
+                else "主体朝向不得采用" + "、".join(negated_labels)
+            )
+            extra_lines.append(
+                "智能主体朝向：" + orientation_text
+                + "。单帧只能采用该朝向；显式三视图或连续转身剧情不受单朝向收敛影响。"
+            )
         cardinality_constraint = dict(scene_graph.get("context_subject_cardinality_constraint", {}) or {})
         if cardinality_constraint:
             required_label = str(cardinality_constraint.get("required_label", "") or "").strip()

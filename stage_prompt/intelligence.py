@@ -9,7 +9,7 @@ import re
 from typing import Any, Iterable
 
 
-INTELLIGENCE_PROFILE_VERSION = "qwen-te-intelligence-v18"
+INTELLIGENCE_PROFILE_VERSION = "qwen-te-intelligence-v20"
 
 _GROUP_LIMITS = {
     "主体": 6,
@@ -201,6 +201,41 @@ _SUBJECT_CARDINALITY_LABELS = {
     "none": "无人",
 }
 _CARDINALITY_FURNITURE_RE = re.compile(r"(?:单人|双人)(?:床|房|间|沙发|座椅|座位)", flags=re.IGNORECASE)
+SUBJECT_ORIENTATION_MARKERS: dict[str, tuple[str, ...]] = {
+    "front": (
+        "正面", "正脸", "正对镜头", "面向镜头", "正面视图", "正面全身", "正面构图",
+        "正侧背", "正面侧面背面", "front view", "frontal view", "front-facing", "facing the camera",
+        "front side back",
+    ),
+    "side": (
+        "侧面", "侧脸", "标准侧面", "侧面视图", "侧面全身", "侧身构图",
+        "正侧背", "正面侧面背面", "side view", "side profile", "profile view", "side-facing",
+        "front side back",
+    ),
+    "back": (
+        "背面", "背影", "背对镜头", "从背后拍摄", "背面视图", "背面全身", "背面构图",
+        "正侧背", "正面侧面背面", "back view", "rear view", "back-facing", "from behind",
+        "front side back",
+    ),
+}
+_SUBJECT_ORIENTATION_LABELS = {
+    "front": "正面",
+    "side": "侧面",
+    "back": "背面",
+}
+_GENERIC_ORIENTATION_MARKERS = {"正面", "侧面", "背面"}
+_ORIENTATION_GLOBAL_SCOPE_RE = re.compile(
+    r"(?:角色设定图|人物设定图|三视图|三幅视图|正侧背|正面侧面背面)",
+    flags=re.IGNORECASE,
+)
+_ORIENTATION_PREFIX_SCOPE_RE = re.compile(
+    r"(?:保持|采用|使用|要求|只要|拍摄|展示|转向|朝向|面向|不要|排除|避免)[^，,；;。！？.!?\n]{0,8}$",
+    flags=re.IGNORECASE,
+)
+_ORIENTATION_SUFFIX_SCOPE_RE = re.compile(
+    r"^(?:视图|全身|构图|朝向|镜头|站姿|轮廓|[、，,；;。/])",
+    flags=re.IGNORECASE,
+)
 
 
 def _clean(value: Any) -> str:
@@ -458,6 +493,69 @@ def _context_subject_cardinality_constraint(text: Any) -> dict[str, Any]:
     }
 
 
+def _detect_subject_orientation(
+    text: Any,
+    *,
+    negated: bool,
+    require_context_scope: bool = False,
+) -> dict[str, list[str]]:
+    source = _clean(text)
+    hits: dict[str, list[str]] = {}
+    for value, markers in SUBJECT_ORIENTATION_MARKERS.items():
+        matched = []
+        for marker in markers:
+            if not require_context_scope or marker not in _GENERIC_ORIENTATION_MARKERS:
+                if _marker_polarity(source, marker)[1 if negated else 0]:
+                    matched.append(marker)
+                continue
+            for match in _marker_matches(source, marker):
+                match_negated = _marker_match_is_negated(source.casefold(), match.start())
+                if match_negated != negated:
+                    continue
+                prefix = source[max(0, match.start() - 24) : match.start()]
+                suffix = source[match.end() : match.end() + 10]
+                if (
+                    _ORIENTATION_GLOBAL_SCOPE_RE.search(source)
+                    or _ORIENTATION_PREFIX_SCOPE_RE.search(prefix)
+                    or _ORIENTATION_SUFFIX_SCOPE_RE.search(suffix)
+                ):
+                    matched.append(marker)
+                    break
+        if matched:
+            hits[value] = matched
+    return hits
+
+
+def detect_subject_orientation(text: Any) -> dict[str, list[str]]:
+    return _detect_subject_orientation(text, negated=False)
+
+
+def detect_negated_subject_orientation(text: Any) -> dict[str, list[str]]:
+    return _detect_subject_orientation(text, negated=True)
+
+
+def _context_subject_orientation_constraint(text: Any) -> dict[str, Any]:
+    positive = _detect_subject_orientation(text, negated=False, require_context_scope=True)
+    negated = _detect_subject_orientation(text, negated=True, require_context_scope=True)
+    positive_values = list(positive)
+    negated_values = list(negated)
+    overlap = set(positive_values) & set(negated_values)
+    positive_values = [value for value in positive_values if value not in overlap]
+    negated_values = [value for value in negated_values if value not in overlap]
+    required = positive_values[0] if len(positive_values) == 1 else ""
+    if not required and not negated_values:
+        return {}
+    return {
+        "required_value": required,
+        "required_label": _SUBJECT_ORIENTATION_LABELS.get(required, "") if required else "",
+        "positive_values": positive_values,
+        "negated_values": negated_values,
+        "negated_labels": [_SUBJECT_ORIENTATION_LABELS.get(value, value) for value in negated_values],
+        "positive_evidence": {value: list(positive.get(value, [])) for value in positive_values},
+        "negated_evidence": {value: list(negated.get(value, [])) for value in negated_values},
+    }
+
+
 def _primary_world_family_in_text(text: Any) -> tuple[str, str]:
     source = _clean(text).casefold()
     ranked: list[tuple[int, int, int, str, str]] = []
@@ -707,6 +805,17 @@ def build_scene_relationship_graph(
     context_subject_cardinality = detect_subject_cardinality(natural_context)
     negated_context_subject_cardinality = detect_negated_subject_cardinality(natural_context)
     context_subject_cardinality_constraint = _context_subject_cardinality_constraint(natural_context)
+    context_subject_orientation = _detect_subject_orientation(
+        natural_context,
+        negated=False,
+        require_context_scope=True,
+    )
+    negated_context_subject_orientation = _detect_subject_orientation(
+        natural_context,
+        negated=True,
+        require_context_scope=True,
+    )
+    context_subject_orientation_constraint = _context_subject_orientation_constraint(natural_context)
     primary_family, primary_world_evidence, primary_world_source = _resolve_primary_world_family(
         groups.get("场景背景", []),
         natural_context,
@@ -888,6 +997,52 @@ def build_scene_relationship_graph(
                 ),
             }
         )
+    orientation_anchors = [
+        {"group": group, "value": value}
+        for group in ("主体", "动作姿态", "构图视角")
+        for value in groups.get(group, [])
+    ] + [{"group": "自定义补充", "value": value} for value in custom]
+    conflicting_orientation_anchors: list[dict[str, Any]] = []
+    if context_subject_orientation_constraint:
+        required_orientation = _clean(context_subject_orientation_constraint.get("required_value"))
+        negated_orientations = set(context_subject_orientation_constraint.get("negated_values", []) or [])
+        for anchor in orientation_anchors:
+            anchor_hits = detect_subject_orientation(anchor["value"])
+            conflicting_values = [
+                value
+                for value in anchor_hits
+                if value in negated_orientations or (required_orientation and value != required_orientation)
+            ]
+            if conflicting_values:
+                conflicting_orientation_anchors.append(
+                    {
+                        **anchor,
+                        "actual_values": conflicting_values,
+                        "actual_labels": [
+                            _SUBJECT_ORIENTATION_LABELS.get(value, value) for value in conflicting_values
+                        ],
+                    }
+                )
+    if conflicting_orientation_anchors:
+        required_label = _clean(context_subject_orientation_constraint.get("required_label"))
+        negated_labels = list(context_subject_orientation_constraint.get("negated_labels", []) or [])
+        orientation_summary = (
+            f"固定为{required_label}"
+            if required_label
+            else "排除" + "/".join(str(item) for item in negated_labels)
+        )
+        coherence_issues.append(
+            {
+                "kind": "context_subject_orientation_conflict",
+                "severity": "error",
+                "constraint": deepcopy(context_subject_orientation_constraint),
+                "conflicting_anchors": conflicting_orientation_anchors,
+                "message": (
+                    f"自然语言已明确主体朝向“{orientation_summary}”，"
+                    "但当前主体、动作、构图或补充标签仍包含相反视图。"
+                ),
+            }
+        )
     context_veto_anchor_keys: set[tuple[str, str]] = set()
     for family, negated_markers in negated_context_world_hits.items():
         family_wide_veto = bool(context_primary_family and context_primary_family != family)
@@ -1003,6 +1158,9 @@ def build_scene_relationship_graph(
         "natural_context_subject_cardinality": context_subject_cardinality,
         "negated_context_subject_cardinality": negated_context_subject_cardinality,
         "context_subject_cardinality_constraint": context_subject_cardinality_constraint,
+        "natural_context_subject_orientation": context_subject_orientation,
+        "negated_context_subject_orientation": negated_context_subject_orientation,
+        "context_subject_orientation_constraint": context_subject_orientation_constraint,
         "context_primary_world_family": context_primary_family,
         "context_primary_world_evidence": context_primary_marker,
         "context_primary_world_source": context_primary_source,
@@ -1282,7 +1440,7 @@ def resolve_soft_scene_conflicts(
     soft_tags: Iterable[Any] = (),
     protected_tags: Iterable[Any] = (),
 ) -> tuple[OrderedDict[str, list[str]], list[str], dict[str, Any]]:
-    """Remove only random/soft anchors when they cause a hard scene conflict."""
+    """Remove only proven low-priority automatic anchors in a hard scene conflict."""
     next_selected = OrderedDict((group, list(values or [])) for group, values in selected.items())
     next_custom = _unique(custom_tags, 64)
     soft_keys = {value.casefold() for value in _unique(soft_tags, 128)}
@@ -1321,7 +1479,7 @@ def resolve_soft_scene_conflicts(
         resolved["resolution"] = "soft_tag_removal"
         resolved["removed_side"] = side
         resolved["removed_anchors"] = removed_for_issue
-        resolved["message"] = f"{_clean(issue.get('message'))}；已仅移除随机派生侧标签。"
+        resolved["message"] = f"{_clean(issue.get('message'))}；已仅移除低优先级自动派生侧标签。"
         resolved_issues.append(resolved)
 
     if isinstance(scene_graph, dict):
@@ -1335,6 +1493,7 @@ def resolve_soft_scene_conflicts(
                 "context_primary_anchor_conflict",
                 "context_scene_attribute_conflict",
                 "context_subject_cardinality_conflict",
+                "context_subject_orientation_conflict",
             }:
                 conflict_anchors = [
                     dict(item) for item in issue.get("conflicting_anchors", []) if isinstance(item, dict)
@@ -1346,6 +1505,7 @@ def resolve_soft_scene_conflicts(
                         "context_primary_anchor_conflict": "context_primary_anchor",
                         "context_scene_attribute_conflict": "context_scene_attribute",
                         "context_subject_cardinality_conflict": "context_subject_cardinality",
+                        "context_subject_orientation_conflict": "context_subject_orientation",
                     }[issue["kind"]]
                     remove_anchors(conflict_anchors, side=side, issue=issue)
                 continue
@@ -1366,7 +1526,8 @@ def resolve_soft_scene_conflicts(
         "removed": removed,
         "resolved_issue_count": len(resolved_issues),
         "resolved_issues": resolved_issues,
-        "policy": "soft_tags_only",
+        "policy": "provenance_soft_tags_only",
+        "legacy_policy": "soft_tags_only",
     }
     return next_selected, next_custom, report
 
@@ -1380,6 +1541,7 @@ def classify_repair_reason(reason: Any) -> dict[str, str]:
         ("scene_conflict", ("冲突场景",), "只移除错误场景，所有动作、道具和光线必须回到当前唯一主场景。"),
         ("scene_attribute", ("场景属性",), "只移除与用户昼夜或天气要求相反的光影和环境状态，不改变主体、动作与剧情顺序。"),
         ("subject_cardinality", ("人物数量",), "只修正人物数量与站位，不改变已有角色身份、服装、动作、场景或镜头顺序。"),
+        ("subject_orientation", ("主体朝向",), "只修正主体正面、侧面或背面的朝向，不改变人物数量、身份、动作、场景或景别。"),
         ("language", ("语言",), "只把正文改为当前要求的语言，不改变任何视觉事实与剧情顺序。"),
         ("layout", ("画面结构",), "只修正单帧、人数或多视图结构，不增加人物副本、额外视角或分屏。"),
         ("wrapper", ("分析", "占位符"), "删除分析、占位符、标题和标签包装，只返回可直接使用的自然语言正文。"),
@@ -1468,6 +1630,21 @@ def candidate_world_violation(original: str, candidate: str, scene_graph: Any) -
                     f"模型响应越过人物数量约束：要求“{expected}”，"
                     f"却新增了“{markers[0]}”。"
                 )
+    orientation_constraint = dict(scene_graph.get("context_subject_orientation_constraint", {}) or {})
+    if orientation_constraint:
+        required = _clean(orientation_constraint.get("required_value"))
+        negated_values = set(orientation_constraint.get("negated_values", []) or [])
+        original_orientation = set(detect_subject_orientation(original))
+        candidate_orientation = detect_subject_orientation(candidate)
+        for value, markers in candidate_orientation.items():
+            if value in original_orientation:
+                continue
+            if value in negated_values or (required and value != required):
+                expected = _clean(orientation_constraint.get("required_label")) or "排除朝向"
+                return (
+                    f"模型响应越过主体朝向约束：要求“{expected}”，"
+                    f"却新增了“{markers[0]}”。"
+                )
     return ""
 
 
@@ -1532,8 +1709,10 @@ __all__ = [
     "detect_negated_world_families",
     "detect_negated_scene_attributes",
     "detect_negated_subject_cardinality",
+    "detect_negated_subject_orientation",
     "detect_scene_attributes",
     "detect_subject_cardinality",
+    "detect_subject_orientation",
     "detect_world_families",
     "infer_task_intent",
     "resolve_model_strategy",
