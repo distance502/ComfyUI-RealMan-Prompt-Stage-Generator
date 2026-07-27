@@ -9,7 +9,7 @@ import re
 from typing import Any, Iterable
 
 
-INTELLIGENCE_PROFILE_VERSION = "qwen-te-intelligence-v9"
+INTELLIGENCE_PROFILE_VERSION = "qwen-te-intelligence-v10"
 
 _GROUP_LIMITS = {
     "主体": 6,
@@ -161,11 +161,11 @@ _BROAD_NEGATION_RE = re.compile(
     r"(?:不要|不需要|不必|无需|不能|别(?:再)?|未(?:启用|使用|包含|生成)?|避免|禁止|排除|移除|去掉|不是|并非|不得|不可|"
     r"\b(?:do\s+not|don't|does\s+not|doesn't|cannot|can't|should\s+not|shouldn't|must\s+not|"
     r"will\s+not|won't|not|never|without|avoid|exclude|remove|omit)\b)"
-    r"[^，,；;。！？.!?\n]{0,24}$",
+    r"[^，,；;。！？.!?\n]{0,48}$",
     flags=re.IGNORECASE,
 )
 _NEGATION_CANCEL_RE = re.compile(
-    r"(?:不仅|不只|不止|不光|\bnot\s+only\b)[^，,；;。！？.!?\n]{0,24}$",
+    r"(?:不仅|不只|不止|不光|\bnot\s+only\b)[^，,；;。！？.!?\n]{0,48}$",
     flags=re.IGNORECASE,
 )
 _DIRECT_NEGATION_RE = re.compile(
@@ -267,12 +267,14 @@ def _resolve_primary_world_family(
         if family:
             return family, marker, "selected_scene"
     context = _clean(natural_context)
+    folded_context = context.casefold()
     cue_matches: list[tuple[int, str]] = []
     for pattern in _PRIMARY_SCENE_CUE_PATTERNS:
         cue_matches.extend(
             (match.start(), _clean(match.group(1)))
             for match in pattern.finditer(context)
             if _clean(match.group(1))
+            and not _marker_match_is_negated(folded_context, match.start())
         )
     for _position, cue_text in sorted(cue_matches, key=lambda item: item[0]):
         family, marker = _primary_world_family_in_text(cue_text)
