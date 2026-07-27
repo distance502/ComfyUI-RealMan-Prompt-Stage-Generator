@@ -583,6 +583,55 @@ class TestStagePromptIntelligence(unittest.TestCase):
         self.assertEqual(strict_api["mode"], "incremental_blend")
         self.assertEqual(local["video_mode"], "incremental_storyboard_blend")
 
+        conflict_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["潜水员"], "场景背景": ["深海"], "道具世界观": ["火炬"]})
+        )
+        guarded = intelligence.resolve_model_strategy(
+            {"模型来源": "本地模型"},
+            task,
+            conflict_graph,
+        )
+        self.assertEqual(guarded["mode"], "skill_only_guarded")
+        self.assertEqual(guarded["video_mode"], "skill_only_guarded")
+
+    def test_unresolved_strong_conflict_skips_all_model_refinement(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+
+        class CountingModel:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def create_chat_completion(self, *args, **kwargs):
+                self.calls += 1
+                return {"choices": [{"message": {"content": "不应被调用"}}]}
+
+        model = CountingModel()
+        result = module._run_stage(
+            model,
+            **{
+                "unique_id": "intelligence-v11-guarded-skill-only",
+                "模型来源": "本地模型",
+                "模型来源实际": "外接本地模型",
+                "模型调用基础来源": "本地模型",
+                "主体标签1": "潜水员",
+                "场景背景标签1": "深海",
+                "动作姿态标签1": "举起火炬",
+                "道具世界观标签1": "火炬",
+                "运行时随机标签": False,
+                "生成数量": 1,
+                "提示词语言": "纯中文",
+                "seed": 41,
+            },
+        )
+        payload = json.loads(result[3])
+        self.assertEqual(model.calls, 0)
+        self.assertEqual(payload["adaptive_model_strategy"]["mode"], "skill_only_guarded")
+        self.assertGreaterEqual(payload["model_intelligence_skip_count"], 2)
+        self.assertIn("强语义冲突", payload["model_intelligence_skip_reason"])
+        self.assertEqual(payload["model_call_attempt_count"], 0)
+        self.assertEqual(payload["video_prompt_model_status"], "智能保护跳过模型，保留 Skill 结果")
+        self.assertIn("智能保护", payload["model_skill_pipeline"])
+
     def test_preference_memory_requires_repeated_explicit_choices(self) -> None:
         explicit = OrderedDict(
             {

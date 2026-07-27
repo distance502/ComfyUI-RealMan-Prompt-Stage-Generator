@@ -9,7 +9,7 @@ import re
 from typing import Any, Iterable
 
 
-INTELLIGENCE_PROFILE_VERSION = "qwen-te-intelligence-v10"
+INTELLIGENCE_PROFILE_VERSION = "qwen-te-intelligence-v11"
 
 _GROUP_LIMITS = {
     "主体": 6,
@@ -530,6 +530,10 @@ def resolve_model_strategy(
     strict = _clean(settings.get("风格隔离策略")) == "严格风格隔离"
     adult = bool(settings.get("NSFW工作台启用", False) or settings.get("NSFW策略启用", False))
     coherence_issues = list((scene_graph or {}).get("coherence_issues", []) or [])
+    has_unresolved_error = any(
+        isinstance(item, dict) and item.get("severity") == "error"
+        for item in coherence_issues
+    )
     structure_sensitive = (
         task_type.startswith("character_sheet")
         or task_type in {"ordered_tag_block_story", "video_first_story"}
@@ -545,6 +549,9 @@ def resolve_model_strategy(
     if source in {"", "仅Skill"}:
         mode = "skill_only"
         reason = "当前未启用模型，直接使用已校验 Skill 成品。"
+    elif has_unresolved_error:
+        mode = "skill_only_guarded"
+        reason = "场景关系图仍有强语义冲突；为避免模型擅自改写显式选择，本次跳过后置模型并保留 Skill 成品。"
     elif (
         source.startswith("本地")
         or structure_sensitive
@@ -558,7 +565,11 @@ def resolve_model_strategy(
         reason = "API 可整理完整自然语言，但必须保留全部关系图锚点并通过场景校验。"
     return {
         "mode": mode,
-        "video_mode": "incremental_storyboard_blend" if mode != "skill_only" else "skill_only",
+        "video_mode": (
+            "skill_only_guarded"
+            if mode == "skill_only_guarded"
+            else ("incremental_storyboard_blend" if mode != "skill_only" else "skill_only")
+        ),
         "repair_mode": "targeted_patch",
         "preserve_skill_baseline": True,
         "risk_score": risk_score,

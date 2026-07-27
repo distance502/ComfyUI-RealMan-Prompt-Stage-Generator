@@ -349,6 +349,21 @@ def _uses_incremental_refinement(settings: dict[str, Any]) -> bool:
     return bool(isinstance(strategy, dict) and strategy.get("mode") == "incremental_blend")
 
 
+def _uses_guarded_skill_only(settings: dict[str, Any]) -> bool:
+    strategy = settings.get("智能模型策略")
+    return bool(isinstance(strategy, dict) and strategy.get("mode") == "skill_only_guarded")
+
+
+def _record_guarded_model_skip(settings: dict[str, Any]) -> None:
+    strategy = settings.get("智能模型策略") if isinstance(settings.get("智能模型策略"), dict) else {}
+    reason = str(strategy.get("reason", "") or "场景关系图仍有未解决强冲突。").strip()
+    settings["模型智能跳过次数"] = max(0, int(settings.get("模型智能跳过次数", 0) or 0)) + 1
+    settings["模型智能跳过原因"] = reason
+    settings["模型调用状态"] = "智能保护：未调用模型，保留 Skill 成品"
+    settings["模型来源实际"] = "仅Skill"
+    _append_model_runtime_note(settings, f"模型智能保护：{reason}")
+
+
 _SEMANTIC_REPEAT_FAMILIES: tuple[tuple[str, int, tuple[str, ...]], ...] = (
     (
         "composition_full_body",
@@ -2593,6 +2608,9 @@ def maybe_model_refine(
     chat_completion: Callable[..., Any],
     clean_think_text: Callable[[str], str],
 ) -> str:
+    if _uses_guarded_skill_only(settings):
+        _record_guarded_model_skip(settings)
+        return prompt
     llm = _resolve_model_backend(model)
     if llm is None:
         return prompt
@@ -2656,6 +2674,9 @@ def maybe_model_refine_video(
     """Use the configured local/API model to polish a video Skill result conservatively."""
 
     original = str(prompt or "").strip()
+    if _uses_guarded_skill_only(settings):
+        _record_guarded_model_skip(settings)
+        return original
     llm = _resolve_model_backend(model)
     if llm is None or not original:
         return original

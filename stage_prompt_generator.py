@@ -554,6 +554,8 @@ _MODEL_RUNTIME_STATE_KEYS = (
     "模型调用基础来源",
     "模型传输重试次数",
     "模型最近瞬时错误",
+    "模型智能跳过次数",
+    "模型智能跳过原因",
     "推理纠偏说明",
 )
 _IMAGE_REVERSE_CACHE: OrderedDict[str, str] = OrderedDict()
@@ -1637,6 +1639,8 @@ def _安全加载阶段模型(settings: dict[str, Any]) -> Any:
     settings["模型调用错误"] = []
     settings["模型传输重试次数"] = 0
     settings["模型最近瞬时错误"] = ""
+    settings["模型智能跳过次数"] = 0
+    settings["模型智能跳过原因"] = ""
     if source == "仅Skill":
         settings["模型来源实际"] = "仅Skill"
         settings["模型回退说明"] = ""
@@ -4810,6 +4814,7 @@ def _run_stage_impl(
     video_model_success_before = max(0, int(settings.get("模型调用成功次数", 0) or 0))
     video_model_failure_before = max(0, int(settings.get("模型调用失败次数", 0) or 0))
     video_model_fallback_before = max(0, int(settings.get("模型活动回退数量", 0) or 0))
+    video_model_skip_before = max(0, int(settings.get("模型智能跳过次数", 0) or 0))
     settings["视频提示词必保留锚点"] = _video_prompt_required_anchors_impl(
         selected,
         custom_tags,
@@ -4834,6 +4839,8 @@ def _run_stage_impl(
             settings["视频提示词模型状态"] = "未调用（仅Skill）"
     elif refined_video_prompt != video_prompt:
         settings["视频提示词模型状态"] = "已采用模型润色"
+    elif max(0, int(settings.get("模型智能跳过次数", 0) or 0)) > video_model_skip_before:
+        settings["视频提示词模型状态"] = "智能保护跳过模型，保留 Skill 结果"
     elif max(0, int(settings.get("模型调用成功次数", 0) or 0)) > video_model_success_before:
         settings["视频提示词模型状态"] = "模型调用成功，保留 Skill 结果"
     elif (
