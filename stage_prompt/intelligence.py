@@ -9,7 +9,7 @@ import re
 from typing import Any, Iterable
 
 
-INTELLIGENCE_PROFILE_VERSION = "qwen-te-intelligence-v8"
+INTELLIGENCE_PROFILE_VERSION = "qwen-te-intelligence-v9"
 
 _GROUP_LIMITS = {
     "主体": 6,
@@ -172,6 +172,29 @@ _DIRECT_NEGATION_RE = re.compile(
     r"(?:没有|不含|无|非|\bno\b)\s*(?:任何|任意|any)?\s*$",
     flags=re.IGNORECASE,
 )
+_PRIMARY_SCENE_CUE_PATTERNS = (
+    re.compile(
+        r"(?:主场景|主要场景|核心地点|主要地点|故事发生地)\s*"
+        r"(?:设(?:定|置)?\s*)?(?:在|为|是|位于|放在|选在|[:：])\s*"
+        r"([^；;。！？!?\n]{1,64})",
+        flags=re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:故事|画面|镜头)\s*(?:发生|展开|定格)\s*(?:在|于)\s*"
+        r"([^；;。！？!?\n]{1,64})",
+        flags=re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:primary|main|core)\s+(?:scene|setting|location)\s*"
+        r"(?:is|at|in|:)?\s*([^;.!?\n]{1,80})",
+        flags=re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:the\s+)?(?:story|scene)\s+(?:takes\s+place|is\s+set)\s+"
+        r"(?:in|at)\s+([^;.!?\n]{1,80})",
+        flags=re.IGNORECASE,
+    ),
+)
 
 
 def _marker_matches(text: str, marker: str) -> list[re.Match[str]]:
@@ -243,6 +266,18 @@ def _resolve_primary_world_family(
         family, marker = _primary_world_family_in_text(scene)
         if family:
             return family, marker, "selected_scene"
+    context = _clean(natural_context)
+    cue_matches: list[tuple[int, str]] = []
+    for pattern in _PRIMARY_SCENE_CUE_PATTERNS:
+        cue_matches.extend(
+            (match.start(), _clean(match.group(1)))
+            for match in pattern.finditer(context)
+            if _clean(match.group(1))
+        )
+    for _position, cue_text in sorted(cue_matches, key=lambda item: item[0]):
+        family, marker = _primary_world_family_in_text(cue_text)
+        if family:
+            return family, marker, "natural_context_cue"
     family, marker = _primary_world_family_in_text(natural_context)
     return (family, marker, "natural_context") if family else ("", "", "")
 

@@ -474,6 +474,27 @@ class TestStagePromptIntelligence(unittest.TestCase):
         self.assertEqual(context_only["primary_world_family"], "natural_wilderness")
         self.assertEqual(context_only["primary_world_evidence_source"], "natural_context")
 
+    def test_explicit_primary_scene_cues_override_incidental_location_order(self) -> None:
+        selected = OrderedDict({"主体": ["成年女性旅人"]})
+        chinese = intelligence.build_scene_relationship_graph(
+            selected,
+            context_text="角色从古城出发，主要场景设在森林深处，远处仍能看见城墙。",
+        )
+        english = intelligence.build_scene_relationship_graph(
+            selected,
+            context_text="The traveler leaves an old town; the main setting is a deep sea shipwreck.",
+        )
+        takes_place = intelligence.build_scene_relationship_graph(
+            selected,
+            context_text="A train appears in the prologue, but the story takes place in a forest valley.",
+        )
+        self.assertEqual(chinese["primary_world_family"], "natural_wilderness")
+        self.assertEqual(chinese["primary_world_evidence_source"], "natural_context_cue")
+        self.assertEqual(english["primary_world_family"], "underwater")
+        self.assertEqual(english["primary_world_evidence_source"], "natural_context_cue")
+        self.assertEqual(takes_place["primary_world_family"], "natural_wilderness")
+        self.assertEqual(takes_place["primary_world_evidence_source"], "natural_context_cue")
+
     def test_natural_language_relation_hint_reaches_full_stage_outputs(self) -> None:
         module = load_stage_prompt_generator_for_integration_test()
         result = module._run_stage(
