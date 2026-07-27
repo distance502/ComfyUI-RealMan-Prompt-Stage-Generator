@@ -175,6 +175,7 @@ from .stage_prompt.intelligence import (
     build_intelligence_profile as _build_intelligence_profile_impl,
     infer_task_intent as _infer_task_intent_impl,
     resolve_preference_hints as _resolve_preference_hints_impl,
+    resolve_relation_hints as _resolve_relation_hints_impl,
     summarize_intelligence_profile as _summarize_intelligence_profile_impl,
     update_preference_memory as _update_preference_memory_impl,
 )
@@ -4480,8 +4481,15 @@ def _run_stage_impl(
         settings,
         scene_graph=intelligence_profile.get("scene_graph"),
     )
+    relation_hints = _resolve_relation_hints_impl(
+        intelligence_profile.get("scene_graph"),
+        selected,
+        settings,
+    )
     intelligence_profile["preference_hints"] = preference_hints
+    intelligence_profile["relation_hints"] = relation_hints
     settings["智能偏好应用"] = preference_hints
+    settings["智能关系补全"] = relation_hints
     settings["智能编排档案"] = intelligence_profile
     settings["智能任务意图"] = dict(intelligence_profile.get("task_intent", {}) or {})
     settings["智能场景关系图"] = dict(intelligence_profile.get("scene_graph", {}) or {})
@@ -4499,6 +4507,11 @@ def _run_stage_impl(
         for group, values in preference_hints.items()
         if values
     )
+    settings["智能关系补全摘要"] = "；".join(
+        f"{group}：{'、'.join(str(item) for item in values)}"
+        for group, values in relation_hints.items()
+        if values
+    )
     coherence_issues = list(settings["智能场景关系图"].get("coherence_issues", []) or [])
     _merge_inference_notes(
         settings,
@@ -4508,6 +4521,11 @@ def _run_stage_impl(
             *(
                 ["智能偏好软应用：" + settings["智能偏好应用摘要"] + "；只填充当前为空且未锁定的维度。"]
                 if settings["智能偏好应用摘要"]
+                else []
+            ),
+            *(
+                ["智能关系软补全：" + settings["智能关系补全摘要"] + "；由当前动作依赖推导，不改写用户标签。"]
+                if settings["智能关系补全摘要"]
                 else []
             ),
             *[f"智能关系诊断：{item.get('message')}" for item in coherence_issues[:3] if item.get("message")],

@@ -271,6 +271,7 @@ def build_json_payload(
         "adaptive_model_strategy": dict(settings.get("智能模型策略", {}) or {}),
         "preference_profile": dict(settings.get("智能偏好档案", {}) or {}),
         "preference_hints_applied": dict(settings.get("智能偏好应用", {}) or {}),
+        "relation_hints_applied": dict(settings.get("智能关系补全", {}) or {}),
         "scene_coherence_status": str(dict(settings.get("智能场景关系图", {}) or {}).get("coherence_status", "") or ""),
         "scene_coherence_issues": list(dict(settings.get("智能场景关系图", {}) or {}).get("coherence_issues", []) or []),
         "targeted_repair_count": int(settings.get("智能定向修复次数", 0) or 0),

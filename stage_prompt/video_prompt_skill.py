@@ -111,15 +111,18 @@ def _normalized_groups(
     custom = _unique_values(custom_tags, limit=4)
     if custom and "自定义补充" not in groups:
         groups["自定义补充"] = custom
-    preference_hints = settings.get("智能偏好应用")
-    if include_preferences and isinstance(preference_hints, dict):
-        for name, values in preference_hints.items():
-            group_name = str(name)
-            if groups.get(group_name):
+    if include_preferences:
+        for hint_key, limit in (("智能关系补全", 2), ("智能偏好应用", 1)):
+            hint_groups = settings.get(hint_key)
+            if not isinstance(hint_groups, dict):
                 continue
-            cleaned = _unique_values(values, limit=1)
-            if cleaned:
-                groups[group_name] = cleaned
+            for name, values in hint_groups.items():
+                group_name = str(name)
+                if groups.get(group_name):
+                    continue
+                cleaned = _unique_values(values, limit=limit)
+                if cleaned:
+                    groups[group_name] = cleaned
     return groups
 
 

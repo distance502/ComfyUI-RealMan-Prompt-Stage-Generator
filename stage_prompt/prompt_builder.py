@@ -5581,9 +5581,11 @@ def build_prompt_list(
         (str(group), [_clean_fragment(value) for value in values if _clean_fragment(value)])
         for group, values in selected.items()
     )
-    preference_hints = settings.get("智能偏好应用")
-    if isinstance(preference_hints, dict):
-        for group, values in preference_hints.items():
+    for hint_key in ("智能关系补全", "智能偏好应用"):
+        hint_groups = settings.get(hint_key)
+        if not isinstance(hint_groups, dict):
+            continue
+        for group, values in hint_groups.items():
             group_name = str(group)
             if selected.get(group_name):
                 continue
@@ -5591,7 +5593,7 @@ def build_prompt_list(
                 _clean_fragment(value)
                 for value in (values if isinstance(values, (list, tuple)) else [])
                 if _clean_fragment(value)
-            ][:1]
+            ][:2 if hint_key == "智能关系补全" else 1]
             if hints:
                 selected[group_name] = hints
     custom_tags = [_clean_fragment(tag) for tag in custom_tags if _clean_fragment(tag)]
