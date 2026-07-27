@@ -9,7 +9,7 @@ import re
 from typing import Any, Iterable
 
 
-INTELLIGENCE_PROFILE_VERSION = "qwen-te-intelligence-v12"
+INTELLIGENCE_PROFILE_VERSION = "qwen-te-intelligence-v17"
 
 _GROUP_LIMITS = {
     "主体": 6,
@@ -82,7 +82,7 @@ WORLD_FAMILY_MARKERS: dict[str, tuple[str, ...]] = {
         "temple", "altar", "church", "cathedral", "sanctuary", "shrine",
     ),
     "urban_space": (
-        "城市街道", "街头", "街巷", "街区", "小巷", "站台", "车站", "列车", "地铁", "公交车",
+        "城市街道", "城市", "街头", "街巷", "街区", "小巷", "站台", "车站", "列车", "地铁", "公交车",
         "汽车", "站牌", "天台", "停车场", "办公室", "咖啡厅", "便利店", "酒吧", "夜店",
         "urban street", "city street", "alley", "station", "train", "subway", "bus", "car", "rooftop",
     ),
@@ -130,6 +130,49 @@ _WORLD_COMPATIBILITY: dict[str, tuple[str, ...]] = {
     "rural_life": ("natural_wilderness",),
     "neutral_studio": (),
     "fantasy_adventure_gear": (),
+}
+SCENE_ATTRIBUTE_MARKERS: dict[str, dict[str, tuple[str, ...]]] = {
+    "time_of_day": {
+        "dawn": (
+            "清晨", "黎明", "拂晓", "日出", "晨光",
+            "dawn", "sunrise", "early morning",
+        ),
+        "day": (
+            "白天", "日间", "正午", "午后", "硬日光", "阳光明媚",
+            "daytime", "daylight", "noon", "midday", "afternoon",
+        ),
+        "dusk": (
+            "黄昏", "傍晚", "日落", "夕阳", "蓝调时刻",
+            "dusk", "twilight", "sunset", "evening",
+        ),
+        "night": (
+            "夜晚", "夜间", "深夜", "月光", "月下", "夜景", "夜色", "雨夜", "霓虹夜色",
+            "night", "nighttime", "midnight", "moonlight",
+        ),
+    },
+    "precipitation": {
+        "clear": (
+            "晴天", "晴朗", "万里无云", "clear sky", "sunny",
+        ),
+        "rain": (
+            "雨天", "下雨", "雨中", "雨夜", "暴雨", "雷雨", "阵雨", "霓虹雨夜",
+            "rainy", "rainfall", "rainstorm", "thunderstorm", "in the rain",
+        ),
+        "snow": (
+            "雪天", "下雪", "飘雪", "暴雪", "snowfall", "snowy", "blizzard",
+        ),
+    },
+}
+_SCENE_ATTRIBUTE_LABELS = {
+    "time_of_day": "昼夜",
+    "precipitation": "降水",
+    "dawn": "清晨",
+    "day": "白天",
+    "dusk": "黄昏",
+    "night": "夜晚",
+    "clear": "晴朗",
+    "rain": "降雨",
+    "snow": "降雪",
 }
 
 
@@ -195,6 +238,41 @@ _PRIMARY_SCENE_CUE_PATTERNS = (
         flags=re.IGNORECASE,
     ),
 )
+_PRIMARY_SCENE_OVERRIDE_PATTERNS = (
+    re.compile(
+        r"(?:改为|改成|换为|换成|调整为|切换到|切换为|转为)\s*"
+        r"([^，,；;。！？!?\n]{1,64})",
+        flags=re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:最终|最后)\s*(?:将|把)?\s*"
+        r"(?:主场景|主要场景|核心地点|主要地点|故事发生地)\s*"
+        r"(?:设(?:定|置)?\s*)?(?:在|为|是|位于|放在|选在|[:：])\s*"
+        r"([^，,；;。！？!?\n]{1,64})",
+        flags=re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:change|switch)\s+(?:(?:the\s+)?(?:primary|main|core)\s+"
+        r"(?:scene|setting|location)|it)\s+(?:to|into)\s+([^,;.!?\n]{1,80})",
+        flags=re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:use|choose|set|place)\s+([^,;.!?\n]{1,80}?)\s+instead\b",
+        flags=re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:finally|ultimately)\s+(?:set|place|use|choose)\s+"
+        r"(?:(?:the\s+)?(?:primary|main|core)\s+(?:scene|setting|location)\s+)?"
+        r"(?:in|at|to|as)?\s*([^,;.!?\n]{1,80})",
+        flags=re.IGNORECASE,
+    ),
+)
+_PRIMARY_SCENE_SCOPE_RE = re.compile(
+    r"(?:主场景|主要场景|核心地点|主要地点|故事发生地|"
+    r"\b(?:primary|main|core)\s+(?:scene|setting|location)\b)",
+    flags=re.IGNORECASE,
+)
+_SENTENCE_BOUNDARY_RE = re.compile(r"[。！？.!?\n]")
 
 
 def _marker_matches(text: str, marker: str) -> list[re.Match[str]]:
@@ -243,6 +321,72 @@ def detect_world_families(text: Any) -> dict[str, list[str]]:
     return hits
 
 
+def detect_negated_world_families(text: Any) -> dict[str, list[str]]:
+    source = _clean(text)
+    hits: dict[str, list[str]] = {}
+    for family, markers in WORLD_FAMILY_MARKERS.items():
+        matched = [marker for marker in markers if _marker_polarity(source, marker)[1]]
+        if matched:
+            hits[family] = matched
+    return hits
+
+
+def _detect_scene_attributes(text: Any, *, negated: bool) -> dict[str, dict[str, list[str]]]:
+    source = _clean(text)
+    hits: dict[str, dict[str, list[str]]] = {}
+    for axis, values in SCENE_ATTRIBUTE_MARKERS.items():
+        axis_hits: dict[str, list[str]] = {}
+        for value, markers in values.items():
+            matched = [
+                marker
+                for marker in markers
+                if _marker_polarity(source, marker)[1 if negated else 0]
+            ]
+            if matched:
+                axis_hits[value] = matched
+        if axis_hits:
+            hits[axis] = axis_hits
+    return hits
+
+
+def detect_scene_attributes(text: Any) -> dict[str, dict[str, list[str]]]:
+    return _detect_scene_attributes(text, negated=False)
+
+
+def detect_negated_scene_attributes(text: Any) -> dict[str, dict[str, list[str]]]:
+    return _detect_scene_attributes(text, negated=True)
+
+
+def _context_scene_attribute_constraints(text: Any) -> dict[str, dict[str, Any]]:
+    positive = detect_scene_attributes(text)
+    negated = detect_negated_scene_attributes(text)
+    constraints: dict[str, dict[str, Any]] = {}
+    for axis in SCENE_ATTRIBUTE_MARKERS:
+        positive_values = list(positive.get(axis, {}))
+        negated_values = list(negated.get(axis, {}))
+        overlap = set(positive_values) & set(negated_values)
+        positive_values = [value for value in positive_values if value not in overlap]
+        negated_values = [value for value in negated_values if value not in overlap]
+        required = positive_values[0] if len(positive_values) == 1 else ""
+        if not required and not negated_values:
+            continue
+        constraints[axis] = {
+            "axis_label": _SCENE_ATTRIBUTE_LABELS[axis],
+            "required_value": required,
+            "required_label": _SCENE_ATTRIBUTE_LABELS.get(required, "") if required else "",
+            "positive_values": positive_values,
+            "negated_values": negated_values,
+            "negated_labels": [_SCENE_ATTRIBUTE_LABELS.get(value, value) for value in negated_values],
+            "positive_evidence": {
+                value: list(positive.get(axis, {}).get(value, [])) for value in positive_values
+            },
+            "negated_evidence": {
+                value: list(negated.get(axis, {}).get(value, [])) for value in negated_values
+            },
+        }
+    return constraints
+
+
 def _primary_world_family_in_text(text: Any) -> tuple[str, str]:
     source = _clean(text).casefold()
     ranked: list[tuple[int, int, int, str, str]] = []
@@ -268,14 +412,40 @@ def _resolve_primary_world_family(
             return family, marker, "selected_scene"
     context = _clean(natural_context)
     folded_context = context.casefold()
-    cue_matches: list[tuple[int, str]] = []
-    for pattern in _PRIMARY_SCENE_CUE_PATTERNS:
-        cue_matches.extend(
+    raw_cue_matches = [
+        match
+        for pattern in _PRIMARY_SCENE_CUE_PATTERNS
+        for match in pattern.finditer(context)
+    ]
+
+    def override_has_scene_scope(match: re.Match[str]) -> bool:
+        if _PRIMARY_SCENE_SCOPE_RE.search(match.group(0)):
+            return True
+        return any(
+            cue.start() < match.start()
+            and not _SENTENCE_BOUNDARY_RE.search(context[cue.start() : match.start()])
+            for cue in raw_cue_matches
+        )
+
+    override_matches: list[tuple[int, str]] = []
+    for pattern in _PRIMARY_SCENE_OVERRIDE_PATTERNS:
+        override_matches.extend(
             (match.start(), _clean(match.group(1)))
             for match in pattern.finditer(context)
             if _clean(match.group(1))
             and not _marker_match_is_negated(folded_context, match.start())
+            and override_has_scene_scope(match)
         )
+    for _position, override_text in sorted(override_matches, key=lambda item: item[0], reverse=True):
+        family, marker = _primary_world_family_in_text(override_text)
+        if family:
+            return family, marker, "natural_context_override"
+    cue_matches = [
+        (match.start(), _clean(match.group(1)))
+        for match in raw_cue_matches
+        if _clean(match.group(1))
+        and not _marker_match_is_negated(folded_context, match.start())
+    ]
     for _position, cue_text in sorted(cue_matches, key=lambda item: item[0]):
         family, marker = _primary_world_family_in_text(cue_text)
         if family:
@@ -287,6 +457,20 @@ def _resolve_primary_world_family(
 def _contains_any(text: Any, markers: Iterable[str]) -> bool:
     source = _clean(text)
     return any(_marker_present(source, marker) for marker in markers)
+
+
+def _compatible_world_families(family: str) -> set[str]:
+    if not family:
+        return set()
+    return {
+        family,
+        *_WORLD_COMPATIBILITY.get(family, ()),
+        *(
+            candidate
+            for candidate, compatible in _WORLD_COMPATIBILITY.items()
+            if family in compatible
+        ),
+    }
 
 
 def _intent_signals(
@@ -445,9 +629,27 @@ def build_scene_relationship_graph(
     explicit_hits = detect_world_families(scene_text)
     scene_only_hits = detect_world_families("，".join(groups.get("场景背景", [])))
     context_world_hits = detect_world_families(natural_context)
+    negated_context_world_hits = detect_negated_world_families(natural_context)
+    context_scene_attributes = detect_scene_attributes(natural_context)
+    negated_context_scene_attributes = detect_negated_scene_attributes(natural_context)
+    context_scene_attribute_constraints = _context_scene_attribute_constraints(natural_context)
     primary_family, primary_world_evidence, primary_world_source = _resolve_primary_world_family(
         groups.get("场景背景", []),
         natural_context,
+    )
+    context_primary_family, context_primary_marker, context_primary_source = _resolve_primary_world_family(
+        [],
+        natural_context,
+    )
+    compatible_context_families = _compatible_world_families(context_primary_family)
+    superseded_context_world_families = (
+        [
+            family
+            for family in context_world_hits
+            if family in _LOCATION_WORLD_FAMILIES and family not in compatible_context_families
+        ]
+        if context_primary_source == "natural_context_override"
+        else []
     )
     allowed = set(explicit_hits)
     inferred_world_hits = detect_world_families(
@@ -461,6 +663,7 @@ def build_scene_relationship_graph(
     if primary_family:
         allowed.add(primary_family)
         allowed.update(_WORLD_COMPATIBILITY.get(primary_family, ()))
+    allowed.difference_update(superseded_context_world_families)
     forbidden = [family for family in WORLD_FAMILY_MARKERS if family not in allowed]
     hard_anchors = {
         group: values
@@ -508,6 +711,154 @@ def build_scene_relationship_graph(
                     "message": message,
                 }
             )
+    active_anchors = [
+        {"group": group, "value": value}
+        for group in ("场景背景", "道具世界观", "动作姿态", "光影氛围")
+        for value in groups.get(group, [])
+    ] + [{"group": "自定义补充", "value": value} for value in custom]
+    attribute_anchors = [
+        {"group": group, "value": value}
+        for group in ("画面风格", "场景背景", "光影氛围")
+        for value in groups.get(group, [])
+    ] + [{"group": "自定义补充", "value": value} for value in custom]
+    conflicting_attribute_anchors: list[dict[str, Any]] = []
+    for anchor in attribute_anchors:
+        anchor_hits = detect_scene_attributes(anchor["value"])
+        conflicts: list[dict[str, Any]] = []
+        for axis, constraint in context_scene_attribute_constraints.items():
+            actual_values = list(anchor_hits.get(axis, {}))
+            required = _clean(constraint.get("required_value"))
+            negated_values = set(constraint.get("negated_values", []) or [])
+            conflicting_values = [
+                value
+                for value in actual_values
+                if value in negated_values or (required and value != required)
+            ]
+            if conflicting_values:
+                conflicts.append(
+                    {
+                        "axis": axis,
+                        "axis_label": constraint["axis_label"],
+                        "required_value": required,
+                        "required_label": constraint["required_label"],
+                        "actual_values": conflicting_values,
+                        "actual_labels": [_SCENE_ATTRIBUTE_LABELS.get(value, value) for value in conflicting_values],
+                    }
+                )
+        if conflicts:
+            conflicting_attribute_anchors.append({**anchor, "attribute_conflicts": conflicts})
+    if conflicting_attribute_anchors:
+        constraint_summary = "、".join(
+            (
+                f"{constraint['axis_label']}={constraint['required_label']}"
+                if constraint.get("required_value")
+                else f"{constraint['axis_label']}排除{'/'.join(constraint['negated_labels'])}"
+            )
+            for constraint in context_scene_attribute_constraints.values()
+        )
+        coherence_issues.append(
+            {
+                "kind": "context_scene_attribute_conflict",
+                "severity": "error",
+                "constraints": deepcopy(context_scene_attribute_constraints),
+                "conflicting_anchors": conflicting_attribute_anchors,
+                "message": (
+                    f"自然语言已明确场景属性“{constraint_summary}”，"
+                    "但当前风格、场景、光影或补充标签仍包含相反的昼夜或天气状态。"
+                ),
+            }
+        )
+    context_veto_anchor_keys: set[tuple[str, str]] = set()
+    for family, negated_markers in negated_context_world_hits.items():
+        family_wide_veto = bool(context_primary_family and context_primary_family != family)
+        conflicting_anchors = [
+            anchor
+            for anchor in active_anchors
+            if (
+                (family_wide_veto and family in detect_world_families(anchor["value"]))
+                or _contains_any(anchor["value"], negated_markers)
+            )
+        ]
+        if not conflicting_anchors:
+            continue
+        context_veto_anchor_keys.update(
+            (_clean(anchor["group"]), _clean(anchor["value"]).casefold())
+            for anchor in conflicting_anchors
+        )
+        coherence_issues.append(
+            {
+                "kind": "context_world_conflict",
+                "severity": "error",
+                "world_family": family,
+                "negated_markers": list(negated_markers),
+                "context_primary_world_family": context_primary_family,
+                "conflicting_anchors": conflicting_anchors,
+                "message": (
+                    f"自然语言已排除世界族“{family}”中的 {'、'.join(negated_markers[:3])}，"
+                    "但当前标签仍包含对应元素。"
+                ),
+            }
+        )
+    if context_primary_family and context_primary_source in {
+        "natural_context_cue",
+        "natural_context_override",
+    }:
+        conflicting_scene_anchors = []
+        for value in groups.get("场景背景", []):
+            anchor_key = ("场景背景", _clean(value).casefold())
+            if anchor_key in context_veto_anchor_keys:
+                continue
+            location_hits = {
+                family
+                for family in detect_world_families(value)
+                if family in _LOCATION_WORLD_FAMILIES
+            }
+            if location_hits and location_hits.isdisjoint(compatible_context_families):
+                conflicting_scene_anchors.append({"group": "场景背景", "value": value})
+        if conflicting_scene_anchors:
+            coherence_issues.append(
+                {
+                    "kind": "context_primary_scene_conflict",
+                    "severity": "error",
+                    "world_family": context_primary_family,
+                    "context_primary_marker": context_primary_marker,
+                    "context_primary_source": context_primary_source,
+                    "conflicting_anchors": conflicting_scene_anchors,
+                    "message": (
+                        f"自然语言已明确主场景为“{context_primary_marker}”，"
+                        "但当前标签仍包含不兼容的其他主场景。"
+                    ),
+                }
+            )
+        conflicting_context_anchors = []
+        for anchor in active_anchors:
+            if anchor["group"] == "场景背景":
+                continue
+            anchor_key = (_clean(anchor["group"]), _clean(anchor["value"]).casefold())
+            if anchor_key in context_veto_anchor_keys:
+                continue
+            world_hits = {
+                family
+                for family in detect_world_families(anchor["value"])
+                if family in _LOCATION_WORLD_FAMILIES
+            }
+            if world_hits and world_hits.isdisjoint(compatible_context_families):
+                conflicting_context_anchors.append(dict(anchor))
+        if conflicting_context_anchors:
+            coherence_issues.append(
+                {
+                    "kind": "context_primary_anchor_conflict",
+                    "severity": "error",
+                    "world_family": context_primary_family,
+                    "context_primary_marker": context_primary_marker,
+                    "context_primary_source": context_primary_source,
+                    "conflicting_anchors": conflicting_context_anchors,
+                    "message": (
+                        f"自然语言已明确主场景为“{context_primary_marker}”，"
+                        "但动作、道具、光影或补充标签仍包含不兼容的跨世界元素。"
+                    ),
+                }
+            )
     for requirement in inferred_requirements:
         if not requirement.get("satisfied"):
             coherence_issues.append(
@@ -523,6 +874,16 @@ def build_scene_relationship_graph(
         "custom_context": custom,
         "natural_context_present": bool(natural_context),
         "natural_context_world_families": list(context_world_hits),
+        "negated_context_world_families": {
+            family: list(markers) for family, markers in negated_context_world_hits.items()
+        },
+        "natural_context_scene_attributes": context_scene_attributes,
+        "negated_context_scene_attributes": negated_context_scene_attributes,
+        "context_scene_attribute_constraints": context_scene_attribute_constraints,
+        "context_primary_world_family": context_primary_family,
+        "context_primary_world_evidence": context_primary_marker,
+        "context_primary_world_source": context_primary_source,
+        "superseded_context_world_families": superseded_context_world_families,
         "relations": relations,
         "hard_anchors": hard_anchors,
         "inferred_requirements": inferred_requirements,
@@ -811,27 +1172,60 @@ def resolve_soft_scene_conflicts(
         return bool(key and key in soft_keys and key not in protected_keys)
 
     def remove_anchors(anchors: list[dict[str, Any]], *, side: str, issue: dict[str, Any]) -> None:
+        removed_for_issue: list[dict[str, Any]] = []
         for anchor in anchors:
             group = _clean(anchor.get("group"))
             value = _clean(anchor.get("value"))
             if not group or not value:
                 continue
-            values = next_selected.get(group, [])
-            next_selected[group] = [item for item in values if _clean(item).casefold() != value.casefold()]
+            if group == "自定义补充":
+                before = len(next_custom)
+                next_custom[:] = [item for item in next_custom if _clean(item).casefold() != value.casefold()]
+                changed = len(next_custom) != before
+            else:
+                values = next_selected.get(group, [])
+                next_values = [item for item in values if _clean(item).casefold() != value.casefold()]
+                changed = len(next_values) != len(values)
+                next_selected[group] = next_values
+            if not changed:
+                continue
             removed.append({"group": group, "value": value, "side": side})
+            removed_for_issue.append(dict(anchor))
+        if not removed_for_issue:
+            return
         resolved = dict(issue)
         resolved["resolved"] = True
         resolved["resolution"] = "soft_tag_removal"
         resolved["removed_side"] = side
-        resolved["removed_anchors"] = [dict(item) for item in anchors]
+        resolved["removed_anchors"] = removed_for_issue
         resolved["message"] = f"{_clean(issue.get('message'))}；已仅移除随机派生侧标签。"
         resolved_issues.append(resolved)
 
     if isinstance(scene_graph, dict):
         for raw_issue in list(scene_graph.get("coherence_issues", []) or []):
-            if not isinstance(raw_issue, dict) or raw_issue.get("kind") != "scene_affordance_conflict":
+            if not isinstance(raw_issue, dict):
                 continue
             issue = dict(raw_issue)
+            if issue.get("kind") in {
+                "context_world_conflict",
+                "context_primary_scene_conflict",
+                "context_primary_anchor_conflict",
+                "context_scene_attribute_conflict",
+            }:
+                conflict_anchors = [
+                    dict(item) for item in issue.get("conflicting_anchors", []) if isinstance(item, dict)
+                ]
+                if conflict_anchors and all(removable(item) for item in conflict_anchors):
+                    side = {
+                        "context_world_conflict": "context_veto",
+                        "context_primary_scene_conflict": "context_primary_scene",
+                        "context_primary_anchor_conflict": "context_primary_anchor",
+                        "context_scene_attribute_conflict": "context_scene_attribute",
+                    }[issue["kind"]]
+                    remove_anchors(conflict_anchors, side=side, issue=issue)
+                continue
+            if issue.get("kind") != "scene_affordance_conflict":
+                continue
             scene_anchors = [dict(item) for item in issue.get("scene_anchors", []) if isinstance(item, dict)]
             conflict_anchors = [dict(item) for item in issue.get("conflicting_anchors", []) if isinstance(item, dict)]
             can_remove_scene = bool(scene_anchors) and all(removable(item) for item in scene_anchors)
@@ -859,6 +1253,7 @@ def classify_repair_reason(reason: Any) -> dict[str, str]:
         ("missing_anchor", ("缺少", "锚点"), "只补回缺失锚点，并保持其与主体、动作和场景的原有关联。"),
         ("world_conflict", ("世界族",), "只删除越界世界族及其附属物件，再用当前场景已有材质或环境反馈补足语句。"),
         ("scene_conflict", ("冲突场景",), "只移除错误场景，所有动作、道具和光线必须回到当前唯一主场景。"),
+        ("scene_attribute", ("场景属性",), "只移除与用户昼夜或天气要求相反的光影和环境状态，不改变主体、动作与剧情顺序。"),
         ("language", ("语言",), "只把正文改为当前要求的语言，不改变任何视觉事实与剧情顺序。"),
         ("layout", ("画面结构",), "只修正单帧、人数或多视图结构，不增加人物副本、额外视角或分屏。"),
         ("wrapper", ("分析", "占位符"), "删除分析、占位符、标题和标签包装，只返回可直接使用的自然语言正文。"),
@@ -904,8 +1299,6 @@ def candidate_world_violation(original: str, candidate: str, scene_graph: Any) -
     if not isinstance(scene_graph, dict):
         return ""
     forbidden = set(str(item) for item in scene_graph.get("forbidden_world_families", []) if str(item))
-    if not forbidden:
-        return ""
     original_hits = detect_world_families(original)
     candidate_hits = detect_world_families(candidate)
     for family in WORLD_FAMILY_MARKERS:
@@ -913,6 +1306,27 @@ def candidate_world_violation(original: str, candidate: str, scene_graph: Any) -
             continue
         marker = candidate_hits[family][0]
         return f"模型响应越过场景关系图：引入未获允许的世界族“{family}”元素“{marker}”。"
+    constraints = dict(scene_graph.get("context_scene_attribute_constraints", {}) or {})
+    if constraints:
+        original_attributes = detect_scene_attributes(original)
+        candidate_attributes = detect_scene_attributes(candidate)
+        for axis, constraint in constraints.items():
+            if not isinstance(constraint, dict):
+                continue
+            required = _clean(constraint.get("required_value"))
+            negated_values = set(constraint.get("negated_values", []) or [])
+            original_values = set(original_attributes.get(axis, {}))
+            for value, markers in candidate_attributes.get(axis, {}).items():
+                if value in original_values:
+                    continue
+                if value in negated_values or (required and value != required):
+                    marker = markers[0]
+                    axis_label = _clean(constraint.get("axis_label")) or axis
+                    expected = _clean(constraint.get("required_label")) or "排除状态"
+                    return (
+                        f"模型响应越过场景属性约束：{axis_label}要求“{expected}”，"
+                        f"却新增了“{marker}”。"
+                    )
     return ""
 
 
@@ -974,6 +1388,9 @@ __all__ = [
     "build_scene_relationship_graph",
     "candidate_world_violation",
     "classify_repair_reason",
+    "detect_negated_world_families",
+    "detect_negated_scene_attributes",
+    "detect_scene_attributes",
     "detect_world_families",
     "infer_task_intent",
     "resolve_model_strategy",

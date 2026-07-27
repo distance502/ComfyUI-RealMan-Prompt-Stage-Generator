@@ -1861,6 +1861,25 @@ def _skill_context_for_model(settings: dict[str, Any]) -> str:
             + "。任务类型和模型策略已经确定，不得在润色时改换任务。"
         )
     if isinstance(scene_graph, dict):
+        attribute_constraints = dict(scene_graph.get("context_scene_attribute_constraints", {}) or {})
+        attribute_parts = []
+        for constraint in attribute_constraints.values():
+            if not isinstance(constraint, dict):
+                continue
+            axis_label = str(constraint.get("axis_label", "") or "").strip()
+            required_label = str(constraint.get("required_label", "") or "").strip()
+            negated_labels = [
+                str(item).strip() for item in list(constraint.get("negated_labels", []) or []) if str(item).strip()
+            ]
+            if axis_label and required_label:
+                attribute_parts.append(f"{axis_label}固定为{required_label}")
+            elif axis_label and negated_labels:
+                attribute_parts.append(f"{axis_label}不得出现{'、'.join(negated_labels)}")
+        if attribute_parts:
+            extra_lines.append(
+                "智能场景属性：" + "；".join(attribute_parts)
+                + "。图片、智能文本和视频必须保持同一昼夜与天气事实，不得新增相反状态。"
+            )
         hard_anchors = scene_graph.get("hard_anchors")
         if isinstance(hard_anchors, dict):
             anchor_text = "；".join(
