@@ -617,7 +617,13 @@ def _执行chat_completion(
 
     try:
         try:
-            result = llm.create_chat_completion(**kwargs)
+            try:
+                result = llm.create_chat_completion(**kwargs)
+            except Exception as format_error:
+                if not _尝试修复llama无效聊天格式(llm, format_error, guessed_chat_format):
+                    raise
+                _重置llm推理状态(llm)
+                result = llm.create_chat_completion(**kwargs)
             if deadline_monotonic is not None and time.monotonic() >= deadline_monotonic:
                 abort_state["timed_out"] = True
                 raise TimeoutError("本地模型推理已超过截止时间，结果已丢弃。")
@@ -778,9 +784,15 @@ def _推断llama默认聊天格式(*, family: str | None = None, model_name: str
     if "qwen" in haystack:
         return "qwen"
     if "llama" in haystack:
+        if re.search(r"llama[\s._-]*4", haystack):
+            return "llama-4"
+        if re.search(r"llama[\s._-]*2", haystack):
+            return "llama-2"
         return "llama-3"
     if "mistral" in haystack:
         return "mistral-instruct"
+    if "deepseek" in haystack:
+        return "chatml"
     return None
 
 
@@ -800,7 +812,7 @@ def _应用llama聊天格式兜底(
         chat_handler = getattr(llm, "chat_handler", None)
     except Exception:
         chat_handler = None
-    if prefer_embedded_template and chat_handler is None:
+    if chat_handler is None:
         try:
             registered_handlers = getattr(llm, "_chat_handlers", None)
         except Exception:
@@ -812,15 +824,19 @@ def _应用llama聊天格式兜底(
             elif current in registered_handlers:
                 embedded_format = current
 
-        # llama-cpp-python registers GGUF Jinja templates on the instance.  A
-        # previous compatibility pass cleared chat_format to None, which makes
-        # create_chat_completion fail with "Invalid chat handler: None".
-        # Restore that registered template; old runtimes without one can still
-        # use Qwen's ChatML-compatible formatter.
-        resolved_format = embedded_format or (current if current and current != "llama-2" else "qwen")
-        if current != resolved_format:
+        # Prefer the model's own GGUF template for every family. This also
+        # repairs cached instances whose chat_format was previously cleared.
+        resolved_format = embedded_format
+        if resolved_format is None and prefer_embedded_template:
+            resolved_format = current if current and current != "llama-2" else "qwen"
+        if resolved_format is not None and current != resolved_format:
             try:
                 llm.chat_format = resolved_format
+            except Exception:
+                pass
+        elif not current and chat_format:
+            try:
+                llm.chat_format = chat_format
             except Exception:
                 pass
     elif not current and chat_format:
@@ -838,6 +854,47 @@ def _应用llama聊天格式兜底(
             llm.tokenizer_ = LlamaTokenizer(llm)
         except Exception:
             pass
+
+
+def _尝试修复llama无效聊天格式(llm: object, error: Exception, suggested_format: str | None) -> bool:
+    message = str(error)
+    if "invalid chat handler:" not in message.lower():
+        return False
+
+    valid_match = re.search(r"valid formats:\s*\[(.*?)\]", message, flags=re.IGNORECASE | re.DOTALL)
+    valid_formats = set(re.findall(r"['\"]([^'\"]+)['\"]", valid_match.group(1))) if valid_match else set()
+    try:
+        registered_handlers = getattr(llm, "_chat_handlers", None)
+    except Exception:
+        registered_handlers = None
+    registered_formats = set(registered_handlers) if isinstance(registered_handlers, dict) else set()
+
+    try:
+        managed_settings = getattr(llm, "_qwen_te_settings", None)
+    except Exception:
+        managed_settings = None
+    if suggested_format is None and isinstance(managed_settings, dict):
+        if _应使用llama内置聊天模板(
+            family=managed_settings.get("family"),
+            model_name=managed_settings.get("model"),
+        ):
+            suggested_format = "qwen"
+
+    candidates = []
+    if "chat_template.default" in registered_formats:
+        candidates.append("chat_template.default")
+    candidates.extend((suggested_format, "chatml", "qwen", "llama-3", "llama-2"))
+    for candidate in candidates:
+        if not candidate:
+            continue
+        if candidate not in registered_formats and valid_formats and candidate not in valid_formats:
+            continue
+        try:
+            llm.chat_format = candidate
+        except Exception:
+            continue
+        return True
+    return False
 
 
 def _按键获取模型存储(storage_key: str):

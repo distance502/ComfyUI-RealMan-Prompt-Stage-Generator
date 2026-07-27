@@ -1307,6 +1307,72 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertEqual(result["choices"][0]["message"]["content"], "embedded-ok")
         self.assertEqual(llm.chat_format, "chat_template.default")
 
+    def test_local_model_chat_formats_cover_supported_text_families(self) -> None:
+        module, _fake_llama, _runtime = load_nodes_for_storage_test(pathlib.Path("."))
+        cases = (
+            ("Qwen3-VL", "Qwen3-8B.gguf", "qwen"),
+            ("Gemma4", "gemma-4-12b.gguf", "gemma"),
+            ("Llama", "Llama-2-7B.gguf", "llama-2"),
+            ("Llama", "Llama-3.2-8B.gguf", "llama-3"),
+            ("Llama", "Llama-4-Scout.gguf", "llama-4"),
+            ("Mistral", "Mistral-7B-Instruct.gguf", "mistral-instruct"),
+            ("DeepSeek", "DeepSeek-V3.gguf", "chatml"),
+            ("通用GGUF", "deepseek-r1-distill.gguf", "chatml"),
+        )
+
+        for family, model_name, expected in cases:
+            with self.subTest(family=family, model_name=model_name):
+                self.assertEqual(
+                    module._推断llama默认聊天格式(family=family, model_name=model_name),
+                    expected,
+                )
+
+    def test_non_qwen_local_models_retry_an_invalid_chat_handler_once(self) -> None:
+        module, _fake_llama, _runtime = load_nodes_for_storage_test(pathlib.Path("."))
+        cases = (
+            ("Qwen3.5-VL", "Qwen3.5-4B.gguf", "qwen"),
+            ("Gemma4", "gemma-4.gguf", "gemma"),
+            ("Llama", "Llama-4.gguf", "llama-4"),
+            ("Mistral", "Mistral-7B.gguf", "mistral-instruct"),
+            ("DeepSeek", "DeepSeek-V3.gguf", "chatml"),
+        )
+
+        for family, model_name, expected in cases:
+            with self.subTest(family=family):
+                class InvalidFormatLlama:
+                    model_path = model_name
+                    chat_format = "unsupported-format"
+                    chat_handler = None
+                    _chat_handlers = {}
+                    _qwen_te_settings = {"model": model_name, "family": family}
+
+                    def __init__(self):
+                        self.calls = 0
+
+                    def reset(self):
+                        return None
+
+                    def create_chat_completion(self, **_kwargs):
+                        self.calls += 1
+                        if self.calls == 1:
+                            raise Exception(
+                                "Invalid chat handler: unsupported-format "
+                                "(valid formats: ['llama-2', 'llama-3', 'llama-4', 'qwen', "
+                                "'mistral-instruct', 'gemma', 'chatml'])"
+                            )
+                        return {"choices": [{"message": {"content": "recovered"}}]}
+
+                llm = InvalidFormatLlama()
+                result = module._执行chat_completion(
+                    llm,
+                    messages=[{"role": "user", "content": "return final text"}],
+                    params={},
+                )
+
+                self.assertEqual(result["choices"][0]["message"]["content"], "recovered")
+                self.assertEqual(llm.chat_format, expected)
+                self.assertEqual(llm.calls, 2)
+
     def test_model_recovery_uses_recorded_owner_storage(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             models_dir = pathlib.Path(temp_dir)
