@@ -9,7 +9,7 @@ import re
 from typing import Any, Iterable
 
 
-INTELLIGENCE_PROFILE_VERSION = "qwen-te-intelligence-v6"
+INTELLIGENCE_PROFILE_VERSION = "qwen-te-intelligence-v7"
 
 _GROUP_LIMITS = {
     "主体": 6,
@@ -368,11 +368,13 @@ def build_scene_relationship_graph(
             *groups.get("道具世界观", []),
             *groups.get("动作姿态", []),
             *custom,
+            natural_context,
         ]
     )
     explicit_hits = detect_world_families(scene_text)
     scene_only_hits = detect_world_families("，".join(groups.get("场景背景", [])))
-    primary_family = next(iter(scene_only_hits), "")
+    context_world_hits = detect_world_families(natural_context)
+    primary_family = next(iter(scene_only_hits), "") or next(iter(context_world_hits), "")
     allowed = set(explicit_hits)
     inferred_world_hits = detect_world_families(
         "，".join(
@@ -426,6 +428,7 @@ def build_scene_relationship_graph(
         "nodes": groups,
         "custom_context": custom,
         "natural_context_present": bool(natural_context),
+        "natural_context_world_families": list(context_world_hits),
         "relations": relations,
         "hard_anchors": hard_anchors,
         "inferred_requirements": inferred_requirements,

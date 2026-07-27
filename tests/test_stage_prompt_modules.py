@@ -429,6 +429,32 @@ class TestStagePromptIntelligence(unittest.TestCase):
         targets = [item["target"][0] for item in active["inferred_requirements"]]
         self.assertEqual(targets, ["火炬", "剑", "卷轴"])
 
+    def test_natural_language_scene_context_tightens_world_family_without_tags(self) -> None:
+        selected = OrderedDict({"主体": ["成年女性侦探"]})
+        urban = intelligence.build_scene_relationship_graph(
+            selected,
+            context_text="成年女性侦探站在城市天台观察远处的霓虹街区。",
+        )
+        self.assertEqual(urban["primary_world_family"], "urban_space")
+        self.assertIn("urban_space", urban["natural_context_world_families"])
+        self.assertIn("urban_space", urban["allowed_world_families"])
+        self.assertIn("underground_ruin", urban["forbidden_world_families"])
+        self.assertIn(
+            "越过场景关系图",
+            intelligence.candidate_world_violation(
+                "成年女性侦探站在城市天台。",
+                "成年女性侦探站在城市天台，地下城遗迹的石墙出现在身后。",
+                urban,
+            ),
+        )
+
+        natural = intelligence.build_scene_relationship_graph(
+            selected,
+            context_text="不是城市街道，而是森林中的小路。",
+        )
+        self.assertEqual(natural["primary_world_family"], "natural_wilderness")
+        self.assertNotIn("urban_space", natural["natural_context_world_families"])
+
     def test_natural_language_relation_hint_reaches_full_stage_outputs(self) -> None:
         module = load_stage_prompt_generator_for_integration_test()
         result = module._run_stage(
