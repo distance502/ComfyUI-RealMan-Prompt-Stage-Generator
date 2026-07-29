@@ -3446,6 +3446,7 @@ def _runtime_random_preview_state_fingerprint(
 
 
 _AUTO_SOFT_TAG_SOURCE_KEYS = (
+    "skill_defaults",
     "runtime_random",
     "random_theme_pool",
     "template_style_profile",
@@ -4337,6 +4338,14 @@ def _run_stage_impl(
     **kwargs: Any,
 ) -> tuple[str, str, str, str, str, str, str]:
     tag_groups, tag_group_index, tag_group_memberships = _tag_catalog_snapshot()
+    raw_explicit_selected, raw_explicit_custom_tags = _collect_selected(
+        kwargs,
+        tag_groups=tag_groups,
+    )
+    raw_explicit_input_tags = _collect_all_tags(
+        raw_explicit_selected,
+        raw_explicit_custom_tags,
+    )
     selected, custom_tags, settings, all_tags_text = _build_state_from_kwargs(
         kwargs,
         tag_groups=tag_groups,
@@ -4345,10 +4354,15 @@ def _run_stage_impl(
     )
     explicit_selected_snapshot = deepcopy(selected)
     explicit_custom_tags_snapshot = list(custom_tags)
-    explicit_input_tags = _collect_all_tags(explicit_selected_snapshot, explicit_custom_tags_snapshot)
+    explicit_input_tags = list(raw_explicit_input_tags)
     auto_soft_tag_sources: dict[str, list[str]] = {
         source_name: [] for source_name in _AUTO_SOFT_TAG_SOURCE_KEYS
     }
+    auto_soft_tag_sources["skill_defaults"] = _new_tags_after_state_change(
+        raw_explicit_input_tags,
+        explicit_selected_snapshot,
+        explicit_custom_tags_snapshot,
+    )
     settings["模型来源"] = _normalize_stage_model_source(settings.get("模型来源"))
     reference_image = kwargs.get("参考图片")
     early_intent = _infer_task_intent_impl(
@@ -4531,6 +4545,7 @@ def _run_stage_impl(
                 ],
             ]
         )
+    tags_before_runtime_normalization = _collect_all_tags(selected, custom_tags)
     selected, custom_tags, runtime_normalization_notes = _normalize_inference_state(
         selected,
         custom_tags,
@@ -4540,6 +4555,16 @@ def _run_stage_impl(
     )
     if runtime_normalization_notes:
         _merge_inference_notes(settings, runtime_normalization_notes)
+    auto_soft_tag_sources["skill_defaults"] = _uniq(
+        [
+            *auto_soft_tag_sources.get("skill_defaults", []),
+            *_new_tags_after_state_change(
+                tags_before_runtime_normalization,
+                selected,
+                custom_tags,
+            ),
+        ]
+    )
     if nsfw_enabled and isinstance(nsfw_workspace, dict):
         normalized_active_tags = set(_collect_all_tags(selected, custom_tags))
         nsfw_output = 应用NSFW工作台到阶段状态(
@@ -6168,6 +6193,7 @@ def 构建运行时随机预览状态(payload: dict[str, Any]) -> dict[str, Any]
         )
     raw_custom_tags = state.get("customTags")
     custom_tags = _bounded_runtime_preview_tags(raw_custom_tags)
+    preview_explicit_input_tags = _collect_all_tags(selected, custom_tags)
 
     selected, custom_tags, initial_notes = _normalize_inference_state(
         selected,
@@ -6178,6 +6204,11 @@ def 构建运行时随机预览状态(payload: dict[str, Any]) -> dict[str, Any]
     )
     if initial_notes:
         _merge_inference_notes(settings, initial_notes)
+    initial_skill_default_tags = _new_tags_after_state_change(
+        preview_explicit_input_tags,
+        selected,
+        custom_tags,
+    )
 
     raw_nsfw_workspace = state.get("nsfwWorkspace") if isinstance(state.get("nsfwWorkspace"), dict) else state.get("nsfw_workspace")
     nsfw_workspace = (
@@ -6205,6 +6236,7 @@ def 构建运行时随机预览状态(payload: dict[str, Any]) -> dict[str, Any]
     auto_soft_tag_sources: dict[str, list[str]] = {
         source_name: [] for source_name in _AUTO_SOFT_TAG_SOURCE_KEYS
     }
+    auto_soft_tag_sources["skill_defaults"] = list(initial_skill_default_tags)
     requested_seed = int(settings.get("seed", 0) or 0)
     effective_seed = requested_seed
     if bool(settings.get("运行时随机标签", False)):
@@ -6260,6 +6292,7 @@ def 构建运行时随机预览状态(payload: dict[str, Any]) -> dict[str, Any]
         selected,
         custom_tags,
     )
+    tags_before_final_normalization = _collect_all_tags(selected, custom_tags)
     selected, custom_tags, final_notes = _normalize_inference_state(
         selected,
         custom_tags,
@@ -6269,6 +6302,16 @@ def 构建运行时随机预览状态(payload: dict[str, Any]) -> dict[str, Any]
     )
     if final_notes:
         _merge_inference_notes(settings, final_notes)
+    auto_soft_tag_sources["skill_defaults"] = _uniq(
+        [
+            *auto_soft_tag_sources.get("skill_defaults", []),
+            *_new_tags_after_state_change(
+                tags_before_final_normalization,
+                selected,
+                custom_tags,
+            ),
+        ]
+    )
     if nsfw_enabled and nsfw_workspace is not None:
         normalized_active_tags = set(_collect_all_tags(selected, custom_tags))
         nsfw_output = 应用NSFW工作台到阶段状态(
@@ -6282,6 +6325,7 @@ def 构建运行时随机预览状态(payload: dict[str, Any]) -> dict[str, Any]
         custom_tags = nsfw_output["custom_tags"]
         settings["运行时随机保护标签"] = ",".join(nsfw_output.get("protected_tags", []))
         _merge_inference_notes(settings, ["NSFW工作台锚点保护：仅保留最终归一化后仍有效的工作台显式选择。"])
+        tags_before_post_nsfw_normalization = _collect_all_tags(selected, custom_tags)
         selected, custom_tags, post_nsfw_notes = _normalize_inference_state(
             selected,
             custom_tags,
@@ -6291,6 +6335,16 @@ def 构建运行时随机预览状态(payload: dict[str, Any]) -> dict[str, Any]
         )
         if post_nsfw_notes:
             _merge_inference_notes(settings, post_nsfw_notes)
+        auto_soft_tag_sources["skill_defaults"] = _uniq(
+            [
+                *auto_soft_tag_sources.get("skill_defaults", []),
+                *_new_tags_after_state_change(
+                    tags_before_post_nsfw_normalization,
+                    selected,
+                    custom_tags,
+                ),
+            ]
+        )
     for group_name, slot_count, _ in tag_groups:
         selected[group_name] = _bounded_runtime_preview_tags(
             selected.get(group_name, []),

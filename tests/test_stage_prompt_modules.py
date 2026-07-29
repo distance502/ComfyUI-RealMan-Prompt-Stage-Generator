@@ -749,7 +749,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
             )
 
         payload = json.loads(result[3])
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v31")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 2)
         self.assertEqual(payload["scene_coherence_status"], "coherent")
         self.assertEqual(payload["model_intelligence_skip_count"], 0)
@@ -787,7 +787,18 @@ class TestStagePromptIntelligence(unittest.TestCase):
         provenance = payload["automatic_tag_provenance"]
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(provenance["sources"]["template_style_profile"], ["地铁站台"])
-        self.assertEqual(provenance["removable_tags"], ["地铁站台"])
+        self.assertEqual(
+            provenance["sources"]["skill_defaults"],
+            ["全景全身", "人物完整入镜", "高细节"],
+        )
+        self.assertEqual(
+            provenance["removable_tags"],
+            ["全景全身", "人物完整入镜", "高细节", "地铁站台"],
+        )
+        self.assertEqual(
+            [item["value"] for item in payload["random_conflict_repair"]["removed"]],
+            ["地铁站台"],
+        )
         self.assertNotIn("地铁站台", payload["selected_tags_flat"])
         self.assertEqual(payload["scene_coherence_status"], "coherent")
 
@@ -1022,7 +1033,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
             )
 
         payload = json.loads(result[3])
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v31")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 2)
         self.assertEqual(payload["scene_relationship_graph"]["primary_world_family"], "natural_wilderness")
         self.assertEqual(payload["scene_coherence_status"], "coherent")
@@ -1114,7 +1125,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
             )
 
         payload = json.loads(result[3])
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v31")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(payload["scene_relationship_graph"]["primary_world_family"], "natural_wilderness")
         self.assertEqual(payload["scene_coherence_status"], "coherent")
@@ -1220,7 +1231,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
             )
 
         payload = json.loads(result[3])
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v31")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(payload["scene_coherence_status"], "coherent")
         self.assertNotIn("操作控制台", payload["selected_tags_flat"])
@@ -1310,7 +1321,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v31")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["primary_world_family"], "urban_space")
         self.assertEqual(graph["context_primary_world_source"], "natural_context_override")
@@ -1419,7 +1430,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v31")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["context_scene_attribute_constraints"]["time_of_day"]["required_value"], "day")
         self.assertEqual(graph["context_scene_attribute_constraints"]["precipitation"]["required_value"], "clear")
@@ -1549,7 +1560,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v31")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["context_subject_cardinality_constraint"]["required_value"], "single")
         self.assertEqual(payload["scene_coherence_status"], "coherent")
@@ -1677,7 +1688,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v31")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["context_subject_orientation_constraint"]["required_value"], "back")
         self.assertEqual(payload["scene_coherence_status"], "coherent")
@@ -1874,7 +1885,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
                 "智能场景关系图": graph,
             },
         )
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v31")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["context_subject_pose_constraint"]["required_value"], "standing")
         self.assertNotIn("坐姿慵懒", payload["selected_tags_flat"])
@@ -2011,7 +2022,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
                 "智能场景关系图": graph,
             },
         )
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v31")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["context_camera_angle_constraint"]["required_value"], "low_angle")
         self.assertNotIn("高角度俯拍", payload["selected_tags_flat"])
@@ -2102,7 +2113,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
                 "智能场景关系图": graph,
             },
         )
-        self.assertEqual(profile["version"], "qwen-te-intelligence-v31")
+        self.assertEqual(profile["version"], "qwen-te-intelligence-v42")
         self.assertEqual(graph["context_subject_presence_constraint"]["required_value"], "non_person")
         self.assertIn("主体存在性约束", violation)
         self.assertIn("成年女性", violation)
@@ -2152,7 +2163,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v31")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["context_subject_presence_constraint"]["required_value"], "none")
         self.assertNotIn("成年女性模特", payload["selected_tags_flat"])
@@ -2289,7 +2300,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v31")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["context_light_temperature_constraint"]["required_value"], "cool")
         self.assertNotIn("烛火暖光", payload["selected_tags_flat"])
@@ -2425,7 +2436,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v31")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["color_rendering_constraint"]["required_value"], "monochrome")
         self.assertNotIn("彩色霓虹光", payload["selected_tags_flat"])
@@ -2571,7 +2582,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v31")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["depth_of_field_constraint"]["required_value"], "deep")
         self.assertNotIn("浅景深", payload["selected_tags_flat"])
@@ -2710,7 +2721,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v31")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["lighting_quality_constraint"]["required_value"], "hard")
         self.assertNotIn("柔光", payload["selected_tags_flat"])
@@ -2855,7 +2866,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v31")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["motion_rendering_constraint"]["required_value"], "frozen")
         self.assertNotIn("运动模糊", payload["selected_tags_flat"])
@@ -2994,7 +3005,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v31")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["camera_stability_constraint"]["required_value"], "stable")
         self.assertNotIn("手持镜头", payload["selected_tags_flat"])
@@ -3133,7 +3144,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v31")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["focal_perspective_constraint"]["required_value"], "wide")
         self.assertNotIn("200mm长焦压缩", payload["selected_tags_flat"])
@@ -3276,11 +3287,1569 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v31")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["key_light_direction_constraint"]["required_value"], "side")
         self.assertNotIn("顶光烟雾", payload["selected_tags_flat"])
         self.assertEqual(payload["scene_coherence_status"], "coherent")
+
+    def test_exposure_key_context_removes_only_conflicting_soft_anchors(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["成年女性冒险者"],
+                "光影氛围": ["高键光", "低键光"],
+                "场景背景": ["地下城遗迹"],
+            }
+        )
+        custom = ["低调摄影", "柔和侧光"]
+        context = "整体固定为高调摄影与高键光，不要低调摄影或低键光。"
+        graph = intelligence.build_scene_relationship_graph(selected, custom, context_text=context)
+        constraint = graph["exposure_key_constraint"]
+        issues = [
+            item for item in graph["coherence_issues"]
+            if item["kind"] == "context_exposure_key_conflict"
+        ]
+        self.assertEqual(constraint["required_value"], "high_key")
+        self.assertEqual(constraint["negated_values"], ["low_key"])
+        self.assertEqual(constraint["source"], "natural_context")
+        self.assertEqual(
+            [item["value"] for item in issues[0]["conflicting_anchors"]],
+            ["低键光", "低调摄影"],
+        )
+
+        repaired, repaired_custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            custom,
+            graph,
+            soft_tags=["低键光", "低调摄影"],
+        )
+        rebuilt = intelligence.build_scene_relationship_graph(
+            repaired,
+            repaired_custom,
+            context_text=context,
+        )
+        self.assertEqual(repaired["光影氛围"], ["高键光"])
+        self.assertEqual(repaired_custom, ["柔和侧光"])
+        self.assertEqual(report["removed_count"], 2)
+        self.assertEqual(rebuilt["coherence_status"], "coherent")
+
+    def test_selected_low_key_rejects_high_key_model_candidate(self) -> None:
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["成年女性冒险者"],
+                    "光影氛围": ["低键光"],
+                    "场景背景": ["地下城遗迹"],
+                }
+            )
+        )
+        original = "低键光让地下城大部分区域沉入阴影，仅保留人物轮廓与火炬反射。"
+        violation = intelligence.candidate_world_violation(
+            original,
+            original + "随后改成明亮高调棚拍，以高键照明均匀填满暗部。",
+            graph,
+        )
+        model_prompt = model_refiner._compose_batch_prompt(
+            [original],
+            {"提示词语言": "纯中文", "智能场景关系图": graph},
+        )
+        self.assertEqual(graph["exposure_key_constraint"]["required_value"], "low_key")
+        self.assertEqual(graph["exposure_key_constraint"]["source"], "selected_state")
+        self.assertIn("曝光调性约束", violation)
+        self.assertIn("明亮高调棚拍", violation)
+        self.assertIn("智能曝光调性：曝光调性固定为低调/低键曝光", model_prompt)
+
+    def test_split_exposure_and_exposure_transition_remain_open(self) -> None:
+        split_exposure = intelligence.build_scene_relationship_graph(
+            OrderedDict({"光影氛围": ["高键光"]}),
+            context_text="采用明暗分区曝光，主体保持高调摄影，背景使用低调摄影形成层次。",
+        )
+        transition = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"]}),
+            context_text="开场使用低键光隐藏空间，石门开启后转为高键照明。",
+        )
+        nonvisual = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"]}),
+            context_text="角色做人低调，但在关键时刻高调宣布决定。",
+        )
+        self.assertEqual(split_exposure["exposure_key_constraint"], {})
+        self.assertEqual(transition["exposure_key_constraint"], {})
+        self.assertEqual(nonvisual["exposure_key_constraint"], {})
+
+    def test_explicit_exposure_key_conflict_is_guarded(self) -> None:
+        selected = OrderedDict(
+            {"主体": ["成年女性冒险者"], "光影氛围": ["低键光"]}
+        )
+        graph = intelligence.build_scene_relationship_graph(
+            selected,
+            context_text="整体固定为高调摄影和高键光，不要低键照明。",
+        )
+        unchanged, _custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            [],
+            graph,
+            soft_tags=[],
+        )
+        strategy = intelligence.resolve_model_strategy(
+            {"模型来源": "API接口"},
+            {"task_type": "standard_visual_story"},
+            graph,
+        )
+        self.assertFalse(report["applied"])
+        self.assertEqual(unchanged, selected)
+        self.assertEqual(strategy["mode"], "skill_only_guarded")
+
+    def test_exposure_key_repair_reaches_full_stage(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+
+        def inject_low_key(selected, custom_tags, settings, **_kwargs):
+            next_selected = OrderedDict((group, list(values)) for group, values in selected.items())
+            settings["运行时随机有效种子"] = 193
+            return next_selected, [*custom_tags, "低键光"], ["低键光"]
+
+        with mock.patch.object(module, "_build_runtime_tags", side_effect=inject_low_key):
+            result = module._run_stage(
+                None,
+                **{
+                    "unique_id": "intelligence-v32-exposure-key-repair",
+                    "模型来源": "仅Skill",
+                    "主体标签1": "成年女性冒险者",
+                    "场景背景标签1": "地下城遗迹",
+                    "额外要求": "整体固定为明亮高调摄影和高键光，不要低调摄影或低键光。",
+                    "运行时随机标签": True,
+                    "运行时随机模式": "全随机",
+                    "生成数量": 1,
+                    "提示词语言": "纯中文",
+                    "seed": 193,
+                },
+            )
+
+        payload = json.loads(result[3])
+        graph = payload["scene_relationship_graph"]
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
+        self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
+        self.assertEqual(graph["exposure_key_constraint"]["required_value"], "high_key")
+        self.assertNotIn("低键光", payload["selected_tags_flat"])
+        self.assertEqual(payload["scene_coherence_status"], "coherent")
+
+    def test_contrast_level_context_removes_only_conflicting_soft_anchors(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["成年女性冒险者"],
+                "光影氛围": ["高对比", "低对比"],
+                "场景背景": ["地下城遗迹"],
+            }
+        )
+        custom = ["低反差画面", "柔和侧光"]
+        context = "整体保持高对比和强烈明暗关系，不要低对比画面或低反差照明。"
+        graph = intelligence.build_scene_relationship_graph(selected, custom, context_text=context)
+        constraint = graph["contrast_level_constraint"]
+        issues = [
+            item for item in graph["coherence_issues"]
+            if item["kind"] == "context_contrast_level_conflict"
+        ]
+        self.assertEqual(constraint["required_value"], "high")
+        self.assertEqual(constraint["negated_values"], ["low"])
+        self.assertEqual(constraint["source"], "natural_context")
+        self.assertEqual(
+            [item["value"] for item in issues[0]["conflicting_anchors"]],
+            ["低对比", "低反差画面"],
+        )
+
+        repaired, repaired_custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            custom,
+            graph,
+            soft_tags=["低对比", "低反差画面"],
+        )
+        rebuilt = intelligence.build_scene_relationship_graph(
+            repaired,
+            repaired_custom,
+            context_text=context,
+        )
+        self.assertEqual(repaired["光影氛围"], ["高对比"])
+        self.assertEqual(repaired_custom, ["柔和侧光"])
+        self.assertEqual(report["removed_count"], 2)
+        self.assertEqual(rebuilt["coherence_status"], "coherent")
+
+    def test_selected_low_contrast_rejects_high_contrast_model_candidate(self) -> None:
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["成年女性冒险者"],
+                    "光影氛围": ["低对比"],
+                    "场景背景": ["地下城遗迹"],
+                }
+            )
+        )
+        original = "整体低对比让石墙、冷雾和人物暗部保持柔和连续的灰阶过渡。"
+        violation = intelligence.candidate_world_violation(
+            original,
+            original + "随后加入高对比戏剧光，以强烈明暗切割人物和背景。",
+            graph,
+        )
+        model_prompt = model_refiner._compose_batch_prompt(
+            [original],
+            {"提示词语言": "纯中文", "智能场景关系图": graph},
+        )
+        self.assertEqual(graph["contrast_level_constraint"]["required_value"], "low")
+        self.assertEqual(graph["contrast_level_constraint"]["source"], "selected_state")
+        self.assertIn("整体对比度约束", violation)
+        self.assertIn("高对比戏剧光", violation)
+        self.assertIn("智能整体对比度：整体对比度固定为低对比/低反差", model_prompt)
+
+    def test_local_low_contrast_hdr_and_contrast_transition_remain_open(self) -> None:
+        local_reflection = intelligence.build_scene_relationship_graph(
+            OrderedDict({"光影氛围": ["高对比"]}),
+            context_text="主体保持清晰，镜像只作为低对比空间层次，不改变真实人物主次。",
+        )
+        hdr = intelligence.build_scene_relationship_graph(
+            OrderedDict({"光影氛围": ["高对比"]}),
+            context_text="采用HDR高动态范围保留窗外高光与室内暗部细节。",
+        )
+        transition = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"]}),
+            context_text="开场保持低反差画面，警报触发后转为高对比戏剧光。",
+        )
+        nonvisual = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"]}),
+            context_text="对比两个方案后，角色选择风险更低的路线。",
+        )
+        self.assertEqual(local_reflection["contrast_level_constraint"], {})
+        self.assertEqual(hdr["contrast_level_constraint"], {})
+        self.assertEqual(transition["contrast_level_constraint"], {})
+        self.assertEqual(nonvisual["contrast_level_constraint"], {})
+
+    def test_explicit_contrast_level_conflict_is_guarded(self) -> None:
+        selected = OrderedDict(
+            {"主体": ["成年女性冒险者"], "光影氛围": ["低对比"]}
+        )
+        graph = intelligence.build_scene_relationship_graph(
+            selected,
+            context_text="整体固定为高对比画面，不要低对比照明。",
+        )
+        unchanged, _custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            [],
+            graph,
+            soft_tags=[],
+        )
+        strategy = intelligence.resolve_model_strategy(
+            {"模型来源": "本地模型"},
+            {"task_type": "standard_visual_story"},
+            graph,
+        )
+        self.assertFalse(report["applied"])
+        self.assertEqual(unchanged, selected)
+        self.assertEqual(strategy["mode"], "skill_only_guarded")
+
+    def test_contrast_level_repair_reaches_full_stage(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+
+        def inject_low_contrast(selected, custom_tags, settings, **_kwargs):
+            next_selected = OrderedDict((group, list(values)) for group, values in selected.items())
+            settings["运行时随机有效种子"] = 197
+            return next_selected, [*custom_tags, "低反差画面"], ["低反差画面"]
+
+        with mock.patch.object(module, "_build_runtime_tags", side_effect=inject_low_contrast):
+            result = module._run_stage(
+                None,
+                **{
+                    "unique_id": "intelligence-v33-contrast-level-repair",
+                    "模型来源": "仅Skill",
+                    "主体标签1": "成年女性冒险者",
+                    "场景背景标签1": "地下城遗迹",
+                    "额外要求": "整体保持高对比画面和强烈明暗关系，不要低对比或低反差照明。",
+                    "运行时随机标签": True,
+                    "运行时随机模式": "全随机",
+                    "生成数量": 1,
+                    "提示词语言": "纯中文",
+                    "seed": 197,
+                },
+            )
+
+        payload = json.loads(result[3])
+        graph = payload["scene_relationship_graph"]
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
+        self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
+        self.assertEqual(graph["contrast_level_constraint"]["required_value"], "high")
+        self.assertNotIn("低反差画面", payload["selected_tags_flat"])
+        self.assertEqual(payload["scene_coherence_status"], "coherent")
+
+    def test_saturation_level_context_removes_only_conflicting_soft_anchors(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["成年女性冒险者"],
+                "光影氛围": ["高饱和", "低饱和"],
+                "场景背景": ["地下城遗迹"],
+            }
+        )
+        custom = ["去饱和画面", "柔和侧光"]
+        context = "整体固定为高饱和画面，不要低饱和或去饱和处理。"
+        graph = intelligence.build_scene_relationship_graph(selected, custom, context_text=context)
+        constraint = graph["saturation_level_constraint"]
+        issues = [
+            item for item in graph["coherence_issues"]
+            if item["kind"] == "context_saturation_level_conflict"
+        ]
+        self.assertEqual(constraint["required_value"], "high")
+        self.assertEqual(constraint["negated_values"], ["low"])
+        self.assertEqual(constraint["source"], "natural_context")
+        self.assertEqual(
+            [item["value"] for item in issues[0]["conflicting_anchors"]],
+            ["低饱和", "去饱和画面"],
+        )
+
+        repaired, repaired_custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            custom,
+            graph,
+            soft_tags=["低饱和", "去饱和画面"],
+        )
+        rebuilt = intelligence.build_scene_relationship_graph(
+            repaired,
+            repaired_custom,
+            context_text=context,
+        )
+        self.assertEqual(repaired["光影氛围"], ["高饱和"])
+        self.assertEqual(repaired_custom, ["柔和侧光"])
+        self.assertEqual(report["removed_count"], 2)
+        self.assertEqual(rebuilt["coherence_status"], "coherent")
+
+    def test_selected_low_saturation_rejects_high_saturation_model_candidate(self) -> None:
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["成年女性冒险者"],
+                    "光影氛围": ["低饱和冷灰"],
+                    "场景背景": ["地下城遗迹"],
+                }
+            )
+        )
+        original = "低饱和冷灰让皮革、石墙和雾气保持克制统一的色彩浓度。"
+        violation = intelligence.candidate_world_violation(
+            original,
+            original + "随后改用高饱和感官色调，让服装与火炬呈现鲜艳饱和色彩。",
+            graph,
+        )
+        model_prompt = model_refiner._compose_batch_prompt(
+            [original],
+            {"提示词语言": "纯中文", "智能场景关系图": graph},
+        )
+        self.assertEqual(graph["saturation_level_constraint"]["required_value"], "low")
+        self.assertEqual(graph["saturation_level_constraint"]["source"], "selected_state")
+        self.assertIn("整体饱和度约束", violation)
+        self.assertIn("高饱和感官色调", violation)
+        self.assertIn("智能整体饱和度：整体饱和度固定为低饱和/去饱和", model_prompt)
+
+    def test_selective_saturation_skin_control_and_saturation_transition_remain_open(self) -> None:
+        skin_control = intelligence.build_scene_relationship_graph(
+            OrderedDict({"光影氛围": ["低饱和"]}),
+            context_text="环境保持低饱和，肤色独立清楚并维持自然色彩。",
+        )
+        selective = intelligence.build_scene_relationship_graph(
+            OrderedDict({"光影氛围": ["低饱和"]}),
+            context_text="采用选择性饱和，只让红色围巾作为局部彩色点缀。",
+        )
+        transition = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"]}),
+            context_text="开场使用高饱和画面，危机解除后逐渐转为低饱和冷灰。",
+        )
+        nonvisual = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"]}),
+            context_text="市场需求已经饱和，角色决定改变原有路线。",
+        )
+        self.assertEqual(skin_control["saturation_level_constraint"], {})
+        self.assertEqual(selective["saturation_level_constraint"], {})
+        self.assertEqual(transition["saturation_level_constraint"], {})
+        self.assertEqual(nonvisual["saturation_level_constraint"], {})
+
+    def test_explicit_saturation_level_conflict_is_guarded(self) -> None:
+        selected = OrderedDict(
+            {"主体": ["成年女性冒险者"], "光影氛围": ["低饱和"]}
+        )
+        graph = intelligence.build_scene_relationship_graph(
+            selected,
+            context_text="整体固定为高饱和画面，不要低饱和或去饱和处理。",
+        )
+        unchanged, _custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            [],
+            graph,
+            soft_tags=[],
+        )
+        strategy = intelligence.resolve_model_strategy(
+            {"模型来源": "API接口"},
+            {"task_type": "standard_visual_story"},
+            graph,
+        )
+        self.assertFalse(report["applied"])
+        self.assertEqual(unchanged, selected)
+        self.assertEqual(strategy["mode"], "skill_only_guarded")
+
+    def test_saturation_level_repair_reaches_full_stage(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+
+        def inject_low_saturation(selected, custom_tags, settings, **_kwargs):
+            next_selected = OrderedDict((group, list(values)) for group, values in selected.items())
+            settings["运行时随机有效种子"] = 199
+            return next_selected, [*custom_tags, "低饱和"], ["低饱和"]
+
+        with mock.patch.object(module, "_build_runtime_tags", side_effect=inject_low_saturation):
+            result = module._run_stage(
+                None,
+                **{
+                    "unique_id": "intelligence-v34-saturation-level-repair",
+                    "模型来源": "仅Skill",
+                    "主体标签1": "成年女性冒险者",
+                    "场景背景标签1": "地下城遗迹",
+                    "额外要求": "整体固定为高饱和画面，不要低饱和或去饱和处理。",
+                    "运行时随机标签": True,
+                    "运行时随机模式": "全随机",
+                    "生成数量": 1,
+                    "提示词语言": "纯中文",
+                    "seed": 199,
+                },
+            )
+
+        payload = json.loads(result[3])
+        graph = payload["scene_relationship_graph"]
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
+        self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
+        self.assertEqual(graph["saturation_level_constraint"]["required_value"], "high")
+        self.assertNotIn("低饱和", payload["selected_tags_flat"])
+        self.assertEqual(payload["scene_coherence_status"], "coherent")
+
+    def test_image_grain_context_removes_only_conflicting_soft_anchors(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["成年女性冒险者"],
+                "技术画质": ["纯净数字成像", "胶片颗粒"],
+                "场景背景": ["地下城遗迹"],
+            }
+        )
+        custom = ["VHS噪点", "柔和侧光"]
+        context = "整体采用纯净数字成像，不要胶片颗粒或VHS噪点。"
+        graph = intelligence.build_scene_relationship_graph(selected, custom, context_text=context)
+        constraint = graph["image_grain_constraint"]
+        issues = [
+            item for item in graph["coherence_issues"]
+            if item["kind"] == "context_image_grain_conflict"
+        ]
+        self.assertEqual(constraint["required_value"], "clean")
+        self.assertEqual(constraint["negated_values"], ["grainy"])
+        self.assertEqual(constraint["source"], "natural_context")
+        self.assertEqual(
+            [item["value"] for item in issues[0]["conflicting_anchors"]],
+            ["胶片颗粒", "VHS噪点"],
+        )
+
+        repaired, repaired_custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            custom,
+            graph,
+            soft_tags=["胶片颗粒", "VHS噪点"],
+        )
+        rebuilt = intelligence.build_scene_relationship_graph(
+            repaired,
+            repaired_custom,
+            context_text=context,
+        )
+        self.assertEqual(repaired["技术画质"], ["纯净数字成像"])
+        self.assertEqual(repaired_custom, ["柔和侧光"])
+        self.assertEqual(report["removed_count"], 2)
+        self.assertEqual(rebuilt["coherence_status"], "coherent")
+
+    def test_selected_film_grain_rejects_clean_digital_model_candidate(self) -> None:
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["成年女性冒险者"],
+                    "技术画质": ["35mm胶片颗粒"],
+                    "场景背景": ["地下城遗迹"],
+                }
+            )
+        )
+        original = "35mm胶片颗粒覆盖石墙、皮革与雾气，保持统一的模拟成像质感。"
+        violation = intelligence.candidate_world_violation(
+            original,
+            original + "随后改为纯净数字成像，并彻底移除画面中的可见颗粒。",
+            graph,
+        )
+        model_prompt = model_refiner._compose_batch_prompt(
+            [original],
+            {"提示词语言": "纯中文", "智能场景关系图": graph},
+        )
+        self.assertEqual(graph["image_grain_constraint"]["required_value"], "grainy")
+        self.assertEqual(graph["image_grain_constraint"]["source"], "selected_state")
+        self.assertIn("成像颗粒质感约束", violation)
+        self.assertIn("纯净数字成像", violation)
+        self.assertIn(
+            "智能成像颗粒质感：成像颗粒质感固定为胶片颗粒/可见噪点",
+            model_prompt,
+        )
+
+    def test_local_grain_print_texture_and_grain_transition_remain_open(self) -> None:
+        local_grain = intelligence.build_scene_relationship_graph(
+            OrderedDict({"技术画质": ["胶片颗粒"]}),
+            context_text="仅背景保留胶片颗粒，人物面部保持干净清晰。",
+        )
+        print_texture = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"]}),
+            context_text="纸面使用印刷网点与扫描纹理，线稿边缘仍然清楚。",
+        )
+        transition = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"]}),
+            context_text="开场保留35mm胶片颗粒，穿过传送门后逐渐转为纯净数字成像。",
+        )
+        nonvisual = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"]}),
+            context_text="她检查谷物的颗粒感，再把原料装进随身布袋。",
+        )
+        clean_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"技术画质": ["纯净数字成像"]}),
+        )
+        nonvisual_candidate_violation = intelligence.candidate_world_violation(
+            "纯净数字成像保持画面干净。",
+            "纯净数字成像保持画面干净，她同时检查砂糖的颗粒质感。",
+            clean_graph,
+        )
+        self.assertEqual(local_grain["image_grain_constraint"], {})
+        self.assertEqual(print_texture["image_grain_constraint"], {})
+        self.assertEqual(transition["image_grain_constraint"], {})
+        self.assertEqual(nonvisual["image_grain_constraint"], {})
+        self.assertEqual(nonvisual_candidate_violation, "")
+
+    def test_explicit_image_grain_conflict_is_guarded(self) -> None:
+        selected = OrderedDict(
+            {"主体": ["成年女性冒险者"], "技术画质": ["纯净数字成像"]}
+        )
+        graph = intelligence.build_scene_relationship_graph(
+            selected,
+            context_text="整体固定为35mm胶片颗粒，不要纯净数字成像。",
+        )
+        unchanged, _custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            [],
+            graph,
+            soft_tags=[],
+        )
+        strategy = intelligence.resolve_model_strategy(
+            {"模型来源": "本地模型"},
+            {"task_type": "standard_visual_story"},
+            graph,
+        )
+        self.assertFalse(report["applied"])
+        self.assertEqual(unchanged, selected)
+        self.assertEqual(strategy["mode"], "skill_only_guarded")
+
+    def test_image_grain_repair_reaches_full_stage(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+
+        def inject_clean_digital(selected, custom_tags, settings, **_kwargs):
+            next_selected = OrderedDict((group, list(values)) for group, values in selected.items())
+            settings["运行时随机有效种子"] = 211
+            return next_selected, [*custom_tags, "纯净数字成像"], ["纯净数字成像"]
+
+        with mock.patch.object(module, "_build_runtime_tags", side_effect=inject_clean_digital):
+            result = module._run_stage(
+                None,
+                **{
+                    "unique_id": "intelligence-v35-image-grain-repair",
+                    "模型来源": "仅Skill",
+                    "主体标签1": "成年女性冒险者",
+                    "场景背景标签1": "地下城遗迹",
+                    "额外要求": "整体固定为35mm胶片颗粒，不要纯净数字成像或无颗粒数字画面。",
+                    "运行时随机标签": True,
+                    "运行时随机模式": "全随机",
+                    "生成数量": 1,
+                    "提示词语言": "纯中文",
+                    "seed": 211,
+                },
+            )
+
+        payload = json.loads(result[3])
+        graph = payload["scene_relationship_graph"]
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
+        self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
+        self.assertEqual(graph["image_grain_constraint"]["required_value"], "grainy")
+        self.assertNotIn("纯净数字成像", payload["selected_tags_flat"])
+        self.assertEqual(payload["scene_coherence_status"], "coherent")
+
+    def test_image_sharpness_context_removes_only_conflicting_soft_anchors(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["成年女性冒险者"],
+                "技术画质": ["锐利", "柔焦"],
+                "场景背景": ["地下城遗迹"],
+            }
+        )
+        custom = ["整体软焦", "胶片颗粒"]
+        context = "整体画面固定为锐利清晰，不要柔焦滤镜或软焦镜头。"
+        graph = intelligence.build_scene_relationship_graph(selected, custom, context_text=context)
+        constraint = graph["image_sharpness_constraint"]
+        issues = [
+            item for item in graph["coherence_issues"]
+            if item["kind"] == "context_image_sharpness_conflict"
+        ]
+        self.assertEqual(constraint["required_value"], "sharp")
+        self.assertEqual(constraint["negated_values"], ["soft_focus"])
+        self.assertEqual(constraint["source"], "natural_context")
+        self.assertEqual(
+            [item["value"] for item in issues[0]["conflicting_anchors"]],
+            ["柔焦", "整体软焦"],
+        )
+
+        repaired, repaired_custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            custom,
+            graph,
+            soft_tags=["柔焦", "整体软焦"],
+        )
+        rebuilt = intelligence.build_scene_relationship_graph(
+            repaired,
+            repaired_custom,
+            context_text=context,
+        )
+        self.assertEqual(repaired["技术画质"], ["锐利"])
+        self.assertEqual(repaired_custom, ["胶片颗粒"])
+        self.assertEqual(report["removed_count"], 2)
+        self.assertEqual(rebuilt["coherence_status"], "coherent")
+
+    def test_selected_soft_focus_rejects_sharp_model_candidate(self) -> None:
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["成年女性冒险者"],
+                    "技术画质": ["柔焦滤镜"],
+                    "场景背景": ["地下城遗迹"],
+                }
+            )
+        )
+        original = "柔焦滤镜让火炬、石墙和人物轮廓维持统一的朦胧成像。"
+        violation = intelligence.candidate_world_violation(
+            original,
+            original + "随后切换为整体锐利清晰，让所有边缘呈现高锐度成像。",
+            graph,
+        )
+        model_prompt = model_refiner._compose_batch_prompt(
+            [original],
+            {"提示词语言": "纯中文", "智能场景关系图": graph},
+        )
+        self.assertEqual(graph["image_sharpness_constraint"]["required_value"], "soft_focus")
+        self.assertEqual(graph["image_sharpness_constraint"]["source"], "selected_state")
+        self.assertIn("整体成像锐度约束", violation)
+        self.assertIn("整体锐利清晰", violation)
+        self.assertIn(
+            "智能整体成像锐度：整体成像锐度固定为整体柔焦/软焦成像",
+            model_prompt,
+        )
+
+    def test_selective_focus_motion_blur_fog_and_sharpness_transition_remain_open(self) -> None:
+        selective_focus = intelligence.build_scene_relationship_graph(
+            OrderedDict({"技术画质": ["清晰"]}),
+            context_text="主体面部保持锐利清晰，背景采用浅景深柔焦和散景。",
+        )
+        motion_design = intelligence.build_scene_relationship_graph(
+            OrderedDict({"技术画质": ["锐利"]}),
+            context_text="人物动作清晰定格，背景通过追焦形成运动模糊。",
+        )
+        fog_and_soft_light = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"]}),
+            context_text="柔光穿过冷雾，石墙轮廓依然清晰可辨。",
+        )
+        skin_softening = intelligence.build_scene_relationship_graph(
+            OrderedDict({"技术画质": ["锐利"]}),
+            context_text="只对皮肤柔化和轻微磨皮，眼睛、发丝与盔甲边缘保持清晰。",
+        )
+        transition = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"]}),
+            context_text="开场采用整体柔焦画面，危机出现后逐渐转为整体锐利清晰。",
+        )
+        nonvisual = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"]}),
+            context_text="她的思路清晰，回答问题时语言锐利。",
+        )
+        sharp_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"技术画质": ["锐利"]}),
+        )
+        selective_candidate_violation = intelligence.candidate_world_violation(
+            "整体画面保持锐利清晰。",
+            "整体画面保持锐利清晰，背景柔焦而人物面部继续清晰。",
+            sharp_graph,
+        )
+        self.assertEqual(selective_focus["image_sharpness_constraint"], {})
+        self.assertEqual(motion_design["image_sharpness_constraint"], {})
+        self.assertEqual(fog_and_soft_light["image_sharpness_constraint"], {})
+        self.assertEqual(skin_softening["image_sharpness_constraint"], {})
+        self.assertEqual(transition["image_sharpness_constraint"], {})
+        self.assertEqual(nonvisual["image_sharpness_constraint"], {})
+        self.assertEqual(selective_candidate_violation, "")
+
+    def test_explicit_image_sharpness_conflict_is_guarded(self) -> None:
+        selected = OrderedDict(
+            {"主体": ["成年女性冒险者"], "技术画质": ["柔焦"]}
+        )
+        graph = intelligence.build_scene_relationship_graph(
+            selected,
+            context_text="整体画面固定为锐利清晰，不要柔焦滤镜。",
+        )
+        unchanged, _custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            [],
+            graph,
+            soft_tags=[],
+        )
+        strategy = intelligence.resolve_model_strategy(
+            {"模型来源": "API接口"},
+            {"task_type": "standard_visual_story"},
+            graph,
+        )
+        self.assertFalse(report["applied"])
+        self.assertEqual(unchanged, selected)
+        self.assertEqual(strategy["mode"], "skill_only_guarded")
+
+    def test_image_sharpness_repair_reaches_full_stage(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+
+        def inject_soft_focus(selected, custom_tags, settings, **_kwargs):
+            next_selected = OrderedDict((group, list(values)) for group, values in selected.items())
+            settings["运行时随机有效种子"] = 223
+            return next_selected, [*custom_tags, "柔焦"], ["柔焦"]
+
+        with mock.patch.object(module, "_build_runtime_tags", side_effect=inject_soft_focus):
+            result = module._run_stage(
+                None,
+                **{
+                    "unique_id": "intelligence-v36-image-sharpness-repair",
+                    "模型来源": "仅Skill",
+                    "主体标签1": "成年女性冒险者",
+                    "场景背景标签1": "地下城遗迹",
+                    "额外要求": "整体画面固定为锐利清晰，不要柔焦滤镜或软焦镜头。",
+                    "运行时随机标签": True,
+                    "运行时随机模式": "全随机",
+                    "生成数量": 1,
+                    "提示词语言": "纯中文",
+                    "seed": 223,
+                },
+            )
+
+        payload = json.loads(result[3])
+        graph = payload["scene_relationship_graph"]
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
+        self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
+        self.assertEqual(graph["image_sharpness_constraint"]["required_value"], "sharp")
+        self.assertNotIn("柔焦", payload["selected_tags_flat"])
+        self.assertEqual(payload["scene_coherence_status"], "coherent")
+
+    def test_detail_density_context_removes_only_conflicting_soft_anchors(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["成年女性冒险者"],
+                "技术画质": ["低细节渲染", "高细节"],
+                "场景背景": ["地下城遗迹"],
+            }
+        )
+        custom = ["极致纹理", "8K"]
+        context = "整体固定为低细节渲染和简化渲染，不要高细节或极致纹理。"
+        graph = intelligence.build_scene_relationship_graph(selected, custom, context_text=context)
+        constraint = graph["detail_density_constraint"]
+        issues = [
+            item for item in graph["coherence_issues"]
+            if item["kind"] == "context_detail_density_conflict"
+        ]
+        self.assertEqual(constraint["required_value"], "low")
+        self.assertEqual(constraint["negated_values"], ["high"])
+        self.assertEqual(constraint["source"], "natural_context")
+        self.assertEqual(
+            [item["value"] for item in issues[0]["conflicting_anchors"]],
+            ["高细节", "极致纹理"],
+        )
+
+        repaired, repaired_custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            custom,
+            graph,
+            soft_tags=["高细节", "极致纹理"],
+        )
+        rebuilt = intelligence.build_scene_relationship_graph(
+            repaired,
+            repaired_custom,
+            context_text=context,
+        )
+        self.assertEqual(repaired["技术画质"], ["低细节渲染"])
+        self.assertEqual(repaired_custom, ["8K"])
+        self.assertEqual(report["removed_count"], 2)
+        self.assertEqual(rebuilt["coherence_status"], "coherent")
+
+    def test_selected_high_detail_rejects_simplified_model_candidate(self) -> None:
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["成年女性冒险者"],
+                    "技术画质": ["高细节"],
+                    "场景背景": ["地下城遗迹"],
+                }
+            )
+        )
+        original = "高细节刻画皮革缝线、石墙裂纹、火炬灰烬与宝石切面。"
+        violation = intelligence.candidate_world_violation(
+            original,
+            original + "随后改成整体低细节渲染，以扁平简化造型移除复杂纹理。",
+            graph,
+        )
+        model_prompt = model_refiner._compose_batch_prompt(
+            [original],
+            {"提示词语言": "纯中文", "智能场景关系图": graph},
+        )
+        self.assertEqual(graph["detail_density_constraint"]["required_value"], "high")
+        self.assertEqual(graph["detail_density_constraint"]["source"], "selected_state")
+        self.assertIn("整体细节密度约束", violation)
+        self.assertIn("整体低细节", violation)
+        self.assertIn(
+            "智能整体细节密度：整体细节密度固定为高细节/高密度纹理",
+            model_prompt,
+        )
+
+    def test_detail_zoning_lod_minimal_background_and_detail_transition_remain_open(self) -> None:
+        zoned = intelligence.build_scene_relationship_graph(
+            OrderedDict({"技术画质": ["高细节"]}),
+            context_text="人物服装保持高细节和丰富纹理，背景采用低细节简化处理。",
+        )
+        distance_lod = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"]}),
+            context_text="前景道具精细，远景随距离降低细节，形成明确的层级细节。",
+        )
+        minimal_background = intelligence.build_scene_relationship_graph(
+            OrderedDict({"技术画质": ["高细节"], "场景背景": ["极简白棚"]}),
+        )
+        low_fidelity = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"]}),
+            context_text="画面采用低保真、低分辨率像素化质感，但不指定纹理细节密度。",
+        )
+        transition = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"]}),
+            context_text="开场是简化低细节草图，随后逐步细化为超高细节完成稿。",
+        )
+        nonvisual = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"]}),
+            context_text="她详细解释任务细节，但没有提出任何渲染要求。",
+        )
+        low_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"技术画质": ["低细节渲染"]}),
+        )
+        zoned_candidate_violation = intelligence.candidate_world_violation(
+            "整体保持低细节渲染。",
+            "整体保持低细节渲染，只让人物徽章局部高细节，背景继续简化。",
+            low_graph,
+        )
+        self.assertEqual(zoned["detail_density_constraint"], {})
+        self.assertEqual(distance_lod["detail_density_constraint"], {})
+        self.assertEqual(minimal_background["detail_density_constraint"]["required_value"], "high")
+        self.assertEqual(low_fidelity["detail_density_constraint"], {})
+        self.assertEqual(transition["detail_density_constraint"], {})
+        self.assertEqual(nonvisual["detail_density_constraint"], {})
+        self.assertEqual(zoned_candidate_violation, "")
+
+    def test_explicit_detail_density_conflict_is_guarded(self) -> None:
+        selected = OrderedDict(
+            {"主体": ["成年女性冒险者"], "技术画质": ["高细节"]}
+        )
+        graph = intelligence.build_scene_relationship_graph(
+            selected,
+            context_text="整体固定为低细节渲染，不要高细节或复杂精细纹理。",
+        )
+        unchanged, _custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            [],
+            graph,
+            soft_tags=[],
+        )
+        strategy = intelligence.resolve_model_strategy(
+            {"模型来源": "本地模型"},
+            {"task_type": "standard_visual_story"},
+            graph,
+        )
+        self.assertFalse(report["applied"])
+        self.assertEqual(unchanged, selected)
+        self.assertEqual(strategy["mode"], "skill_only_guarded")
+
+    def test_detail_density_repair_reaches_full_stage(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+
+        def inject_dense_texture(selected, custom_tags, settings, **_kwargs):
+            next_selected = OrderedDict((group, list(values)) for group, values in selected.items())
+            settings["运行时随机有效种子"] = 227
+            return next_selected, [*custom_tags, "极致纹理"], ["极致纹理"]
+
+        with mock.patch.object(module, "_build_runtime_tags", side_effect=inject_dense_texture):
+            result = module._run_stage(
+                None,
+                **{
+                    "unique_id": "intelligence-v37-detail-density-repair",
+                    "模型来源": "仅Skill",
+                    "主体标签1": "成年女性冒险者",
+                    "场景背景标签1": "地下城遗迹",
+                    "额外要求": "整体固定为低细节渲染和简化渲染，不要高细节、极致纹理或复杂精细纹理。",
+                    "运行时随机标签": True,
+                    "运行时随机模式": "全随机",
+                    "生成数量": 1,
+                    "提示词语言": "纯中文",
+                    "seed": 227,
+                },
+            )
+
+        payload = json.loads(result[3])
+        graph = payload["scene_relationship_graph"]
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
+        self.assertEqual(payload["random_conflict_repair"]["removed_count"], 2)
+        self.assertEqual(graph["detail_density_constraint"]["required_value"], "low")
+        self.assertNotIn("高细节", payload["selected_tags_flat"])
+        self.assertNotIn("极致纹理", payload["selected_tags_flat"])
+        self.assertEqual(payload["scene_coherence_status"], "coherent")
+
+    def test_explicit_high_detail_stage_conflict_stays_protected(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        result = module._run_stage(
+            None,
+            **{
+                "unique_id": "intelligence-v37-explicit-high-detail-protection",
+                "模型来源": "仅Skill",
+                "主体标签1": "成年女性冒险者",
+                "技术画质标签1": "高细节",
+                "场景背景标签1": "地下城遗迹",
+                "额外要求": "整体固定为低细节渲染，不要高细节或复杂精细纹理。",
+                "运行时随机标签": False,
+                "生成数量": 1,
+                "提示词语言": "纯中文",
+                "seed": 229,
+            },
+        )
+
+        payload = json.loads(result[3])
+        provenance = payload["automatic_tag_provenance"]
+        self.assertEqual(payload["random_conflict_repair"]["removed_count"], 0)
+        self.assertIn("高细节", payload["selected_tags_flat"])
+        self.assertNotIn("高细节", provenance["sources"]["skill_defaults"])
+        self.assertEqual(payload["scene_coherence_status"], "conflict")
+
+    def test_visual_medium_context_removes_only_conflicting_soft_anchors(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["成年女性冒险者"],
+                "画面风格": ["暗黑漫画", "3D渲染"],
+                "场景背景": ["地下城遗迹"],
+            }
+        )
+        custom = ["真人实拍", "高细节"]
+        context = "整体固定为二维绘制的暗黑漫画，不要三维渲染或真人实拍。"
+        graph = intelligence.build_scene_relationship_graph(selected, custom, context_text=context)
+        constraint = graph["visual_medium_constraint"]
+        issues = [
+            item for item in graph["coherence_issues"]
+            if item["kind"] == "context_visual_medium_conflict"
+        ]
+        self.assertEqual(constraint["required_value"], "drawn_2d")
+        self.assertEqual(
+            constraint["negated_values"],
+            ["rendered_3d", "photographic"],
+        )
+        self.assertEqual(constraint["source"], "natural_context")
+        self.assertEqual(
+            [item["value"] for item in issues[0]["conflicting_anchors"]],
+            ["3D渲染", "真人实拍"],
+        )
+
+        repaired, repaired_custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            custom,
+            graph,
+            soft_tags=["3D渲染", "真人实拍"],
+        )
+        rebuilt = intelligence.build_scene_relationship_graph(
+            repaired,
+            repaired_custom,
+            context_text=context,
+        )
+        self.assertEqual(repaired["画面风格"], ["暗黑漫画"])
+        self.assertEqual(repaired_custom, ["高细节"])
+        self.assertEqual(report["removed_count"], 2)
+        self.assertEqual(rebuilt["coherence_status"], "coherent")
+
+    def test_selected_2d_medium_rejects_3d_model_candidate(self) -> None:
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["成年女性冒险者"],
+                    "画面风格": ["暗黑漫画"],
+                    "技术画质": ["黑白线稿"],
+                    "场景背景": ["地下城遗迹"],
+                }
+            )
+        )
+        original = "暗黑漫画以黑白线稿描绘冒险者穿过地下城遗迹。"
+        violation = intelligence.candidate_world_violation(
+            original,
+            original + "随后画面改成写实三维渲染，并采用 Blender 渲染质感。",
+            graph,
+        )
+        model_prompt = model_refiner._compose_batch_prompt(
+            [original],
+            {"提示词语言": "纯中文", "智能场景关系图": graph},
+        )
+        self.assertEqual(graph["visual_medium_constraint"]["required_value"], "drawn_2d")
+        self.assertEqual(graph["visual_medium_constraint"]["source"], "selected_state")
+        self.assertIn("画面媒介约束", violation)
+        self.assertIn("三维渲染", violation)
+        self.assertIn(
+            "智能画面媒介：画面媒介固定为二维绘制/插画漫画",
+            model_prompt,
+        )
+
+    def test_mixed_local_and_transition_visual_media_remain_open(self) -> None:
+        mixed = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"]}),
+            context_text="采用 2D 插画与 3D 渲染融合的 2.5D 画面。",
+        )
+        local_screen = intelligence.build_scene_relationship_graph(
+            OrderedDict({"画面风格": ["真人实拍"]}),
+            context_text="真人实拍场景中，墙上屏幕显示二维漫画插画。",
+        )
+        transition = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"]}),
+            context_text="开场采用真人实拍，随后逐渐转为二维动画。",
+        )
+        camera_word = intelligence.build_scene_relationship_graph(
+            OrderedDict({"构图视角": ["摄影机低角度"], "技术画质": ["写实材质"]}),
+        )
+        drawn_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"画面风格": ["暗黑漫画"]}),
+        )
+        local_candidate_violation = intelligence.candidate_world_violation(
+            "暗黑漫画描绘地下城走廊。",
+            "暗黑漫画描绘地下城走廊，墙上屏幕播放真人实拍画面。",
+            drawn_graph,
+        )
+        self.assertEqual(mixed["visual_medium_constraint"], {})
+        self.assertEqual(local_screen["visual_medium_constraint"], {})
+        self.assertEqual(transition["visual_medium_constraint"], {})
+        self.assertEqual(camera_word["visual_medium_constraint"], {})
+        self.assertEqual(local_candidate_violation, "")
+
+    def test_explicit_visual_medium_conflict_is_guarded(self) -> None:
+        selected = OrderedDict(
+            {"主体": ["成年女性冒险者"], "画面风格": ["3D渲染"]}
+        )
+        graph = intelligence.build_scene_relationship_graph(
+            selected,
+            context_text="整体固定为二维插画，不要三维或 CG 渲染。",
+        )
+        unchanged, _custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            [],
+            graph,
+            soft_tags=[],
+        )
+        strategy = intelligence.resolve_model_strategy(
+            {"模型来源": "API接口"},
+            {"task_type": "standard_visual_story"},
+            graph,
+        )
+        self.assertFalse(report["applied"])
+        self.assertEqual(unchanged, selected)
+        self.assertEqual(strategy["mode"], "skill_only_guarded")
+
+    def test_visual_medium_repair_reaches_full_stage(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+
+        def inject_3d_medium(selected, custom_tags, settings, **_kwargs):
+            next_selected = OrderedDict((group, list(values)) for group, values in selected.items())
+            settings["运行时随机有效种子"] = 233
+            return next_selected, [*custom_tags, "3D渲染"], ["3D渲染"]
+
+        with mock.patch.object(module, "_build_runtime_tags", side_effect=inject_3d_medium):
+            result = module._run_stage(
+                None,
+                **{
+                    "unique_id": "intelligence-v38-visual-medium-repair",
+                    "模型来源": "仅Skill",
+                    "主体标签1": "成年女性冒险者",
+                    "场景背景标签1": "地下城遗迹",
+                    "额外要求": "整体固定为二维绘制的暗黑漫画，不要三维或 CG 渲染。",
+                    "运行时随机标签": True,
+                    "运行时随机模式": "全随机",
+                    "生成数量": 1,
+                    "提示词语言": "纯中文",
+                    "seed": 233,
+                },
+            )
+
+        payload = json.loads(result[3])
+        graph = payload["scene_relationship_graph"]
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
+        self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
+        self.assertEqual(graph["visual_medium_constraint"]["required_value"], "drawn_2d")
+        self.assertNotIn("3D渲染", payload["selected_tags_flat"])
+        self.assertEqual(payload["scene_coherence_status"], "coherent")
+
+    def test_projection_geometry_context_removes_only_conflicting_soft_anchors(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["成年女性冒险者"],
+                "构图视角": ["正交投影视角", "鱼眼镜头"],
+                "场景背景": ["地下城遗迹"],
+            }
+        )
+        custom = ["夸张透视", "高细节"]
+        context = "画面固定为正交投影，不要透视投影、轴测投影或鱼眼镜头。"
+        graph = intelligence.build_scene_relationship_graph(selected, custom, context_text=context)
+        constraint = graph["projection_geometry_constraint"]
+        issues = [
+            item for item in graph["coherence_issues"]
+            if item["kind"] == "context_projection_geometry_conflict"
+        ]
+        self.assertEqual(constraint["required_value"], "orthographic")
+        self.assertEqual(
+            constraint["negated_values"],
+            ["perspective", "axonometric", "fisheye"],
+        )
+        self.assertEqual(constraint["source"], "natural_context")
+        self.assertEqual(
+            [item["value"] for item in issues[0]["conflicting_anchors"]],
+            ["鱼眼镜头", "夸张透视"],
+        )
+
+        repaired, repaired_custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            custom,
+            graph,
+            soft_tags=["鱼眼镜头", "夸张透视"],
+        )
+        rebuilt = intelligence.build_scene_relationship_graph(
+            repaired,
+            repaired_custom,
+            context_text=context,
+        )
+        self.assertEqual(repaired["构图视角"], ["正交投影视角"])
+        self.assertEqual(repaired_custom, ["高细节"])
+        self.assertEqual(report["removed_count"], 2)
+        self.assertEqual(rebuilt["coherence_status"], "coherent")
+
+    def test_selected_orthographic_projection_rejects_fisheye_model_candidate(self) -> None:
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["成年女性冒险者"],
+                    "构图视角": ["正交投影视角"],
+                    "场景背景": ["简洁连续中性背景"],
+                }
+            )
+        )
+        original = "角色三视图采用正交投影视角，三栏人物等高并共用基线。"
+        violation = intelligence.candidate_world_violation(
+            original,
+            original + "画面另外改用鱼眼镜头和圆形鱼眼畸变。",
+            graph,
+        )
+        model_prompt = model_refiner._compose_batch_prompt(
+            [original],
+            {"提示词语言": "纯中文", "智能场景关系图": graph},
+        )
+        self.assertEqual(
+            graph["projection_geometry_constraint"]["required_value"],
+            "orthographic",
+        )
+        self.assertEqual(
+            graph["projection_geometry_constraint"]["source"],
+            "selected_state",
+        )
+        self.assertIn("投影几何约束", violation)
+        self.assertIn("鱼眼镜头", violation)
+        self.assertIn(
+            "智能投影几何：投影几何固定为正交/平行投影",
+            model_prompt,
+        )
+
+    def test_mixed_inset_and_transition_projection_geometry_remain_open(self) -> None:
+        multi_view = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["机械少女"]}),
+            context_text="三视图采用正交投影，右下角辅助图使用等轴测投影。",
+        )
+        transition = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"]}),
+            context_text="镜头开场采用透视投影，随后逐渐转为鱼眼镜头。",
+        )
+        nonvisual = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"]}),
+            context_text="她尝试从长远视角透视问题的本质，没有指定画面投影。",
+        )
+        orthographic_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"构图视角": ["正交投影视角"]}),
+        )
+        inset_candidate_violation = intelligence.candidate_world_violation(
+            "三幅主视图保持正交投影。",
+            "三幅主视图保持正交投影，右下角辅助图采用等轴测投影。",
+            orthographic_graph,
+        )
+        self.assertEqual(multi_view["projection_geometry_constraint"], {})
+        self.assertEqual(transition["projection_geometry_constraint"], {})
+        self.assertEqual(nonvisual["projection_geometry_constraint"], {})
+        self.assertEqual(inset_candidate_violation, "")
+
+    def test_explicit_projection_geometry_conflict_is_guarded(self) -> None:
+        selected = OrderedDict(
+            {"主体": ["成年女性冒险者"], "构图视角": ["鱼眼镜头"]}
+        )
+        graph = intelligence.build_scene_relationship_graph(
+            selected,
+            context_text="画面固定为正交投影，不要鱼眼镜头或透视畸变。",
+        )
+        unchanged, _custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            [],
+            graph,
+            soft_tags=[],
+        )
+        strategy = intelligence.resolve_model_strategy(
+            {"模型来源": "本地模型"},
+            {"task_type": "character_sheet"},
+            graph,
+        )
+        self.assertFalse(report["applied"])
+        self.assertEqual(unchanged, selected)
+        self.assertEqual(strategy["mode"], "skill_only_guarded")
+
+    def test_character_sheet_stage_exports_orthographic_projection_constraint(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        result = module._run_stage(
+            None,
+            **{
+                "unique_id": "intelligence-v39-character-sheet-projection",
+                "模型来源": "仅Skill",
+                "主体标签1": "机械少女",
+                "画面风格标签1": "CG感",
+                "图片反推生成": True,
+                "图片反推模式": "角色设定图",
+                "运行时随机标签": False,
+                "生成数量": 1,
+                "提示词语言": "纯中文",
+                "seed": 239,
+            },
+        )
+
+        payload = json.loads(result[3])
+        graph = payload["scene_relationship_graph"]
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
+        self.assertEqual(
+            graph["projection_geometry_constraint"]["required_value"],
+            "orthographic",
+        )
+        self.assertEqual(
+            graph["projection_geometry_constraint"]["source"],
+            "natural_context",
+        )
+        self.assertEqual(
+            graph["background_complexity_constraint"]["required_value"],
+            "minimal",
+        )
+        self.assertEqual(
+            graph["background_complexity_constraint"]["source"],
+            "selected_state",
+        )
+        self.assertIn("正交投影", result[1])
+        self.assertEqual(payload["scene_coherence_status"], "coherent")
+
+    def test_atmospheric_medium_context_removes_only_conflicting_soft_anchors(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["成年女性冒险者"],
+                "光影氛围": ["上午通透天光", "冷雾惊悚侧光"],
+                "场景背景": ["地下城遗迹"],
+            }
+        )
+        custom = ["顶光烟雾", "高细节"]
+        context = (
+            "整体采用高能见度画面和空气通透的环境，不要冷雾，"
+            "不要浓雾，不要烟雾弥漫，不要烟尘。"
+        )
+        graph = intelligence.build_scene_relationship_graph(selected, custom, context_text=context)
+        constraint = graph["atmospheric_medium_constraint"]
+        issues = [
+            item for item in graph["coherence_issues"]
+            if item["kind"] == "context_atmospheric_medium_conflict"
+        ]
+        self.assertEqual(constraint["required_value"], "clear_air")
+        self.assertEqual(constraint["negated_values"], ["mist_fog", "smoke_dust"])
+        self.assertEqual(constraint["source"], "natural_context")
+        self.assertEqual(
+            [item["value"] for item in issues[0]["conflicting_anchors"]],
+            ["冷雾惊悚侧光", "顶光烟雾"],
+        )
+
+        repaired, repaired_custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            custom,
+            graph,
+            soft_tags=["冷雾惊悚侧光", "顶光烟雾"],
+        )
+        rebuilt = intelligence.build_scene_relationship_graph(
+            repaired,
+            repaired_custom,
+            context_text=context,
+        )
+        self.assertEqual(repaired["光影氛围"], ["上午通透天光"])
+        self.assertEqual(repaired_custom, ["高细节"])
+        self.assertEqual(report["removed_count"], 2)
+        self.assertEqual(rebuilt["coherence_status"], "coherent")
+
+    def test_selected_cold_fog_rejects_smoke_dust_model_candidate(self) -> None:
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["成年女性冒险者"],
+                    "光影氛围": ["冷雾惊悚侧光"],
+                    "场景背景": ["地下城遗迹"],
+                }
+            )
+        )
+        original = "冷雾贴着地下城石阶流动，侧光勾出冒险者的完整轮廓。"
+        violation = intelligence.candidate_world_violation(
+            original,
+            original + "随后空气改为烟尘天光，浓烟遮住石墙。",
+            graph,
+        )
+        model_prompt = model_refiner._compose_batch_prompt(
+            [original],
+            {"提示词语言": "纯中文", "智能场景关系图": graph},
+        )
+        self.assertEqual(
+            graph["atmospheric_medium_constraint"]["required_value"],
+            "mist_fog",
+        )
+        self.assertEqual(
+            graph["atmospheric_medium_constraint"]["source"],
+            "selected_state",
+        )
+        self.assertIn("大气介质与能见度约束", violation)
+        self.assertIn("浓烟", violation)
+        self.assertIn(
+            "智能大气介质与能见度：大气介质与能见度固定为薄雾/浓雾空气",
+            model_prompt,
+        )
+
+    def test_zoned_local_and_transition_atmospheric_media_remain_open(self) -> None:
+        zoned = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"]}),
+            context_text="人物轮廓保持清晰通透，背景薄雾沿石墙分层。",
+        )
+        local_smoke = intelligence.build_scene_relationship_graph(
+            OrderedDict({"光影氛围": ["上午通透天光"]}),
+            context_text="空气通透，只有火炬冒出局部一缕烟雾。",
+        )
+        transition = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"]}),
+            context_text="浓雾逐渐散去，空气恢复通透，远景重新显现。",
+        )
+        nonvisual = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"], "服装造型": ["雾面妆", "烟熏妆"]}),
+        )
+        fog_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"光影氛围": ["冷雾惊悚侧光"]}),
+        )
+        local_candidate_violation = intelligence.candidate_world_violation(
+            "火炬旁的冷雾在地下城石阶间流动。",
+            "火炬旁的冷雾在地下城石阶间流动，火炬冒出局部一缕烟雾。",
+            fog_graph,
+        )
+        self.assertEqual(zoned["atmospheric_medium_constraint"], {})
+        self.assertEqual(local_smoke["atmospheric_medium_constraint"], {})
+        self.assertEqual(transition["atmospheric_medium_constraint"], {})
+        self.assertEqual(nonvisual["atmospheric_medium_constraint"], {})
+        self.assertEqual(local_candidate_violation, "")
+
+    def test_explicit_atmospheric_medium_conflict_is_guarded(self) -> None:
+        selected = OrderedDict(
+            {"主体": ["成年女性冒险者"], "光影氛围": ["顶光烟雾"]}
+        )
+        graph = intelligence.build_scene_relationship_graph(
+            selected,
+            context_text="环境固定为冷雾，不要烟雾弥漫或烟尘。",
+        )
+        unchanged, _custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            [],
+            graph,
+            soft_tags=[],
+        )
+        strategy = intelligence.resolve_model_strategy(
+            {"模型来源": "API接口"},
+            {"task_type": "standard_visual_story"},
+            graph,
+        )
+        self.assertFalse(report["applied"])
+        self.assertEqual(unchanged, selected)
+        self.assertEqual(strategy["mode"], "skill_only_guarded")
+
+    def test_atmospheric_medium_repair_reaches_full_stage(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+
+        def inject_smoke_dust(selected, custom_tags, settings, **_kwargs):
+            next_selected = OrderedDict((group, list(values)) for group, values in selected.items())
+            settings["运行时随机有效种子"] = 241
+            return next_selected, [*custom_tags, "烟尘天光"], ["烟尘天光"]
+
+        with mock.patch.object(module, "_build_runtime_tags", side_effect=inject_smoke_dust):
+            result = module._run_stage(
+                None,
+                **{
+                    "unique_id": "intelligence-v40-atmospheric-medium-repair",
+                    "模型来源": "仅Skill",
+                    "主体标签1": "成年女性冒险者",
+                    "场景背景标签1": "地下城遗迹",
+                    "额外要求": "环境固定为冷雾，不要烟雾弥漫，不要烟尘或沙尘。",
+                    "运行时随机标签": True,
+                    "运行时随机模式": "全随机",
+                    "生成数量": 1,
+                    "提示词语言": "纯中文",
+                    "seed": 241,
+                },
+            )
+
+        payload = json.loads(result[3])
+        graph = payload["scene_relationship_graph"]
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
+        self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
+        self.assertEqual(
+            graph["atmospheric_medium_constraint"]["required_value"],
+            "mist_fog",
+        )
+        self.assertNotIn("烟尘天光", payload["selected_tags_flat"])
+        self.assertEqual(payload["scene_coherence_status"], "coherent")
+
+    def test_background_complexity_context_removes_only_conflicting_soft_anchors(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["机械少女"],
+                "场景背景": ["简洁连续中性背景", "复杂背景"],
+            }
+        )
+        custom = ["背景堆满杂物", "高细节"]
+        context = "背景固定为简洁无杂物的中性背景，不要复杂背景，不要大量背景道具。"
+        graph = intelligence.build_scene_relationship_graph(selected, custom, context_text=context)
+        constraint = graph["background_complexity_constraint"]
+        issues = [
+            item for item in graph["coherence_issues"]
+            if item["kind"] == "context_background_complexity_conflict"
+        ]
+        self.assertEqual(constraint["required_value"], "minimal")
+        self.assertEqual(constraint["negated_values"], ["environment_rich"])
+        self.assertEqual(
+            [item["value"] for item in issues[0]["conflicting_anchors"]],
+            ["复杂背景", "背景堆满杂物"],
+        )
+        repaired, repaired_custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected, custom, graph, soft_tags=["复杂背景", "背景堆满杂物"]
+        )
+        rebuilt = intelligence.build_scene_relationship_graph(
+            repaired, repaired_custom, context_text=context
+        )
+        self.assertEqual(repaired["场景背景"], ["简洁连续中性背景"])
+        self.assertEqual(repaired_custom, ["高细节"])
+        self.assertEqual(report["removed_count"], 2)
+        self.assertEqual(rebuilt["coherence_status"], "coherent")
+
+    def test_selected_minimal_background_rejects_cluttered_model_candidate(self) -> None:
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["机械少女"], "场景背景": ["简洁连续中性背景"]})
+        )
+        original = "机械少女站在简洁连续中性背景前，地面保留轻微接触阴影。"
+        violation = intelligence.candidate_world_violation(
+            original,
+            original + "背景改成复杂背景，并布置大量背景道具。",
+            graph,
+        )
+        model_prompt = model_refiner._compose_batch_prompt(
+            [original], {"提示词语言": "纯中文", "智能场景关系图": graph}
+        )
+        self.assertEqual(graph["background_complexity_constraint"]["required_value"], "minimal")
+        self.assertIn("背景复杂度约束", violation)
+        self.assertIn("复杂背景", violation)
+        self.assertIn("智能背景复杂度：背景复杂度固定为简洁/无杂物背景", model_prompt)
+
+    def test_single_prop_inset_and_background_transition_remain_open(self) -> None:
+        single_prop = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["机械少女"]}),
+            context_text="主背景保持简洁无杂物，只保留单个必要底座和接触阴影。",
+        )
+        inset = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["机械少女"]}),
+            context_text="三视图使用简洁背景，右下角辅助情境图展示丰富环境。",
+        )
+        transition = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["机械少女"]}),
+            context_text="开场是极简背景，随后逐渐展开为丰富环境背景。",
+        )
+        minimal_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"场景背景": ["简单背景"]})
+        )
+        candidate_violation = intelligence.candidate_world_violation(
+            "人物站在简单背景前。",
+            "人物站在简单背景前，只保留单个必要底座和接触阴影。",
+            minimal_graph,
+        )
+        self.assertEqual(single_prop["background_complexity_constraint"], {})
+        self.assertEqual(inset["background_complexity_constraint"], {})
+        self.assertEqual(transition["background_complexity_constraint"], {})
+        self.assertEqual(candidate_violation, "")
+
+    def test_explicit_background_complexity_conflict_is_guarded(self) -> None:
+        selected = OrderedDict({"主体": ["机械少女"], "场景背景": ["复杂背景"]})
+        graph = intelligence.build_scene_relationship_graph(
+            selected,
+            context_text="背景固定为简洁连续中性背景，不要复杂背景。",
+        )
+        unchanged, _custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected, [], graph, soft_tags=[]
+        )
+        strategy = intelligence.resolve_model_strategy(
+            {"模型来源": "本地模型"}, {"task_type": "character_sheet"}, graph
+        )
+        self.assertFalse(report["applied"])
+        self.assertEqual(unchanged, selected)
+        self.assertEqual(strategy["mode"], "skill_only_guarded")
+
+    def test_v42_fifty_language_rules_reach_their_relation_detectors(self) -> None:
+        detectors = {
+            "subject_cardinality": intelligence.detect_subject_cardinality,
+            "subject_orientation": intelligence.detect_subject_orientation,
+            "subject_pose": intelligence.detect_subject_pose,
+            "shot_scale": intelligence.detect_shot_scale,
+            "camera_angle": intelligence.detect_camera_angle,
+            "light_temperature": intelligence.detect_light_temperature,
+            "color_rendering": intelligence.detect_color_rendering,
+            "depth_of_field": intelligence.detect_depth_of_field,
+            "lighting_quality": intelligence.detect_lighting_quality,
+            "motion_rendering": intelligence.detect_motion_rendering,
+            "camera_stability": intelligence.detect_camera_stability,
+            "focal_perspective": intelligence.detect_focal_perspective,
+            "key_light_direction": intelligence.detect_key_light_direction,
+            "exposure_key": intelligence.detect_exposure_key,
+            "contrast_level": intelligence.detect_contrast_level,
+            "saturation_level": intelligence.detect_saturation_level,
+            "image_grain": intelligence.detect_image_grain,
+            "image_sharpness": intelligence.detect_image_sharpness,
+            "detail_density": intelligence.detect_detail_density,
+            "visual_medium": intelligence.detect_visual_medium,
+            "projection_geometry": intelligence.detect_projection_geometry,
+            "atmospheric_medium": intelligence.detect_atmospheric_medium,
+            "background_complexity": intelligence.detect_background_complexity,
+        }
+        rules = intelligence.INTELLIGENCE_V42_RULE_EXPANSIONS
+        self.assertEqual(len(rules), 50)
+        self.assertEqual(len(set(rules)), 50)
+        for axis_name, expected_value, marker in rules:
+            with self.subTest(axis=axis_name, marker=marker):
+                self.assertIn(expected_value, detectors[axis_name](marker))
 
     def test_preference_memory_requires_repeated_explicit_choices(self) -> None:
         explicit = OrderedDict(
