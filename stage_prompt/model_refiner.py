@@ -36,6 +36,117 @@ except Exception:  # pragma: no cover - exercised by direct import tests
         introduced_human_subject_intrusions,
     )
 
+_SCENE_ATTRIBUTE_MODEL_GUIDANCE = {
+    "time_of_day": "昼夜只约束天空亮度、环境基准光与时段线索，不自行改变天气或场景",
+    "precipitation": "降水只约束雨雪、落水轨迹、遮挡与积落反馈，不自行改变风势或地表",
+    "wind": "风势只约束发丝衣摆、植被与已经存在的空气介质受力反馈，不自行新增雾、烟或颗粒",
+    "ambient_temperature": "环境温度只约束人物呼气汗液、衣着反馈、凝露热浪和冷热体感",
+    "ground_surface": "地表状态只约束地面反光、水洼、结冰、脚印和接触阴影",
+    "spatial_enclosure": "空间围合只约束封闭或露天边界、原文已有开口、天气暴露及内外光源逻辑，不自行新增建筑构件",
+    "dominant_light_source": (
+        "主导照明来源只约束全局阴影投向、反射高光和综合色偏；"
+        "局部实景灯、火炬、屏幕或招牌可作为辅助光，但不得取代已固定的主导照明"
+    ),
+}
+_SCENE_ATTRIBUTE_VALUE_MODEL_GUIDANCE = {
+    "time_of_day": {
+        "dawn": "清晨采用逐步抬升的环境基准亮度与低位时段线索，具体光源和阴影形态保持独立",
+        "day": "白天采用充分稳定的环境基准亮度与日间时段线索，具体光源和阴影形态保持独立",
+        "dusk": "黄昏采用逐步降低的环境基准亮度与低位暮色线索，具体光源和阴影形态保持独立",
+        "night": "夜晚采用低环境基准亮度与深层明暗层次，具体光源和阴影形态保持独立",
+    },
+    "precipitation": {
+        "clear": "晴朗保持无持续雨雪轨迹与新增积落反馈，远景能见度、空气散射和地表状态分别服从大气介质与地表合同",
+        "rain": "降雨采用连续雨滴轨迹、落点飞溅与受雨表面反馈",
+        "snow": "降雪采用雪花飘落、表面附着与渐进积雪反馈",
+    },
+    "wind": {
+        "calm": "静风采用稳定垂落的发丝衣摆、近乎静止的植被与稳定空间关系",
+        "breeze": "微风采用轻柔摆动的发丝衣角、缓慢摇曳的植被与连续低幅受力",
+        "strong_wind": "强风采用明显侧卷的发丝衣摆、弯折植被与统一横向受力",
+    },
+    "ambient_temperature": {
+        "cold": "寒冷环境采用可见呼气、衣领发梢凝霜与厚实衣着反馈",
+        "mild": "温和环境采用舒适衣着、自然呼吸与稳定空气反馈",
+        "hot": "炎热环境采用汗液、高热体感与空气热浪折射反馈",
+    },
+    "ground_surface": {
+        "dry_ground": "干燥地表采用干爽哑光表面、清晰脚印边缘与稳定接触阴影",
+        "wet_ground": "湿润地表采用湿亮反射、水洼边缘、脚步涟漪与柔化接触阴影",
+        "icy_ground": "结冰地表采用连续冰面高光、薄冰纹理、受力裂纹与抓地反馈",
+    },
+    "spatial_enclosure": {
+        "indoor": "室内保持连续墙顶和封闭主体空间，天气、气流与外部自然光仅可使用原文已有开口；没有已有开口时不新增门窗、洞口或室外远景",
+        "outdoor": "户外保持无连续封闭顶棚的露天边界，天空与地平线仅在原构图可见时呈现，不强制补入远景",
+        "semi_open": "半开放空间保持既有顶棚与开放侧边，天气、气流和外部光线沿原有开放边界作用，不扩建额外开口",
+    },
+    "dominant_light_source": {
+        "natural_light": "自然光作为全局基准，统一阴影投向、反射高光与综合色偏，既有局部实景灯仅保持辅助光关系",
+        "artificial_light": "人工光作为全局基准，统一灯位、阴影投向、反射高光与综合色偏",
+        "mixed_light": "混合光源明确日光与灯光分工，统一综合色偏、交叠阴影与反射高光",
+    },
+}
+_SCENE_ATTRIBUTE_GROUND_LABELS = {
+    "dry_ground": "干燥",
+    "wet_ground": "湿润积水",
+    "icy_ground": "结冰",
+}
+_SCENE_ATTRIBUTE_TIME_LIGHT_LABELS = {
+    "dawn": "清晨自然光",
+    "day": "日间自然光",
+    "dusk": "黄昏自然光",
+    "night": "夜间自然光",
+}
+_SCENE_ATTRIBUTE_PRECIPITATION_WIND_FEEDBACK = {
+    "rain": {
+        "calm": "雨滴保持近乎垂直",
+        "breeze": "雨滴保持轻微倾斜",
+        "strong_wind": "雨滴保持明显斜向",
+    },
+    "snow": {
+        "calm": "雪花保持缓慢近垂直下落",
+        "breeze": "雪花保持轻柔侧移",
+        "strong_wind": "雪花保持明显横向飞掠",
+    },
+}
+_ATMOSPHERIC_MEDIUM_VALUE_MODEL_GUIDANCE = {
+    "clear_air": "空气保持通透和高能见度，远近景边缘清晰，光线保持清洁传播",
+    "mist_fog": "既有雾层持续控制远景能见度、轮廓衰减与介质散射，密度和分布服从 Skill 底稿",
+    "smoke_dust": "既有颗粒烟尘持续控制能见度、颗粒密度与光线散射，浓度和分布服从 Skill 底稿",
+}
+_ATMOSPHERIC_MEDIUM_PRECIPITATION_GUIDANCE = {
+    "clear_air": "雨雪轨迹只改变瞬时遮挡，空气继续保持通透和高能见度",
+    "mist_fog": "雨雪轨迹穿过既有雾层，能见度与介质散射继续服从当前空气合同",
+    "smoke_dust": "雨雪轨迹穿过既有颗粒烟尘，能见度与颗粒散射继续服从当前空气合同",
+}
+_ATMOSPHERIC_MEDIUM_CLEAR_WEATHER_GUIDANCE = {
+    "clear_air": "当前通透空气继续保持高能见度与清晰远近景边缘",
+    "mist_fog": "当前雾层继续控制远景能见度与介质散射",
+    "smoke_dust": "当前颗粒烟尘继续控制能见度与颗粒散射",
+}
+_ATMOSPHERIC_MEDIUM_WIND_FEEDBACK = {
+    "clear_air": {
+        "calm": "通透空气中的静风只通过既有物体的稳定状态表现",
+        "breeze": "通透空气中的微风只通过既有物体的轻微受力表现",
+        "strong_wind": "通透空气中的强风只通过既有物体的显著受力表现",
+    },
+    "mist_fog": {
+        "calm": "既有雾层近乎静止，不产生横向漂移",
+        "breeze": "既有雾层沿同一方向缓慢侧移",
+        "strong_wind": "既有雾层沿统一方向明显横移，密度与能见度保持连续",
+    },
+    "smoke_dust": {
+        "calm": "既有烟雾或烟尘保持低幅运动，不产生横向漂移",
+        "breeze": "既有烟雾或烟尘沿同一方向轻柔偏移",
+        "strong_wind": "既有烟雾或烟尘沿统一方向明显横向卷动",
+    },
+}
+_ATMOSPHERIC_MEDIUM_LIGHT_TRANSPORT = {
+    "clear_air": "既定光线保持清洁传播，光质、阴影形态与综合色偏继续服从各自合同",
+    "mist_fog": "既定光线在既有雾层中产生介质散射与距离衰减，近处光质和主光方向保持独立",
+    "smoke_dust": "既定光线穿过既有烟尘形成颗粒散射与不均匀距离衰减，近处光质和主光方向保持独立",
+}
+
 DEFAULT_STAGE_PROMPT_SYSTEM_TEMPLATE = """
 你是 Qwen TE 阶段式提示词生成器的默认图像提示词整理模板，兼具资深视觉艺术总监、电影摄影指导、高端人像修图审美和生成式图像 Prompt 工程能力。
 
@@ -1711,6 +1822,204 @@ def _summarize_recent_prompt_history(items: list[str]) -> str:
     return "；".join(parts)
 
 
+def _scene_attribute_state_guidance(
+    axis: str,
+    required_value: str,
+    required_values: dict[str, str],
+) -> str:
+    guidance = _SCENE_ATTRIBUTE_VALUE_MODEL_GUIDANCE.get(axis, {}).get(required_value, "")
+    atmospheric_medium = required_values.get("atmospheric_medium", "")
+    if axis == "time_of_day":
+        if atmospheric_medium and not required_values.get("dominant_light_source", ""):
+            light_transport = _ATMOSPHERIC_MEDIUM_LIGHT_TRANSPORT.get(
+                atmospheric_medium,
+                "",
+            )
+            if light_transport:
+                guidance += f"，{light_transport}"
+    elif axis == "precipitation" and required_value == "clear":
+        atmosphere_guidance = _ATMOSPHERIC_MEDIUM_CLEAR_WEATHER_GUIDANCE.get(
+            atmospheric_medium,
+            "",
+        )
+        if atmosphere_guidance:
+            guidance += f"，{atmosphere_guidance}"
+    elif axis == "precipitation" and required_value in {"rain", "snow"}:
+        precipitation_label = "降雨" if required_value == "rain" else "降雪"
+        trajectory_label = "连续雨滴轨迹" if required_value == "rain" else "连续雪花轨迹"
+        wind = required_values.get("wind", "")
+        wind_feedback = _SCENE_ATTRIBUTE_PRECIPITATION_WIND_FEEDBACK.get(
+            required_value,
+            {},
+        ).get(wind, "")
+        trajectory_text = trajectory_label
+        if wind_feedback:
+            trajectory_text += f"并使{wind_feedback}"
+        enclosure = required_values.get("spatial_enclosure", "")
+        if enclosure == "indoor":
+            guidance = f"{precipitation_label}仅在原文已有开口或可见室外范围呈现{trajectory_text}"
+        elif enclosure == "semi_open":
+            guidance = f"{precipitation_label}沿开放侧边与顶棚边缘呈现{trajectory_text}"
+        else:
+            guidance = f"{precipitation_label}采用{trajectory_text}与环境遮挡反馈"
+        ground = required_values.get("ground_surface", "")
+        ground_label = _SCENE_ATTRIBUTE_GROUND_LABELS.get(ground, "")
+        if ground_label:
+            guidance += f"，落点与积留服从{ground_label}地表合同"
+        atmosphere_guidance = _ATMOSPHERIC_MEDIUM_PRECIPITATION_GUIDANCE.get(
+            atmospheric_medium,
+            "",
+        )
+        if atmosphere_guidance:
+            guidance += f"，{atmosphere_guidance}"
+    elif axis == "wind" and required_value in {"calm", "breeze", "strong_wind"}:
+        enclosure = required_values.get("spatial_enclosure", "")
+        if required_value != "calm" and enclosure == "indoor":
+            wind_label = "微风" if required_value == "breeze" else "强风"
+            guidance = f"{wind_label}仅通过原文已有开口形成局部定向气流，" + guidance
+        elif required_value != "calm" and enclosure == "semi_open":
+            wind_label = "微风" if required_value == "breeze" else "强风"
+            guidance = f"{wind_label}沿开放侧边形成连续定向气流，" + guidance
+        atmosphere_feedback = _ATMOSPHERIC_MEDIUM_WIND_FEEDBACK.get(
+            atmospheric_medium,
+            {},
+        ).get(required_value, "")
+        if atmosphere_feedback:
+            guidance += f"，{atmosphere_feedback}"
+        precipitation = required_values.get("precipitation", "")
+        precipitation_feedback = _SCENE_ATTRIBUTE_PRECIPITATION_WIND_FEEDBACK.get(
+            precipitation,
+            {},
+        ).get(required_value, "")
+        if precipitation_feedback:
+            wind_label = {
+                "calm": "静风场",
+                "breeze": "微风场",
+                "strong_wind": "强风场",
+            }[required_value]
+            guidance += f"，同一{wind_label}使{precipitation_feedback}"
+    elif axis == "dominant_light_source":
+        if required_value == "natural_light":
+            time_light = _SCENE_ATTRIBUTE_TIME_LIGHT_LABELS.get(
+                required_values.get("time_of_day", ""),
+                "自然光",
+            )
+            enclosure = required_values.get("spatial_enclosure", "")
+            if enclosure == "indoor":
+                guidance = f"{time_light}通过原文已有采光开口作为全局基准"
+            elif enclosure == "semi_open":
+                guidance = f"{time_light}通过开放侧边作为全局基准"
+            else:
+                guidance = f"{time_light}作为全局基准"
+            guidance += "，统一阴影投向、反射高光与综合色偏，既有局部实景灯仅保持辅助光关系"
+        light_transport = _ATMOSPHERIC_MEDIUM_LIGHT_TRANSPORT.get(
+            atmospheric_medium,
+            "",
+        )
+        if light_transport:
+            guidance += f"，{light_transport}"
+    return guidance
+
+
+def _scene_attribute_context_for_model(scene_graph: Any) -> str:
+    if not isinstance(scene_graph, dict):
+        return ""
+    attribute_constraints = dict(
+        scene_graph.get("scene_attribute_constraints", {})
+        or scene_graph.get("context_scene_attribute_constraints", {})
+        or {}
+    )
+    required_values = {
+        str(axis): str(constraint.get("required_value", "") or "").strip()
+        for axis, constraint in attribute_constraints.items()
+        if isinstance(constraint, dict)
+        and str(constraint.get("required_value", "") or "").strip()
+    }
+    atmospheric_medium_constraint = dict(
+        scene_graph.get("atmospheric_medium_constraint", {}) or {}
+    )
+    atmospheric_medium = str(
+        atmospheric_medium_constraint.get("required_value", "") or ""
+    ).strip()
+    if atmospheric_medium:
+        required_values["atmospheric_medium"] = atmospheric_medium
+    attribute_parts = []
+    attribute_guidance = []
+    for axis, constraint in attribute_constraints.items():
+        if not isinstance(constraint, dict):
+            continue
+        axis_key = str(axis)
+        axis_label = str(constraint.get("axis_label", "") or "").strip()
+        required_value = str(constraint.get("required_value", "") or "").strip()
+        required_label = str(constraint.get("required_label", "") or "").strip()
+        negated_labels = [
+            str(item).strip()
+            for item in list(constraint.get("negated_labels", []) or [])
+            if str(item).strip()
+        ]
+        if axis_label and required_label:
+            attribute_parts.append(f"{axis_label}固定为{required_label}")
+        elif axis_label and negated_labels:
+            attribute_parts.append(f"{axis_label}不得出现{'、'.join(negated_labels)}")
+        guidance = _scene_attribute_state_guidance(
+            axis_key,
+            required_value,
+            required_values,
+        )
+        if not guidance:
+            guidance = _SCENE_ATTRIBUTE_MODEL_GUIDANCE.get(axis_key)
+        if guidance:
+            attribute_guidance.append(guidance)
+    if not attribute_parts:
+        return ""
+    guidance_text = "；".join(attribute_guidance)
+    return (
+        "智能场景属性：" + "；".join(attribute_parts)
+        + "。图片、智能文本和视频只需保持上述已激活属性一致；"
+        + guidance_text
+        + "。未列出的场景属性保持开放，不得据此补入无关天气、地表、空间或光源。"
+    )
+
+
+def _atmospheric_medium_context_for_model(scene_graph: Any) -> str:
+    if not isinstance(scene_graph, dict):
+        return ""
+    constraint = dict(scene_graph.get("atmospheric_medium_constraint", {}) or {})
+    if not constraint:
+        return ""
+    required_value = str(constraint.get("required_value", "") or "").strip()
+    required_label = str(constraint.get("required_label", "") or "").strip()
+    negated_labels = [
+        str(item).strip()
+        for item in list(constraint.get("negated_labels", []) or [])
+        if str(item).strip()
+    ]
+    if required_label:
+        atmosphere_text = f"大气介质与能见度固定为{required_label}"
+    elif negated_labels:
+        atmosphere_text = "大气介质与能见度不得采用" + "、".join(negated_labels)
+    else:
+        return ""
+    guidance = _ATMOSPHERIC_MEDIUM_VALUE_MODEL_GUIDANCE.get(required_value, "")
+    guidance_text = f"；{guidance}" if guidance else ""
+    return (
+        "智能大气介质与能见度：" + atmosphere_text + guidance_text
+        + "。图片和每段视频分镜持续保持上述空气状态及其可见反馈；"
+        "未由 Skill 底稿给出的空气成分不作补充。"
+    )
+
+
+def _compact_environment_context_for_model(scene_graph: Any) -> str:
+    return "\n".join(
+        part
+        for part in (
+            _atmospheric_medium_context_for_model(scene_graph),
+            _scene_attribute_context_for_model(scene_graph),
+        )
+        if part
+    )
+
+
 def _skill_context_for_model(settings: dict[str, Any]) -> str:
     notes = [str(note).strip() for note in settings.get("推理纠偏说明", []) if str(note).strip()]
     compact_notes = " | ".join(notes[:8]) if notes else "无"
@@ -2157,27 +2466,9 @@ def _skill_context_for_model(settings: dict[str, Any]) -> str:
                 "智能投影几何：" + projection_text
                 + "。图片和每段视频分镜不得自行在正交、线性透视、轴测或鱼眼投影之间切换；明确的辅助视图、示意图叠层、混合投影设计及连续投影转场保持开放。"
             )
-        atmospheric_medium_constraint = dict(
-            scene_graph.get("atmospheric_medium_constraint", {}) or {}
-        )
-        if atmospheric_medium_constraint:
-            required_label = str(
-                atmospheric_medium_constraint.get("required_label", "") or ""
-            ).strip()
-            negated_labels = [
-                str(item).strip()
-                for item in list(atmospheric_medium_constraint.get("negated_labels", []) or [])
-                if str(item).strip()
-            ]
-            atmosphere_text = (
-                f"大气介质与能见度固定为{required_label}"
-                if required_label
-                else "大气介质与能见度不得采用" + "、".join(negated_labels)
-            )
-            extra_lines.append(
-                "智能大气介质与能见度：" + atmosphere_text
-                + "。图片和每段视频分镜不得自行在通透空气、薄雾或浓雾、烟雾或烟尘之间切换；前后景分区、局部火源烟气、雾烟混合及连续消散转场保持开放。"
-            )
+        atmospheric_medium_context = _atmospheric_medium_context_for_model(scene_graph)
+        if atmospheric_medium_context:
+            extra_lines.append(atmospheric_medium_context)
         background_complexity_constraint = dict(
             scene_graph.get("background_complexity_constraint", {}) or {}
         )
@@ -2199,6 +2490,23 @@ def _skill_context_for_model(settings: dict[str, Any]) -> str:
                 "智能背景复杂度：" + background_text
                 + "。图片和每段视频分镜不得自行在简洁无杂物背景与丰富繁复环境背景之间切换；单个必要道具、底座、接触阴影、辅助情境图及连续背景展开保持开放。"
             )
+        season_constraint = dict(scene_graph.get("season_constraint", {}) or {})
+        if season_constraint:
+            required_label = str(season_constraint.get("required_label", "") or "").strip()
+            negated_labels = [
+                str(item).strip()
+                for item in list(season_constraint.get("negated_labels", []) or [])
+                if str(item).strip()
+            ]
+            season_text = (
+                f"季节固定为{required_label}"
+                if required_label
+                else "季节不得采用" + "、".join(negated_labels)
+            )
+            extra_lines.append(
+                "智能季节连续性：" + season_text
+                + "。图片和每段视频分镜不得自行切换春夏秋冬及对应植被、衣着和环境反馈；四季组图、跨季节叙事及连续季节转场保持开放。"
+            )
         cardinality_constraint = dict(scene_graph.get("context_subject_cardinality_constraint", {}) or {})
         if cardinality_constraint:
             required_label = str(cardinality_constraint.get("required_label", "") or "").strip()
@@ -2216,25 +2524,9 @@ def _skill_context_for_model(settings: dict[str, Any]) -> str:
                 "智能人物数量：" + cardinality_text
                 + "。不得增加路人、背景人物、同伴或额外主体；多视图只改变视角，不改变角色数量。"
             )
-        attribute_constraints = dict(scene_graph.get("context_scene_attribute_constraints", {}) or {})
-        attribute_parts = []
-        for constraint in attribute_constraints.values():
-            if not isinstance(constraint, dict):
-                continue
-            axis_label = str(constraint.get("axis_label", "") or "").strip()
-            required_label = str(constraint.get("required_label", "") or "").strip()
-            negated_labels = [
-                str(item).strip() for item in list(constraint.get("negated_labels", []) or []) if str(item).strip()
-            ]
-            if axis_label and required_label:
-                attribute_parts.append(f"{axis_label}固定为{required_label}")
-            elif axis_label and negated_labels:
-                attribute_parts.append(f"{axis_label}不得出现{'、'.join(negated_labels)}")
-        if attribute_parts:
-            extra_lines.append(
-                "智能场景属性：" + "；".join(attribute_parts)
-                + "。图片、智能文本和视频必须保持同一昼夜与天气事实，不得新增相反状态。"
-            )
+        scene_attribute_context = _scene_attribute_context_for_model(scene_graph)
+        if scene_attribute_context:
+            extra_lines.append(scene_attribute_context)
         hard_anchors = scene_graph.get("hard_anchors")
         if isinstance(hard_anchors, dict):
             anchor_text = "；".join(
@@ -2332,6 +2624,12 @@ def _compose_model_user_prompt(prompt: str, settings: dict[str, Any]) -> str:
             "其他已经正确的主体、服装、动作、场景、道具、光影和剧情不得改写。"
             "不得复述任务、解释规则或输出思考过程。\n"
         )
+    environment_context = _compact_environment_context_for_model(
+        settings.get("智能场景关系图")
+    )
+    environment_line = (
+        f"{environment_context}\n" if environment_context else ""
+    )
     if _uses_qwen35_local_incremental_refinement(settings):
         contract_summary = str(settings.get("全局创作主线摘要", "") or "").strip()
         if not contract_summary:
@@ -2351,7 +2649,7 @@ def _compose_model_user_prompt(prompt: str, settings: dict[str, Any]) -> str:
         spine_line = f"全局创作主线：{contract_summary}\n" if contract_summary else ""
         return (
             f"{retry_note}任务：{task_name}。只返回可插入底稿的新增句子。\n"
-            f"{spine_line}{anchor_line}"
+            f"{spine_line}{anchor_line}{environment_line}"
             f"Skill 已校验底稿：\n{str(prompt or '').strip()}"
         )
     if str(settings.get("模型任务", "") or "").strip() == "视频提示词":
@@ -2362,6 +2660,7 @@ def _compose_model_user_prompt(prompt: str, settings: dict[str, Any]) -> str:
             "视频 Skill 已先生成一份可直接使用的多段分镜故事底稿。你只能沿这条故事主线润色，不能另起无关剧情。\n"
             f"必须原样保留的主体、场景、动作等锚点：{anchor_text}\n"
             f"全局创作主线摘要：{spine}\n"
+            f"{environment_line}"
             "请按时间顺序输出至少三段分镜，每段用完整自然语言写清镜头、动作、环境反馈和承接关系；所有分镜必须组成同一个有开端、触发、行动、升级和结尾的故事。不得写具体秒数或时长参数，不限制字数。\n"
             "只输出最终分镜正文，不输出分析、规则解释、标签列表或 Markdown。\n\n"
             f"视频 Skill 底稿：\n{str(prompt or '').strip()}"
@@ -2404,6 +2703,12 @@ def _compose_batch_prompt(prompts: list[str], settings: dict[str, Any]) -> str:
         if not contract_summary:
             contract_summary = summarize_global_creative_spine_contract(settings.get("全局创作主线合同"))
         spine_line = f"共同创作主线：{contract_summary}\n" if contract_summary else ""
+        environment_context = _compact_environment_context_for_model(
+            settings.get("智能场景关系图")
+        )
+        environment_line = (
+            f"{environment_context}\n" if environment_context else ""
+        )
         detail_contract = (
             "2-4 句中文新增细节"
             if _uses_qwen35_local_incremental_refinement(settings)
@@ -2411,7 +2716,7 @@ def _compose_batch_prompt(prompts: list[str], settings: dict[str, Any]) -> str:
         )
         return (
             f"请按原顺序为以下 {len(prompts)} 份 Skill 已校验底稿分别输出 {detail_contract}。\n"
-            f"{spine_line}每份结果只补充同一场景内可见的动作因果、材质、空间或光影变化，不重写全文，不引入其他世界族，不输出分析、标题或标签列表。\n"
+            f"{spine_line}{environment_line}每份结果只补充同一场景内可见的动作因果、材质、空间或光影变化，不重写全文，不引入其他世界族，不输出分析、标题或标签列表。\n"
             f"结果之间只使用 `{_BATCH_SEPARATOR}` 分隔，不要添加序号或其他前后缀。\n\n"
             + f"\n{_BATCH_SEPARATOR}\n".join(prompts)
         )
@@ -2950,6 +3255,31 @@ def _retry_invalid_model_output(
     repair_settings["智能定向修复原因"] = repair_reason
     repair_settings["智能定向修复类型"] = repair_focus["kind"]
     repair_settings["智能定向修复指令"] = repair_focus["instruction"]
+    scene_attribute_prefix = "scene_attribute_"
+    if repair_focus["kind"].startswith(scene_attribute_prefix):
+        repair_axis = repair_focus["kind"][len(scene_attribute_prefix):]
+        scene_graph = settings.get("智能场景关系图")
+        if isinstance(scene_graph, dict):
+            attribute_constraints = dict(
+                scene_graph.get("scene_attribute_constraints", {})
+                or scene_graph.get("context_scene_attribute_constraints", {})
+                or {}
+            )
+            focused_constraint = attribute_constraints.get(repair_axis)
+            if isinstance(focused_constraint, dict):
+                focused_graph = dict(scene_graph)
+                focused_graph["scene_attribute_constraints"] = {
+                    repair_axis: dict(focused_constraint)
+                }
+                context_constraints = dict(
+                    scene_graph.get("context_scene_attribute_constraints", {}) or {}
+                )
+                focused_graph["context_scene_attribute_constraints"] = (
+                    {repair_axis: dict(context_constraints[repair_axis])}
+                    if isinstance(context_constraints.get(repair_axis), dict)
+                    else {}
+                )
+                repair_settings["智能场景关系图"] = focused_graph
     settings["智能定向修复次数"] = max(
         0,
         int(settings.get("智能定向修复次数", 0) or 0),
