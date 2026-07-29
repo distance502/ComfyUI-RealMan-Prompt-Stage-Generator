@@ -9,7 +9,7 @@ import re
 from typing import Any, Iterable
 
 
-INTELLIGENCE_PROFILE_VERSION = "qwen-te-intelligence-v31"
+INTELLIGENCE_PROFILE_VERSION = "qwen-te-intelligence-v42"
 
 _GROUP_LIMITS = {
     "主体": 6,
@@ -572,6 +572,448 @@ _COMPLEX_LIGHT_DIRECTION_RE = re.compile(
     r"(?:fill light|rim light)[^;.!?\n]{0,48}key light)",
     flags=re.IGNORECASE,
 )
+EXPOSURE_KEY_MARKERS: dict[str, tuple[str, ...]] = {
+    "high_key": (
+        "明亮高调棚拍", "白色高调棚拍", "高调人像摄影", "高调摄影", "高调照明",
+        "高调画面", "高键照明", "高键布光", "高键光",
+        "high-key portrait photography", "high key portrait photography",
+        "high-key photography", "high key photography", "high-key lighting", "high key lighting",
+        "bright airy exposure", "bright and airy lighting",
+    ),
+    "low_key": (
+        "暗调低键布光", "暗调低键", "低调人像摄影", "低调摄影", "低调照明",
+        "低调画面", "低键照明", "低键布光", "低键光",
+        "low-key portrait photography", "low key portrait photography",
+        "low-key photography", "low key photography", "low-key lighting", "low key lighting",
+        "dark low-key exposure", "dark low key exposure",
+    ),
+}
+_EXPOSURE_KEY_LABELS = {
+    "high_key": "高调/高键曝光",
+    "low_key": "低调/低键曝光",
+}
+_COMPLEX_EXPOSURE_KEY_RE = re.compile(
+    r"(?:高低调(?:并置|对比|分区)|明暗分区曝光|局部高调[^，,；;。！？.!?\n]{0,32}局部低调|"
+    r"局部低调[^，,；;。！？.!?\n]{0,32}局部高调|split exposure|mixed high[- ]key and low[- ]key|"
+    r"high[- ]key[^;.!?\n]{0,48}low[- ]key|low[- ]key[^;.!?\n]{0,48}high[- ]key)",
+    flags=re.IGNORECASE,
+)
+CONTRAST_LEVEL_MARKERS: dict[str, tuple[str, ...]] = {
+    "high": (
+        "高对比戏剧光", "高对比滤镜", "高对比黑白", "高反差黑色电影", "高反差照明",
+        "高反差画面", "强烈明暗对比", "强对比照明", "强对比", "高对比",
+        "high-contrast film noir", "high contrast film noir", "high-contrast lighting",
+        "high contrast lighting", "high-contrast image", "high contrast image",
+        "strong tonal contrast", "high contrast",
+    ),
+    "low": (
+        "整体低对比", "柔和低对比画面", "低对比画面", "低对比照明", "低反差照明",
+        "低反差画面", "柔和反差", "柔和对比度",
+        "overall low contrast", "low-contrast lighting", "low contrast lighting",
+        "low-contrast image", "low contrast image", "soft tonal contrast",
+    ),
+}
+_CONTRAST_LEVEL_LABELS = {
+    "high": "高对比/高反差",
+    "low": "低对比/低反差",
+}
+_COMPLEX_CONTRAST_RE = re.compile(
+    r"(?:局部对比|局部反差|分区对比|分区反差|对比度分区|高动态范围|\bHDR\b|"
+    r"镜(?:像|面)[^，,；;。！？.!?\n]{0,28}低对比|倒影[^，,；;。！？.!?\n]{0,28}低对比|"
+    r"(?:前景|背景|反射|折射)[^，,；;。！？.!?\n]{0,28}低对比|"
+    r"local contrast|zonal contrast|split contrast|high dynamic range|"
+    r"(?:reflection|foreground|background)[^;.!?\n]{0,36}low contrast)",
+    flags=re.IGNORECASE,
+)
+SATURATION_LEVEL_MARKERS: dict[str, tuple[str, ...]] = {
+    "high": (
+        "高饱和感官色调", "高饱和图形化", "高饱和色彩", "高饱和画面", "高饱和滤镜",
+        "鲜艳饱和色彩", "鲜艳色彩", "高饱和",
+        "high-saturation palette", "high saturation palette", "highly saturated colors",
+        "highly saturated colours", "high saturation", "vibrant saturated colors",
+        "vibrant saturated colours", "vivid saturated colors", "vivid saturated colours",
+    ),
+    "low": (
+        "低饱和黑金胶片", "低饱和亲密影像", "克制低饱和电影", "低饱和冷灰",
+        "低饱和霓虹", "低饱和滤镜", "低饱和情绪", "低饱和色彩", "低饱和画面",
+        "去饱和处理", "去饱和色彩", "去饱和画面", "低饱和",
+        "low-saturation palette", "low saturation palette", "low-saturation colors",
+        "low saturation colors", "low-saturation colours", "low saturation colours",
+        "desaturated palette", "desaturated colors", "desaturated colours",
+        "muted color palette", "muted colour palette", "muted colors", "muted colours",
+    ),
+}
+_SATURATION_LEVEL_LABELS = {
+    "high": "高饱和",
+    "low": "低饱和/去饱和",
+}
+_SELECTIVE_SATURATION_RE = re.compile(
+    r"(?:局部(?:高|低|去)饱和|选择性饱和|饱和度分区|局部彩色|选择性色彩|色彩点缀|"
+    r"(?:环境|背景)[^。！？.!?\n]{0,48}低饱和[^。！？.!?\n]{0,48}(?:主体|人物|肤色)|"
+    r"(?:主体|人物|肤色)[^。！？.!?\n]{0,48}(?:自然|鲜明|独立)[^。！？.!?\n]{0,48}(?:环境|背景)[^。！？.!?\n]{0,32}低饱和|"
+    r"selective saturation|selectively saturated|saturation zoning|color pop|colour pop|"
+    r"(?:background|environment)[^;.!?\n]{0,48}(?:low saturation|desaturated)[^;.!?\n]{0,48}(?:subject|skin tone))",
+    flags=re.IGNORECASE,
+)
+IMAGE_GRAIN_MARKERS: dict[str, tuple[str, ...]] = {
+    "grainy": (
+        "35mm胶片颗粒", "胶片颗粒", "柔和颗粒感", "颗粒质感", "颗粒感",
+        "VHS噪点", "模拟噪点", "自然噪点", "粗粝噪点", "复古噪点",
+        "35mm film grain", "film grain", "analog grain", "analogue grain",
+        "grainy texture", "grainy image", "visible grain", "VHS noise",
+    ),
+    "clean": (
+        "干净无颗粒画面", "无颗粒数字画面", "纯净数字成像", "干净数字质感",
+        "数字无噪点", "无胶片颗粒", "无可见颗粒", "低噪点画面", "无颗粒",
+        "noise-free digital image", "clean digital image", "clean digital rendering",
+        "grain-free image", "no film grain", "no visible grain",
+    ),
+}
+_IMAGE_GRAIN_LABELS = {
+    "grainy": "胶片颗粒/可见噪点",
+    "clean": "干净无颗粒数字成像",
+}
+_SELECTIVE_IMAGE_GRAIN_RE = re.compile(
+    r"(?:局部(?:颗粒|噪点)|颗粒(?:感)?分区|噪点分区|扫描纹理|印刷网点|半色调网点|"
+    r"(?:背景|环境|边缘|阴影)[^。！？.!?\n]{0,48}(?:颗粒|噪点)[^。！？.!?\n]{0,48}(?:主体|人物|面部|肤色)[^。！？.!?\n]{0,32}(?:干净|清晰|纯净)|"
+    r"(?:主体|人物|面部|肤色)[^。！？.!?\n]{0,48}(?:干净|清晰|纯净)[^。！？.!?\n]{0,48}(?:背景|环境|边缘|阴影)[^。！？.!?\n]{0,32}(?:颗粒|噪点)|"
+    r"local(?:ized)? (?:film )?grain|selective grain|grain zoning|halftone dots|print dots|"
+    r"(?:background|environment)[^;.!?\n]{0,48}(?:grain|noise)[^;.!?\n]{0,48}(?:subject|face|skin)[^;.!?\n]{0,32}(?:clean|clear))",
+    flags=re.IGNORECASE,
+)
+_NONVISUAL_GRAIN_RE = re.compile(
+    r"(?:(?:谷物|粮食|砂糖|食盐|药粉|粉末|砂石|泥土|土壤|药片|食材|原料)"
+    r"[^，,；;。！？.!?\n]{0,20}(?:颗粒感|颗粒质感)|"
+    r"(?:颗粒感|颗粒质感)[^，,；;。！？.!?\n]{0,20}"
+    r"(?:谷物|粮食|砂糖|食盐|药粉|粉末|砂石|泥土|土壤|药片|食材|原料))",
+    flags=re.IGNORECASE,
+)
+IMAGE_SHARPNESS_MARKERS: dict[str, tuple[str, ...]] = {
+    "sharp": (
+        "整体锐利清晰", "全画面锐利", "高锐度成像", "锐利清晰成像", "边缘锐利清晰",
+        "清晰锐利画面", "超清晰画面", "锐利细节", "锐利焦点", "高锐度", "锐利", "清晰",
+        "razor-sharp image", "razor sharp image", "tack-sharp image", "tack sharp image",
+        "crisp sharp image", "high image sharpness", "sharp rendering", "sharp focus",
+    ),
+    "soft_focus": (
+        "整体柔焦画面", "全画面柔化", "朦胧柔焦", "柔焦滤镜", "软焦镜头",
+        "柔焦成像", "柔焦效果", "全局柔焦", "整体软焦", "柔焦",
+        "soft-focus image", "soft focus image", "dreamy soft focus", "diffusion filter",
+        "soft-focus rendering", "soft focus rendering",
+    ),
+}
+_IMAGE_SHARPNESS_LABELS = {
+    "sharp": "锐利清晰成像",
+    "soft_focus": "整体柔焦/软焦成像",
+}
+_GENERIC_IMAGE_SHARPNESS_MARKERS = {"锐利", "清晰", "柔焦"}
+_IMAGE_SHARPNESS_GLOBAL_SCOPE_RE = re.compile(
+    r"(?:整体|全局|全画面|画面|图像|影像|成像|照片|摄影|渲染|镜头|滤镜|焦点|锐度|清晰度|"
+    r"image|render(?:ing)?|photo(?:graphy)?|camera|lens|filter|focus|sharpness)",
+    flags=re.IGNORECASE,
+)
+_IMAGE_SHARPNESS_PREFIX_SCOPE_RE = re.compile(
+    r"(?:整体|全局|全画面|画面|图像|影像|成像|照片|摄影|渲染|镜头|滤镜|焦点|锐度|清晰度|"
+    r"保持|采用|使用|要求|固定为|设为|改为|改成|转为|变为)"
+    r"[^，,；;。！？.!?\n]{0,14}$",
+    flags=re.IGNORECASE,
+)
+_IMAGE_SHARPNESS_SUFFIX_SCOPE_RE = re.compile(
+    r"^(?:画面|图像|影像|成像|效果|滤镜|质感|细节|边缘|焦点|锐度|清晰度|"
+    r"image|render(?:ing)?|effect|filter|detail|edge|focus|sharpness)",
+    flags=re.IGNORECASE,
+)
+_SELECTIVE_IMAGE_SHARPNESS_RE = re.compile(
+    r"(?:局部(?:锐化|柔化|柔焦)|选择性锐化|锐度分区|清晰度分区|皮肤(?:柔化|磨皮|柔焦)|"
+    r"(?:背景|前景|边缘|倒影|反射)[^。！？.!?\n]{0,40}(?:虚化|模糊|柔焦)|"
+    r"(?:主体|人物|面部|眼睛|产品)[^。！？.!?\n]{0,48}(?:锐利|清晰)[^。！？.!?\n]{0,48}(?:背景|前景)[^。！？.!?\n]{0,32}(?:虚化|模糊|柔焦)|"
+    r"(?:背景|前景)[^。！？.!?\n]{0,48}(?:虚化|模糊|柔焦)[^。！？.!?\n]{0,48}(?:主体|人物|面部|眼睛|产品)[^。！？.!?\n]{0,32}(?:锐利|清晰)|"
+    r"浅景深|背景虚化|前景虚化|散景|运动模糊|动态模糊|慢门拖影|长曝光拖影|追焦|"
+    r"local(?:ized)? sharpen(?:ing)?|selective sharpen(?:ing)?|sharpness zoning|skin softening|"
+    r"(?:background|foreground)[^;.!?\n]{0,48}(?:blur|soft focus)[^;.!?\n]{0,48}(?:subject|face|eyes|product)[^;.!?\n]{0,32}(?:sharp|crisp)|"
+    r"(?:subject|face|eyes|product)[^;.!?\n]{0,48}(?:sharp|crisp)[^;.!?\n]{0,48}(?:background|foreground)[^;.!?\n]{0,32}(?:blur|soft focus)|"
+    r"shallow depth of field|background blur|foreground blur|motion blur|rack focus|focus pull)",
+    flags=re.IGNORECASE,
+)
+DETAIL_DENSITY_MARKERS: dict[str, tuple[str, ...]] = {
+    "high": (
+        "超高细节", "高细节", "超精细", "极致纹理", "材质细节丰富", "细节密度高",
+        "高密度细节", "复杂精细纹理", "细密纹理", "丰富纹理细节",
+        "ultra-detailed", "ultra detailed", "highly detailed", "extremely detailed",
+        "high detail density", "dense visual detail", "intricate texture detail",
+        "rich texture detail",
+    ),
+    "low": (
+        "整体低细节", "低细节渲染", "简化低细节", "简洁低细节", "细节简化",
+        "减少纹理细节", "无复杂纹理", "扁平简化造型", "简化渲染", "低细节",
+        "minimal detail", "low-detail rendering", "low detail rendering", "simplified rendering",
+        "reduced texture detail", "no intricate textures", "clean simple shapes",
+    ),
+}
+_DETAIL_DENSITY_LABELS = {
+    "high": "高细节/高密度纹理",
+    "low": "简化/低细节渲染",
+}
+_SELECTIVE_DETAIL_DENSITY_RE = re.compile(
+    r"(?:局部(?:高|低)细节|选择性细化|细节密度分区|纹理密度分区|层级细节|"
+    r"(?:背景|远景|边缘|阴影)[^。！？.!?\n]{0,48}(?:简化|低细节|减少纹理)[^。！？.!?\n]{0,48}(?:主体|人物|产品|服装|道具|前景)[^。！？.!?\n]{0,32}(?:高细节|精细|丰富纹理)|"
+    r"(?:主体|人物|产品|服装|道具|前景)[^。！？.!?\n]{0,48}(?:高细节|精细|丰富纹理)[^。！？.!?\n]{0,48}(?:背景|远景|边缘|阴影)[^。！？.!?\n]{0,32}(?:简化|低细节|减少纹理)|"
+    r"随距离(?:降低|减少)细节|远近细节层级|逐步细化|细节逐渐(?:增加|减少)|"
+    r"从草图[^。！？.!?\n]{0,48}(?:细化|高细节)|由高细节[^。！？.!?\n]{0,48}(?:简化|低细节)|"
+    r"local(?:ized)? detail|selective detail|detail density zoning|level of detail|\bLOD\b|"
+    r"(?:background|distance)[^;.!?\n]{0,48}(?:simplified|low detail)[^;.!?\n]{0,48}(?:subject|character|product|foreground)[^;.!?\n]{0,32}(?:highly detailed|intricate)|"
+    r"(?:subject|character|product|foreground)[^;.!?\n]{0,48}(?:highly detailed|intricate)[^;.!?\n]{0,48}(?:background|distance)[^;.!?\n]{0,32}(?:simplified|low detail)|"
+    r"progressive detail|detail gradually (?:increases|decreases)|sketch[^;.!?\n]{0,48}(?:refined|high detail))",
+    flags=re.IGNORECASE,
+)
+VISUAL_MEDIUM_MARKERS: dict[str, tuple[str, ...]] = {
+    "drawn_2d": (
+        "二维绘制", "二维插画", "2D插画", "2D 绘制", "手绘插画", "漫画插画",
+        "暗黑漫画", "恐怖漫画", "黑白漫画", "漫画线稿", "黑白线稿", "网点漫画",
+        "赛璐璐动画", "赛璐璐上色", "动画截图感", "平面矢量", "铅笔素描",
+        "水彩插画", "水粉插画", "木刻版画", "手绘画面",
+        "2d illustration", "2d drawing", "hand-drawn illustration", "hand drawn illustration",
+        "comic illustration", "comic line art", "manga line art", "cel animation",
+        "cel-shaded animation", "flat vector illustration", "watercolor illustration",
+    ),
+    "rendered_3d": (
+        "三维渲染", "3D渲染", "3D 渲染", "三维建模渲染", "CG渲染", "CG 渲染",
+        "游戏CG质感", "游戏 CG 质感", "C4D渲染", "Blender渲染", "虚幻引擎渲染",
+        "写实三维渲染", "三维角色渲染", "三维场景渲染", "黏土渲染",
+        "3d rendering", "3d render", "three-dimensional rendering", "cgi rendering",
+        "cinema 4d render", "blender render", "unreal engine render", "octane render",
+        "photorealistic 3d render", "clay render",
+    ),
+    "photographic": (
+        "真人实拍", "真实实拍", "实景拍摄", "实拍照片", "摄影照片", "写实摄影",
+        "真人摄影", "纪实摄影", "街拍摄影", "胶片摄影", "电影实拍", "实拍电影画面",
+        "生活流写实", "雾景实拍感", "写实真人质感",
+        "live-action photography", "live action photography", "live-action footage",
+        "live action footage", "real-world photography", "documentary photography",
+        "street photography", "film photography", "photographic image",
+    ),
+}
+_VISUAL_MEDIUM_LABELS = {
+    "drawn_2d": "二维绘制/插画漫画",
+    "rendered_3d": "三维/CG 渲染",
+    "photographic": "摄影实拍",
+}
+_MIXED_VISUAL_MEDIUM_RE = re.compile(
+    r"(?:2\.5D|2\.5d|二点五维|二维[^。！？.!?\n]{0,32}(?:与|和|结合|融合|混合|叠加)[^。！？.!?\n]{0,32}三维|"
+    r"三维[^。！？.!?\n]{0,32}(?:与|和|结合|融合|混合|叠加)[^。！？.!?\n]{0,32}二维|"
+    r"实拍[^。！？.!?\n]{0,32}(?:与|和|结合|融合|混合|叠加)[^。！？.!?\n]{0,32}(?:动画|插画|漫画|CG|三维)|"
+    r"(?:动画|插画|漫画|CG|三维)[^。！？.!?\n]{0,32}(?:与|和|结合|融合|混合|叠加)[^。！？.!?\n]{0,32}实拍|"
+    r"(?:屏幕|海报|壁画|画框|书页|投影|全息界面)[^。！？.!?\n]{0,40}(?:二维|2D|插画|漫画|动画|三维|3D|CG|实拍|摄影)|"
+    r"(?:二维|2D|插画|漫画|动画|三维|3D|CG|实拍|摄影)[^。！？.!?\n]{0,40}(?:屏幕|海报|壁画|画框|书页|投影|全息界面)|"
+    r"从(?:二维|2D|插画|漫画|动画|三维|3D|CG|实拍|摄影)[^。！？.!?\n]{0,48}(?:转为|变为|过渡到|切换到)[^。！？.!?\n]{0,24}(?:二维|2D|插画|漫画|动画|三维|3D|CG|实拍|摄影)|"
+    r"(?:二维|2D|插画|漫画|动画|三维|3D|CG|实拍|摄影)[^。！？.!?\n]{0,48}(?:随后|逐渐|渐渐|最终|再)?[^。！？.!?\n]{0,12}(?:转为|变为|过渡到|切换到)[^。！？.!?\n]{0,24}(?:二维|2D|插画|漫画|动画|三维|3D|CG|实拍|摄影)|"
+    r"(?:mixed[- ]media|2d[^;.!?\n]{0,32}(?:and|with|hybrid|mixed|combined)[^;.!?\n]{0,32}3d|"
+    r"3d[^;.!?\n]{0,32}(?:and|with|hybrid|mixed|combined)[^;.!?\n]{0,32}2d|"
+    r"live[- ]action[^;.!?\n]{0,32}(?:animation|illustration|cgi|3d)|"
+    r"(?:screen|poster|mural|painting|book page|projection|hologram)[^;.!?\n]{0,40}(?:2d|illustration|comic|animation|3d|cgi|photograph)|"
+    r"transition[^;.!?\n]{0,32}(?:2d|illustration|animation|3d|cgi|live[- ]action|photography)))",
+    flags=re.IGNORECASE,
+)
+PROJECTION_GEOMETRY_MARKERS: dict[str, tuple[str, ...]] = {
+    "orthographic": (
+        "正交投影视角", "正交投影", "标准正投影", "正投影视图", "平行投影",
+        "无透视投影", "无透视畸变", "正交相机",
+        "orthographic projection", "orthographic camera", "orthographic view",
+        "parallel projection", "no perspective distortion",
+    ),
+    "perspective": (
+        "透视投影", "线性透视", "单点透视", "一点透视", "两点透视", "三点透视",
+        "夸张透视", "强烈透视", "广角畸变",
+        "perspective projection", "linear perspective", "one-point perspective",
+        "two-point perspective", "three-point perspective", "exaggerated perspective",
+        "wide-angle distortion", "wide angle distortion",
+    ),
+    "axonometric": (
+        "轴测投影", "轴测视图", "等轴测投影", "等距投影", "等距视图",
+        "isometric projection", "isometric view", "axonometric projection", "axonometric view",
+    ),
+    "fisheye": (
+        "鱼眼镜头", "鱼眼畸变", "圆形鱼眼", "全景鱼眼",
+        "fisheye lens", "fisheye distortion", "circular fisheye", "full-frame fisheye",
+    ),
+}
+_PROJECTION_GEOMETRY_LABELS = {
+    "orthographic": "正交/平行投影",
+    "perspective": "线性透视投影",
+    "axonometric": "轴测/等距投影",
+    "fisheye": "鱼眼投影",
+}
+_MIXED_PROJECTION_GEOMETRY_RE = re.compile(
+    r"(?:正交[^。！？.!?\n]{0,36}(?:与|和|结合|配合|并列|加上)[^。！？.!?\n]{0,36}(?:透视|轴测|等距|鱼眼)|"
+    r"(?:透视|轴测|等距|鱼眼)[^。！？.!?\n]{0,36}(?:与|和|结合|配合|并列|加上)[^。！？.!?\n]{0,36}正交|"
+    r"(?:主视图|主体|三视图)[^。！？.!?\n]{0,40}正交[^。！？.!?\n]{0,48}(?:辅助图|插图|小窗|局部|细节图)[^。！？.!?\n]{0,32}(?:透视|轴测|等距|鱼眼)|"
+    r"(?:辅助图|插图|小窗|局部|细节图)[^。！？.!?\n]{0,32}(?:透视|轴测|等距|鱼眼)[^。！？.!?\n]{0,48}(?:主视图|主体|三视图)[^。！？.!?\n]{0,40}正交|"
+    r"(?:正交|透视|轴测|等距|鱼眼)[^。！？.!?\n]{0,48}(?:随后|逐渐|渐渐|最终|再)?[^。！？.!?\n]{0,12}(?:转为|变为|过渡到|切换到)[^。！？.!?\n]{0,24}(?:正交|透视|轴测|等距|鱼眼)|"
+    r"(?:orthographic[^;.!?\n]{0,36}(?:and|with|combined|alongside)[^;.!?\n]{0,36}(?:perspective|isometric|axonometric|fisheye)|"
+    r"(?:perspective|isometric|axonometric|fisheye)[^;.!?\n]{0,36}(?:and|with|combined|alongside)[^;.!?\n]{0,36}orthographic|"
+    r"(?:main views?|turnaround)[^;.!?\n]{0,40}orthographic[^;.!?\n]{0,48}(?:inset|detail view|support view)[^;.!?\n]{0,32}(?:perspective|isometric|axonometric|fisheye)|"
+    r"(?:orthographic|perspective|isometric|axonometric|fisheye)[^;.!?\n]{0,48}(?:transition|shift|change)[^;.!?\n]{0,24}(?:orthographic|perspective|isometric|axonometric|fisheye)))",
+    flags=re.IGNORECASE,
+)
+ATMOSPHERIC_MEDIUM_MARKERS: dict[str, tuple[str, ...]] = {
+    "clear_air": (
+        "空气通透", "通透空气", "清澈空气", "无雾空气", "无烟空气", "无雾无烟",
+        "高能见度空气", "高能见度画面", "能见度通透", "上午通透天光",
+        "crystal-clear air", "crystal clear air", "clear haze-free air", "haze-free air",
+        "fog-free atmosphere", "smoke-free air", "high-visibility atmosphere",
+    ),
+    "mist_fog": (
+        "冷雾惊悚侧光", "冷雾侧光", "青蓝冷雾", "冷雾", "红雾表现主义打光", "红雾",
+        "清晨薄雾", "细雨薄雾", "初秋薄雾", "薄雾层次", "海雾", "远景蓝雾",
+        "雾气弥漫", "浓雾", "体积雾", "低垂雾气", "冷雾古巷", "雾林吊脚楼",
+        "cold mist", "morning mist", "thin mist", "layered mist", "sea fog",
+        "foggy atmosphere", "mist-filled air", "mist filled air", "dense fog",
+        "volumetric fog", "low-lying fog", "low lying fog", "red mist expressionist lighting",
+    ),
+    "smoke_dust": (
+        "顶光烟雾", "舞台烟雾", "烟雾弥漫", "烟雾中", "浓烟", "烟尘天光",
+        "烟尘", "沙尘逆光", "沙尘体积光", "沙尘天气", "粉尘空气", "扬尘",
+        "火山灰弥漫", "灰烬弥漫",
+        "smoky atmosphere", "smoke-filled air", "smoke filled air", "dense smoke",
+        "stage smoke", "airborne dust", "dust-filled air", "dust filled air",
+        "sandstorm haze", "volcanic ash in the air",
+    ),
+}
+_ATMOSPHERIC_MEDIUM_LABELS = {
+    "clear_air": "通透无雾无烟空气",
+    "mist_fog": "薄雾/浓雾空气",
+    "smoke_dust": "烟雾/烟尘空气",
+}
+_MIXED_ATMOSPHERIC_MEDIUM_RE = re.compile(
+    r"(?:(?:前景|主体|人物|面部|产品)[^。！？.!?\n]{0,40}(?:清晰|通透|无雾|无烟)[^。！？.!?\n]{0,48}(?:背景|远景|地面|脚边)[^。！？.!?\n]{0,32}(?:薄雾|浓雾|冷雾|烟雾|烟尘|沙尘)|"
+    r"(?:背景|远景|地面|脚边)[^。！？.!?\n]{0,32}(?:薄雾|浓雾|冷雾|烟雾|烟尘|沙尘)[^。！？.!?\n]{0,48}(?:主体|人物|面部|产品|前景)[^。！？.!?\n]{0,32}(?:清晰|通透|无雾|无烟)|"
+    r"(?:薄雾|浓雾|冷雾|雾气)[^。！？.!?\n]{0,36}(?:与|和|混合|交织|叠加)[^。！？.!?\n]{0,36}(?:烟雾|烟尘|沙尘|粉尘)|"
+    r"(?:烟雾|烟尘|沙尘|粉尘)[^。！？.!?\n]{0,36}(?:与|和|混合|交织|叠加)[^。！？.!?\n]{0,36}(?:薄雾|浓雾|冷雾|雾气)|"
+    r"(?:火炬|香炉|烟囱|排气口|枪口|火堆)[^。！？.!?\n]{0,32}(?:局部|少量|一缕)?(?:烟雾|烟气|烟尘)|"
+    r"(?:薄雾|浓雾|冷雾|雾气|烟雾|浓烟|烟尘|沙尘)[^。！？.!?\n]{0,40}(?:逐渐|开始|随后|最终)?(?:散去|消散|退去|退开|变淡|被吹散|转为通透)|"
+    r"(?:(?:foreground|subject|character|face|product)[^;.!?\n]{0,40}(?:clear|haze-free|fog-free|smoke-free)[^;.!?\n]{0,48}(?:background|distance|ground)[^;.!?\n]{0,32}(?:mist|fog|smoke|dust)|"
+    r"(?:background|distance|ground)[^;.!?\n]{0,32}(?:mist|fog|smoke|dust)[^;.!?\n]{0,48}(?:subject|character|face|product|foreground)[^;.!?\n]{0,32}(?:clear|haze-free|fog-free|smoke-free)|"
+    r"(?:mist|fog)[^;.!?\n]{0,36}(?:and|with|mixed|interwoven)[^;.!?\n]{0,36}(?:smoke|dust)|"
+    r"(?:torch|incense|chimney|vent|muzzle|campfire)[^;.!?\n]{0,32}(?:local|small|thin)?[^;.!?\n]{0,12}(?:smoke|fumes)|"
+    r"(?:mist|fog|smoke|dust)[^;.!?\n]{0,40}(?:dissipates|clears|thins|fades|is blown away)))",
+    flags=re.IGNORECASE,
+)
+BACKGROUND_COMPLEXITY_MARKERS: dict[str, tuple[str, ...]] = {
+    "minimal": (
+        "简洁连续中性背景", "简洁连续背景", "简洁中性背景", "简洁背景", "简单背景",
+        "极简背景", "干净背景", "纯色背景", "无缝背景", "空白背景", "背景无杂物",
+        "简洁无杂物", "简单无杂物",
+        "simple continuous neutral background", "simple continuous background",
+        "simple neutral background", "simple background", "minimal background",
+        "clean uncluttered background", "plain background", "seamless backdrop",
+    ),
+    "environment_rich": (
+        "复杂背景", "繁复背景", "丰富环境背景", "高密度场景元素", "密集背景元素",
+        "背景堆满杂物", "背景布满道具", "大量背景道具", "繁复环境陈设", "拥挤背景",
+        "complex background", "elaborate background", "rich environmental background",
+        "dense background elements", "cluttered background", "background crowded with props",
+        "busy environmental backdrop",
+    ),
+}
+_BACKGROUND_COMPLEXITY_LABELS = {
+    "minimal": "简洁/无杂物背景",
+    "environment_rich": "丰富/繁复环境背景",
+}
+_MIXED_BACKGROUND_COMPLEXITY_RE = re.compile(
+    r"(?:(?:背景|主背景)[^。！？.!?\n]{0,40}(?:简洁|简单|极简|纯色|无缝|无杂物)[^。！？.!?\n]{0,48}(?:单个|唯一|一件|必要)[^。！？.!?\n]{0,24}(?:道具|底座|地面阴影|接触阴影)|"
+    r"(?:单个|唯一|一件|必要)[^。！？.!?\n]{0,24}(?:道具|底座|地面阴影|接触阴影)[^。！？.!?\n]{0,48}(?:背景|主背景)[^。！？.!?\n]{0,32}(?:简洁|简单|极简|纯色|无缝|无杂物)|"
+    r"(?:主视图|三视图)[^。！？.!?\n]{0,40}(?:简洁|简单|极简)[^。！？.!?\n]{0,48}(?:辅助图|情境图|小窗)[^。！？.!?\n]{0,32}(?:复杂|丰富|环境)|"
+    r"(?:简洁|简单|极简|纯色|无缝)[^。！？.!?\n]{0,48}(?:随后|逐渐|最终|再)?[^。！？.!?\n]{0,12}(?:转为|变为|展开为|过渡到)[^。！？.!?\n]{0,24}(?:复杂|繁复|丰富|真实环境)|"
+    r"(?:(?:background|backdrop)[^;.!?\n]{0,40}(?:simple|minimal|plain|uncluttered)[^;.!?\n]{0,48}(?:single|one|necessary)[^;.!?\n]{0,24}(?:prop|pedestal|contact shadow)|"
+    r"(?:main views?|turnaround)[^;.!?\n]{0,40}(?:simple|minimal)[^;.!?\n]{0,48}(?:inset|context view)[^;.!?\n]{0,32}(?:complex|rich|environmental)|"
+    r"(?:simple|minimal|plain)[^;.!?\n]{0,48}(?:transition|change|expand)[^;.!?\n]{0,24}(?:complex|rich|environmental)))",
+    flags=re.IGNORECASE,
+)
+
+# Fifty exact language expansions share the established relation and model-guard pipeline.
+INTELLIGENCE_V42_RULE_EXPANSIONS: tuple[tuple[str, str, str], ...] = (
+    ("subject_cardinality", "single", "仅有一名角色"),
+    ("subject_cardinality", "pair", "恰好两名角色"),
+    ("subject_orientation", "front", "人物正对观众"),
+    ("subject_orientation", "back", "人物背朝观众"),
+    ("subject_pose", "standing", "保持直立站姿"),
+    ("subject_pose", "sitting", "端正坐下姿态"),
+    ("shot_scale", "closeup", "头肩肖像特写"),
+    ("shot_scale", "full_body", "完整头脚全身像"),
+    ("camera_angle", "low_angle", "贴地仰视镜头"),
+    ("camera_angle", "top_down", "垂直向下俯视"),
+    ("light_temperature", "cool", "冰蓝冷调照明"),
+    ("light_temperature", "warm", "琥珀暖调照明"),
+    ("color_rendering", "monochrome", "纯灰阶画面"),
+    ("color_rendering", "full_color", "完整彩色成像"),
+    ("depth_of_field", "shallow", "奶油散景浅焦"),
+    ("depth_of_field", "deep", "全场景深焦"),
+    ("lighting_quality", "hard", "刀锋般硬光"),
+    ("lighting_quality", "soft", "包裹式柔光"),
+    ("motion_rendering", "frozen", "高速快门定格"),
+    ("motion_rendering", "motion_trail", "明显动态拖影"),
+    ("camera_stability", "stable", "锁死三脚架机位"),
+    ("camera_stability", "handheld", "肩扛晃动摄影"),
+    ("focal_perspective", "wide", "14毫米超广角"),
+    ("focal_perspective", "telephoto", "300毫米长焦压缩"),
+    ("key_light_direction", "side", "左侧主光照明"),
+    ("key_light_direction", "back", "正后方轮廓主光"),
+    ("exposure_key", "high_key", "明亮白场高键"),
+    ("exposure_key", "low_key", "深黑低键曝光"),
+    ("contrast_level", "high", "强烈明暗反差"),
+    ("contrast_level", "low", "柔和平缓反差"),
+    ("saturation_level", "high", "浓烈高彩度"),
+    ("saturation_level", "low", "克制低彩度"),
+    ("image_grain", "grainy", "明显银盐颗粒"),
+    ("image_grain", "clean", "无噪纯净数码"),
+    ("image_sharpness", "sharp", "全局锐利成像"),
+    ("image_sharpness", "soft_focus", "全局朦胧软焦"),
+    ("detail_density", "high", "精密复杂细节"),
+    ("detail_density", "low", "概括化低细节"),
+    ("visual_medium", "drawn_2d", "传统手绘漫画"),
+    ("visual_medium", "rendered_3d", "PBR三维渲染"),
+    ("visual_medium", "photographic", "高保真人像实拍"),
+    ("projection_geometry", "orthographic", "工程正交视图"),
+    ("projection_geometry", "perspective", "建筑两点透视"),
+    ("projection_geometry", "axonometric", "标准等轴测视图"),
+    ("atmospheric_medium", "clear_air", "澄澈无霾空气"),
+    ("atmospheric_medium", "mist_fog", "乳白薄雾空气"),
+    ("atmospheric_medium", "smoke_dust", "工业烟尘空气"),
+    ("background_complexity", "minimal", "单色无杂物背景"),
+    ("background_complexity", "environment_rich", "层次繁密环境背景"),
+    ("camera_angle", "eye_level", "人物眼高平视镜头"),
+)
+
+_V42_MARKER_TARGETS: dict[str, dict[str, tuple[str, ...]]] = {
+    "subject_cardinality": SUBJECT_CARDINALITY_MARKERS,
+    "subject_orientation": SUBJECT_ORIENTATION_MARKERS,
+    "subject_pose": SUBJECT_POSE_MARKERS,
+    "shot_scale": SHOT_SCALE_MARKERS,
+    "camera_angle": CAMERA_ANGLE_MARKERS,
+    "light_temperature": LIGHT_TEMPERATURE_MARKERS,
+    "color_rendering": COLOR_RENDERING_MARKERS,
+    "depth_of_field": DEPTH_OF_FIELD_MARKERS,
+    "lighting_quality": LIGHTING_QUALITY_MARKERS,
+    "motion_rendering": MOTION_RENDERING_MARKERS,
+    "camera_stability": CAMERA_STABILITY_MARKERS,
+    "focal_perspective": FOCAL_PERSPECTIVE_MARKERS,
+    "key_light_direction": KEY_LIGHT_DIRECTION_MARKERS,
+    "exposure_key": EXPOSURE_KEY_MARKERS,
+    "contrast_level": CONTRAST_LEVEL_MARKERS,
+    "saturation_level": SATURATION_LEVEL_MARKERS,
+    "image_grain": IMAGE_GRAIN_MARKERS,
+    "image_sharpness": IMAGE_SHARPNESS_MARKERS,
+    "detail_density": DETAIL_DENSITY_MARKERS,
+    "visual_medium": VISUAL_MEDIUM_MARKERS,
+    "projection_geometry": PROJECTION_GEOMETRY_MARKERS,
+    "atmospheric_medium": ATMOSPHERIC_MEDIUM_MARKERS,
+    "background_complexity": BACKGROUND_COMPLEXITY_MARKERS,
+}
+for _axis_name, _axis_value, _marker in INTELLIGENCE_V42_RULE_EXPANSIONS:
+    _target = _V42_MARKER_TARGETS[_axis_name]
+    if _marker not in _target[_axis_value]:
+        _target[_axis_value] = (*_target[_axis_value], _marker)
+del _axis_name, _axis_value, _marker, _target
 
 
 def _clean(value: Any) -> str:
@@ -1582,6 +2024,688 @@ def _resolve_key_light_direction_constraint(
     return constraint
 
 
+def detect_exposure_key(text: Any) -> dict[str, list[str]]:
+    return _detect_exclusive_visual_axis(
+        text,
+        EXPOSURE_KEY_MARKERS,
+        negated=False,
+    )
+
+
+def detect_negated_exposure_key(text: Any) -> dict[str, list[str]]:
+    return _detect_exclusive_visual_axis(
+        text,
+        EXPOSURE_KEY_MARKERS,
+        negated=True,
+    )
+
+
+def _context_exposure_key_constraint(text: Any) -> dict[str, Any]:
+    source = _clean(text)
+    if _COMPLEX_EXPOSURE_KEY_RE.search(source):
+        return {}
+    positive = detect_exposure_key(source)
+    if len(positive) > 1:
+        return {}
+    negated = detect_negated_exposure_key(source)
+    constraint = _exclusive_visual_axis_constraint(
+        positive,
+        negated,
+        _EXPOSURE_KEY_LABELS,
+        axis_label="曝光调性",
+    )
+    if constraint:
+        constraint["source"] = "natural_context"
+    return constraint
+
+
+def _resolve_exposure_key_constraint(
+    context_text: Any,
+    selected_values: Iterable[Any],
+) -> dict[str, Any]:
+    context_constraint = _context_exposure_key_constraint(context_text)
+    if context_constraint:
+        return context_constraint
+    context = _clean(context_text)
+    if _COMPLEX_EXPOSURE_KEY_RE.search(context) or len(detect_exposure_key(context)) > 1:
+        return {}
+    selected_text = "，".join(_unique(selected_values, 32))
+    if _COMPLEX_EXPOSURE_KEY_RE.search(selected_text):
+        return {}
+    positive = detect_exposure_key(selected_text)
+    if len(positive) != 1:
+        return {}
+    constraint = _exclusive_visual_axis_constraint(
+        positive,
+        {},
+        _EXPOSURE_KEY_LABELS,
+        axis_label="曝光调性",
+    )
+    if constraint:
+        constraint["source"] = "selected_state"
+    return constraint
+
+
+def detect_contrast_level(text: Any) -> dict[str, list[str]]:
+    source = _clean(text)
+    hits = _detect_exclusive_visual_axis(
+        source,
+        CONTRAST_LEVEL_MARKERS,
+        negated=False,
+    )
+    if source.casefold() in {"低对比", "low contrast", "low-contrast"}:
+        hits.setdefault("low", []).append(source)
+    return hits
+
+
+def detect_negated_contrast_level(text: Any) -> dict[str, list[str]]:
+    return _detect_exclusive_visual_axis(
+        text,
+        CONTRAST_LEVEL_MARKERS,
+        negated=True,
+    )
+
+
+def _context_contrast_level_constraint(text: Any) -> dict[str, Any]:
+    source = _clean(text)
+    if _COMPLEX_CONTRAST_RE.search(source):
+        return {}
+    positive = detect_contrast_level(source)
+    if len(positive) > 1:
+        return {}
+    negated = detect_negated_contrast_level(source)
+    constraint = _exclusive_visual_axis_constraint(
+        positive,
+        negated,
+        _CONTRAST_LEVEL_LABELS,
+        axis_label="整体对比度",
+    )
+    if constraint:
+        constraint["source"] = "natural_context"
+    return constraint
+
+
+def _resolve_contrast_level_constraint(
+    context_text: Any,
+    selected_values: Iterable[Any],
+) -> dict[str, Any]:
+    context_constraint = _context_contrast_level_constraint(context_text)
+    if context_constraint:
+        return context_constraint
+    context = _clean(context_text)
+    if _COMPLEX_CONTRAST_RE.search(context) or len(detect_contrast_level(context)) > 1:
+        return {}
+    selected = _unique(selected_values, 32)
+    selected_text = "，".join(selected)
+    if _COMPLEX_CONTRAST_RE.search(selected_text):
+        return {}
+    positive: dict[str, list[str]] = {}
+    for value in selected:
+        for contrast, markers in detect_contrast_level(value).items():
+            positive.setdefault(contrast, []).extend(markers)
+    if len(positive) != 1:
+        return {}
+    constraint = _exclusive_visual_axis_constraint(
+        positive,
+        {},
+        _CONTRAST_LEVEL_LABELS,
+        axis_label="整体对比度",
+    )
+    if constraint:
+        constraint["source"] = "selected_state"
+    return constraint
+
+
+def detect_saturation_level(text: Any) -> dict[str, list[str]]:
+    return _detect_exclusive_visual_axis(
+        text,
+        SATURATION_LEVEL_MARKERS,
+        negated=False,
+    )
+
+
+def detect_negated_saturation_level(text: Any) -> dict[str, list[str]]:
+    return _detect_exclusive_visual_axis(
+        text,
+        SATURATION_LEVEL_MARKERS,
+        negated=True,
+    )
+
+
+def _context_saturation_level_constraint(text: Any) -> dict[str, Any]:
+    source = _clean(text)
+    if _SELECTIVE_SATURATION_RE.search(source):
+        return {}
+    positive = detect_saturation_level(source)
+    if len(positive) > 1:
+        return {}
+    negated = detect_negated_saturation_level(source)
+    constraint = _exclusive_visual_axis_constraint(
+        positive,
+        negated,
+        _SATURATION_LEVEL_LABELS,
+        axis_label="整体饱和度",
+    )
+    if constraint:
+        constraint["source"] = "natural_context"
+    return constraint
+
+
+def _resolve_saturation_level_constraint(
+    context_text: Any,
+    selected_values: Iterable[Any],
+) -> dict[str, Any]:
+    context_constraint = _context_saturation_level_constraint(context_text)
+    if context_constraint:
+        return context_constraint
+    context = _clean(context_text)
+    if _SELECTIVE_SATURATION_RE.search(context) or len(detect_saturation_level(context)) > 1:
+        return {}
+    selected_text = "，".join(_unique(selected_values, 32))
+    if _SELECTIVE_SATURATION_RE.search(selected_text):
+        return {}
+    positive = detect_saturation_level(selected_text)
+    if len(positive) != 1:
+        return {}
+    constraint = _exclusive_visual_axis_constraint(
+        positive,
+        {},
+        _SATURATION_LEVEL_LABELS,
+        axis_label="整体饱和度",
+    )
+    if constraint:
+        constraint["source"] = "selected_state"
+    return constraint
+
+
+def _without_nonvisual_grain_hits(
+    source: str,
+    hits: dict[str, list[str]],
+) -> dict[str, list[str]]:
+    if _NONVISUAL_GRAIN_RE.search(source) and "grainy" in hits:
+        explicit_imaging_markers = {
+            marker
+            for marker in hits["grainy"]
+            if marker not in {"颗粒感", "颗粒质感"}
+        }
+        if explicit_imaging_markers:
+            hits["grainy"] = [
+                marker for marker in hits["grainy"] if marker in explicit_imaging_markers
+            ]
+        else:
+            hits.pop("grainy", None)
+    return hits
+
+
+def detect_image_grain(text: Any) -> dict[str, list[str]]:
+    source = _clean(text)
+    return _without_nonvisual_grain_hits(
+        source,
+        _detect_exclusive_visual_axis(
+            source,
+            IMAGE_GRAIN_MARKERS,
+            negated=False,
+        ),
+    )
+
+
+def detect_negated_image_grain(text: Any) -> dict[str, list[str]]:
+    source = _clean(text)
+    return _without_nonvisual_grain_hits(
+        source,
+        _detect_exclusive_visual_axis(
+            source,
+            IMAGE_GRAIN_MARKERS,
+            negated=True,
+        ),
+    )
+
+
+def _context_image_grain_constraint(text: Any) -> dict[str, Any]:
+    source = _clean(text)
+    if _SELECTIVE_IMAGE_GRAIN_RE.search(source):
+        return {}
+    positive = detect_image_grain(source)
+    if len(positive) > 1:
+        return {}
+    negated = detect_negated_image_grain(source)
+    constraint = _exclusive_visual_axis_constraint(
+        positive,
+        negated,
+        _IMAGE_GRAIN_LABELS,
+        axis_label="成像颗粒质感",
+    )
+    if constraint:
+        constraint["source"] = "natural_context"
+    return constraint
+
+
+def _resolve_image_grain_constraint(
+    context_text: Any,
+    selected_values: Iterable[Any],
+) -> dict[str, Any]:
+    context_constraint = _context_image_grain_constraint(context_text)
+    if context_constraint:
+        return context_constraint
+    context = _clean(context_text)
+    if _SELECTIVE_IMAGE_GRAIN_RE.search(context) or len(detect_image_grain(context)) > 1:
+        return {}
+    selected_text = "，".join(_unique(selected_values, 32))
+    if _SELECTIVE_IMAGE_GRAIN_RE.search(selected_text):
+        return {}
+    positive = detect_image_grain(selected_text)
+    if len(positive) != 1:
+        return {}
+    constraint = _exclusive_visual_axis_constraint(
+        positive,
+        {},
+        _IMAGE_GRAIN_LABELS,
+        axis_label="成像颗粒质感",
+    )
+    if constraint:
+        constraint["source"] = "selected_state"
+    return constraint
+
+
+def detect_image_sharpness(
+    text: Any,
+    *,
+    require_context_scope: bool = False,
+) -> dict[str, list[str]]:
+    return _detect_exclusive_visual_axis(
+        text,
+        IMAGE_SHARPNESS_MARKERS,
+        negated=False,
+        require_context_scope=require_context_scope,
+        generic_markers=_GENERIC_IMAGE_SHARPNESS_MARKERS,
+        global_scope_re=_IMAGE_SHARPNESS_GLOBAL_SCOPE_RE,
+        prefix_scope_re=_IMAGE_SHARPNESS_PREFIX_SCOPE_RE,
+        suffix_scope_re=_IMAGE_SHARPNESS_SUFFIX_SCOPE_RE,
+    )
+
+
+def detect_negated_image_sharpness(
+    text: Any,
+    *,
+    require_context_scope: bool = False,
+) -> dict[str, list[str]]:
+    return _detect_exclusive_visual_axis(
+        text,
+        IMAGE_SHARPNESS_MARKERS,
+        negated=True,
+        require_context_scope=require_context_scope,
+        generic_markers=_GENERIC_IMAGE_SHARPNESS_MARKERS,
+        global_scope_re=_IMAGE_SHARPNESS_GLOBAL_SCOPE_RE,
+        prefix_scope_re=_IMAGE_SHARPNESS_PREFIX_SCOPE_RE,
+        suffix_scope_re=_IMAGE_SHARPNESS_SUFFIX_SCOPE_RE,
+    )
+
+
+def _context_image_sharpness_constraint(text: Any) -> dict[str, Any]:
+    source = _clean(text)
+    if _SELECTIVE_IMAGE_SHARPNESS_RE.search(source):
+        return {}
+    positive = detect_image_sharpness(source, require_context_scope=True)
+    if len(positive) > 1:
+        return {}
+    negated = detect_negated_image_sharpness(source, require_context_scope=True)
+    constraint = _exclusive_visual_axis_constraint(
+        positive,
+        negated,
+        _IMAGE_SHARPNESS_LABELS,
+        axis_label="整体成像锐度",
+    )
+    if constraint:
+        constraint["source"] = "natural_context"
+    return constraint
+
+
+def _resolve_image_sharpness_constraint(
+    context_text: Any,
+    selected_values: Iterable[Any],
+) -> dict[str, Any]:
+    context_constraint = _context_image_sharpness_constraint(context_text)
+    if context_constraint:
+        return context_constraint
+    context = _clean(context_text)
+    if (
+        _SELECTIVE_IMAGE_SHARPNESS_RE.search(context)
+        or len(detect_image_sharpness(context, require_context_scope=True)) > 1
+    ):
+        return {}
+    selected_text = "，".join(_unique(selected_values, 32))
+    if _SELECTIVE_IMAGE_SHARPNESS_RE.search(selected_text):
+        return {}
+    positive = detect_image_sharpness(selected_text)
+    if len(positive) != 1:
+        return {}
+    constraint = _exclusive_visual_axis_constraint(
+        positive,
+        {},
+        _IMAGE_SHARPNESS_LABELS,
+        axis_label="整体成像锐度",
+    )
+    if constraint:
+        constraint["source"] = "selected_state"
+    return constraint
+
+
+def detect_detail_density(text: Any) -> dict[str, list[str]]:
+    return _detect_exclusive_visual_axis(
+        text,
+        DETAIL_DENSITY_MARKERS,
+        negated=False,
+    )
+
+
+def detect_negated_detail_density(text: Any) -> dict[str, list[str]]:
+    return _detect_exclusive_visual_axis(
+        text,
+        DETAIL_DENSITY_MARKERS,
+        negated=True,
+    )
+
+
+def _context_detail_density_constraint(text: Any) -> dict[str, Any]:
+    source = _clean(text)
+    if _SELECTIVE_DETAIL_DENSITY_RE.search(source):
+        return {}
+    positive = detect_detail_density(source)
+    if len(positive) > 1:
+        return {}
+    negated = detect_negated_detail_density(source)
+    constraint = _exclusive_visual_axis_constraint(
+        positive,
+        negated,
+        _DETAIL_DENSITY_LABELS,
+        axis_label="整体细节密度",
+    )
+    if constraint:
+        constraint["source"] = "natural_context"
+    return constraint
+
+
+def _resolve_detail_density_constraint(
+    context_text: Any,
+    selected_values: Iterable[Any],
+) -> dict[str, Any]:
+    context_constraint = _context_detail_density_constraint(context_text)
+    if context_constraint:
+        return context_constraint
+    context = _clean(context_text)
+    if _SELECTIVE_DETAIL_DENSITY_RE.search(context) or len(detect_detail_density(context)) > 1:
+        return {}
+    selected_text = "，".join(_unique(selected_values, 32))
+    if _SELECTIVE_DETAIL_DENSITY_RE.search(selected_text):
+        return {}
+    positive = detect_detail_density(selected_text)
+    if len(positive) != 1:
+        return {}
+    constraint = _exclusive_visual_axis_constraint(
+        positive,
+        {},
+        _DETAIL_DENSITY_LABELS,
+        axis_label="整体细节密度",
+    )
+    if constraint:
+        constraint["source"] = "selected_state"
+    return constraint
+
+
+def detect_visual_medium(text: Any) -> dict[str, list[str]]:
+    return _detect_exclusive_visual_axis(
+        text,
+        VISUAL_MEDIUM_MARKERS,
+        negated=False,
+    )
+
+
+def detect_negated_visual_medium(text: Any) -> dict[str, list[str]]:
+    return _detect_exclusive_visual_axis(
+        text,
+        VISUAL_MEDIUM_MARKERS,
+        negated=True,
+    )
+
+
+def _context_visual_medium_constraint(text: Any) -> dict[str, Any]:
+    source = _clean(text)
+    if _MIXED_VISUAL_MEDIUM_RE.search(source):
+        return {}
+    positive = detect_visual_medium(source)
+    if len(positive) > 1:
+        return {}
+    negated = detect_negated_visual_medium(source)
+    constraint = _exclusive_visual_axis_constraint(
+        positive,
+        negated,
+        _VISUAL_MEDIUM_LABELS,
+        axis_label="画面媒介",
+    )
+    if constraint:
+        constraint["source"] = "natural_context"
+    return constraint
+
+
+def _resolve_visual_medium_constraint(
+    context_text: Any,
+    selected_values: Iterable[Any],
+) -> dict[str, Any]:
+    context_constraint = _context_visual_medium_constraint(context_text)
+    if context_constraint:
+        return context_constraint
+    context = _clean(context_text)
+    if _MIXED_VISUAL_MEDIUM_RE.search(context) or len(detect_visual_medium(context)) > 1:
+        return {}
+    selected_text = "，".join(_unique(selected_values, 32))
+    if _MIXED_VISUAL_MEDIUM_RE.search(selected_text):
+        return {}
+    positive = detect_visual_medium(selected_text)
+    if len(positive) != 1:
+        return {}
+    constraint = _exclusive_visual_axis_constraint(
+        positive,
+        {},
+        _VISUAL_MEDIUM_LABELS,
+        axis_label="画面媒介",
+    )
+    if constraint:
+        constraint["source"] = "selected_state"
+    return constraint
+
+
+def detect_projection_geometry(text: Any) -> dict[str, list[str]]:
+    return _detect_exclusive_visual_axis(
+        text,
+        PROJECTION_GEOMETRY_MARKERS,
+        negated=False,
+    )
+
+
+def detect_negated_projection_geometry(text: Any) -> dict[str, list[str]]:
+    return _detect_exclusive_visual_axis(
+        text,
+        PROJECTION_GEOMETRY_MARKERS,
+        negated=True,
+    )
+
+
+def _context_projection_geometry_constraint(text: Any) -> dict[str, Any]:
+    source = _clean(text)
+    if _MIXED_PROJECTION_GEOMETRY_RE.search(source):
+        return {}
+    positive = detect_projection_geometry(source)
+    if len(positive) > 1:
+        return {}
+    negated = detect_negated_projection_geometry(source)
+    constraint = _exclusive_visual_axis_constraint(
+        positive,
+        negated,
+        _PROJECTION_GEOMETRY_LABELS,
+        axis_label="投影几何",
+    )
+    if constraint:
+        constraint["source"] = "natural_context"
+    return constraint
+
+
+def _resolve_projection_geometry_constraint(
+    context_text: Any,
+    selected_values: Iterable[Any],
+) -> dict[str, Any]:
+    context_constraint = _context_projection_geometry_constraint(context_text)
+    if context_constraint:
+        return context_constraint
+    context = _clean(context_text)
+    if (
+        _MIXED_PROJECTION_GEOMETRY_RE.search(context)
+        or len(detect_projection_geometry(context)) > 1
+    ):
+        return {}
+    selected_text = "，".join(_unique(selected_values, 32))
+    if _MIXED_PROJECTION_GEOMETRY_RE.search(selected_text):
+        return {}
+    positive = detect_projection_geometry(selected_text)
+    if len(positive) != 1:
+        return {}
+    constraint = _exclusive_visual_axis_constraint(
+        positive,
+        {},
+        _PROJECTION_GEOMETRY_LABELS,
+        axis_label="投影几何",
+    )
+    if constraint:
+        constraint["source"] = "selected_state"
+    return constraint
+
+
+def detect_atmospheric_medium(text: Any) -> dict[str, list[str]]:
+    return _detect_exclusive_visual_axis(
+        text,
+        ATMOSPHERIC_MEDIUM_MARKERS,
+        negated=False,
+    )
+
+
+def detect_negated_atmospheric_medium(text: Any) -> dict[str, list[str]]:
+    return _detect_exclusive_visual_axis(
+        text,
+        ATMOSPHERIC_MEDIUM_MARKERS,
+        negated=True,
+    )
+
+
+def _context_atmospheric_medium_constraint(text: Any) -> dict[str, Any]:
+    source = _clean(text)
+    if _MIXED_ATMOSPHERIC_MEDIUM_RE.search(source):
+        return {}
+    positive = detect_atmospheric_medium(source)
+    if len(positive) > 1:
+        return {}
+    negated = detect_negated_atmospheric_medium(source)
+    constraint = _exclusive_visual_axis_constraint(
+        positive,
+        negated,
+        _ATMOSPHERIC_MEDIUM_LABELS,
+        axis_label="大气介质与能见度",
+    )
+    if constraint:
+        constraint["source"] = "natural_context"
+    return constraint
+
+
+def _resolve_atmospheric_medium_constraint(
+    context_text: Any,
+    selected_values: Iterable[Any],
+) -> dict[str, Any]:
+    context_constraint = _context_atmospheric_medium_constraint(context_text)
+    if context_constraint:
+        return context_constraint
+    context = _clean(context_text)
+    if (
+        _MIXED_ATMOSPHERIC_MEDIUM_RE.search(context)
+        or len(detect_atmospheric_medium(context)) > 1
+    ):
+        return {}
+    selected_text = "，".join(_unique(selected_values, 32))
+    if _MIXED_ATMOSPHERIC_MEDIUM_RE.search(selected_text):
+        return {}
+    positive = detect_atmospheric_medium(selected_text)
+    if len(positive) != 1:
+        return {}
+    constraint = _exclusive_visual_axis_constraint(
+        positive,
+        {},
+        _ATMOSPHERIC_MEDIUM_LABELS,
+        axis_label="大气介质与能见度",
+    )
+    if constraint:
+        constraint["source"] = "selected_state"
+    return constraint
+
+
+def detect_background_complexity(text: Any) -> dict[str, list[str]]:
+    return _detect_exclusive_visual_axis(
+        text,
+        BACKGROUND_COMPLEXITY_MARKERS,
+        negated=False,
+    )
+
+
+def detect_negated_background_complexity(text: Any) -> dict[str, list[str]]:
+    return _detect_exclusive_visual_axis(
+        text,
+        BACKGROUND_COMPLEXITY_MARKERS,
+        negated=True,
+    )
+
+
+def _context_background_complexity_constraint(text: Any) -> dict[str, Any]:
+    source = _clean(text)
+    if _MIXED_BACKGROUND_COMPLEXITY_RE.search(source):
+        return {}
+    positive = detect_background_complexity(source)
+    if len(positive) > 1:
+        return {}
+    negated = detect_negated_background_complexity(source)
+    constraint = _exclusive_visual_axis_constraint(
+        positive,
+        negated,
+        _BACKGROUND_COMPLEXITY_LABELS,
+        axis_label="背景复杂度",
+    )
+    if constraint:
+        constraint["source"] = "natural_context"
+    return constraint
+
+
+def _resolve_background_complexity_constraint(
+    context_text: Any,
+    selected_values: Iterable[Any],
+) -> dict[str, Any]:
+    context_constraint = _context_background_complexity_constraint(context_text)
+    if context_constraint:
+        return context_constraint
+    context = _clean(context_text)
+    if _MIXED_BACKGROUND_COMPLEXITY_RE.search(context) or len(detect_background_complexity(context)) > 1:
+        return {}
+    selected_text = "，".join(_unique(selected_values, 32))
+    if _MIXED_BACKGROUND_COMPLEXITY_RE.search(selected_text):
+        return {}
+    positive = detect_background_complexity(selected_text)
+    if len(positive) != 1:
+        return {}
+    constraint = _exclusive_visual_axis_constraint(
+        positive,
+        {},
+        _BACKGROUND_COMPLEXITY_LABELS,
+        axis_label="背景复杂度",
+    )
+    if constraint:
+        constraint["source"] = "selected_state"
+    return constraint
+
+
 def _conflicting_exclusive_axis_anchors(
     anchors: Iterable[dict[str, Any]],
     constraint: dict[str, Any],
@@ -1968,6 +3092,122 @@ def build_scene_relationship_graph(
     key_light_direction_constraint = _resolve_key_light_direction_constraint(
         natural_context,
         key_light_direction_values,
+    )
+    context_exposure_key = detect_exposure_key(natural_context)
+    negated_context_exposure_key = detect_negated_exposure_key(natural_context)
+    exposure_key_values = [
+        value
+        for group in ("光影氛围", "画面风格", "技术画质")
+        for value in groups.get(group, [])
+    ] + list(custom)
+    exposure_key_constraint = _resolve_exposure_key_constraint(
+        natural_context,
+        exposure_key_values,
+    )
+    context_contrast_level = detect_contrast_level(natural_context)
+    negated_context_contrast_level = detect_negated_contrast_level(natural_context)
+    contrast_level_values = [
+        value
+        for group in ("光影氛围", "画面风格", "技术画质")
+        for value in groups.get(group, [])
+    ] + list(custom)
+    contrast_level_constraint = _resolve_contrast_level_constraint(
+        natural_context,
+        contrast_level_values,
+    )
+    context_saturation_level = detect_saturation_level(natural_context)
+    negated_context_saturation_level = detect_negated_saturation_level(natural_context)
+    saturation_level_values = [
+        value
+        for group in ("光影氛围", "画面风格", "技术画质")
+        for value in groups.get(group, [])
+    ] + list(custom)
+    saturation_level_constraint = _resolve_saturation_level_constraint(
+        natural_context,
+        saturation_level_values,
+    )
+    context_image_grain = detect_image_grain(natural_context)
+    negated_context_image_grain = detect_negated_image_grain(natural_context)
+    image_grain_values = [
+        value
+        for group in ("技术画质", "画面风格", "光影氛围")
+        for value in groups.get(group, [])
+    ] + list(custom)
+    image_grain_constraint = _resolve_image_grain_constraint(
+        natural_context,
+        image_grain_values,
+    )
+    context_image_sharpness = detect_image_sharpness(
+        natural_context,
+        require_context_scope=True,
+    )
+    negated_context_image_sharpness = detect_negated_image_sharpness(
+        natural_context,
+        require_context_scope=True,
+    )
+    image_sharpness_values = [
+        value
+        for group in ("技术画质", "画面风格", "光影氛围", "构图视角")
+        for value in groups.get(group, [])
+    ] + list(custom)
+    image_sharpness_constraint = _resolve_image_sharpness_constraint(
+        natural_context,
+        image_sharpness_values,
+    )
+    context_detail_density = detect_detail_density(natural_context)
+    negated_context_detail_density = detect_negated_detail_density(natural_context)
+    detail_density_values = [
+        value
+        for group in ("技术画质", "画面风格", "光影氛围", "构图视角")
+        for value in groups.get(group, [])
+    ] + list(custom)
+    detail_density_constraint = _resolve_detail_density_constraint(
+        natural_context,
+        detail_density_values,
+    )
+    context_visual_medium = detect_visual_medium(natural_context)
+    negated_context_visual_medium = detect_negated_visual_medium(natural_context)
+    visual_medium_values = [
+        value
+        for group in ("画面风格", "技术画质", "构图视角", "光影氛围")
+        for value in groups.get(group, [])
+    ] + list(custom)
+    visual_medium_constraint = _resolve_visual_medium_constraint(
+        natural_context,
+        visual_medium_values,
+    )
+    context_projection_geometry = detect_projection_geometry(natural_context)
+    negated_context_projection_geometry = detect_negated_projection_geometry(natural_context)
+    projection_geometry_values = [
+        value
+        for group in ("构图视角", "技术画质", "画面风格")
+        for value in groups.get(group, [])
+    ] + list(custom)
+    projection_geometry_constraint = _resolve_projection_geometry_constraint(
+        natural_context,
+        projection_geometry_values,
+    )
+    context_atmospheric_medium = detect_atmospheric_medium(natural_context)
+    negated_context_atmospheric_medium = detect_negated_atmospheric_medium(natural_context)
+    atmospheric_medium_values = [
+        value
+        for group in ("光影氛围", "场景背景", "技术画质", "画面风格")
+        for value in groups.get(group, [])
+    ] + list(custom)
+    atmospheric_medium_constraint = _resolve_atmospheric_medium_constraint(
+        natural_context,
+        atmospheric_medium_values,
+    )
+    context_background_complexity = detect_background_complexity(natural_context)
+    negated_context_background_complexity = detect_negated_background_complexity(natural_context)
+    background_complexity_values = [
+        value
+        for group in ("场景背景", "构图视角", "画面风格", "技术画质")
+        for value in groups.get(group, [])
+    ] + list(custom)
+    background_complexity_constraint = _resolve_background_complexity_constraint(
+        natural_context,
+        background_complexity_values,
     )
     primary_family, primary_world_evidence, primary_world_source = _resolve_primary_world_family(
         groups.get("场景背景", []),
@@ -2581,6 +3821,316 @@ def build_scene_relationship_graph(
                 ),
             }
         )
+    exposure_key_anchors = [
+        {"group": group, "value": value}
+        for group in ("光影氛围", "画面风格", "技术画质")
+        for value in groups.get(group, [])
+    ] + [{"group": "自定义补充", "value": value} for value in custom]
+    conflicting_exposure_key_anchors = _conflicting_exclusive_axis_anchors(
+        exposure_key_anchors,
+        exposure_key_constraint,
+        detect_exposure_key,
+        _EXPOSURE_KEY_LABELS,
+    )
+    if conflicting_exposure_key_anchors:
+        required_label = _clean(exposure_key_constraint.get("required_label"))
+        negated_labels = list(exposure_key_constraint.get("negated_labels", []) or [])
+        exposure_summary = (
+            f"固定为{required_label}"
+            if required_label
+            else "排除" + "/".join(str(item) for item in negated_labels)
+        )
+        coherence_issues.append(
+            {
+                "kind": "context_exposure_key_conflict",
+                "severity": "error",
+                "constraint": deepcopy(exposure_key_constraint),
+                "conflicting_anchors": conflicting_exposure_key_anchors,
+                "message": (
+                    f"自然语言已明确曝光调性“{exposure_summary}”，"
+                    "但当前光影、风格、画质或补充标签仍包含相反高低键关系。"
+                ),
+            }
+        )
+    contrast_level_anchors = [
+        {"group": group, "value": value}
+        for group in ("光影氛围", "画面风格", "技术画质")
+        for value in groups.get(group, [])
+    ] + [{"group": "自定义补充", "value": value} for value in custom]
+    conflicting_contrast_level_anchors = _conflicting_exclusive_axis_anchors(
+        contrast_level_anchors,
+        contrast_level_constraint,
+        detect_contrast_level,
+        _CONTRAST_LEVEL_LABELS,
+    )
+    if conflicting_contrast_level_anchors:
+        required_label = _clean(contrast_level_constraint.get("required_label"))
+        negated_labels = list(contrast_level_constraint.get("negated_labels", []) or [])
+        contrast_summary = (
+            f"固定为{required_label}"
+            if required_label
+            else "排除" + "/".join(str(item) for item in negated_labels)
+        )
+        coherence_issues.append(
+            {
+                "kind": "context_contrast_level_conflict",
+                "severity": "error",
+                "constraint": deepcopy(contrast_level_constraint),
+                "conflicting_anchors": conflicting_contrast_level_anchors,
+                "message": (
+                    f"自然语言已明确整体对比度“{contrast_summary}”，"
+                    "但当前光影、风格、画质或补充标签仍包含相反反差关系。"
+                ),
+            }
+        )
+    saturation_level_anchors = [
+        {"group": group, "value": value}
+        for group in ("光影氛围", "画面风格", "技术画质")
+        for value in groups.get(group, [])
+    ] + [{"group": "自定义补充", "value": value} for value in custom]
+    conflicting_saturation_level_anchors = _conflicting_exclusive_axis_anchors(
+        saturation_level_anchors,
+        saturation_level_constraint,
+        detect_saturation_level,
+        _SATURATION_LEVEL_LABELS,
+    )
+    if conflicting_saturation_level_anchors:
+        required_label = _clean(saturation_level_constraint.get("required_label"))
+        negated_labels = list(saturation_level_constraint.get("negated_labels", []) or [])
+        saturation_summary = (
+            f"固定为{required_label}"
+            if required_label
+            else "排除" + "/".join(str(item) for item in negated_labels)
+        )
+        coherence_issues.append(
+            {
+                "kind": "context_saturation_level_conflict",
+                "severity": "error",
+                "constraint": deepcopy(saturation_level_constraint),
+                "conflicting_anchors": conflicting_saturation_level_anchors,
+                "message": (
+                    f"自然语言已明确整体饱和度“{saturation_summary}”，"
+                    "但当前光影、风格、画质或补充标签仍包含相反色彩浓度。"
+                ),
+            }
+        )
+    image_grain_anchors = [
+        {"group": group, "value": value}
+        for group in ("技术画质", "画面风格", "光影氛围")
+        for value in groups.get(group, [])
+    ] + [{"group": "自定义补充", "value": value} for value in custom]
+    conflicting_image_grain_anchors = _conflicting_exclusive_axis_anchors(
+        image_grain_anchors,
+        image_grain_constraint,
+        detect_image_grain,
+        _IMAGE_GRAIN_LABELS,
+    )
+    if conflicting_image_grain_anchors:
+        required_label = _clean(image_grain_constraint.get("required_label"))
+        negated_labels = list(image_grain_constraint.get("negated_labels", []) or [])
+        grain_summary = (
+            f"固定为{required_label}"
+            if required_label
+            else "排除" + "/".join(str(item) for item in negated_labels)
+        )
+        coherence_issues.append(
+            {
+                "kind": "context_image_grain_conflict",
+                "severity": "error",
+                "constraint": deepcopy(image_grain_constraint),
+                "conflicting_anchors": conflicting_image_grain_anchors,
+                "message": (
+                    f"自然语言已明确成像颗粒质感“{grain_summary}”，"
+                    "但当前风格、光影、画质或补充标签仍包含相反颗粒关系。"
+                ),
+            }
+        )
+    image_sharpness_anchors = [
+        {"group": group, "value": value}
+        for group in ("技术画质", "画面风格", "光影氛围", "构图视角")
+        for value in groups.get(group, [])
+    ] + [{"group": "自定义补充", "value": value} for value in custom]
+    conflicting_image_sharpness_anchors = _conflicting_exclusive_axis_anchors(
+        image_sharpness_anchors,
+        image_sharpness_constraint,
+        detect_image_sharpness,
+        _IMAGE_SHARPNESS_LABELS,
+    )
+    if conflicting_image_sharpness_anchors:
+        required_label = _clean(image_sharpness_constraint.get("required_label"))
+        negated_labels = list(image_sharpness_constraint.get("negated_labels", []) or [])
+        sharpness_summary = (
+            f"固定为{required_label}"
+            if required_label
+            else "排除" + "/".join(str(item) for item in negated_labels)
+        )
+        coherence_issues.append(
+            {
+                "kind": "context_image_sharpness_conflict",
+                "severity": "error",
+                "constraint": deepcopy(image_sharpness_constraint),
+                "conflicting_anchors": conflicting_image_sharpness_anchors,
+                "message": (
+                    f"自然语言已明确整体成像锐度“{sharpness_summary}”，"
+                    "但当前风格、光影、构图、画质或补充标签仍包含相反锐度关系。"
+                ),
+            }
+        )
+    detail_density_anchors = [
+        {"group": group, "value": value}
+        for group in ("技术画质", "画面风格", "光影氛围", "构图视角")
+        for value in groups.get(group, [])
+    ] + [{"group": "自定义补充", "value": value} for value in custom]
+    conflicting_detail_density_anchors = _conflicting_exclusive_axis_anchors(
+        detail_density_anchors,
+        detail_density_constraint,
+        detect_detail_density,
+        _DETAIL_DENSITY_LABELS,
+    )
+    if conflicting_detail_density_anchors:
+        required_label = _clean(detail_density_constraint.get("required_label"))
+        negated_labels = list(detail_density_constraint.get("negated_labels", []) or [])
+        detail_summary = (
+            f"固定为{required_label}"
+            if required_label
+            else "排除" + "/".join(str(item) for item in negated_labels)
+        )
+        coherence_issues.append(
+            {
+                "kind": "context_detail_density_conflict",
+                "severity": "error",
+                "constraint": deepcopy(detail_density_constraint),
+                "conflicting_anchors": conflicting_detail_density_anchors,
+                "message": (
+                    f"自然语言已明确整体细节密度“{detail_summary}”，"
+                    "但当前风格、光影、构图、画质或补充标签仍包含相反细节密度。"
+                ),
+            }
+        )
+    visual_medium_anchors = [
+        {"group": group, "value": value}
+        for group in ("画面风格", "技术画质", "构图视角", "光影氛围")
+        for value in groups.get(group, [])
+    ] + [{"group": "自定义补充", "value": value} for value in custom]
+    conflicting_visual_medium_anchors = _conflicting_exclusive_axis_anchors(
+        visual_medium_anchors,
+        visual_medium_constraint,
+        detect_visual_medium,
+        _VISUAL_MEDIUM_LABELS,
+    )
+    if conflicting_visual_medium_anchors:
+        required_label = _clean(visual_medium_constraint.get("required_label"))
+        negated_labels = list(visual_medium_constraint.get("negated_labels", []) or [])
+        medium_summary = (
+            f"固定为{required_label}"
+            if required_label
+            else "排除" + "/".join(str(item) for item in negated_labels)
+        )
+        coherence_issues.append(
+            {
+                "kind": "context_visual_medium_conflict",
+                "severity": "error",
+                "constraint": deepcopy(visual_medium_constraint),
+                "conflicting_anchors": conflicting_visual_medium_anchors,
+                "message": (
+                    f"自然语言已明确画面媒介“{medium_summary}”，"
+                    "但当前风格、画质、构图、光影或补充标签仍包含相反成片媒介。"
+                ),
+            }
+        )
+    projection_geometry_anchors = [
+        {"group": group, "value": value}
+        for group in ("构图视角", "技术画质", "画面风格")
+        for value in groups.get(group, [])
+    ] + [{"group": "自定义补充", "value": value} for value in custom]
+    conflicting_projection_geometry_anchors = _conflicting_exclusive_axis_anchors(
+        projection_geometry_anchors,
+        projection_geometry_constraint,
+        detect_projection_geometry,
+        _PROJECTION_GEOMETRY_LABELS,
+    )
+    if conflicting_projection_geometry_anchors:
+        required_label = _clean(projection_geometry_constraint.get("required_label"))
+        negated_labels = list(projection_geometry_constraint.get("negated_labels", []) or [])
+        projection_summary = (
+            f"固定为{required_label}"
+            if required_label
+            else "排除" + "/".join(str(item) for item in negated_labels)
+        )
+        coherence_issues.append(
+            {
+                "kind": "context_projection_geometry_conflict",
+                "severity": "error",
+                "constraint": deepcopy(projection_geometry_constraint),
+                "conflicting_anchors": conflicting_projection_geometry_anchors,
+                "message": (
+                    f"自然语言已明确投影几何“{projection_summary}”，"
+                    "但当前构图、画质、风格或补充标签仍包含相反投影关系。"
+                ),
+            }
+        )
+    atmospheric_medium_anchors = [
+        {"group": group, "value": value}
+        for group in ("光影氛围", "场景背景", "技术画质", "画面风格")
+        for value in groups.get(group, [])
+    ] + [{"group": "自定义补充", "value": value} for value in custom]
+    conflicting_atmospheric_medium_anchors = _conflicting_exclusive_axis_anchors(
+        atmospheric_medium_anchors,
+        atmospheric_medium_constraint,
+        detect_atmospheric_medium,
+        _ATMOSPHERIC_MEDIUM_LABELS,
+    )
+    if conflicting_atmospheric_medium_anchors:
+        required_label = _clean(atmospheric_medium_constraint.get("required_label"))
+        negated_labels = list(atmospheric_medium_constraint.get("negated_labels", []) or [])
+        atmosphere_summary = (
+            f"固定为{required_label}"
+            if required_label
+            else "排除" + "/".join(str(item) for item in negated_labels)
+        )
+        coherence_issues.append(
+            {
+                "kind": "context_atmospheric_medium_conflict",
+                "severity": "error",
+                "constraint": deepcopy(atmospheric_medium_constraint),
+                "conflicting_anchors": conflicting_atmospheric_medium_anchors,
+                "message": (
+                    f"自然语言已明确大气介质与能见度“{atmosphere_summary}”，"
+                    "但当前光影、场景、画质、风格或补充标签仍包含相反空气状态。"
+                ),
+            }
+        )
+    background_complexity_anchors = [
+        {"group": group, "value": value}
+        for group in ("场景背景", "构图视角", "画面风格", "技术画质")
+        for value in groups.get(group, [])
+    ] + [{"group": "自定义补充", "value": value} for value in custom]
+    conflicting_background_complexity_anchors = _conflicting_exclusive_axis_anchors(
+        background_complexity_anchors,
+        background_complexity_constraint,
+        detect_background_complexity,
+        _BACKGROUND_COMPLEXITY_LABELS,
+    )
+    if conflicting_background_complexity_anchors:
+        required_label = _clean(background_complexity_constraint.get("required_label"))
+        negated_labels = list(background_complexity_constraint.get("negated_labels", []) or [])
+        background_summary = (
+            f"固定为{required_label}"
+            if required_label
+            else "排除" + "/".join(str(item) for item in negated_labels)
+        )
+        coherence_issues.append(
+            {
+                "kind": "context_background_complexity_conflict",
+                "severity": "error",
+                "constraint": deepcopy(background_complexity_constraint),
+                "conflicting_anchors": conflicting_background_complexity_anchors,
+                "message": (
+                    f"自然语言已明确背景复杂度“{background_summary}”，"
+                    "但当前场景、构图、风格、画质或补充标签仍包含相反背景密度。"
+                ),
+            }
+        )
     context_veto_anchor_keys: set[tuple[str, str]] = set()
     for family, negated_markers in negated_context_world_hits.items():
         family_wide_veto = bool(context_primary_family and context_primary_family != family)
@@ -2733,6 +4283,36 @@ def build_scene_relationship_graph(
         "natural_context_key_light_direction": context_key_light_direction,
         "negated_context_key_light_direction": negated_context_key_light_direction,
         "key_light_direction_constraint": key_light_direction_constraint,
+        "natural_context_exposure_key": context_exposure_key,
+        "negated_context_exposure_key": negated_context_exposure_key,
+        "exposure_key_constraint": exposure_key_constraint,
+        "natural_context_contrast_level": context_contrast_level,
+        "negated_context_contrast_level": negated_context_contrast_level,
+        "contrast_level_constraint": contrast_level_constraint,
+        "natural_context_saturation_level": context_saturation_level,
+        "negated_context_saturation_level": negated_context_saturation_level,
+        "saturation_level_constraint": saturation_level_constraint,
+        "natural_context_image_grain": context_image_grain,
+        "negated_context_image_grain": negated_context_image_grain,
+        "image_grain_constraint": image_grain_constraint,
+        "natural_context_image_sharpness": context_image_sharpness,
+        "negated_context_image_sharpness": negated_context_image_sharpness,
+        "image_sharpness_constraint": image_sharpness_constraint,
+        "natural_context_detail_density": context_detail_density,
+        "negated_context_detail_density": negated_context_detail_density,
+        "detail_density_constraint": detail_density_constraint,
+        "natural_context_visual_medium": context_visual_medium,
+        "negated_context_visual_medium": negated_context_visual_medium,
+        "visual_medium_constraint": visual_medium_constraint,
+        "natural_context_projection_geometry": context_projection_geometry,
+        "negated_context_projection_geometry": negated_context_projection_geometry,
+        "projection_geometry_constraint": projection_geometry_constraint,
+        "natural_context_atmospheric_medium": context_atmospheric_medium,
+        "negated_context_atmospheric_medium": negated_context_atmospheric_medium,
+        "atmospheric_medium_constraint": atmospheric_medium_constraint,
+        "natural_context_background_complexity": context_background_complexity,
+        "negated_context_background_complexity": negated_context_background_complexity,
+        "background_complexity_constraint": background_complexity_constraint,
         "context_primary_world_family": context_primary_family,
         "context_primary_world_evidence": context_primary_marker,
         "context_primary_world_source": context_primary_source,
@@ -3078,6 +4658,16 @@ def resolve_soft_scene_conflicts(
                 "context_camera_stability_conflict",
                 "context_focal_perspective_conflict",
                 "context_key_light_direction_conflict",
+                "context_exposure_key_conflict",
+                "context_contrast_level_conflict",
+                "context_saturation_level_conflict",
+                "context_image_grain_conflict",
+                "context_image_sharpness_conflict",
+                "context_detail_density_conflict",
+                "context_visual_medium_conflict",
+                "context_projection_geometry_conflict",
+                "context_atmospheric_medium_conflict",
+                "context_background_complexity_conflict",
             }:
                 conflict_anchors = [
                     dict(item) for item in issue.get("conflicting_anchors", []) if isinstance(item, dict)
@@ -3102,6 +4692,16 @@ def resolve_soft_scene_conflicts(
                         "context_camera_stability_conflict": "context_camera_stability",
                         "context_focal_perspective_conflict": "context_focal_perspective",
                         "context_key_light_direction_conflict": "context_key_light_direction",
+                        "context_exposure_key_conflict": "context_exposure_key",
+                        "context_contrast_level_conflict": "context_contrast_level",
+                        "context_saturation_level_conflict": "context_saturation_level",
+                        "context_image_grain_conflict": "context_image_grain",
+                        "context_image_sharpness_conflict": "context_image_sharpness",
+                        "context_detail_density_conflict": "context_detail_density",
+                        "context_visual_medium_conflict": "context_visual_medium",
+                        "context_projection_geometry_conflict": "context_projection_geometry",
+                        "context_atmospheric_medium_conflict": "context_atmospheric_medium",
+                        "context_background_complexity_conflict": "context_background_complexity",
                     }[issue["kind"]]
                     remove_anchors(conflict_anchors, side=side, issue=issue)
                 continue
@@ -3150,6 +4750,16 @@ def classify_repair_reason(reason: Any) -> dict[str, str]:
         ("camera_stability", ("镜头稳定性",), "只修正稳定固定机位与手持晃动镜头冲突，不改变机位角度、景别、动作、主体、场景或剧情顺序。"),
         ("focal_perspective", ("焦段透视",), "只修正广角空间延展与长焦空间压缩冲突，不改变景别、机位、主体、动作、场景或剧情顺序。"),
         ("key_light_direction", ("主光方向",), "只修正正面、侧向、背后或顶部主光冲突，不改变光质、色温、主体、场景、材质或剧情顺序。"),
+        ("exposure_key", ("曝光调性",), "只修正高调高键与低调低键曝光冲突，不改变光质、色温、主光方向、主体、场景或剧情顺序。"),
+        ("contrast_level", ("整体对比度",), "只修正整体高对比与低对比冲突，不改变曝光调性、光质、色温、主光方向、主体或剧情顺序。"),
+        ("saturation_level", ("整体饱和度",), "只修正整体高饱和与低饱和或去饱和冲突，不改变颜色模式、色温、对比度、主体、场景或剧情顺序。"),
+        ("image_grain", ("成像颗粒质感",), "只修正胶片颗粒、可见噪点与干净无颗粒数字成像的冲突，不改变景深、运动呈现、光质、主体、场景或剧情顺序。"),
+        ("image_sharpness", ("整体成像锐度",), "只修正锐利清晰成像与整体柔焦或软焦冲突，不改变景深、运动模糊、雾气、光质、主体、场景或剧情顺序。"),
+        ("detail_density", ("整体细节密度",), "只修正高细节、高密度纹理与简化低细节渲染冲突，不改变分辨率、锐度、颗粒、风格、主体、场景或剧情顺序。"),
+        ("visual_medium", ("画面媒介",), "只修正二维绘制、三维渲染与摄影实拍之间的成片媒介冲突，不改变画风、材质、锐度、细节、主体、场景或剧情顺序。"),
+        ("projection_geometry", ("投影几何",), "只修正正交、线性透视、轴测或鱼眼投影冲突，不改变景别、机位方向、焦段、画面媒介、主体、场景或剧情顺序。"),
+        ("atmospheric_medium", ("大气介质", "能见度"), "只修正通透空气、薄雾浓雾与烟雾烟尘之间的空气状态冲突，不改变光质、色温、天气、景深、主体、场景或剧情顺序。"),
+        ("background_complexity", ("背景复杂度",), "只修正简洁无杂物背景与丰富繁复环境背景之间的冲突，不改变主体、必要道具、接触阴影、画面媒介、场景世界或剧情顺序。"),
         ("language", ("语言",), "只把正文改为当前要求的语言，不改变任何视觉事实与剧情顺序。"),
         ("layout", ("画面结构",), "只修正单帧、人数或多视图结构，不增加人物副本、额外视角或分屏。"),
         ("wrapper", ("分析", "占位符"), "删除分析、占位符、标题和标签包装，只返回可直接使用的自然语言正文。"),
@@ -3443,6 +5053,197 @@ def candidate_world_violation(original: str, candidate: str, scene_graph: Any) -
                     f"模型响应越过主光方向约束：要求“{expected}”，"
                     f"却新增了“{markers[0]}”。"
                 )
+    exposure_key_constraint = dict(scene_graph.get("exposure_key_constraint", {}) or {})
+    if exposure_key_constraint:
+        required = _clean(exposure_key_constraint.get("required_value"))
+        negated_values = set(exposure_key_constraint.get("negated_values", []) or [])
+        original_exposure = set(detect_exposure_key(original))
+        candidate_exposure = detect_exposure_key(candidate)
+        for value, markers in candidate_exposure.items():
+            if value in original_exposure:
+                continue
+            if value in negated_values or (required and value != required):
+                expected = _clean(exposure_key_constraint.get("required_label")) or "排除曝光调性"
+                return (
+                    f"模型响应越过曝光调性约束：要求“{expected}”，"
+                    f"却新增了“{markers[0]}”。"
+                )
+    contrast_level_constraint = dict(scene_graph.get("contrast_level_constraint", {}) or {})
+    if contrast_level_constraint:
+        required = _clean(contrast_level_constraint.get("required_value"))
+        negated_values = set(contrast_level_constraint.get("negated_values", []) or [])
+        original_contrast = set(detect_contrast_level(original))
+        candidate_contrast = detect_contrast_level(candidate)
+        for value, markers in candidate_contrast.items():
+            if value in original_contrast:
+                continue
+            if value in negated_values or (required and value != required):
+                expected = _clean(contrast_level_constraint.get("required_label")) or "排除整体对比度"
+                return (
+                    f"模型响应越过整体对比度约束：要求“{expected}”，"
+                    f"却新增了“{markers[0]}”。"
+                )
+    saturation_level_constraint = dict(scene_graph.get("saturation_level_constraint", {}) or {})
+    if saturation_level_constraint:
+        required = _clean(saturation_level_constraint.get("required_value"))
+        negated_values = set(saturation_level_constraint.get("negated_values", []) or [])
+        original_saturation = set(detect_saturation_level(original))
+        candidate_saturation = detect_saturation_level(candidate)
+        for value, markers in candidate_saturation.items():
+            if value in original_saturation:
+                continue
+            if value in negated_values or (required and value != required):
+                expected = _clean(saturation_level_constraint.get("required_label")) or "排除整体饱和度"
+                return (
+                    f"模型响应越过整体饱和度约束：要求“{expected}”，"
+                    f"却新增了“{markers[0]}”。"
+                )
+    image_grain_constraint = dict(scene_graph.get("image_grain_constraint", {}) or {})
+    if image_grain_constraint:
+        required = _clean(image_grain_constraint.get("required_value"))
+        negated_values = set(image_grain_constraint.get("negated_values", []) or [])
+        original_grain = set(detect_image_grain(original))
+        candidate_grain = detect_image_grain(candidate)
+        for value, markers in candidate_grain.items():
+            if value in original_grain:
+                continue
+            if value in negated_values or (required and value != required):
+                expected = _clean(image_grain_constraint.get("required_label")) or "排除成像颗粒质感"
+                return (
+                    f"模型响应越过成像颗粒质感约束：要求“{expected}”，"
+                    f"却新增了“{markers[0]}”。"
+                )
+    image_sharpness_constraint = dict(scene_graph.get("image_sharpness_constraint", {}) or {})
+    if image_sharpness_constraint:
+        required = _clean(image_sharpness_constraint.get("required_value"))
+        negated_values = set(image_sharpness_constraint.get("negated_values", []) or [])
+        original_sharpness = set(
+            detect_image_sharpness(original, require_context_scope=True)
+        )
+        candidate_sharpness = (
+            {}
+            if _SELECTIVE_IMAGE_SHARPNESS_RE.search(_clean(candidate))
+            else detect_image_sharpness(candidate, require_context_scope=True)
+        )
+        for value, markers in candidate_sharpness.items():
+            if value in original_sharpness:
+                continue
+            if value in negated_values or (required and value != required):
+                expected = _clean(image_sharpness_constraint.get("required_label")) or "排除整体成像锐度"
+                return (
+                    f"模型响应越过整体成像锐度约束：要求“{expected}”，"
+                    f"却新增了“{markers[0]}”。"
+                )
+    detail_density_constraint = dict(scene_graph.get("detail_density_constraint", {}) or {})
+    if detail_density_constraint:
+        required = _clean(detail_density_constraint.get("required_value"))
+        negated_values = set(detail_density_constraint.get("negated_values", []) or [])
+        original_detail = set(detect_detail_density(original))
+        candidate_detail = (
+            {}
+            if _SELECTIVE_DETAIL_DENSITY_RE.search(_clean(candidate))
+            else detect_detail_density(candidate)
+        )
+        for value, markers in candidate_detail.items():
+            if value in original_detail:
+                continue
+            if value in negated_values or (required and value != required):
+                expected = _clean(detail_density_constraint.get("required_label")) or "排除整体细节密度"
+                return (
+                    f"模型响应越过整体细节密度约束：要求“{expected}”，"
+                    f"却新增了“{markers[0]}”。"
+                )
+    visual_medium_constraint = dict(scene_graph.get("visual_medium_constraint", {}) or {})
+    if visual_medium_constraint:
+        required = _clean(visual_medium_constraint.get("required_value"))
+        negated_values = set(visual_medium_constraint.get("negated_values", []) or [])
+        original_medium = set(detect_visual_medium(original))
+        candidate_medium = (
+            {}
+            if _MIXED_VISUAL_MEDIUM_RE.search(_clean(candidate))
+            else detect_visual_medium(candidate)
+        )
+        for value, markers in candidate_medium.items():
+            if value in original_medium:
+                continue
+            if value in negated_values or (required and value != required):
+                expected = _clean(visual_medium_constraint.get("required_label")) or "排除画面媒介"
+                return (
+                    f"模型响应越过画面媒介约束：要求“{expected}”，"
+                    f"却新增了“{markers[0]}”。"
+                )
+    projection_geometry_constraint = dict(
+        scene_graph.get("projection_geometry_constraint", {}) or {}
+    )
+    if projection_geometry_constraint:
+        required = _clean(projection_geometry_constraint.get("required_value"))
+        negated_values = set(projection_geometry_constraint.get("negated_values", []) or [])
+        original_projection = set(detect_projection_geometry(original))
+        candidate_projection = (
+            {}
+            if _MIXED_PROJECTION_GEOMETRY_RE.search(_clean(candidate))
+            else detect_projection_geometry(candidate)
+        )
+        for value, markers in candidate_projection.items():
+            if value in original_projection:
+                continue
+            if value in negated_values or (required and value != required):
+                expected = (
+                    _clean(projection_geometry_constraint.get("required_label"))
+                    or "排除投影几何"
+                )
+                return (
+                    f"模型响应越过投影几何约束：要求“{expected}”，"
+                    f"却新增了“{markers[0]}”。"
+                )
+    atmospheric_medium_constraint = dict(
+        scene_graph.get("atmospheric_medium_constraint", {}) or {}
+    )
+    if atmospheric_medium_constraint:
+        required = _clean(atmospheric_medium_constraint.get("required_value"))
+        negated_values = set(atmospheric_medium_constraint.get("negated_values", []) or [])
+        original_atmosphere = set(detect_atmospheric_medium(original))
+        candidate_atmosphere = (
+            {}
+            if _MIXED_ATMOSPHERIC_MEDIUM_RE.search(_clean(candidate))
+            else detect_atmospheric_medium(candidate)
+        )
+        for value, markers in candidate_atmosphere.items():
+            if value in original_atmosphere:
+                continue
+            if value in negated_values or (required and value != required):
+                expected = (
+                    _clean(atmospheric_medium_constraint.get("required_label"))
+                    or "排除大气介质与能见度"
+                )
+                return (
+                    f"模型响应越过大气介质与能见度约束：要求“{expected}”，"
+                    f"却新增了“{markers[0]}”。"
+                )
+    background_complexity_constraint = dict(
+        scene_graph.get("background_complexity_constraint", {}) or {}
+    )
+    if background_complexity_constraint:
+        required = _clean(background_complexity_constraint.get("required_value"))
+        negated_values = set(background_complexity_constraint.get("negated_values", []) or [])
+        original_background = set(detect_background_complexity(original))
+        candidate_background = (
+            {}
+            if _MIXED_BACKGROUND_COMPLEXITY_RE.search(_clean(candidate))
+            else detect_background_complexity(candidate)
+        )
+        for value, markers in candidate_background.items():
+            if value in original_background:
+                continue
+            if value in negated_values or (required and value != required):
+                expected = (
+                    _clean(background_complexity_constraint.get("required_label"))
+                    or "排除背景复杂度"
+                )
+                return (
+                    f"模型响应越过背景复杂度约束：要求“{expected}”，"
+                    f"却新增了“{markers[0]}”。"
+                )
     return ""
 
 
@@ -3508,6 +5309,17 @@ __all__ = [
     "CAMERA_STABILITY_MARKERS",
     "FOCAL_PERSPECTIVE_MARKERS",
     "KEY_LIGHT_DIRECTION_MARKERS",
+    "EXPOSURE_KEY_MARKERS",
+    "CONTRAST_LEVEL_MARKERS",
+    "SATURATION_LEVEL_MARKERS",
+    "IMAGE_GRAIN_MARKERS",
+    "IMAGE_SHARPNESS_MARKERS",
+    "DETAIL_DENSITY_MARKERS",
+    "VISUAL_MEDIUM_MARKERS",
+    "PROJECTION_GEOMETRY_MARKERS",
+    "ATMOSPHERIC_MEDIUM_MARKERS",
+    "BACKGROUND_COMPLEXITY_MARKERS",
+    "INTELLIGENCE_V42_RULE_EXPANSIONS",
     "apply_relation_hint_resolution",
     "build_intelligence_profile",
     "build_scene_relationship_graph",
@@ -3516,21 +5328,41 @@ __all__ = [
     "detect_camera_angle",
     "detect_camera_stability",
     "detect_color_rendering",
+    "detect_contrast_level",
+    "detect_detail_density",
+    "detect_visual_medium",
+    "detect_projection_geometry",
+    "detect_atmospheric_medium",
+    "detect_background_complexity",
     "detect_depth_of_field",
+    "detect_exposure_key",
     "detect_focal_perspective",
+    "detect_image_grain",
+    "detect_image_sharpness",
     "detect_lighting_quality",
     "detect_motion_rendering",
+    "detect_saturation_level",
     "detect_human_subject_intrusions",
     "detect_key_light_direction",
     "detect_light_temperature",
     "detect_negated_camera_angle",
     "detect_negated_camera_stability",
     "detect_negated_color_rendering",
+    "detect_negated_contrast_level",
+    "detect_negated_detail_density",
+    "detect_negated_visual_medium",
+    "detect_negated_projection_geometry",
+    "detect_negated_atmospheric_medium",
+    "detect_negated_background_complexity",
     "detect_negated_depth_of_field",
+    "detect_negated_exposure_key",
     "detect_negated_focal_perspective",
+    "detect_negated_image_grain",
+    "detect_negated_image_sharpness",
     "detect_negated_key_light_direction",
     "detect_negated_lighting_quality",
     "detect_negated_motion_rendering",
+    "detect_negated_saturation_level",
     "detect_negated_light_temperature",
     "detect_negated_world_families",
     "detect_negated_scene_attributes",

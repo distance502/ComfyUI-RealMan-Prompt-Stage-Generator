@@ -2017,6 +2017,188 @@ def _skill_context_for_model(settings: dict[str, Any]) -> str:
                 "智能主光方向：" + direction_text
                 + "。图片和每段视频分镜不得自行切换正面、侧向、背后或顶部主光；侧逆光、轮廓补光、三点布光及连续灯位变化保持开放。"
             )
+        exposure_key_constraint = dict(scene_graph.get("exposure_key_constraint", {}) or {})
+        if exposure_key_constraint:
+            required_label = str(exposure_key_constraint.get("required_label", "") or "").strip()
+            negated_labels = [
+                str(item).strip()
+                for item in list(exposure_key_constraint.get("negated_labels", []) or [])
+                if str(item).strip()
+            ]
+            exposure_text = (
+                f"曝光调性固定为{required_label}"
+                if required_label
+                else "曝光调性不得采用" + "、".join(negated_labels)
+            )
+            extra_lines.append(
+                "智能曝光调性：" + exposure_text
+                + "。图片和每段视频分镜不得自行切换高调高键或低调低键曝光；明确的明暗分区、混合曝光设计及连续调性变化保持开放。"
+            )
+        contrast_level_constraint = dict(scene_graph.get("contrast_level_constraint", {}) or {})
+        if contrast_level_constraint:
+            required_label = str(contrast_level_constraint.get("required_label", "") or "").strip()
+            negated_labels = [
+                str(item).strip()
+                for item in list(contrast_level_constraint.get("negated_labels", []) or [])
+                if str(item).strip()
+            ]
+            contrast_text = (
+                f"整体对比度固定为{required_label}"
+                if required_label
+                else "整体对比度不得采用" + "、".join(negated_labels)
+            )
+            extra_lines.append(
+                "智能整体对比度：" + contrast_text
+                + "。图片和每段视频分镜不得自行切换整体高反差或低反差；局部对比、HDR、镜像或前景弱化、分区对比及连续反差变化保持开放。"
+            )
+        saturation_level_constraint = dict(scene_graph.get("saturation_level_constraint", {}) or {})
+        if saturation_level_constraint:
+            required_label = str(saturation_level_constraint.get("required_label", "") or "").strip()
+            negated_labels = [
+                str(item).strip()
+                for item in list(saturation_level_constraint.get("negated_labels", []) or [])
+                if str(item).strip()
+            ]
+            saturation_text = (
+                f"整体饱和度固定为{required_label}"
+                if required_label
+                else "整体饱和度不得采用" + "、".join(negated_labels)
+            )
+            extra_lines.append(
+                "智能整体饱和度：" + saturation_text
+                + "。图片和每段视频分镜不得自行切换整体高饱和或低饱和、去饱和色彩；局部彩色、选择性饱和、肤色独立控制及连续褪色变化保持开放。"
+            )
+        image_grain_constraint = dict(scene_graph.get("image_grain_constraint", {}) or {})
+        if image_grain_constraint:
+            required_label = str(image_grain_constraint.get("required_label", "") or "").strip()
+            negated_labels = [
+                str(item).strip()
+                for item in list(image_grain_constraint.get("negated_labels", []) or [])
+                if str(item).strip()
+            ]
+            grain_text = (
+                f"成像颗粒质感固定为{required_label}"
+                if required_label
+                else "成像颗粒质感不得采用" + "、".join(negated_labels)
+            )
+            extra_lines.append(
+                "智能成像颗粒质感：" + grain_text
+                + "。图片和每段视频分镜不得自行加入或移除全局胶片颗粒、可见噪点；局部颗粒、扫描或印刷纹理、主体与背景分区及连续质感转换保持开放。"
+            )
+        image_sharpness_constraint = dict(scene_graph.get("image_sharpness_constraint", {}) or {})
+        if image_sharpness_constraint:
+            required_label = str(image_sharpness_constraint.get("required_label", "") or "").strip()
+            negated_labels = [
+                str(item).strip()
+                for item in list(image_sharpness_constraint.get("negated_labels", []) or [])
+                if str(item).strip()
+            ]
+            sharpness_text = (
+                f"整体成像锐度固定为{required_label}"
+                if required_label
+                else "整体成像锐度不得采用" + "、".join(negated_labels)
+            )
+            extra_lines.append(
+                "智能整体成像锐度：" + sharpness_text
+                + "。图片和每段视频分镜不得自行切换全局锐利清晰与柔焦软焦；浅景深、背景或前景虚化、运动模糊、皮肤柔化、雾气和局部锐度设计保持独立。"
+            )
+        detail_density_constraint = dict(scene_graph.get("detail_density_constraint", {}) or {})
+        if detail_density_constraint:
+            required_label = str(detail_density_constraint.get("required_label", "") or "").strip()
+            negated_labels = [
+                str(item).strip()
+                for item in list(detail_density_constraint.get("negated_labels", []) or [])
+                if str(item).strip()
+            ]
+            detail_text = (
+                f"整体细节密度固定为{required_label}"
+                if required_label
+                else "整体细节密度不得采用" + "、".join(negated_labels)
+            )
+            extra_lines.append(
+                "智能整体细节密度：" + detail_text
+                + "。图片和每段视频分镜不得自行切换高密度纹理与简化低细节渲染；主体背景分区、距离层级、局部细化及连续细节变化保持开放，分辨率与锐度按独立事实处理。"
+            )
+        visual_medium_constraint = dict(scene_graph.get("visual_medium_constraint", {}) or {})
+        if visual_medium_constraint:
+            required_label = str(visual_medium_constraint.get("required_label", "") or "").strip()
+            negated_labels = [
+                str(item).strip()
+                for item in list(visual_medium_constraint.get("negated_labels", []) or [])
+                if str(item).strip()
+            ]
+            medium_text = (
+                f"画面媒介固定为{required_label}"
+                if required_label
+                else "画面媒介不得采用" + "、".join(negated_labels)
+            )
+            extra_lines.append(
+                "智能画面媒介：" + medium_text
+                + "。图片和每段视频分镜不得自行在二维绘制、三维或 CG 渲染、摄影实拍之间切换；明确的混合媒介、2.5D、屏幕或海报内嵌画面及连续媒介转场保持开放。"
+            )
+        projection_geometry_constraint = dict(
+            scene_graph.get("projection_geometry_constraint", {}) or {}
+        )
+        if projection_geometry_constraint:
+            required_label = str(
+                projection_geometry_constraint.get("required_label", "") or ""
+            ).strip()
+            negated_labels = [
+                str(item).strip()
+                for item in list(projection_geometry_constraint.get("negated_labels", []) or [])
+                if str(item).strip()
+            ]
+            projection_text = (
+                f"投影几何固定为{required_label}"
+                if required_label
+                else "投影几何不得采用" + "、".join(negated_labels)
+            )
+            extra_lines.append(
+                "智能投影几何：" + projection_text
+                + "。图片和每段视频分镜不得自行在正交、线性透视、轴测或鱼眼投影之间切换；明确的辅助视图、示意图叠层、混合投影设计及连续投影转场保持开放。"
+            )
+        atmospheric_medium_constraint = dict(
+            scene_graph.get("atmospheric_medium_constraint", {}) or {}
+        )
+        if atmospheric_medium_constraint:
+            required_label = str(
+                atmospheric_medium_constraint.get("required_label", "") or ""
+            ).strip()
+            negated_labels = [
+                str(item).strip()
+                for item in list(atmospheric_medium_constraint.get("negated_labels", []) or [])
+                if str(item).strip()
+            ]
+            atmosphere_text = (
+                f"大气介质与能见度固定为{required_label}"
+                if required_label
+                else "大气介质与能见度不得采用" + "、".join(negated_labels)
+            )
+            extra_lines.append(
+                "智能大气介质与能见度：" + atmosphere_text
+                + "。图片和每段视频分镜不得自行在通透空气、薄雾或浓雾、烟雾或烟尘之间切换；前后景分区、局部火源烟气、雾烟混合及连续消散转场保持开放。"
+            )
+        background_complexity_constraint = dict(
+            scene_graph.get("background_complexity_constraint", {}) or {}
+        )
+        if background_complexity_constraint:
+            required_label = str(
+                background_complexity_constraint.get("required_label", "") or ""
+            ).strip()
+            negated_labels = [
+                str(item).strip()
+                for item in list(background_complexity_constraint.get("negated_labels", []) or [])
+                if str(item).strip()
+            ]
+            background_text = (
+                f"背景复杂度固定为{required_label}"
+                if required_label
+                else "背景复杂度不得采用" + "、".join(negated_labels)
+            )
+            extra_lines.append(
+                "智能背景复杂度：" + background_text
+                + "。图片和每段视频分镜不得自行在简洁无杂物背景与丰富繁复环境背景之间切换；单个必要道具、底座、接触阴影、辅助情境图及连续背景展开保持开放。"
+            )
         cardinality_constraint = dict(scene_graph.get("context_subject_cardinality_constraint", {}) or {})
         if cardinality_constraint:
             required_label = str(cardinality_constraint.get("required_label", "") or "").strip()
