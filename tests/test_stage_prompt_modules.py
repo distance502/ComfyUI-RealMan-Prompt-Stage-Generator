@@ -749,7 +749,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
             )
 
         payload = json.loads(result[3])
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v61")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 2)
         self.assertEqual(payload["scene_coherence_status"], "coherent")
         self.assertEqual(payload["model_intelligence_skip_count"], 0)
@@ -1033,7 +1033,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
             )
 
         payload = json.loads(result[3])
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v61")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 2)
         self.assertEqual(payload["scene_relationship_graph"]["primary_world_family"], "natural_wilderness")
         self.assertEqual(payload["scene_coherence_status"], "coherent")
@@ -1125,7 +1125,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
             )
 
         payload = json.loads(result[3])
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v61")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(payload["scene_relationship_graph"]["primary_world_family"], "natural_wilderness")
         self.assertEqual(payload["scene_coherence_status"], "coherent")
@@ -1231,7 +1231,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
             )
 
         payload = json.loads(result[3])
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v61")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(payload["scene_coherence_status"], "coherent")
         self.assertNotIn("操作控制台", payload["selected_tags_flat"])
@@ -1321,7 +1321,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v61")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["primary_world_family"], "urban_space")
         self.assertEqual(graph["context_primary_world_source"], "natural_context_override")
@@ -1404,6 +1404,1451 @@ class TestStagePromptIntelligence(unittest.TestCase):
         self.assertIn("场景属性约束", violation)
         self.assertTrue("月光" in violation or "暴雨" in violation)
 
+    def test_candidate_scene_attribute_guard_infers_conflicting_physical_feedback(self) -> None:
+        cases = (
+            (
+                "昼夜",
+                OrderedDict({"主体": ["旅人"], "光影氛围": ["硬日光"]}),
+                "旅人在硬日光下前进。",
+                "繁星逐渐铺满天幕。",
+                "time_of_day",
+            ),
+            (
+                "降水",
+                OrderedDict({"主体": ["旅人"], "光影氛围": ["雨天"]}),
+                "旅人在雨天前进。",
+                "降水已经完全停止，云层彻底散尽。",
+                "precipitation",
+            ),
+            (
+                "风势",
+                OrderedDict({"主体": ["旅人"], "光影氛围": ["无风"]}),
+                "无风环境里，旅人保持站立。",
+                "她的长发与衣摆被猛烈掀向一侧。",
+                "wind",
+            ),
+            (
+                "环境温度",
+                OrderedDict({"主体": ["旅人"], "光影氛围": ["炎热环境"]}),
+                "炎热环境里，旅人继续前进。",
+                "她每次呼气都凝成一团白雾。",
+                "ambient_temperature",
+            ),
+            (
+                "地表状态",
+                OrderedDict({"主体": ["旅人"], "场景背景": ["干燥地面"]}),
+                "旅人踩过干燥地面。",
+                "她的脚步连续溅起水花。",
+                "ground_surface",
+            ),
+            (
+                "空间围合",
+                OrderedDict({"主体": ["旅人"], "场景背景": ["室内场景"]}),
+                "旅人沿室内场景的墙边前进。",
+                "人物上方是完全无遮蔽的天空。",
+                "spatial_enclosure",
+            ),
+            (
+                "主导照明来源",
+                OrderedDict({"主体": ["旅人"], "光影氛围": ["自然光照明"]}),
+                "旅人由自然光照明。",
+                "棚灯随后接管全局主光。",
+                "dominant_light_source",
+            ),
+            (
+                "风势",
+                OrderedDict({"主体": ["旅人"], "光影氛围": ["无风"]}),
+                "The traveler stands in still air.",
+                " Her hair is blown sideways across her face.",
+                "wind",
+            ),
+        )
+        for axis_label, selected, original, addition, axis in cases:
+            with self.subTest(axis=axis):
+                graph = intelligence.build_scene_relationship_graph(selected)
+                violation = intelligence.candidate_world_violation(
+                    original,
+                    original + addition,
+                    graph,
+                )
+                repair = intelligence.classify_repair_reason(violation)
+                self.assertIn(f"{axis_label}要求", violation)
+                self.assertIn("直接视觉反馈", violation)
+                self.assertEqual(repair["kind"], f"scene_attribute_{axis}")
+
+    def test_negated_scene_attribute_feedback_does_not_trigger_candidate_guard(self) -> None:
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["旅人"], "光影氛围": ["无风"]})
+        )
+        original = "无风环境里，旅人的发丝和衣摆自然垂落。"
+        candidate = original + "不要让长发与衣摆猛烈掀向一侧，保持空气静止。"
+        self.assertEqual(
+            intelligence.candidate_world_violation(original, candidate, graph),
+            "",
+        )
+
+        consistent_candidate = original + "发丝和衣摆依然纹丝不动，烟雾垂直上升。"
+        self.assertEqual(
+            intelligence.candidate_world_violation(original, consistent_candidate, graph),
+            "",
+        )
+
+        feedback_only_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["旅人"]}),
+            context_text="她的长发与衣摆被猛烈掀向一侧，但用户没有指定环境风势。",
+        )
+        self.assertNotIn("wind", feedback_only_graph["scene_attribute_constraints"])
+
+    def test_selected_weather_state_reaches_model_contract_and_candidate_guard(self) -> None:
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["旅人"], "光影氛围": ["霓虹雨夜"]})
+        )
+        constraints = graph["scene_attribute_constraints"]
+        violation = intelligence.candidate_world_violation(
+            "旅人在霓虹雨夜穿过街道。",
+            "旅人在霓虹雨夜穿过街道，天空忽然转为晴朗无云。",
+            graph,
+        )
+        model_prompt = model_refiner._compose_batch_prompt(
+            ["旅人在霓虹雨夜穿过街道。"],
+            {"提示词语言": "纯中文", "智能场景关系图": graph},
+        )
+        self.assertEqual(constraints["precipitation"]["required_value"], "rain")
+        self.assertEqual(constraints["precipitation"]["source"], "selected_state")
+        self.assertEqual(constraints["time_of_day"]["required_value"], "night")
+        self.assertEqual(constraints["time_of_day"]["source"], "selected_state")
+        self.assertIn("场景属性约束", violation)
+        self.assertIn("晴朗", violation)
+        self.assertIn("昼夜固定为夜晚", model_prompt)
+        self.assertIn("降水固定为降雨", model_prompt)
+
+    def test_explicit_weather_transition_suppresses_selected_state_fallback(self) -> None:
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["旅人"], "光影氛围": ["霓虹雨夜"]}),
+            context_text="故事从霓虹雨夜开始，随后在晴朗清晨结束。",
+        )
+        violation = intelligence.candidate_world_violation(
+            "旅人在霓虹雨夜出发。",
+            "旅人在霓虹雨夜出发，随后雨停云散，最终在晴朗清晨抵达。",
+            graph,
+        )
+        self.assertEqual(graph["context_scene_attribute_constraints"], {})
+        self.assertEqual(graph["scene_attribute_constraints"], {})
+        self.assertEqual(violation, "")
+
+    def test_natural_weather_constraint_overrides_selected_state_source(self) -> None:
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["旅人"], "光影氛围": ["霓虹雨夜"]}),
+            context_text="画面固定为正午晴天，不要夜晚或降雨。",
+        )
+        constraints = graph["scene_attribute_constraints"]
+        self.assertEqual(constraints["time_of_day"]["required_value"], "day")
+        self.assertEqual(constraints["precipitation"]["required_value"], "clear")
+        self.assertEqual(constraints["time_of_day"]["source"], "natural_context")
+        self.assertEqual(constraints["precipitation"]["source"], "natural_context")
+
+    def test_selected_calm_wind_reaches_model_contract_and_candidate_guard(self) -> None:
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["旅人"], "光影氛围": ["无风静谧空气"]})
+        )
+        constraint = graph["scene_attribute_constraints"]["wind"]
+        violation = intelligence.candidate_world_violation(
+            "无风环境里，旅人的发丝和衣摆自然垂落。",
+            "无风环境里，旅人的发丝和衣摆突然被狂风卷起。",
+            graph,
+        )
+        model_prompt = model_refiner._compose_batch_prompt(
+            ["无风环境里，旅人的发丝和衣摆自然垂落。"],
+            {"提示词语言": "纯中文", "智能场景关系图": graph},
+        )
+        self.assertEqual(constraint["required_value"], "calm")
+        self.assertEqual(constraint["source"], "selected_state")
+        self.assertIn("场景属性约束", violation)
+        self.assertIn("狂风", violation)
+        self.assertIn("风势固定为静风", model_prompt)
+        self.assertIn("发丝衣摆", model_prompt)
+        self.assertNotIn("地面反光", model_prompt)
+
+    def test_natural_calm_wind_removes_only_conflicting_soft_anchor(self) -> None:
+        selected = OrderedDict(
+            {"主体": ["旅人"], "光影氛围": ["无风静谧空气", "猛烈阵风"]}
+        )
+        graph = intelligence.build_scene_relationship_graph(
+            selected,
+            context_text="场景保持无风，不要强风或狂风。",
+        )
+        repaired, _custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            [],
+            graph,
+            soft_tags=["猛烈阵风"],
+        )
+        constraint = graph["scene_attribute_constraints"]["wind"]
+        self.assertEqual(constraint["required_value"], "calm")
+        self.assertEqual(constraint["source"], "natural_context")
+        self.assertEqual(repaired["光影氛围"], ["无风静谧空气"])
+        self.assertEqual(report["removed_count"], 1)
+        self.assertEqual(report["removed"][0]["side"], "context_scene_attribute")
+
+    def test_explicit_wind_conflict_is_guarded(self) -> None:
+        selected = OrderedDict({"主体": ["旅人"], "光影氛围": ["狂风"]})
+        graph = intelligence.build_scene_relationship_graph(
+            selected,
+            context_text="场景固定为无风环境，不要强风。",
+        )
+        unchanged, _custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            [],
+            graph,
+            soft_tags=[],
+        )
+        strategy = intelligence.resolve_model_strategy(
+            {"模型来源": "本地模型"},
+            {"task_type": "standard_visual_story"},
+            graph,
+        )
+        self.assertFalse(report["applied"])
+        self.assertEqual(unchanged, selected)
+        self.assertEqual(strategy["mode"], "skill_only_guarded")
+
+    def test_wind_transition_and_nonwind_style_language_remain_open(self) -> None:
+        transition = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["旅人"], "光影氛围": ["无风静谧空气"]}),
+            context_text="镜头开始时无风，随后微风增强，最终转为狂风。",
+        )
+        nonwind = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["旅人"]}),
+            context_text="画风强烈，角色风格克制，保持统一视觉风格。",
+        )
+        self.assertNotIn("wind", transition["context_scene_attribute_constraints"])
+        self.assertNotIn("wind", transition["scene_attribute_constraints"])
+        self.assertNotIn("wind", nonwind["scene_attribute_constraints"])
+
+    def test_wind_repair_reaches_full_stage(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+
+        def inject_strong_wind(selected, custom_tags, settings, **_kwargs):
+            next_selected = OrderedDict((group, list(values)) for group, values in selected.items())
+            settings["运行时随机有效种子"] = 271
+            return next_selected, [*custom_tags, "狂风卷动衣摆"], ["狂风卷动衣摆"]
+
+        with mock.patch.object(module, "_build_runtime_tags", side_effect=inject_strong_wind):
+            result = module._run_stage(
+                None,
+                **{
+                    "unique_id": "intelligence-v45-wind-repair",
+                    "模型来源": "仅Skill",
+                    "主体标签1": "成年女性旅人",
+                    "额外要求": "场景固定为无风环境，不要强风或狂风。",
+                    "运行时随机标签": True,
+                    "运行时随机模式": "全随机",
+                    "生成数量": 1,
+                    "提示词语言": "纯中文",
+                    "seed": 271,
+                },
+            )
+        payload = json.loads(result[3])
+        graph = payload["scene_relationship_graph"]
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v61")
+        self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
+        self.assertEqual(graph["scene_attribute_constraints"]["wind"]["required_value"], "calm")
+        self.assertNotIn("狂风卷动衣摆", payload["selected_tags_flat"])
+        self.assertEqual(payload["scene_coherence_status"], "coherent")
+
+    def test_selected_cold_temperature_reaches_model_contract_and_candidate_guard(self) -> None:
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["旅人"], "光影氛围": ["严寒环境与冰冷空气"]})
+        )
+        constraint = graph["scene_attribute_constraints"]["ambient_temperature"]
+        violation = intelligence.candidate_world_violation(
+            "严寒环境中，旅人的呼气凝成白雾。",
+            "严寒环境中，旅人的呼气凝成白雾，空气却变成酷热天气并出现热浪。",
+            graph,
+        )
+        model_prompt = model_refiner._compose_batch_prompt(
+            ["严寒环境中，旅人的呼气凝成白雾。"],
+            {"提示词语言": "纯中文", "智能场景关系图": graph},
+        )
+        self.assertEqual(constraint["required_value"], "cold")
+        self.assertEqual(constraint["source"], "selected_state")
+        self.assertIn("场景属性约束", violation)
+        self.assertTrue("酷热天气" in violation or "热浪" in violation)
+        self.assertIn("环境温度固定为寒冷", model_prompt)
+        self.assertIn("寒冷环境采用可见呼气、衣领发梢凝霜与厚实衣着反馈", model_prompt)
+
+    def test_natural_cold_temperature_removes_only_conflicting_soft_anchor(self) -> None:
+        selected = OrderedDict(
+            {"主体": ["旅人"], "光影氛围": ["严寒环境", "热浪天气"]}
+        )
+        graph = intelligence.build_scene_relationship_graph(
+            selected,
+            context_text="场景固定为严寒环境，不要炎热环境或酷热天气。",
+        )
+        repaired, _custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            [],
+            graph,
+            soft_tags=["热浪天气"],
+        )
+        constraint = graph["scene_attribute_constraints"]["ambient_temperature"]
+        self.assertEqual(constraint["required_value"], "cold")
+        self.assertEqual(constraint["source"], "natural_context")
+        self.assertEqual(repaired["光影氛围"], ["严寒环境"])
+        self.assertEqual(report["removed_count"], 1)
+        self.assertEqual(report["removed"][0]["side"], "context_scene_attribute")
+
+    def test_explicit_temperature_conflict_is_guarded(self) -> None:
+        selected = OrderedDict({"主体": ["旅人"], "光影氛围": ["高温环境"]})
+        graph = intelligence.build_scene_relationship_graph(
+            selected,
+            context_text="场景固定为严寒环境，不要高温环境。",
+        )
+        unchanged, _custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            [],
+            graph,
+            soft_tags=[],
+        )
+        strategy = intelligence.resolve_model_strategy(
+            {"模型来源": "API接口"},
+            {"task_type": "standard_visual_story"},
+            graph,
+        )
+        self.assertFalse(report["applied"])
+        self.assertEqual(unchanged, selected)
+        self.assertEqual(strategy["mode"], "skill_only_guarded")
+
+    def test_temperature_transition_and_color_temperature_language_remain_open(self) -> None:
+        transition = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["旅人"], "光影氛围": ["严寒环境"]}),
+            context_text="故事从严寒环境开始，进入温和气温，最终抵达炎热环境。",
+        )
+        non_temperature = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["工程师"]}),
+            context_text="采用暖色光与冷色调对比，研究高温超导材料。",
+        )
+        self.assertNotIn(
+            "ambient_temperature",
+            transition["context_scene_attribute_constraints"],
+        )
+        self.assertNotIn("ambient_temperature", transition["scene_attribute_constraints"])
+        self.assertNotIn("ambient_temperature", non_temperature["scene_attribute_constraints"])
+
+    def test_temperature_repair_reaches_full_stage(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+
+        def inject_heatwave(selected, custom_tags, settings, **_kwargs):
+            next_selected = OrderedDict((group, list(values)) for group, values in selected.items())
+            settings["运行时随机有效种子"] = 283
+            return next_selected, [*custom_tags, "热浪天气与汗液"], ["热浪天气与汗液"]
+
+        with mock.patch.object(module, "_build_runtime_tags", side_effect=inject_heatwave):
+            result = module._run_stage(
+                None,
+                **{
+                    "unique_id": "intelligence-v46-temperature-repair",
+                    "模型来源": "仅Skill",
+                    "主体标签1": "成年女性旅人",
+                    "额外要求": "场景固定为严寒环境，不要炎热环境或热浪天气。",
+                    "运行时随机标签": True,
+                    "运行时随机模式": "全随机",
+                    "生成数量": 1,
+                    "提示词语言": "纯中文",
+                    "seed": 283,
+                },
+            )
+        payload = json.loads(result[3])
+        graph = payload["scene_relationship_graph"]
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v61")
+        self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
+        self.assertEqual(
+            graph["scene_attribute_constraints"]["ambient_temperature"]["required_value"],
+            "cold",
+        )
+        self.assertNotIn("热浪天气与汗液", payload["selected_tags_flat"])
+        self.assertEqual(payload["scene_coherence_status"], "coherent")
+
+    def test_selected_dry_ground_is_independent_from_rain_and_guards_candidate(self) -> None:
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["旅人"],
+                    "场景背景": ["有顶棚的干燥地面"],
+                    "光影氛围": ["雨天"],
+                }
+            )
+        )
+        constraints = graph["scene_attribute_constraints"]
+        violation = intelligence.candidate_world_violation(
+            "雨天里，旅人站在顶棚覆盖的干燥地面上。",
+            "雨天里，旅人站在顶棚下，脚边却出现湿润地面和大片水洼。",
+            graph,
+        )
+        model_prompt = model_refiner._compose_batch_prompt(
+            ["雨天里，旅人站在顶棚覆盖的干燥地面上。"],
+            {"提示词语言": "纯中文", "智能场景关系图": graph},
+        )
+        self.assertEqual(constraints["precipitation"]["required_value"], "rain")
+        self.assertEqual(constraints["ground_surface"]["required_value"], "dry_ground")
+        self.assertEqual(constraints["ground_surface"]["source"], "selected_state")
+        self.assertEqual(graph["coherence_status"], "coherent")
+        self.assertIn("场景属性约束", violation)
+        self.assertTrue("湿润地面" in violation or "水洼" in violation)
+        self.assertIn("地表状态固定为干燥", model_prompt)
+        self.assertIn("干燥地表采用干爽哑光表面、清晰脚印边缘与稳定接触阴影", model_prompt)
+
+    def test_natural_dry_ground_removes_only_conflicting_soft_anchor(self) -> None:
+        selected = OrderedDict(
+            {"主体": ["旅人"], "场景背景": ["干燥路面", "地面积水"]}
+        )
+        graph = intelligence.build_scene_relationship_graph(
+            selected,
+            context_text="地表固定为干燥地面，不要湿润地面或结冰地面。",
+        )
+        repaired, _custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            [],
+            graph,
+            soft_tags=["地面积水"],
+        )
+        constraint = graph["scene_attribute_constraints"]["ground_surface"]
+        self.assertEqual(constraint["required_value"], "dry_ground")
+        self.assertEqual(constraint["source"], "natural_context")
+        self.assertEqual(repaired["场景背景"], ["干燥路面"])
+        self.assertEqual(report["removed_count"], 1)
+        self.assertEqual(report["removed"][0]["side"], "context_scene_attribute")
+
+    def test_explicit_ground_surface_conflict_is_guarded(self) -> None:
+        selected = OrderedDict({"主体": ["旅人"], "场景背景": ["湿滑路面"]})
+        graph = intelligence.build_scene_relationship_graph(
+            selected,
+            context_text="地表固定为干燥地面，不要湿滑路面。",
+        )
+        unchanged, _custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            [],
+            graph,
+            soft_tags=[],
+        )
+        strategy = intelligence.resolve_model_strategy(
+            {"模型来源": "本地模型"},
+            {"task_type": "standard_visual_story"},
+            graph,
+        )
+        self.assertFalse(report["applied"])
+        self.assertEqual(unchanged, selected)
+        self.assertEqual(strategy["mode"], "skill_only_guarded")
+
+    def test_ground_transition_and_local_material_language_remain_open(self) -> None:
+        transition = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["旅人"], "场景背景": ["干燥路面"]}),
+            context_text="镜头从干燥路面开始，随后进入湿润地面，最终踏上结冰地面。",
+        )
+        local_material = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["旅人"]}),
+            context_text="角色皮肤干燥、头发湿润，手中金属表面冰冷。",
+        )
+        self.assertNotIn(
+            "ground_surface",
+            transition["context_scene_attribute_constraints"],
+        )
+        self.assertNotIn("ground_surface", transition["scene_attribute_constraints"])
+        self.assertNotIn("ground_surface", local_material["scene_attribute_constraints"])
+
+    def test_ground_surface_repair_reaches_full_stage(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+
+        def inject_wet_ground(selected, custom_tags, settings, **_kwargs):
+            next_selected = OrderedDict((group, list(values)) for group, values in selected.items())
+            settings["运行时随机有效种子"] = 293
+            return next_selected, [*custom_tags, "湿润地面与水洼"], ["湿润地面与水洼"]
+
+        with mock.patch.object(module, "_build_runtime_tags", side_effect=inject_wet_ground):
+            result = module._run_stage(
+                None,
+                **{
+                    "unique_id": "intelligence-v47-ground-surface-repair",
+                    "模型来源": "仅Skill",
+                    "主体标签1": "成年女性旅人",
+                    "额外要求": "地表固定为干燥地面，不要湿润地面或结冰地面。",
+                    "运行时随机标签": True,
+                    "运行时随机模式": "全随机",
+                    "生成数量": 1,
+                    "提示词语言": "纯中文",
+                    "seed": 293,
+                },
+            )
+        payload = json.loads(result[3])
+        graph = payload["scene_relationship_graph"]
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v61")
+        self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
+        self.assertEqual(
+            graph["scene_attribute_constraints"]["ground_surface"]["required_value"],
+            "dry_ground",
+        )
+        self.assertNotIn("湿润地面与水洼", payload["selected_tags_flat"])
+        self.assertEqual(payload["scene_coherence_status"], "coherent")
+
+    def test_selected_indoor_space_reaches_model_contract_and_candidate_guard(self) -> None:
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["旅人"], "场景背景": ["建筑内部的室内空间"]})
+        )
+        constraint = graph["scene_attribute_constraints"]["spatial_enclosure"]
+        violation = intelligence.candidate_world_violation(
+            "旅人在建筑内部的室内空间沿墙前进。",
+            "旅人沿墙前进，场景却突然变成没有墙顶的露天环境。",
+            graph,
+        )
+        model_prompt = model_refiner._compose_batch_prompt(
+            ["旅人在建筑内部的室内空间沿墙前进。"],
+            {"提示词语言": "纯中文", "智能场景关系图": graph},
+        )
+        self.assertEqual(constraint["required_value"], "indoor")
+        self.assertEqual(constraint["source"], "selected_state")
+        self.assertIn("场景属性约束", violation)
+        self.assertIn("露天环境", violation)
+        self.assertIn("空间围合固定为室内", model_prompt)
+        self.assertIn("室内保持连续墙顶和封闭主体空间", model_prompt)
+        self.assertIn("没有已有开口时不新增门窗、洞口或室外远景", model_prompt)
+
+    def test_natural_indoor_space_removes_only_conflicting_soft_anchor(self) -> None:
+        selected = OrderedDict(
+            {"主体": ["旅人"], "场景背景": ["室内场景", "露天环境"]}
+        )
+        graph = intelligence.build_scene_relationship_graph(
+            selected,
+            context_text="主场景固定为室内场景，不要户外场景或半开放空间。",
+        )
+        repaired, _custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            [],
+            graph,
+            soft_tags=["露天环境"],
+        )
+        constraint = graph["scene_attribute_constraints"]["spatial_enclosure"]
+        self.assertEqual(constraint["required_value"], "indoor")
+        self.assertEqual(constraint["source"], "natural_context")
+        self.assertEqual(repaired["场景背景"], ["室内场景"])
+        self.assertEqual(report["removed_count"], 1)
+        self.assertEqual(report["removed"][0]["side"], "context_scene_attribute")
+
+    def test_explicit_spatial_enclosure_conflict_is_guarded(self) -> None:
+        selected = OrderedDict({"主体": ["旅人"], "场景背景": ["户外场景"]})
+        graph = intelligence.build_scene_relationship_graph(
+            selected,
+            context_text="主场景固定为建筑内部，不要户外场景。",
+        )
+        unchanged, _custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            [],
+            graph,
+            soft_tags=[],
+        )
+        strategy = intelligence.resolve_model_strategy(
+            {"模型来源": "API接口"},
+            {"task_type": "standard_visual_story"},
+            graph,
+        )
+        self.assertFalse(report["applied"])
+        self.assertEqual(unchanged, selected)
+        self.assertEqual(strategy["mode"], "skill_only_guarded")
+
+    def test_enclosure_transition_and_abstract_inside_language_remain_open(self) -> None:
+        transition = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["旅人"], "场景背景": ["室内场景"]}),
+            context_text="镜头从房间内部开始，穿过半开放空间，最终进入户外场景。",
+        )
+        abstract = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["工程师"]}),
+            context_text="角色梳理内在情绪，并检查系统外部接口和内部参数。",
+        )
+        self.assertNotIn(
+            "spatial_enclosure",
+            transition["context_scene_attribute_constraints"],
+        )
+        self.assertNotIn("spatial_enclosure", transition["scene_attribute_constraints"])
+        self.assertNotIn("spatial_enclosure", abstract["scene_attribute_constraints"])
+
+    def test_spatial_enclosure_repair_reaches_full_stage(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+
+        def inject_outdoor_space(selected, custom_tags, settings, **_kwargs):
+            next_selected = OrderedDict((group, list(values)) for group, values in selected.items())
+            settings["运行时随机有效种子"] = 307
+            return next_selected, [*custom_tags, "露天环境与无遮蔽天空"], ["露天环境与无遮蔽天空"]
+
+        with mock.patch.object(module, "_build_runtime_tags", side_effect=inject_outdoor_space):
+            result = module._run_stage(
+                None,
+                **{
+                    "unique_id": "intelligence-v48-spatial-enclosure-repair",
+                    "模型来源": "仅Skill",
+                    "主体标签1": "成年女性旅人",
+                    "额外要求": "主场景固定为室内场景，不要户外场景或露天环境。",
+                    "运行时随机标签": True,
+                    "运行时随机模式": "全随机",
+                    "生成数量": 1,
+                    "提示词语言": "纯中文",
+                    "seed": 307,
+                },
+            )
+        payload = json.loads(result[3])
+        graph = payload["scene_relationship_graph"]
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v61")
+        self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
+        self.assertEqual(
+            graph["scene_attribute_constraints"]["spatial_enclosure"]["required_value"],
+            "indoor",
+        )
+        self.assertNotIn("露天环境与无遮蔽天空", payload["selected_tags_flat"])
+        self.assertEqual(payload["scene_coherence_status"], "coherent")
+
+    def test_selected_natural_light_guards_global_switch_but_allows_local_practical(self) -> None:
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["旅人"], "光影氛围": ["窗外日光照明"]})
+        )
+        constraint = graph["scene_attribute_constraints"]["dominant_light_source"]
+        global_violation = intelligence.candidate_world_violation(
+            "旅人由窗外日光照明，室内保持自然阴影。",
+            "旅人所在空间改为纯人工光照明，棚灯成为唯一全局光源。",
+            graph,
+        )
+        local_violation = intelligence.candidate_world_violation(
+            "旅人由窗外日光照明，室内保持自然阴影。",
+            "旅人仍由窗外日光照明，桌面台灯只在手边增加局部暖光。",
+            graph,
+        )
+        model_prompt = model_refiner._compose_batch_prompt(
+            ["旅人由窗外日光照明，室内保持自然阴影。"],
+            {"提示词语言": "纯中文", "智能场景关系图": graph},
+        )
+        self.assertEqual(constraint["required_value"], "natural_light")
+        self.assertEqual(constraint["source"], "selected_state")
+        self.assertIn("场景属性约束", global_violation)
+        self.assertIn("人工光照明", global_violation)
+        self.assertEqual(local_violation, "")
+        self.assertIn("主导照明来源固定为自然光", model_prompt)
+        self.assertIn("自然光作为全局基准，统一阴影投向、反射高光与综合色偏", model_prompt)
+        self.assertIn("既有局部实景灯仅保持辅助光关系", model_prompt)
+
+    def test_natural_light_context_removes_only_conflicting_soft_anchor(self) -> None:
+        selected = OrderedDict(
+            {"主体": ["旅人"], "光影氛围": ["自然光照明", "人工光照明"]}
+        )
+        graph = intelligence.build_scene_relationship_graph(
+            selected,
+            context_text="全局固定为纯自然光照明，不要人工光照明或混合光源照明。",
+        )
+        repaired, _custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            [],
+            graph,
+            soft_tags=["人工光照明"],
+        )
+        constraint = graph["scene_attribute_constraints"]["dominant_light_source"]
+        self.assertEqual(constraint["required_value"], "natural_light")
+        self.assertEqual(constraint["source"], "natural_context")
+        self.assertEqual(repaired["光影氛围"], ["自然光照明"])
+        self.assertEqual(report["removed_count"], 1)
+        self.assertEqual(report["removed"][0]["side"], "context_scene_attribute")
+
+    def test_explicit_dominant_light_source_conflict_is_guarded(self) -> None:
+        selected = OrderedDict({"主体": ["旅人"], "光影氛围": ["人工光照明"]})
+        graph = intelligence.build_scene_relationship_graph(
+            selected,
+            context_text="全局固定为自然光照明，不要人工光照明。",
+        )
+        unchanged, _custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            [],
+            graph,
+            soft_tags=[],
+        )
+        strategy = intelligence.resolve_model_strategy(
+            {"模型来源": "本地模型"},
+            {"task_type": "standard_visual_story"},
+            graph,
+        )
+        self.assertFalse(report["applied"])
+        self.assertEqual(unchanged, selected)
+        self.assertEqual(strategy["mode"], "skill_only_guarded")
+
+    def test_light_source_transition_mixed_state_and_abstract_language_are_distinct(self) -> None:
+        transition = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["旅人"], "光影氛围": ["自然光照明"]}),
+            context_text="镜头从自然光照明开始，入夜后逐渐转为人工光照明。",
+        )
+        mixed = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["旅人"], "光影氛围": ["自然光与人工光混合"]})
+        )
+        abstract = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["工程师"]}),
+            context_text="人工智能处理自然语言，并混合多个数据来源。",
+        )
+        self.assertNotIn(
+            "dominant_light_source",
+            transition["scene_attribute_constraints"],
+        )
+        self.assertEqual(
+            mixed["scene_attribute_constraints"]["dominant_light_source"]["required_value"],
+            "mixed_light",
+        )
+        self.assertNotIn("dominant_light_source", abstract["scene_attribute_constraints"])
+
+    def test_dominant_light_source_repair_reaches_full_stage(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+
+        def inject_artificial_light(selected, custom_tags, settings, **_kwargs):
+            next_selected = OrderedDict((group, list(values)) for group, values in selected.items())
+            settings["运行时随机有效种子"] = 317
+            return next_selected, [*custom_tags, "人工光照明与棚灯主导照明"], ["人工光照明与棚灯主导照明"]
+
+        with mock.patch.object(module, "_build_runtime_tags", side_effect=inject_artificial_light):
+            result = module._run_stage(
+                None,
+                **{
+                    "unique_id": "intelligence-v49-dominant-light-repair",
+                    "模型来源": "仅Skill",
+                    "主体标签1": "成年女性旅人",
+                    "额外要求": "全局固定为自然光照明，不要人工光照明。",
+                    "运行时随机标签": True,
+                    "运行时随机模式": "全随机",
+                    "生成数量": 1,
+                    "提示词语言": "纯中文",
+                    "seed": 317,
+                },
+            )
+        payload = json.loads(result[3])
+        graph = payload["scene_relationship_graph"]
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v61")
+        self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
+        self.assertEqual(
+            graph["scene_attribute_constraints"]["dominant_light_source"]["required_value"],
+            "natural_light",
+        )
+        self.assertNotIn("人工光照明与棚灯主导照明", payload["selected_tags_flat"])
+        self.assertEqual(payload["scene_coherence_status"], "coherent")
+
+    def test_scene_attribute_model_guidance_combines_only_active_axes(self) -> None:
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["旅人"],
+                    "场景背景": ["湿润地面"],
+                    "光影氛围": ["雨天"],
+                }
+            )
+        )
+        model_prompt = model_refiner._compose_batch_prompt(
+            ["雨天里，旅人踏过湿润地面。"],
+            {"提示词语言": "纯中文", "智能场景关系图": graph},
+        )
+        self.assertIn("降水固定为降雨", model_prompt)
+        self.assertIn("地表状态固定为湿润积水", model_prompt)
+        self.assertIn("降雨采用连续雨滴轨迹与环境遮挡反馈", model_prompt)
+        self.assertIn("落点与积留服从湿润积水地表合同", model_prompt)
+        self.assertIn("湿润地表采用湿亮反射、水洼边缘、脚步涟漪与柔化接触阴影", model_prompt)
+        self.assertNotIn("风势只约束", model_prompt)
+        self.assertNotIn("环境温度只约束", model_prompt)
+        self.assertNotIn("空间围合只约束", model_prompt)
+        self.assertNotIn("主导照明来源只约束", model_prompt)
+        self.assertIn("未列出的场景属性保持开放", model_prompt)
+
+    def test_compound_scene_attribute_guidance_respects_space_ground_and_time(self) -> None:
+        sheltered_rain = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["旅人"],
+                    "场景背景": ["室内场景", "干燥地面"],
+                    "光影氛围": ["雨天"],
+                }
+            )
+        )
+        semi_open_snow = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["旅人"],
+                    "场景背景": ["半开放空间", "湿润地面"],
+                    "光影氛围": ["雪天"],
+                }
+            )
+        )
+        indoor_night_light = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["旅人"],
+                    "场景背景": ["室内场景"],
+                    "光影氛围": ["夜晚", "自然光照明"],
+                }
+            )
+        )
+        rain_context = model_refiner._scene_attribute_context_for_model(sheltered_rain)
+        snow_context = model_refiner._scene_attribute_context_for_model(semi_open_snow)
+        light_context = model_refiner._scene_attribute_context_for_model(indoor_night_light)
+
+        self.assertIn("降雨仅在原文已有开口或可见室外范围呈现连续雨滴轨迹", rain_context)
+        self.assertIn("落点与积留服从干燥地表合同", rain_context)
+        self.assertNotIn("落点飞溅", rain_context)
+        self.assertNotIn("受雨表面反馈", rain_context)
+
+        self.assertIn("降雪沿开放侧边与顶棚边缘呈现连续雪花轨迹", snow_context)
+        self.assertIn("落点与积留服从湿润积水地表合同", snow_context)
+        self.assertNotIn("渐进积雪反馈", snow_context)
+
+        self.assertIn("夜间自然光通过原文已有采光开口作为全局基准", light_context)
+        self.assertIn("既有局部实景灯仅保持辅助光关系", light_context)
+        self.assertNotIn("日间自然光", light_context)
+        self.assertNotIn("开放天空", light_context)
+
+    def test_spatial_enclosure_guidance_does_not_invent_openings_or_horizons(self) -> None:
+        indoor_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["旅人"],
+                    "场景背景": ["室内场景"],
+                    "光影氛围": ["雨天", "强风", "自然光照明"],
+                }
+            )
+        )
+        outdoor_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["旅人"], "场景背景": ["户外场景"]})
+        )
+        semi_open_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["旅人"],
+                    "场景背景": ["半开放空间"],
+                    "光影氛围": ["雪天", "微风", "自然光照明"],
+                }
+            )
+        )
+        indoor_context = model_refiner._scene_attribute_context_for_model(indoor_graph)
+        outdoor_context = model_refiner._scene_attribute_context_for_model(outdoor_graph)
+        semi_open_context = model_refiner._scene_attribute_context_for_model(
+            semi_open_graph
+        )
+
+        self.assertIn("室内保持连续墙顶和封闭主体空间", indoor_context)
+        self.assertEqual(
+            indoor_context.count("没有已有开口时不新增门窗、洞口或室外远景"),
+            1,
+        )
+        self.assertIn("降雨仅在原文已有开口或可见室外范围呈现", indoor_context)
+        self.assertIn("强风仅通过原文已有开口形成局部定向气流", indoor_context)
+        self.assertIn("自然光通过原文已有采光开口作为全局基准", indoor_context)
+        self.assertNotIn("明确门窗开口", indoor_context)
+        self.assertNotIn("既有门窗开口", indoor_context)
+
+        self.assertIn("户外保持无连续封闭顶棚的露天边界", outdoor_context)
+        self.assertIn("天空与地平线仅在原构图可见时呈现", outdoor_context)
+        self.assertNotIn("连续地平线", outdoor_context)
+
+        self.assertIn("半开放空间保持既有顶棚与开放侧边", semi_open_context)
+        self.assertIn("不扩建额外开口", semi_open_context)
+        self.assertIn("降雪沿开放侧边与顶棚边缘呈现", semi_open_context)
+        self.assertIn("微风沿开放侧边形成连续定向气流", semi_open_context)
+        self.assertIn("自然光通过开放侧边作为全局基准", semi_open_context)
+
+        repair = intelligence.classify_repair_reason(
+            "模型响应越过场景属性约束：空间围合要求‘室内’，却新增了‘户外’。"
+        )
+        self.assertEqual(repair["kind"], "scene_attribute_spatial_enclosure")
+        self.assertIn("原文已有开口", repair["instruction"])
+        self.assertIn("不新增门窗、洞口或室外远景", repair["instruction"])
+
+    def test_time_light_and_atmosphere_guidance_keep_independent_responsibilities(self) -> None:
+        transport = model_refiner._ATMOSPHERIC_MEDIUM_LIGHT_TRANSPORT
+        self.assertEqual(set(transport), set(intelligence.ATMOSPHERIC_MEDIUM_MARKERS))
+        time_cases = (
+            (
+                "清晨",
+                "空气通透",
+                "清晨采用逐步抬升的环境基准亮度",
+                transport["clear_air"],
+            ),
+            (
+                "白天",
+                "冷雾",
+                "白天采用充分稳定的环境基准亮度",
+                transport["mist_fog"],
+            ),
+            (
+                "黄昏",
+                "烟尘天光",
+                "黄昏采用逐步降低的环境基准亮度",
+                transport["smoke_dust"],
+            ),
+        )
+        for time_tag, atmosphere_tag, time_guidance, transport_guidance in time_cases:
+            with self.subTest(time=time_tag, atmosphere=atmosphere_tag):
+                graph = intelligence.build_scene_relationship_graph(
+                    OrderedDict({"光影氛围": [time_tag, atmosphere_tag]})
+                )
+                context = model_refiner._compact_environment_context_for_model(graph)
+                self.assertIn(time_guidance, context)
+                self.assertEqual(context.count(transport_guidance), 1)
+                self.assertNotIn("清晰投影", context)
+                self.assertNotIn("稳定日光", context)
+
+        combined_cases = (
+            (
+                ["白天", "人工光照明", "冷雾"],
+                "人工光作为全局基准",
+                transport["mist_fog"],
+            ),
+            (
+                ["清晨", "自然光照明", "空气通透"],
+                "清晨自然光作为全局基准",
+                transport["clear_air"],
+            ),
+            (
+                ["黄昏", "混合光源照明", "烟尘天光"],
+                "混合光源明确日光与灯光分工",
+                transport["smoke_dust"],
+            ),
+        )
+        for tags, light_guidance, transport_guidance in combined_cases:
+            with self.subTest(tags=tags):
+                graph = intelligence.build_scene_relationship_graph(
+                    OrderedDict({"光影氛围": tags})
+                )
+                context = model_refiner._compact_environment_context_for_model(graph)
+                self.assertIn(light_guidance, context)
+                self.assertEqual(context.count(transport_guidance), 1)
+                self.assertNotIn("清晰投影", context)
+
+        artificial_day = intelligence.build_scene_relationship_graph(
+            OrderedDict({"光影氛围": ["白天", "人工光照明"]})
+        )
+        artificial_context = model_refiner._scene_attribute_context_for_model(artificial_day)
+        self.assertIn("白天采用充分稳定的环境基准亮度", artificial_context)
+        self.assertIn("人工光作为全局基准", artificial_context)
+        self.assertNotIn("日间自然光", artificial_context)
+        self.assertFalse(any(value in artificial_context for value in transport.values()))
+
+    def test_wind_field_guidance_coordinates_precipitation_and_enclosure(self) -> None:
+        calm_rain = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["旅人"],
+                    "场景背景": ["户外场景"],
+                    "光影氛围": ["无风", "雨天"],
+                }
+            )
+        )
+        breeze_rain = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["旅人"],
+                    "场景背景": ["半开放空间"],
+                    "光影氛围": ["微风", "雨天"],
+                }
+            )
+        )
+        strong_snow = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["旅人"],
+                    "场景背景": ["室内场景"],
+                    "光影氛围": ["强风", "雪天"],
+                }
+            )
+        )
+        calm_context = model_refiner._scene_attribute_context_for_model(calm_rain)
+        breeze_context = model_refiner._scene_attribute_context_for_model(breeze_rain)
+        strong_context = model_refiner._scene_attribute_context_for_model(strong_snow)
+
+        self.assertIn("连续雨滴轨迹并使雨滴保持近乎垂直", calm_context)
+        self.assertIn("同一静风场使雨滴保持近乎垂直", calm_context)
+
+        self.assertIn("连续雨滴轨迹并使雨滴保持轻微倾斜", breeze_context)
+        self.assertIn("微风沿开放侧边形成连续定向气流", breeze_context)
+        self.assertIn("同一微风场使雨滴保持轻微倾斜", breeze_context)
+
+        self.assertIn("连续雪花轨迹并使雪花保持明显横向飞掠", strong_context)
+        self.assertIn("强风仅通过原文已有开口形成局部定向气流", strong_context)
+        self.assertIn("同一强风场使雪花保持明显横向飞掠", strong_context)
+        self.assertNotIn("开放天空", strong_context)
+
+    def test_wind_guidance_uses_only_the_active_atmospheric_medium(self) -> None:
+        wind_tags = {
+            "calm": "无风",
+            "breeze": "微风",
+            "strong_wind": "强风",
+        }
+        atmosphere_cases = {
+            "clear_air": (
+                "空气通透",
+                {
+                    "calm": "通透空气中的静风只通过既有物体的稳定状态表现",
+                    "breeze": "通透空气中的微风只通过既有物体的轻微受力表现",
+                    "strong_wind": "通透空气中的强风只通过既有物体的显著受力表现",
+                },
+            ),
+            "mist_fog": (
+                "冷雾",
+                {
+                    "calm": "既有雾层近乎静止",
+                    "breeze": "既有雾层沿同一方向缓慢侧移",
+                    "strong_wind": "既有雾层沿统一方向明显横移",
+                },
+            ),
+            "smoke_dust": (
+                "烟尘天光",
+                {
+                    "calm": "既有烟雾或烟尘保持低幅运动",
+                    "breeze": "既有烟雾或烟尘沿同一方向轻柔偏移",
+                    "strong_wind": "既有烟雾或烟尘沿统一方向明显横向卷动",
+                },
+            ),
+        }
+        self.assertEqual(
+            set(model_refiner._ATMOSPHERIC_MEDIUM_WIND_FEEDBACK),
+            set(intelligence.ATMOSPHERIC_MEDIUM_MARKERS),
+        )
+        for medium, (atmosphere_tag, expected_by_wind) in atmosphere_cases.items():
+            self.assertEqual(
+                set(model_refiner._ATMOSPHERIC_MEDIUM_WIND_FEEDBACK[medium]),
+                set(wind_tags),
+            )
+            for wind, wind_tag in wind_tags.items():
+                with self.subTest(medium=medium, wind=wind):
+                    graph = intelligence.build_scene_relationship_graph(
+                        OrderedDict({"光影氛围": [wind_tag, atmosphere_tag]})
+                    )
+                    context = model_refiner._compact_environment_context_for_model(graph)
+                    self.assertIn(expected_by_wind[wind], context)
+                    self.assertNotIn("近乎垂直的烟雾", context)
+                    self.assertNotIn("连续轻烟偏移", context)
+                    self.assertNotIn("横向烟尘轨迹", context)
+                    if medium == "clear_air":
+                        self.assertNotIn("既有雾层", context)
+                        self.assertNotIn("既有烟雾或烟尘", context)
+                    elif medium == "mist_fog":
+                        self.assertNotIn("既有烟雾或烟尘", context)
+                    else:
+                        self.assertNotIn("既有雾层", context)
+
+        wind_only = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["旅人"], "光影氛围": ["强风"]})
+        )
+        wind_only_context = model_refiner._scene_attribute_context_for_model(wind_only)
+        self.assertNotIn("通透空气中的", wind_only_context)
+        self.assertNotIn("既有雾层", wind_only_context)
+        self.assertNotIn("既有烟雾或烟尘", wind_only_context)
+
+    def test_candidate_guard_infers_wind_from_atmospheric_medium_motion(self) -> None:
+        cases = (
+            ("无风", "雾层突然沿单一方向扫过石墙。"),
+            ("强风", "雾层在门边近乎静止，不产生横向漂移。"),
+            ("微风", " The mist layer sweeps sideways across the passage."),
+            ("强风", " The moisture layer remains nearly still with no lateral drift."),
+        )
+        for wind_tag, addition in cases:
+            with self.subTest(wind=wind_tag, addition=addition):
+                graph = intelligence.build_scene_relationship_graph(
+                    OrderedDict({"主体": ["旅人"], "光影氛围": [wind_tag, "冷雾"]})
+                )
+                original = f"{wind_tag}环境中，冷雾沿石阶铺开。"
+                violation = intelligence.candidate_world_violation(
+                    original,
+                    original + addition,
+                    graph,
+                )
+                repair = intelligence.classify_repair_reason(violation)
+                self.assertIn("风势要求", violation)
+                self.assertIn("直接视觉反馈", violation)
+                self.assertEqual(repair["kind"], "scene_attribute_wind")
+                self.assertIn("既有空气介质", repair["instruction"])
+                self.assertIn("不新增空气介质", repair["instruction"])
+                self.assertNotIn("烟雾", repair["instruction"])
+
+        breeze_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["旅人"], "光影氛围": ["微风", "冷雾"]})
+        )
+        breeze_original = "微风环境中，冷雾沿石阶铺开。"
+        self.assertEqual(
+            intelligence.candidate_world_violation(
+                breeze_original,
+                breeze_original + "雾层沿石墙缓慢侧移。",
+                breeze_graph,
+            ),
+            "",
+        )
+        calm_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["旅人"], "光影氛围": ["无风", "冷雾"]})
+        )
+        calm_original = "无风环境中，冷雾沿石阶铺开。"
+        self.assertEqual(
+            intelligence.candidate_world_violation(
+                calm_original,
+                calm_original + "不要让雾层沿单一方向扫过石墙。",
+                calm_graph,
+            ),
+            "",
+        )
+        open_wind_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["旅人"], "光影氛围": ["冷雾"]})
+        )
+        self.assertNotIn("wind", open_wind_graph["scene_attribute_constraints"])
+        self.assertEqual(
+            intelligence.candidate_world_violation(
+                "冷雾沿石阶铺开。",
+                "冷雾沿石阶铺开，雾层突然沿单一方向扫过石墙。",
+                open_wind_graph,
+            ),
+            "",
+        )
+
+    def test_candidate_guard_infers_wind_from_rain_and_snow_trajectory(self) -> None:
+        calm_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["旅人"], "光影氛围": ["无风", "雨天"]})
+        )
+        calm_original = "无风雨天里，旅人沿道路前进。"
+        calm_violation = intelligence.candidate_world_violation(
+            calm_original,
+            calm_original + "雨线突然斜向扫过整条道路。",
+            calm_graph,
+        )
+        strong_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["旅人"], "光影氛围": ["强风", "雪天"]})
+        )
+        strong_original = "强风雪天里，旅人压低重心前进。"
+        strong_violation = intelligence.candidate_world_violation(
+            strong_original,
+            strong_original + "雪花却近乎垂直落下。",
+            strong_graph,
+        )
+
+        for violation in (calm_violation, strong_violation):
+            repair = intelligence.classify_repair_reason(violation)
+            self.assertIn("风势要求", violation)
+            self.assertIn("直接视觉反馈", violation)
+            self.assertEqual(repair["kind"], "scene_attribute_wind")
+
+    def test_scene_attribute_value_guidance_covers_every_supported_state(self) -> None:
+        guidance = model_refiner._SCENE_ATTRIBUTE_VALUE_MODEL_GUIDANCE
+        self.assertEqual(set(guidance), set(intelligence.SCENE_ATTRIBUTE_MARKERS))
+        for axis, values in intelligence.SCENE_ATTRIBUTE_MARKERS.items():
+            with self.subTest(axis=axis):
+                self.assertEqual(set(guidance[axis]), set(values))
+                self.assertTrue(all(str(item).strip() for item in guidance[axis].values()))
+        all_guidance = [item for values in guidance.values() for item in values.values()]
+        self.assertEqual(len(all_guidance), 22)
+        self.assertEqual(len(set(all_guidance)), 22)
+
+    def test_compact_scene_attribute_contract_reaches_all_short_model_paths(self) -> None:
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["旅人"], "光影氛围": ["无风"]})
+        )
+        qwen_settings = {
+            "提示词语言": "纯中文",
+            "模型来源": "本地模型",
+            "模型调用基础来源": "本地模型",
+            "内置模型系列": "Qwen3.5-VL",
+            "内置主模型": "Qwen3.5-4B-Q4_K_M.gguf",
+            "智能模型策略": {"mode": "incremental_blend"},
+            "智能场景关系图": graph,
+        }
+        qwen_image = model_refiner._compose_model_user_prompt("Skill 图像底稿。", qwen_settings)
+        qwen_video = model_refiner._compose_model_user_prompt(
+            "Skill 视频底稿。",
+            {**qwen_settings, "模型任务": "视频提示词"},
+        )
+        qwen_batch = model_refiner._compose_batch_prompt(
+            ["第一份底稿。", "第二份底稿。"],
+            qwen_settings,
+        )
+        api_video = model_refiner._compose_model_user_prompt(
+            "API 视频底稿。",
+            {
+                "提示词语言": "纯中文",
+                "模型来源": "API接口",
+                "模型任务": "视频提示词",
+                "智能场景关系图": graph,
+            },
+        )
+        api_batch = model_refiner._compose_batch_prompt(
+            ["第一份底稿。", "第二份底稿。"],
+            {
+                "提示词语言": "纯中文",
+                "模型来源": "API接口",
+                "智能模型策略": {"mode": "incremental_blend"},
+                "智能场景关系图": graph,
+            },
+        )
+        for request in (qwen_image, qwen_video, qwen_batch, api_video, api_batch):
+            self.assertIn("智能场景属性：风势固定为静风", request)
+            self.assertIn("静风采用稳定垂落的发丝衣摆", request)
+            self.assertNotIn("微风采用", request)
+            self.assertNotIn("强风采用", request)
+            self.assertEqual(request.count("智能场景属性："), 1)
+
+    def test_precipitation_guidance_preserves_independent_atmospheric_medium(self) -> None:
+        self.assertEqual(
+            set(model_refiner._ATMOSPHERIC_MEDIUM_VALUE_MODEL_GUIDANCE),
+            set(intelligence.ATMOSPHERIC_MEDIUM_MARKERS),
+        )
+        sunny_fog = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["旅人"],
+                    "场景背景": ["户外场景"],
+                    "光影氛围": ["晴朗", "浓雾"],
+                }
+            )
+        )
+        rainy_smoke = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["旅人"],
+                    "场景背景": ["户外场景"],
+                    "光影氛围": ["雨天", "烟尘天光"],
+                }
+            )
+        )
+        sunny_context = model_refiner._compact_environment_context_for_model(sunny_fog)
+        rain_context = model_refiner._compact_environment_context_for_model(rainy_smoke)
+
+        self.assertIn("降水固定为晴朗", sunny_context)
+        self.assertIn("大气介质与能见度固定为雾化低能见度空气", sunny_context)
+        self.assertIn("当前雾层继续控制远景能见度与介质散射", sunny_context)
+        self.assertNotIn("清晰远景层次", sunny_context)
+        self.assertNotIn("空气保持通透和高能见度", sunny_context)
+
+        self.assertIn("降水固定为降雨", rain_context)
+        self.assertIn("大气介质与能见度固定为颗粒烟尘空气", rain_context)
+        self.assertIn("雨雪轨迹穿过既有颗粒烟尘", rain_context)
+        self.assertIn("颗粒散射继续服从当前空气合同", rain_context)
+        self.assertNotIn("薄雾或浓雾持续控制", rain_context)
+
+        precipitation_cases = (
+            ("雨天", "空气通透", "空气继续保持通透和高能见度"),
+            ("雪天", "浓雾", "雨雪轨迹穿过既有雾层"),
+            ("雨天", "烟尘天光", "雨雪轨迹穿过既有颗粒烟尘"),
+        )
+        for precipitation, atmosphere, expected in precipitation_cases:
+            with self.subTest(precipitation=precipitation, atmosphere=atmosphere):
+                graph = intelligence.build_scene_relationship_graph(
+                    OrderedDict({"光影氛围": [precipitation, atmosphere]})
+                )
+                context = model_refiner._compact_environment_context_for_model(graph)
+                self.assertIn(expected, context)
+                self.assertEqual(context.count("智能大气介质与能见度："), 1)
+
+    def test_atmospheric_medium_contract_reaches_all_short_model_paths_once(self) -> None:
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["旅人"], "光影氛围": ["冷雾"]})
+        )
+        qwen_settings = {
+            "提示词语言": "纯中文",
+            "模型来源": "本地模型",
+            "模型调用基础来源": "本地模型",
+            "内置模型系列": "Qwen3.5-VL",
+            "内置主模型": "Qwen3.5-4B-Q4_K_M.gguf",
+            "智能模型策略": {"mode": "incremental_blend"},
+            "智能场景关系图": graph,
+        }
+        requests = (
+            model_refiner._compose_model_user_prompt("Skill 图像底稿。", qwen_settings),
+            model_refiner._compose_model_user_prompt(
+                "Skill 视频底稿。",
+                {**qwen_settings, "模型任务": "视频提示词"},
+            ),
+            model_refiner._compose_batch_prompt(
+                ["第一份底稿。", "第二份底稿。"],
+                qwen_settings,
+            ),
+            model_refiner._compose_model_user_prompt(
+                "API 视频底稿。",
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "模型任务": "视频提示词",
+                    "智能场景关系图": graph,
+                },
+            ),
+            model_refiner._compose_model_user_prompt(
+                "API 图像底稿。",
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "智能场景关系图": graph,
+                },
+            ),
+            model_refiner._compose_batch_prompt(
+                ["第一份底稿。", "第二份底稿。"],
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "智能模型策略": {"mode": "incremental_blend"},
+                    "智能场景关系图": graph,
+                },
+            ),
+            model_refiner._compose_batch_prompt(
+                ["第一份完整底稿。", "第二份完整底稿。"],
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "智能场景关系图": graph,
+                },
+            ),
+        )
+
+        for request in requests:
+            self.assertIn("大气介质与能见度固定为雾化低能见度空气", request)
+            self.assertIn("既有雾层持续控制远景能见度", request)
+            self.assertEqual(request.count("智能大气介质与能见度："), 1)
+
+        weather_only = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["旅人"], "光影氛围": ["晴朗"]})
+        )
+        self.assertEqual(weather_only["atmospheric_medium_constraint"], {})
+        self.assertEqual(
+            model_refiner._atmospheric_medium_context_for_model(weather_only),
+            "",
+        )
+        self.assertNotIn(
+            "智能大气介质与能见度：",
+            model_refiner._compact_environment_context_for_model(weather_only),
+        )
+
+    def test_required_atmosphere_contract_uses_only_active_medium_vocabulary(self) -> None:
+        cases = (
+            (
+                ["空气通透", "雨天", "强风", "人工光照明"],
+                "大气介质与能见度固定为通透高能见度空气",
+                ("薄雾", "浓雾", "雾层", "烟雾", "烟尘", "火源烟气"),
+            ),
+            (
+                ["冷雾", "雨天", "强风", "人工光照明"],
+                "大气介质与能见度固定为雾化低能见度空气",
+                ("通透", "烟雾", "烟尘", "火源烟气"),
+            ),
+            (
+                ["烟尘天光", "雨天", "强风", "人工光照明"],
+                "大气介质与能见度固定为颗粒烟尘空气",
+                ("通透", "薄雾", "浓雾", "雾层"),
+            ),
+        )
+        for tags, expected, forbidden_terms in cases:
+            with self.subTest(tags=tags):
+                graph = intelligence.build_scene_relationship_graph(
+                    OrderedDict({"主体": ["旅人"], "光影氛围": tags})
+                )
+                settings = {
+                    "提示词语言": "纯中文",
+                    "模型来源": "本地模型",
+                    "模型调用基础来源": "本地模型",
+                    "内置模型系列": "Qwen3.5-VL",
+                    "内置主模型": "Qwen3.5-4B-Q4_K_M.gguf",
+                    "智能模型策略": {"mode": "incremental_blend"},
+                    "智能场景关系图": graph,
+                }
+                requests = (
+                    model_refiner._compact_environment_context_for_model(graph),
+                    model_refiner._compose_model_user_prompt("Skill 图像底稿。", settings),
+                    model_refiner._compose_model_user_prompt(
+                        "Skill 视频底稿。",
+                        {**settings, "模型任务": "视频提示词"},
+                    ),
+                    model_refiner._compose_batch_prompt(
+                        ["第一份底稿。", "第二份底稿。"],
+                        settings,
+                    ),
+                )
+                for request in requests:
+                    self.assertIn(expected, request)
+                    self.assertIn("未由 Skill 底稿给出的空气成分不作补充", request)
+                    for forbidden in forbidden_terms:
+                        self.assertNotIn(forbidden, request)
+
+        negated_only = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["旅人"]}),
+            context_text="不要冷雾，也不要烟尘天光。",
+        )
+        negated_context = model_refiner._atmospheric_medium_context_for_model(
+            negated_only
+        )
+        self.assertIn("大气介质与能见度不得采用", negated_context)
+        self.assertIn("雾化低能见度空气", negated_context)
+        self.assertIn("颗粒烟尘空气", negated_context)
+
+    def test_scene_attribute_repair_reasons_are_isolated_by_axis(self) -> None:
+        cases = (
+            ("昼夜", "time_of_day", "太阳或月亮", ("降雨", "发丝", "呼气", "水洼", "墙体", "全局阴影")),
+            ("降水", "precipitation", "直接落点反馈", ("太阳或月亮", "发丝", "呼气", "水洼", "墙体", "全局阴影")),
+            ("风势", "wind", "发丝、衣摆", ("太阳或月亮", "降雨", "呼气", "水洼", "墙体", "全局阴影")),
+            ("环境温度", "ambient_temperature", "呼气、汗液", ("太阳或月亮", "降雨", "发丝", "水洼", "墙体", "全局阴影")),
+            ("地表状态", "ground_surface", "水洼、结冰", ("太阳或月亮", "降雨", "发丝", "呼气", "墙体", "全局阴影")),
+            ("空间围合", "spatial_enclosure", "墙体、顶棚", ("太阳或月亮", "降雨", "发丝", "呼气", "水洼", "全局阴影")),
+            ("主导照明来源", "dominant_light_source", "全局阴影", ("太阳或月亮", "降雨", "发丝", "呼气", "水洼", "墙体")),
+        )
+        for axis_label, axis, expected_fragment, forbidden_fragments in cases:
+            with self.subTest(axis=axis):
+                repair = intelligence.classify_repair_reason(
+                    f"模型响应越过场景属性约束：{axis_label}要求‘固定状态’，却新增了‘相反状态’。"
+                )
+                self.assertEqual(repair["kind"], f"scene_attribute_{axis}")
+                self.assertIn(expected_fragment, repair["instruction"])
+                for fragment in forbidden_fragments:
+                    self.assertNotIn(fragment, repair["instruction"])
+
+        fallback = intelligence.classify_repair_reason("模型响应越过场景属性约束，但未提供轴标签。")
+        self.assertEqual(fallback["kind"], "scene_attribute")
+
+    def test_scene_attribute_retry_prompt_uses_only_violated_axis_instruction(self) -> None:
+        class CapturingModel:
+            def __init__(self):
+                self.messages = []
+
+            def create_chat_completion(self, messages=None, **_kwargs):
+                self.messages.append(messages or [])
+                return {"choices": [{"message": {"content": "无风环境里，人物发丝与衣摆自然垂落。"}}]}
+
+        model = CapturingModel()
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["旅人"],
+                    "场景背景": ["湿润地面", "室内场景"],
+                    "光影氛围": ["无风", "自然光照明"],
+                }
+            )
+        )
+        settings = {
+            "提示词语言": "纯中文",
+            "模型来源": "本地模型",
+            "模型输出修复重试次数": 1,
+            "智能模型策略": {"mode": "incremental_blend"},
+            "智能场景关系图": graph,
+        }
+        result = model_refiner._retry_invalid_model_output(
+            model,
+            "无风环境里，人物发丝与衣摆自然垂落。",
+            settings,
+            chat_completion=lambda backend, messages, params: backend.create_chat_completion(
+                messages=messages,
+                **params,
+            ),
+            clean_think_text=lambda value: value,
+            reason="模型响应越过场景属性约束：风势要求‘静风’，却新增了‘狂风’。",
+        )
+        request = "\n".join(str(item.get("content", "")) for item in model.messages[0])
+        self.assertEqual(result, "无风环境里，人物发丝与衣摆自然垂落。")
+        self.assertEqual(settings["智能定向修复最近类型"], "scene_attribute_wind")
+        self.assertIn("发丝、衣摆、植被与既有空气介质", request)
+        self.assertIn("不新增空气介质", request)
+        self.assertNotIn("烟雾与颗粒", request)
+        self.assertIn("智能场景属性：风势固定为静风", request)
+        self.assertNotIn("地表状态固定", request)
+        self.assertNotIn("空间围合固定", request)
+        self.assertNotIn("主导照明来源固定", request)
+        self.assertNotIn("水洼", request)
+        self.assertNotIn("墙体", request)
+        self.assertNotIn("呼气", request)
+        self.assertNotIn("全局阴影", request)
+
     def test_scene_attribute_repair_reaches_full_stage(self) -> None:
         module = load_stage_prompt_generator_for_integration_test()
 
@@ -1430,7 +2875,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v61")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["context_scene_attribute_constraints"]["time_of_day"]["required_value"], "day")
         self.assertEqual(graph["context_scene_attribute_constraints"]["precipitation"]["required_value"], "clear")
@@ -1560,7 +3005,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v61")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["context_subject_cardinality_constraint"]["required_value"], "single")
         self.assertEqual(payload["scene_coherence_status"], "coherent")
@@ -1688,7 +3133,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v61")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["context_subject_orientation_constraint"]["required_value"], "back")
         self.assertEqual(payload["scene_coherence_status"], "coherent")
@@ -1885,7 +3330,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
                 "智能场景关系图": graph,
             },
         )
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v61")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["context_subject_pose_constraint"]["required_value"], "standing")
         self.assertNotIn("坐姿慵懒", payload["selected_tags_flat"])
@@ -2022,7 +3467,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
                 "智能场景关系图": graph,
             },
         )
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v61")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["context_camera_angle_constraint"]["required_value"], "low_angle")
         self.assertNotIn("高角度俯拍", payload["selected_tags_flat"])
@@ -2113,7 +3558,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
                 "智能场景关系图": graph,
             },
         )
-        self.assertEqual(profile["version"], "qwen-te-intelligence-v42")
+        self.assertEqual(profile["version"], "qwen-te-intelligence-v61")
         self.assertEqual(graph["context_subject_presence_constraint"]["required_value"], "non_person")
         self.assertIn("主体存在性约束", violation)
         self.assertIn("成年女性", violation)
@@ -2163,7 +3608,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v61")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["context_subject_presence_constraint"]["required_value"], "none")
         self.assertNotIn("成年女性模特", payload["selected_tags_flat"])
@@ -2300,7 +3745,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v61")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["context_light_temperature_constraint"]["required_value"], "cool")
         self.assertNotIn("烛火暖光", payload["selected_tags_flat"])
@@ -2436,7 +3881,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v61")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["color_rendering_constraint"]["required_value"], "monochrome")
         self.assertNotIn("彩色霓虹光", payload["selected_tags_flat"])
@@ -2582,7 +4027,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v61")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["depth_of_field_constraint"]["required_value"], "deep")
         self.assertNotIn("浅景深", payload["selected_tags_flat"])
@@ -2721,7 +4166,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v61")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["lighting_quality_constraint"]["required_value"], "hard")
         self.assertNotIn("柔光", payload["selected_tags_flat"])
@@ -2866,7 +4311,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v61")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["motion_rendering_constraint"]["required_value"], "frozen")
         self.assertNotIn("运动模糊", payload["selected_tags_flat"])
@@ -3005,7 +4450,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v61")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["camera_stability_constraint"]["required_value"], "stable")
         self.assertNotIn("手持镜头", payload["selected_tags_flat"])
@@ -3144,7 +4589,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v61")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["focal_perspective_constraint"]["required_value"], "wide")
         self.assertNotIn("200mm长焦压缩", payload["selected_tags_flat"])
@@ -3287,7 +4732,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v61")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["key_light_direction_constraint"]["required_value"], "side")
         self.assertNotIn("顶光烟雾", payload["selected_tags_flat"])
@@ -3426,7 +4871,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v61")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["exposure_key_constraint"]["required_value"], "high_key")
         self.assertNotIn("低键光", payload["selected_tags_flat"])
@@ -3570,7 +5015,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v61")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["contrast_level_constraint"]["required_value"], "high")
         self.assertNotIn("低反差画面", payload["selected_tags_flat"])
@@ -3714,7 +5159,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v61")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["saturation_level_constraint"]["required_value"], "high")
         self.assertNotIn("低饱和", payload["selected_tags_flat"])
@@ -3870,7 +5315,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v61")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["image_grain_constraint"]["required_value"], "grainy")
         self.assertNotIn("纯净数字成像", payload["selected_tags_flat"])
@@ -4036,7 +5481,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v61")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["image_sharpness_constraint"]["required_value"], "sharp")
         self.assertNotIn("柔焦", payload["selected_tags_flat"])
@@ -4201,7 +5646,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v61")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 2)
         self.assertEqual(graph["detail_density_constraint"]["required_value"], "low")
         self.assertNotIn("高细节", payload["selected_tags_flat"])
@@ -4386,7 +5831,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v61")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["visual_medium_constraint"]["required_value"], "drawn_2d")
         self.assertNotIn("3D渲染", payload["selected_tags_flat"])
@@ -4539,7 +5984,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v61")
         self.assertEqual(
             graph["projection_geometry_constraint"]["required_value"],
             "orthographic",
@@ -4633,8 +6078,114 @@ class TestStagePromptIntelligence(unittest.TestCase):
         self.assertIn("大气介质与能见度约束", violation)
         self.assertIn("浓烟", violation)
         self.assertIn(
-            "智能大气介质与能见度：大气介质与能见度固定为薄雾/浓雾空气",
+            "智能大气介质与能见度：大气介质与能见度固定为雾化低能见度空气",
             model_prompt,
+        )
+
+    def test_candidate_guard_infers_atmospheric_medium_from_visual_feedback(self) -> None:
+        samples = {
+            "clear_air": "远处石墙边缘始终清晰锐利，光束穿过空气时毫无介质散射。",
+            "mist_fog": "远景轮廓在悬浮水汽中逐层衰减，光线化为乳白散射。",
+            "smoke_dust": "密集灰黑颗粒逐步遮住远景，光束在干燥悬浮物中形成浑浊散射。",
+        }
+        for value, sample in samples.items():
+            with self.subTest(detector=value):
+                self.assertEqual(
+                    set(intelligence.detect_atmospheric_medium_feedback(sample)),
+                    {value},
+                )
+
+        cases = (
+            (
+                "clear_to_mist_zh",
+                "上午通透天光",
+                "空气通透，旅人沿石阶前进。",
+                samples["mist_fog"],
+            ),
+            (
+                "fog_to_clear_zh",
+                "冷雾惊悚侧光",
+                "冷雾贴着石阶流动。",
+                samples["clear_air"],
+            ),
+            (
+                "fog_to_smoke_zh",
+                "冷雾惊悚侧光",
+                "冷雾贴着石阶流动。",
+                samples["smoke_dust"],
+            ),
+            (
+                "smoke_to_clear_en",
+                "烟尘天光",
+                "烟尘天光笼罩遗迹。",
+                " Distant architecture remains crisp with no atmospheric falloff.",
+            ),
+            (
+                "clear_to_mist_en",
+                "上午通透天光",
+                "空气通透，旅人沿石阶前进。",
+                " Distant contours fade through suspended moisture.",
+            ),
+            (
+                "clear_to_smoke_en",
+                "上午通透天光",
+                "空气通透，旅人沿石阶前进。",
+                " Dense gritty particles obscure the distance.",
+            ),
+        )
+        for name, atmosphere, original, addition in cases:
+            with self.subTest(case=name):
+                graph = intelligence.build_scene_relationship_graph(
+                    OrderedDict({"主体": ["旅人"], "光影氛围": [atmosphere]})
+                )
+                violation = intelligence.candidate_world_violation(
+                    original,
+                    original + addition,
+                    graph,
+                )
+                repair = intelligence.classify_repair_reason(violation)
+                self.assertIn("大气介质与能见度约束", violation)
+                self.assertIn("直接视觉反馈", violation)
+                self.assertEqual(repair["kind"], "atmospheric_medium")
+                self.assertIn("轮廓衰减", repair["instruction"])
+                self.assertNotIn("降雨", repair["instruction"])
+
+    def test_atmospheric_feedback_guard_preserves_negation_consistency_and_open_axes(self) -> None:
+        clear_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["旅人"], "光影氛围": ["上午通透天光"]})
+        )
+        clear_original = "空气通透，旅人沿石阶前进。"
+        negated_candidate = (
+            clear_original
+            + "不要让远景轮廓在悬浮水汽中逐层衰减，远处结构仍应可读。"
+        )
+        consistent_candidate = (
+            clear_original
+            + "远处石墙边缘始终清晰锐利，光束穿过空气时毫无介质散射。"
+        )
+        depth_candidate = clear_original + "浅景深让远景虚化，人物面部保持清晰。"
+        for candidate in (negated_candidate, consistent_candidate, depth_candidate):
+            self.assertEqual(
+                intelligence.candidate_world_violation(
+                    clear_original,
+                    candidate,
+                    clear_graph,
+                ),
+                "",
+            )
+
+        open_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["旅人"], "光影氛围": ["侧光"]})
+        )
+        open_original = "旅人在侧光下沿石阶前进。"
+        self.assertEqual(open_graph["atmospheric_medium_constraint"], {})
+        self.assertEqual(
+            intelligence.candidate_world_violation(
+                open_original,
+                open_original + "远景轮廓在悬浮水汽中逐层衰减。",
+                open_graph,
+            ),
+            "",
         )
 
     def test_zoned_local_and_transition_atmospheric_media_remain_open(self) -> None:
@@ -4717,7 +6268,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v42")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v61")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(
             graph["atmospheric_medium_constraint"]["required_value"],
@@ -4850,6 +6401,132 @@ class TestStagePromptIntelligence(unittest.TestCase):
         for axis_name, expected_value, marker in rules:
             with self.subTest(axis=axis_name, marker=marker):
                 self.assertIn(expected_value, detectors[axis_name](marker))
+
+    def test_season_context_removes_only_conflicting_soft_anchors(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["成年女性冒险者"],
+                "场景背景": ["春日新绿", "冬日雪原"],
+            }
+        )
+        custom = ["深秋红叶", "高细节"]
+        context = "故事固定在春季，不要秋季，不要冬季。"
+        graph = intelligence.build_scene_relationship_graph(selected, custom, context_text=context)
+        constraint = graph["season_constraint"]
+        issues = [
+            item for item in graph["coherence_issues"]
+            if item["kind"] == "context_season_conflict"
+        ]
+        self.assertEqual(constraint["required_value"], "spring")
+        self.assertEqual(constraint["negated_values"], ["autumn", "winter"])
+        self.assertEqual(constraint["source"], "natural_context")
+        self.assertEqual(
+            [item["value"] for item in issues[0]["conflicting_anchors"]],
+            ["冬日雪原", "深秋红叶"],
+        )
+        repaired, repaired_custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected, custom, graph, soft_tags=["冬日雪原", "深秋红叶"]
+        )
+        rebuilt = intelligence.build_scene_relationship_graph(
+            repaired, repaired_custom, context_text=context
+        )
+        self.assertEqual(repaired["场景背景"], ["春日新绿"])
+        self.assertEqual(repaired_custom, ["高细节"])
+        self.assertEqual(report["removed_count"], 2)
+        self.assertEqual(rebuilt["coherence_status"], "coherent")
+
+    def test_selected_winter_rejects_summer_model_candidate(self) -> None:
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"], "场景背景": ["冬日雪原"]})
+        )
+        original = "冬日雪原上，冒险者迎着冷风检查足迹。"
+        violation = intelligence.candidate_world_violation(
+            original,
+            original + "环境随后被改成盛夏浓荫和夏夜萤火。",
+            graph,
+        )
+        model_prompt = model_refiner._compose_batch_prompt(
+            [original], {"提示词语言": "纯中文", "智能场景关系图": graph}
+        )
+        self.assertEqual(graph["season_constraint"]["required_value"], "winter")
+        self.assertEqual(graph["season_constraint"]["source"], "selected_state")
+        self.assertIn("季节连续性约束", violation)
+        self.assertIn("盛夏", violation)
+        self.assertIn("智能季节连续性：季节固定为冬季", model_prompt)
+
+    def test_four_seasons_transition_and_nonseasonal_language_remain_open(self) -> None:
+        four_seasons = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"]}),
+            context_text="制作春夏秋冬四季组图，每幅保持同一角色。",
+        )
+        transition = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"]}),
+            context_text="故事从春日新绿逐渐过渡到深秋红叶。",
+        )
+        nonseasonal = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["青春少女"], "道具世界观": ["机械弹簧"]}),
+            context_text="她保持青春活力，检查机械弹簧结构。",
+        )
+        winter_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"场景背景": ["冬日雪原"]})
+        )
+        series_violation = intelligence.candidate_world_violation(
+            "冬日雪原中的角色保持同一造型。",
+            "四季组图依次展示春日、夏日、秋日与冬日，角色保持同一造型。",
+            winter_graph,
+        )
+        self.assertEqual(four_seasons["season_constraint"], {})
+        self.assertEqual(transition["season_constraint"], {})
+        self.assertEqual(nonseasonal["season_constraint"], {})
+        self.assertEqual(series_violation, "")
+
+    def test_explicit_season_conflict_is_guarded(self) -> None:
+        selected = OrderedDict({"主体": ["成年女性冒险者"], "场景背景": ["盛夏浓荫"]})
+        graph = intelligence.build_scene_relationship_graph(
+            selected,
+            context_text="故事固定在冬季，不要夏季。",
+        )
+        unchanged, _custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected, [], graph, soft_tags=[]
+        )
+        strategy = intelligence.resolve_model_strategy(
+            {"模型来源": "本地模型"}, {"task_type": "standard_visual_story"}, graph
+        )
+        self.assertFalse(report["applied"])
+        self.assertEqual(unchanged, selected)
+        self.assertEqual(strategy["mode"], "skill_only_guarded")
+
+    def test_season_repair_reaches_full_stage(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+
+        def inject_summer(selected, custom_tags, settings, **_kwargs):
+            next_selected = OrderedDict((group, list(values)) for group, values in selected.items())
+            settings["运行时随机有效种子"] = 251
+            return next_selected, [*custom_tags, "盛夏浓荫"], ["盛夏浓荫"]
+
+        with mock.patch.object(module, "_build_runtime_tags", side_effect=inject_summer):
+            result = module._run_stage(
+                None,
+                **{
+                    "unique_id": "intelligence-v43-season-repair",
+                    "模型来源": "仅Skill",
+                    "主体标签1": "成年女性冒险者",
+                    "场景背景标签1": "森林",
+                    "额外要求": "故事固定在冬季，不要夏季或盛夏景色。",
+                    "运行时随机标签": True,
+                    "运行时随机模式": "全随机",
+                    "生成数量": 1,
+                    "提示词语言": "纯中文",
+                    "seed": 251,
+                },
+            )
+        payload = json.loads(result[3])
+        graph = payload["scene_relationship_graph"]
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v61")
+        self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
+        self.assertEqual(graph["season_constraint"]["required_value"], "winter")
+        self.assertNotIn("盛夏浓荫", payload["selected_tags_flat"])
+        self.assertEqual(payload["scene_coherence_status"], "coherent")
 
     def test_preference_memory_requires_repeated_explicit_choices(self) -> None:
         explicit = OrderedDict(

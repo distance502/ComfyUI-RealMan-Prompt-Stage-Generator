@@ -9,7 +9,7 @@ import re
 from typing import Any, Iterable
 
 
-INTELLIGENCE_PROFILE_VERSION = "qwen-te-intelligence-v42"
+INTELLIGENCE_PROFILE_VERSION = "qwen-te-intelligence-v61"
 
 _GROUP_LIMITS = {
     "主体": 6,
@@ -162,10 +162,82 @@ SCENE_ATTRIBUTE_MARKERS: dict[str, dict[str, tuple[str, ...]]] = {
             "雪天", "下雪", "飘雪", "暴雪", "snowfall", "snowy", "blizzard",
         ),
     },
+    "wind": {
+        "calm": (
+            "无风", "静风", "风平浪静", "空气静止", "windless", "still air", "calm air",
+        ),
+        "breeze": (
+            "微风", "轻风", "徐徐清风", "轻柔气流", "breeze", "gentle wind", "light wind",
+        ),
+        "strong_wind": (
+            "强风", "大风", "狂风", "烈风", "猛烈阵风", "strong wind", "gale", "violent wind", "gusty wind",
+        ),
+    },
+    "ambient_temperature": {
+        "cold": (
+            "严寒环境", "寒冷环境", "低温环境", "冰冷空气", "零下低温", "刺骨寒冷",
+            "freezing cold", "cold weather", "subzero temperature", "icy air",
+        ),
+        "mild": (
+            "温和气温", "舒适气温", "不冷不热", "宜人温度",
+            "mild temperature", "temperate weather", "comfortable temperature",
+        ),
+        "hot": (
+            "炎热环境", "酷热天气", "高温环境", "热浪天气", "闷热空气", "灼热空气",
+            "scorching heat", "hot weather", "high ambient temperature", "heatwave",
+        ),
+    },
+    "ground_surface": {
+        "dry_ground": (
+            "干燥地面", "干燥路面", "地表干燥", "路面无积水",
+            "dry ground", "dry pavement", "dry roadway",
+        ),
+        "wet_ground": (
+            "湿润地面", "潮湿地面", "湿滑路面", "雨水路面", "地面积水", "水洼路面",
+            "wet ground", "wet pavement", "rain-soaked street", "puddled ground",
+        ),
+        "icy_ground": (
+            "结冰地面", "冰封路面", "薄冰地表", "冻结路面",
+            "icy ground", "frozen ground", "ice-covered pavement",
+        ),
+    },
+    "spatial_enclosure": {
+        "indoor": (
+            "室内场景", "室内空间", "房间内部", "建筑内部", "封闭室内",
+            "indoor scene", "indoor space", "inside the room", "inside the building",
+        ),
+        "outdoor": (
+            "户外场景", "户外环境", "室外空间", "露天环境",
+            "outdoor scene", "outdoor setting", "open-air setting", "outdoors",
+        ),
+        "semi_open": (
+            "半开放空间", "有顶棚的开放空间", "开放式廊亭", "四面通风的顶棚空间",
+            "semi-open space", "covered outdoor area", "open-sided shelter",
+        ),
+    },
+    "dominant_light_source": {
+        "natural_light": (
+            "自然光照明", "纯自然光照明", "仅自然光照明", "日光主导照明", "窗外日光照明",
+            "natural-light illumination", "daylight-dominant lighting", "lit only by daylight",
+        ),
+        "artificial_light": (
+            "人工光照明", "纯人工光照明", "仅人工灯光照明", "电气灯光主导", "棚灯主导照明",
+            "artificial-light illumination", "electric-light-dominant lighting", "lit only by artificial lights",
+        ),
+        "mixed_light": (
+            "自然光与人工光混合", "日光与灯光混合照明", "混合光源照明",
+            "mixed natural and artificial lighting", "mixed-source lighting",
+        ),
+    },
 }
 _SCENE_ATTRIBUTE_LABELS = {
     "time_of_day": "昼夜",
     "precipitation": "降水",
+    "wind": "风势",
+    "ambient_temperature": "环境温度",
+    "ground_surface": "地表状态",
+    "spatial_enclosure": "空间围合",
+    "dominant_light_source": "主导照明来源",
     "dawn": "清晨",
     "day": "白天",
     "dusk": "黄昏",
@@ -173,6 +245,145 @@ _SCENE_ATTRIBUTE_LABELS = {
     "clear": "晴朗",
     "rain": "降雨",
     "snow": "降雪",
+    "calm": "静风",
+    "breeze": "微风",
+    "strong_wind": "强风",
+    "cold": "寒冷",
+    "mild": "温和",
+    "hot": "炎热",
+    "dry_ground": "干燥",
+    "wet_ground": "湿润积水",
+    "icy_ground": "结冰",
+    "indoor": "室内",
+    "outdoor": "户外",
+    "semi_open": "半开放",
+    "natural_light": "自然光",
+    "artificial_light": "人工光",
+    "mixed_light": "混合光源",
+}
+_SCENE_ATTRIBUTE_REPAIR_RULES: tuple[tuple[str, str, str], ...] = (
+    (
+        "time_of_day",
+        "昼夜",
+        "只修正天空明暗、太阳或月亮可见性以及对应时段光线，不改变主体、动作、场景与剧情顺序。",
+    ),
+    (
+        "precipitation",
+        "降水",
+        "只修正晴朗、降雨或降雪状态及其直接落点反馈，不改变主体、动作、场景与剧情顺序。",
+    ),
+    (
+        "wind",
+        "风势",
+        "只修正发丝、衣摆、植被与既有空气介质的受力状态，不新增空气介质，不改变主体、动作、场景与剧情顺序。",
+    ),
+    (
+        "ambient_temperature",
+        "环境温度",
+        "只修正呼气、汗液、衣着反馈、凝露与热浪表现，不改变主体、动作、场景与剧情顺序。",
+    ),
+    (
+        "ground_surface",
+        "地表状态",
+        "只修正地面反光、水洼、结冰、脚印、接触阴影与移动接触反馈，不改变主体、动作、场景与剧情顺序。",
+    ),
+    (
+        "spatial_enclosure",
+        "空间围合",
+        "只修正墙体、顶棚、原文已有开口、天空可见性与内外边界，不新增门窗、洞口或室外远景，不改变主体、动作、道具与剧情顺序。",
+    ),
+    (
+        "dominant_light_source",
+        "主导照明来源",
+        "只修正全局阴影、反射高光、综合色偏以及主光与辅助光关系，不改变主体、动作、场景与剧情顺序。",
+    ),
+)
+# These patterns infer only candidate-side physical feedback. They never create
+# a user constraint, so descriptive details cannot silently lock an open axis.
+SCENE_ATTRIBUTE_FEEDBACK_PATTERNS: dict[str, dict[str, tuple[re.Pattern[str], ...]]] = {
+    "time_of_day": {
+        "dawn": (
+            re.compile(r"(?:晨曦|破晓微光)[^。！？.!?\n]{0,16}(?:铺开|泛起|照亮)|\bfirst light\b[^.!?\n]{0,32}\b(?:spreads|fills|illuminates)\b", re.IGNORECASE),
+        ),
+        "day": (
+            re.compile(r"太阳[^。！？.!?\n]{0,16}(?:高悬|直射|投下短影)|\b(?:the sun|sunlight)\b[^.!?\n]{0,32}\b(?:overhead|casts short shadows|shines directly)\b", re.IGNORECASE),
+        ),
+        "dusk": (
+            re.compile(r"(?:暮色|落日余晖)[^。！？.!?\n]{0,16}(?:笼罩|染红|铺满)|\b(?:evening glow|sunset afterglow)\b[^.!?\n]{0,32}\b(?:settles|fills|turns)\b", re.IGNORECASE),
+        ),
+        "night": (
+            re.compile(r"(?:繁星|星光)[^。！？.!?\n]{0,16}(?:铺满|笼罩|照亮)|\b(?:stars|starlight)\b[^.!?\n]{0,32}\b(?:fill|fills|cover|covers|illuminate|illuminates)\b", re.IGNORECASE),
+        ),
+    },
+    "precipitation": {
+        "clear": (
+            re.compile(r"(?:雨雪|降水)[^。！？.!?\n]{0,12}(?:完全停止|已经停止)|云层[^。！？.!?\n]{0,10}(?:完全散尽|彻底散尽)|\b(?:rain|snow|precipitation)\b[^.!?\n]{0,24}\b(?:has|have) stopped completely\b", re.IGNORECASE),
+        ),
+        "rain": (
+            re.compile(r"雨滴[^。！？.!?\n]{0,14}(?:落下|敲打|打湿)|\braindrops?\b[^.!?\n]{0,28}\b(?:fall|falls|strike|strikes|soak|soaks)\b", re.IGNORECASE),
+        ),
+        "snow": (
+            re.compile(r"雪花[^。！？.!?\n]{0,14}(?:飘落|落下|覆盖)|\bsnowflakes?\b[^.!?\n]{0,28}\b(?:fall|falls|drift|drifts|cover|covers)\b", re.IGNORECASE),
+        ),
+    },
+    "wind": {
+        "calm": (
+            re.compile(r"(?:发丝|头发|衣摆|披风|烟柱|烟雾)[^。！？.!?\n]{0,16}(?:自然垂落|纹丝不动|垂直上升)|\b(?:hair|hem|cape|smoke)\b[^.!?\n]{0,32}\b(?:hangs still|remains motionless|rises vertically)\b", re.IGNORECASE),
+            re.compile(r"(?:雨滴|雨线|雪花)[^。！？.!?\n]{0,14}(?:近乎垂直|垂直落下|笔直落下)|\b(?:rain|raindrops|snowflakes)\b[^.!?\n]{0,32}\b(?:falls?|descends?) (?:almost )?vertically\b", re.IGNORECASE),
+            re.compile(r"(?:雾层|水汽层)[^。！？.!?\n]{0,16}(?:近乎静止|纹丝不动|不产生横向漂移)|\b(?:mist|moisture) layers?\b[^.!?\n]{0,32}\b(?:remains? nearly still|shows? no lateral drift)\b", re.IGNORECASE),
+        ),
+        "breeze": (
+            re.compile(r"(?:发丝|衣角|树叶)[^。！？.!?\n]{0,14}(?:轻轻摆动|微微拂动|缓慢摇曳)|\b(?:hair|hem|leaves)\b[^.!?\n]{0,32}\b(?:sways gently|flutter gently|flutters gently)\b", re.IGNORECASE),
+            re.compile(r"(?:雨滴|雨线|雪花)[^。！？.!?\n]{0,14}(?:轻微倾斜|缓慢偏移|轻柔侧移)|\b(?:rain|raindrops|snowflakes)\b[^.!?\n]{0,32}\b(?:tilts? slightly|drifts? gently)\b", re.IGNORECASE),
+            re.compile(r"(?:雾层|水汽层)[^。！？.!?\n]{0,16}(?:缓慢侧移|轻柔偏移|低幅横移)|\b(?:mist|moisture) layers?\b[^.!?\n]{0,32}\b(?:drifts? gently|shifts? slowly sideways)\b", re.IGNORECASE),
+        ),
+        "strong_wind": (
+            re.compile(r"(?:发丝|长发|衣摆|披风|树枝|烟雾|尘粒)[^。！？.!?\n]{0,18}(?:猛烈掀起|剧烈翻飞|压向一侧|掀向一侧|横向卷走|大幅弯折)|\b(?:hair|hem|cape|branches|smoke|dust)\b[^.!?\n]{0,40}\b(?:whips violently|is blown sideways|are blown sideways|bends sharply)\b", re.IGNORECASE),
+            re.compile(r"(?:雨线|雨滴|雪花)[^。！？.!?\n]{0,16}(?:斜向扫过|横向飞掠|横飞|几乎平行地面)|\b(?:rain|raindrops|snowflakes)\b[^.!?\n]{0,36}\b(?:lashes diagonally|drives sideways|flies horizontally)\b", re.IGNORECASE),
+            re.compile(r"(?:雾层|水汽层)[^。！？.!?\n]{0,18}(?:横向卷过|快速侧移|沿单一方向扫过)|\b(?:mist|moisture) layers?\b[^.!?\n]{0,36}\b(?:sweeps? sideways|races? laterally|drives? in one direction)\b", re.IGNORECASE),
+        ),
+    },
+    "ambient_temperature": {
+        "cold": (
+            re.compile(r"(?:呼气|气息)[^。！？.!?\n]{0,10}(?:凝成|化作|形成)[^。！？.!?\n]{0,6}白雾|(?:睫毛|发梢|衣领)[^。！？.!?\n]{0,10}(?:结霜|凝霜)|\b(?:breath|exhalation)\b[^.!?\n]{0,28}\b(?:forms|turns into) white mist\b", re.IGNORECASE),
+        ),
+        "hot": (
+            re.compile(r"空气[^。！？.!?\n]{0,10}(?:因高热|被热量)[^。！？.!?\n]{0,10}(?:扭曲|晃动)|皮肤[^。！？.!?\n]{0,10}(?:因酷热|被高温)[^。！？.!?\n]{0,10}(?:泛红|冒汗)|\bair\b[^.!?\n]{0,32}\b(?:shimmers|warps) from (?:the )?heat\b", re.IGNORECASE),
+        ),
+    },
+    "ground_surface": {
+        "dry_ground": (
+            re.compile(r"(?:脚下|鞋底)[^。！？.!?\n]{0,12}(?:扬起|带起)[^。！？.!?\n]{0,6}(?:干尘|尘土)|路面[^。！？.!?\n]{0,10}(?:没有水痕|毫无水痕)|\b(?:footsteps?|boots?)\b[^.!?\n]{0,32}\b(?:kick up|kicks up|raise|raises) dry dust\b", re.IGNORECASE),
+        ),
+        "wet_ground": (
+            re.compile(r"(?:脚步|鞋底)[^。！？.!?\n]{0,14}(?:溅起|踩出)[^。！？.!?\n]{0,6}(?:水花|涟漪)|(?:地面|路面)[^。！？.!?\n]{0,10}(?:湿亮反光|湿光倒影)|\b(?:footsteps?|boots?)\b[^.!?\n]{0,32}\b(?:splash|splashes) (?:water|through puddles)\b", re.IGNORECASE),
+        ),
+        "icy_ground": (
+            re.compile(r"(?:鞋底|脚步)[^。！？.!?\n]{0,12}(?:在冰面打滑|失去抓地)|薄冰[^。！？.!?\n]{0,10}(?:开裂|龟裂)|\b(?:boots?|feet)\b[^.!?\n]{0,28}\b(?:slip|slides?) on (?:the )?ice\b", re.IGNORECASE),
+        ),
+    },
+    "spatial_enclosure": {
+        "indoor": (
+            re.compile(r"(?:墙壁|墙体)[^。！？.!?\n]{0,14}(?:与|和)[^。！？.!?\n]{0,8}(?:顶棚|天花板)[^。！？.!?\n]{0,14}(?:完全闭合|封闭四周)|四周[^。！？.!?\n]{0,12}(?:封闭|闭合)[^。！？.!?\n]{0,10}(?:没有门窗|无门无窗)|\bwalls?\b[^.!?\n]{0,32}\b(?:and|with) (?:a )?(?:ceiling|roof)\b[^.!?\n]{0,28}\bfully enclose\b", re.IGNORECASE),
+        ),
+        "outdoor": (
+            re.compile(r"(?:头顶|人物上方)[^。！？.!?\n]{0,12}(?:毫无遮蔽|完全无遮蔽)[^。！？.!?\n]{0,8}(?:天空|天际)|四周[^。！？.!?\n]{0,12}(?:没有|不存在)[^。！？.!?\n]{0,8}(?:墙体|顶棚)|\b(?:open|unobstructed) sky\b[^.!?\n]{0,28}\b(?:directly above|overhead)\b", re.IGNORECASE),
+        ),
+        "semi_open": (
+            re.compile(r"(?:顶棚|雨棚)[^。！？.!?\n]{0,12}(?:遮住|覆盖)[^。！？.!?\n]{0,10}(?:头顶|上方)[^。！？.!?\n]{0,18}(?:四周|侧面)[^。！？.!?\n]{0,8}(?:敞开|通风)|\b(?:roof|canopy)\b[^.!?\n]{0,32}\boverhead\b[^.!?\n]{0,32}\bopen sides\b", re.IGNORECASE),
+        ),
+    },
+    "dominant_light_source": {
+        "natural_light": (
+            re.compile(r"(?:日光|阳光|窗外天光)[^。！？.!?\n]{0,14}(?:成为|构成|作为)[^。！？.!?\n]{0,8}(?:唯一|全局|主要)[^。！？.!?\n]{0,8}(?:光源|主光)|\b(?:daylight|sunlight)\b[^.!?\n]{0,32}\b(?:is|becomes|remains) the (?:only|primary|global) light\b", re.IGNORECASE),
+        ),
+        "artificial_light": (
+            re.compile(r"(?:棚灯|顶灯|霓虹灯|电灯)[^。！？.!?\n]{0,14}(?:成为|接管|构成)[^。！？.!?\n]{0,8}(?:唯一|全局|主要)[^。！？.!?\n]{0,8}(?:光源|主光|照明)|\b(?:studio lights?|ceiling lights?|neon lights?|electric lights?)\b[^.!?\n]{0,36}\b(?:become|becomes|take over as) the (?:only|primary|global) light\b", re.IGNORECASE),
+        ),
+        "mixed_light": (
+            re.compile(r"(?:日光|天光)[^。！？.!?\n]{0,14}(?:与|和)[^。！？.!?\n]{0,10}(?:灯光|棚灯|电灯)[^。！？.!?\n]{0,14}(?:共同|同时)[^。！？.!?\n]{0,10}(?:照明|塑造阴影|成为主光)|\b(?:daylight|sunlight)\b[^.!?\n]{0,32}\b(?:and|with) (?:artificial|electric|studio) lights?\b[^.!?\n]{0,32}\b(?:jointly|together|both)\b", re.IGNORECASE),
+        ),
+    },
 }
 SUBJECT_CARDINALITY_MARKERS: dict[str, tuple[str, ...]] = {
     "single": (
@@ -880,9 +1091,9 @@ ATMOSPHERIC_MEDIUM_MARKERS: dict[str, tuple[str, ...]] = {
     ),
 }
 _ATMOSPHERIC_MEDIUM_LABELS = {
-    "clear_air": "通透无雾无烟空气",
-    "mist_fog": "薄雾/浓雾空气",
-    "smoke_dust": "烟雾/烟尘空气",
+    "clear_air": "通透高能见度空气",
+    "mist_fog": "雾化低能见度空气",
+    "smoke_dust": "颗粒烟尘空气",
 }
 _MIXED_ATMOSPHERIC_MEDIUM_RE = re.compile(
     r"(?:(?:前景|主体|人物|面部|产品)[^。！？.!?\n]{0,40}(?:清晰|通透|无雾|无烟)[^。！？.!?\n]{0,48}(?:背景|远景|地面|脚边)[^。！？.!?\n]{0,32}(?:薄雾|浓雾|冷雾|烟雾|烟尘|沙尘)|"
@@ -898,6 +1109,38 @@ _MIXED_ATMOSPHERIC_MEDIUM_RE = re.compile(
     r"(?:mist|fog|smoke|dust)[^;.!?\n]{0,40}(?:dissipates|clears|thins|fades|is blown away)))",
     flags=re.IGNORECASE,
 )
+# Candidate-only feedback patterns catch an implicit medium change without
+# turning ordinary depth of field, soft focus, or isolated particles into a
+# new scene constraint.
+ATMOSPHERIC_MEDIUM_FEEDBACK_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
+    "clear_air": (
+        re.compile(
+            r"(?:远景|远处(?:轮廓|建筑|石墙)?|背景轮廓)[^。！？.!?\n]{0,24}(?:始终|依然|保持)?(?:清晰锐利|清楚分明|毫无衰减)|"
+            r"(?:光束|光线)[^。！？.!?\n]{0,16}(?:穿过|通过)空气[^。！？.!?\n]{0,12}(?:毫无|没有|不产生)(?:介质)?散射|"
+            r"\b(?:distant|faraway) (?:contours?|architecture|background)\b[^.!?\n]{0,36}\b(?:remains?|stays?) (?:crisp|sharply defined)\b|"
+            r"\b(?:distant|faraway) (?:contours?|architecture|background)\b[^.!?\n]{0,36}\bshows? no atmospheric (?:falloff|scattering)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    "mist_fog": (
+        re.compile(
+            r"(?:远景|远处(?:轮廓|建筑|石墙)?|背景轮廓)[^。！？.!?\n]{0,24}(?:在|穿过)[^。！？.!?\n]{0,8}(?:悬浮水汽|细密水滴|湿润微滴)[^。！？.!?\n]{0,16}(?:逐层衰减|层层隐没|逐渐消失)|"
+            r"(?:光束|光线)[^。！？.!?\n]{0,12}(?:穿过|经过)[^。！？.!?\n]{0,8}(?:悬浮水汽|细密水滴|湿润微滴)[^。！？.!?\n]{0,12}(?:乳白散射|柔和漫散|扩散成乳白光晕)|"
+            r"\b(?:distant contours?|background silhouettes?)\b[^.!?\n]{0,32}\b(?:fade|recede|disappear)\b[^.!?\n]{0,24}\b(?:through )?(?:suspended moisture|fine water droplets)\b|"
+            r"\b(?:suspended moisture|fine water droplets)\b[^.!?\n]{0,24}\b(?:soften|diffuse|scatter) (?:the )?(?:light|light beams?)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    "smoke_dust": (
+        re.compile(
+            r"(?:密集|大量)(?:灰黑|焦黑|干燥|粗粝)?(?:悬浮)?颗粒[^。！？.!?\n]{0,20}(?:遮住|遮蔽|吞没)(?:远景|背景|视线)|"
+            r"(?:光束|光线)[^。！？.!?\n]{0,16}(?:干燥悬浮物|灰黑颗粒|焦黑颗粒)[^。！？.!?\n]{0,16}(?:浑浊散射|棕黄散射|变得浑浊)|"
+            r"\b(?:dense|thick) (?:gritty|charred|dark|dry|suspended) particles\b[^.!?\n]{0,32}\b(?:obscure|veil|swallow) (?:the )?(?:distance|background|view)\b|"
+            r"\b(?:light|light beams?)\b[^.!?\n]{0,24}\b(?:through|among) (?:dry suspended matter|charred particles)\b[^.!?\n]{0,24}\b(?:turn|turns|become|becomes) murky\b",
+            re.IGNORECASE,
+        ),
+    ),
+}
 BACKGROUND_COMPLEXITY_MARKERS: dict[str, tuple[str, ...]] = {
     "minimal": (
         "简洁连续中性背景", "简洁连续背景", "简洁中性背景", "简洁背景", "简单背景",
@@ -927,6 +1170,45 @@ _MIXED_BACKGROUND_COMPLEXITY_RE = re.compile(
     r"(?:(?:background|backdrop)[^;.!?\n]{0,40}(?:simple|minimal|plain|uncluttered)[^;.!?\n]{0,48}(?:single|one|necessary)[^;.!?\n]{0,24}(?:prop|pedestal|contact shadow)|"
     r"(?:main views?|turnaround)[^;.!?\n]{0,40}(?:simple|minimal)[^;.!?\n]{0,48}(?:inset|context view)[^;.!?\n]{0,32}(?:complex|rich|environmental)|"
     r"(?:simple|minimal|plain)[^;.!?\n]{0,48}(?:transition|change|expand)[^;.!?\n]{0,24}(?:complex|rich|environmental)))",
+    flags=re.IGNORECASE,
+)
+SEASON_MARKERS: dict[str, tuple[str, ...]] = {
+    "spring": (
+        "春季", "春日", "早春", "暮春", "春日新绿", "早春融雪", "暮春花雨",
+        "春耕水田", "樱花春景", "春季景色",
+        "springtime", "spring season", "early spring", "late spring", "spring scenery",
+    ),
+    "summer": (
+        "夏季", "夏日", "盛夏", "仲夏", "夏夜", "盛夏浓荫", "夏日雷雨",
+        "夏夜萤火", "夏季景色",
+        "summertime", "summer season", "midsummer", "summer night", "summer scenery",
+    ),
+    "autumn": (
+        "秋季", "秋日", "初秋", "深秋", "晚秋", "金秋", "秋收田野",
+        "初秋薄雾", "深秋红叶", "金秋草原", "晚秋芦苇", "秋季景色",
+        "autumn season", "fall season", "early autumn", "late autumn", "autumn scenery",
+    ),
+    "winter": (
+        "冬季", "冬日", "初冬", "寒冬", "隆冬", "冬日原野", "初冬霜地",
+        "冬日雪原", "冬季景色",
+        "wintertime", "winter season", "early winter", "deep winter", "winter scenery",
+    ),
+}
+_SEASON_LABELS = {
+    "spring": "春季",
+    "summer": "夏季",
+    "autumn": "秋季",
+    "winter": "冬季",
+}
+_MIXED_SEASON_RE = re.compile(
+    r"(?:四季|春夏秋冬|四时景色|四季组图|四季变化|季节轮回|跨季节|"
+    r"(?:春季|春日|早春|暮春|夏季|夏日|盛夏|仲夏|秋季|秋日|初秋|深秋|晚秋|冬季|冬日|初冬|寒冬)[^。！？.!?\n]{0,48}"
+    r"(?:随后|逐渐|最终|再)?[^。！？.!?\n]{0,12}(?:转为|进入|过渡到|变化为)[^。！？.!?\n]{0,24}"
+    r"(?:春季|春日|夏季|夏日|秋季|秋日|冬季|冬日)|"
+    r"four seasons|seasonal cycle|seasonal transition|across seasons|"
+    r"(?:springtime|spring season|summer season|summertime|autumn season|fall season|winter season|wintertime)"
+    r"[^;.!?\n]{0,48}(?:transition|change|shift|turn)[^;.!?\n]{0,24}"
+    r"(?:springtime|spring season|summer season|summertime|autumn season|fall season|winter season|wintertime))",
     flags=re.IGNORECASE,
 )
 
@@ -1197,6 +1479,28 @@ def detect_negated_scene_attributes(text: Any) -> dict[str, dict[str, list[str]]
     return _detect_scene_attributes(text, negated=True)
 
 
+def detect_scene_attribute_feedback(text: Any) -> dict[str, dict[str, list[str]]]:
+    source = _clean(text)
+    folded = source.casefold()
+    hits: dict[str, dict[str, list[str]]] = {}
+    for axis, values in SCENE_ATTRIBUTE_FEEDBACK_PATTERNS.items():
+        axis_hits: dict[str, list[str]] = {}
+        for value, patterns in values.items():
+            evidence: list[str] = []
+            for pattern in patterns:
+                for match in pattern.finditer(source):
+                    if _marker_match_is_negated(folded, match.start()):
+                        continue
+                    fragment = _clean(match.group(0))
+                    if fragment and fragment not in evidence:
+                        evidence.append(fragment)
+            if evidence:
+                axis_hits[value] = evidence
+        if axis_hits:
+            hits[axis] = axis_hits
+    return hits
+
+
 def _context_scene_attribute_constraints(text: Any) -> dict[str, dict[str, Any]]:
     positive = detect_scene_attributes(text)
     negated = detect_negated_scene_attributes(text)
@@ -1223,6 +1527,39 @@ def _context_scene_attribute_constraints(text: Any) -> dict[str, dict[str, Any]]
             "negated_evidence": {
                 value: list(negated.get(axis, {}).get(value, [])) for value in negated_values
             },
+            "source": "natural_context",
+        }
+    return constraints
+
+
+def _resolve_scene_attribute_constraints(
+    context_text: Any,
+    selected_values: Iterable[Any],
+) -> dict[str, dict[str, Any]]:
+    constraints = _context_scene_attribute_constraints(context_text)
+    context_positive = detect_scene_attributes(context_text)
+    selected_hits = detect_scene_attributes("，".join(_unique(selected_values, 32)))
+    for axis in SCENE_ATTRIBUTE_MARKERS:
+        if axis in constraints:
+            continue
+        # Multiple context states describe a sequence or comparison and must not
+        # fall back to a static tag-derived constraint.
+        if len(context_positive.get(axis, {})) > 1:
+            continue
+        selected_axis_hits = dict(selected_hits.get(axis, {}) or {})
+        if len(selected_axis_hits) != 1:
+            continue
+        required = next(iter(selected_axis_hits))
+        constraints[axis] = {
+            "axis_label": _SCENE_ATTRIBUTE_LABELS[axis],
+            "required_value": required,
+            "required_label": _SCENE_ATTRIBUTE_LABELS.get(required, required),
+            "positive_values": [required],
+            "negated_values": [],
+            "negated_labels": [],
+            "positive_evidence": {required: list(selected_axis_hits[required])},
+            "negated_evidence": {},
+            "source": "selected_state",
         }
     return constraints
 
@@ -2587,6 +2924,24 @@ def detect_atmospheric_medium(text: Any) -> dict[str, list[str]]:
     )
 
 
+def detect_atmospheric_medium_feedback(text: Any) -> dict[str, list[str]]:
+    source = _clean(text)
+    folded = source.casefold()
+    hits: dict[str, list[str]] = {}
+    for value, patterns in ATMOSPHERIC_MEDIUM_FEEDBACK_PATTERNS.items():
+        evidence: list[str] = []
+        for pattern in patterns:
+            for match in pattern.finditer(source):
+                if _marker_match_is_negated(folded, match.start()):
+                    continue
+                fragment = _clean(match.group(0))
+                if fragment and fragment not in evidence:
+                    evidence.append(fragment)
+        if evidence:
+            hits[value] = evidence
+    return hits
+
+
 def detect_negated_atmospheric_medium(text: Any) -> dict[str, list[str]]:
     return _detect_exclusive_visual_axis(
         text,
@@ -2700,6 +3055,68 @@ def _resolve_background_complexity_constraint(
         {},
         _BACKGROUND_COMPLEXITY_LABELS,
         axis_label="背景复杂度",
+    )
+    if constraint:
+        constraint["source"] = "selected_state"
+    return constraint
+
+
+def detect_season(text: Any) -> dict[str, list[str]]:
+    return _detect_exclusive_visual_axis(
+        text,
+        SEASON_MARKERS,
+        negated=False,
+    )
+
+
+def detect_negated_season(text: Any) -> dict[str, list[str]]:
+    return _detect_exclusive_visual_axis(
+        text,
+        SEASON_MARKERS,
+        negated=True,
+    )
+
+
+def _context_season_constraint(text: Any) -> dict[str, Any]:
+    source = _clean(text)
+    if _MIXED_SEASON_RE.search(source):
+        return {}
+    positive = detect_season(source)
+    if len(positive) > 1:
+        return {}
+    negated = detect_negated_season(source)
+    constraint = _exclusive_visual_axis_constraint(
+        positive,
+        negated,
+        _SEASON_LABELS,
+        axis_label="季节连续性",
+    )
+    if constraint:
+        constraint["source"] = "natural_context"
+    return constraint
+
+
+def _resolve_season_constraint(
+    context_text: Any,
+    selected_values: Iterable[Any],
+) -> dict[str, Any]:
+    context_constraint = _context_season_constraint(context_text)
+    if context_constraint:
+        return context_constraint
+    context = _clean(context_text)
+    if _MIXED_SEASON_RE.search(context) or len(detect_season(context)) > 1:
+        return {}
+    selected_text = "，".join(_unique(selected_values, 32))
+    if _MIXED_SEASON_RE.search(selected_text):
+        return {}
+    positive = detect_season(selected_text)
+    if len(positive) != 1:
+        return {}
+    constraint = _exclusive_visual_axis_constraint(
+        positive,
+        {},
+        _SEASON_LABELS,
+        axis_label="季节连续性",
     )
     if constraint:
         constraint["source"] = "selected_state"
@@ -2983,6 +3400,15 @@ def build_scene_relationship_graph(
     context_scene_attributes = detect_scene_attributes(natural_context)
     negated_context_scene_attributes = detect_negated_scene_attributes(natural_context)
     context_scene_attribute_constraints = _context_scene_attribute_constraints(natural_context)
+    scene_attribute_values = [
+        value
+        for group in ("画面风格", "场景背景", "光影氛围", "技术画质")
+        for value in groups.get(group, [])
+    ] + list(custom)
+    scene_attribute_constraints = _resolve_scene_attribute_constraints(
+        natural_context,
+        scene_attribute_values,
+    )
     context_subject_cardinality = detect_subject_cardinality(natural_context)
     negated_context_subject_cardinality = detect_negated_subject_cardinality(natural_context)
     context_subject_cardinality_constraint = _context_subject_cardinality_constraint(natural_context)
@@ -3209,6 +3635,17 @@ def build_scene_relationship_graph(
         natural_context,
         background_complexity_values,
     )
+    context_season = detect_season(natural_context)
+    negated_context_season = detect_negated_season(natural_context)
+    season_values = [
+        value
+        for group in ("场景背景", "光影氛围", "画面风格", "服装造型", "技术画质")
+        for value in groups.get(group, [])
+    ] + list(custom)
+    season_constraint = _resolve_season_constraint(
+        natural_context,
+        season_values,
+    )
     primary_family, primary_world_evidence, primary_world_source = _resolve_primary_world_family(
         groups.get("场景背景", []),
         natural_context,
@@ -3301,7 +3738,7 @@ def build_scene_relationship_graph(
     for anchor in attribute_anchors:
         anchor_hits = detect_scene_attributes(anchor["value"])
         conflicts: list[dict[str, Any]] = []
-        for axis, constraint in context_scene_attribute_constraints.items():
+        for axis, constraint in scene_attribute_constraints.items():
             actual_values = list(anchor_hits.get(axis, {}))
             required = _clean(constraint.get("required_value"))
             negated_values = set(constraint.get("negated_values", []) or [])
@@ -3330,7 +3767,7 @@ def build_scene_relationship_graph(
                 if constraint.get("required_value")
                 else f"{constraint['axis_label']}排除{'/'.join(constraint['negated_labels'])}"
             )
-            for constraint in context_scene_attribute_constraints.values()
+            for constraint in scene_attribute_constraints.values()
         )
         coherence_issues.append(
             {
@@ -3340,7 +3777,7 @@ def build_scene_relationship_graph(
                 "conflicting_anchors": conflicting_attribute_anchors,
                 "message": (
                     f"自然语言已明确场景属性“{constraint_summary}”，"
-                    "但当前风格、场景、光影或补充标签仍包含相反的昼夜或天气状态。"
+                    "但当前风格、场景、光影或补充标签仍包含相反的昼夜、降水、风势、环境温度、地表状态、空间围合或主导照明来源。"
                 ),
             }
         )
@@ -4131,6 +4568,37 @@ def build_scene_relationship_graph(
                 ),
             }
         )
+    season_anchors = [
+        {"group": group, "value": value}
+        for group in ("场景背景", "光影氛围", "画面风格", "服装造型", "技术画质")
+        for value in groups.get(group, [])
+    ] + [{"group": "自定义补充", "value": value} for value in custom]
+    conflicting_season_anchors = _conflicting_exclusive_axis_anchors(
+        season_anchors,
+        season_constraint,
+        detect_season,
+        _SEASON_LABELS,
+    )
+    if conflicting_season_anchors:
+        required_label = _clean(season_constraint.get("required_label"))
+        negated_labels = list(season_constraint.get("negated_labels", []) or [])
+        season_summary = (
+            f"固定为{required_label}"
+            if required_label
+            else "排除" + "/".join(str(item) for item in negated_labels)
+        )
+        coherence_issues.append(
+            {
+                "kind": "context_season_conflict",
+                "severity": "error",
+                "constraint": deepcopy(season_constraint),
+                "conflicting_anchors": conflicting_season_anchors,
+                "message": (
+                    f"自然语言已明确季节连续性“{season_summary}”，"
+                    "但当前场景、光影、风格、服装、画质或补充标签仍包含相反季节。"
+                ),
+            }
+        )
     context_veto_anchor_keys: set[tuple[str, str]] = set()
     for family, negated_markers in negated_context_world_hits.items():
         family_wide_veto = bool(context_primary_family and context_primary_family != family)
@@ -4243,6 +4711,7 @@ def build_scene_relationship_graph(
         "natural_context_scene_attributes": context_scene_attributes,
         "negated_context_scene_attributes": negated_context_scene_attributes,
         "context_scene_attribute_constraints": context_scene_attribute_constraints,
+        "scene_attribute_constraints": scene_attribute_constraints,
         "natural_context_subject_cardinality": context_subject_cardinality,
         "negated_context_subject_cardinality": negated_context_subject_cardinality,
         "context_subject_cardinality_constraint": context_subject_cardinality_constraint,
@@ -4313,6 +4782,9 @@ def build_scene_relationship_graph(
         "natural_context_background_complexity": context_background_complexity,
         "negated_context_background_complexity": negated_context_background_complexity,
         "background_complexity_constraint": background_complexity_constraint,
+        "natural_context_season": context_season,
+        "negated_context_season": negated_context_season,
+        "season_constraint": season_constraint,
         "context_primary_world_family": context_primary_family,
         "context_primary_world_evidence": context_primary_marker,
         "context_primary_world_source": context_primary_source,
@@ -4668,6 +5140,7 @@ def resolve_soft_scene_conflicts(
                 "context_projection_geometry_conflict",
                 "context_atmospheric_medium_conflict",
                 "context_background_complexity_conflict",
+                "context_season_conflict",
             }:
                 conflict_anchors = [
                     dict(item) for item in issue.get("conflicting_anchors", []) if isinstance(item, dict)
@@ -4702,6 +5175,7 @@ def resolve_soft_scene_conflicts(
                         "context_projection_geometry_conflict": "context_projection_geometry",
                         "context_atmospheric_medium_conflict": "context_atmospheric_medium",
                         "context_background_complexity_conflict": "context_background_complexity",
+                        "context_season_conflict": "context_season",
                     }[issue["kind"]]
                     remove_anchors(conflict_anchors, side=side, issue=issue)
                 continue
@@ -4731,11 +5205,19 @@ def resolve_soft_scene_conflicts(
 def classify_repair_reason(reason: Any) -> dict[str, str]:
     text = _clean(reason)
     folded = text.casefold()
+    if "场景属性" in text:
+        for axis, axis_label, instruction in _SCENE_ATTRIBUTE_REPAIR_RULES:
+            if axis_label in text or axis.casefold() in folded:
+                return {
+                    "kind": f"scene_attribute_{axis}",
+                    "instruction": instruction,
+                    "reason": text,
+                }
     rules = (
         ("missing_anchor", ("缺少", "锚点"), "只补回缺失锚点，并保持其与主体、动作和场景的原有关联。"),
         ("world_conflict", ("世界族",), "只删除越界世界族及其附属物件，再用当前场景已有材质或环境反馈补足语句。"),
         ("scene_conflict", ("冲突场景",), "只移除错误场景，所有动作、道具和光线必须回到当前唯一主场景。"),
-        ("scene_attribute", ("场景属性",), "只移除与用户昼夜或天气要求相反的光影和环境状态，不改变主体、动作与剧情顺序。"),
+        ("scene_attribute", ("场景属性",), "只移除与用户昼夜、降水、风势、环境温度、地表状态、空间围合或主导照明来源要求相反的光影和环境状态，不改变主体、动作与剧情顺序。"),
         ("subject_cardinality", ("人物数量",), "只修正人物数量与站位，不改变已有角色身份、服装、动作、场景或镜头顺序。"),
         ("subject_presence", ("主体存在性",), "只移除无人或非人物任务中新增加的人物身份、肖像身体与人物造型，不改变非人物主体、场景、材质或剧情顺序。"),
         ("subject_orientation", ("主体朝向",), "只修正主体正面、侧面或背面的朝向，不改变人物数量、身份、动作、场景或景别。"),
@@ -4758,8 +5240,9 @@ def classify_repair_reason(reason: Any) -> dict[str, str]:
         ("detail_density", ("整体细节密度",), "只修正高细节、高密度纹理与简化低细节渲染冲突，不改变分辨率、锐度、颗粒、风格、主体、场景或剧情顺序。"),
         ("visual_medium", ("画面媒介",), "只修正二维绘制、三维渲染与摄影实拍之间的成片媒介冲突，不改变画风、材质、锐度、细节、主体、场景或剧情顺序。"),
         ("projection_geometry", ("投影几何",), "只修正正交、线性透视、轴测或鱼眼投影冲突，不改变景别、机位方向、焦段、画面媒介、主体、场景或剧情顺序。"),
-        ("atmospheric_medium", ("大气介质", "能见度"), "只修正通透空气、薄雾浓雾与烟雾烟尘之间的空气状态冲突，不改变光质、色温、天气、景深、主体、场景或剧情顺序。"),
+        ("atmospheric_medium", ("大气介质", "能见度"), "只修正当前空气介质的能见度、轮廓衰减、散射与颗粒密度，使其回到关系图已固定状态，不改变光质、色温、天气、景深、主体、场景或剧情顺序。"),
         ("background_complexity", ("背景复杂度",), "只修正简洁无杂物背景与丰富繁复环境背景之间的冲突，不改变主体、必要道具、接触阴影、画面媒介、场景世界或剧情顺序。"),
+        ("season", ("季节连续性",), "只修正春夏秋冬之间的季节冲突，不改变昼夜、降水、主体、动作、主场景或剧情顺序。"),
         ("language", ("语言",), "只把正文改为当前要求的语言，不改变任何视觉事实与剧情顺序。"),
         ("layout", ("画面结构",), "只修正单帧、人数或多视图结构，不增加人物副本、额外视角或分屏。"),
         ("wrapper", ("分析", "占位符"), "删除分析、占位符、标题和标签包装，只返回可直接使用的自然语言正文。"),
@@ -4835,10 +5318,16 @@ def candidate_world_violation(original: str, candidate: str, scene_graph: Any) -
                 f"模型响应越过主体存在性约束：当前要求“{expected}”，"
                 f"却新增了{category_label}“{markers[0]}”。"
             )
-    constraints = dict(scene_graph.get("context_scene_attribute_constraints", {}) or {})
+    constraints = dict(
+        scene_graph.get("scene_attribute_constraints", {})
+        or scene_graph.get("context_scene_attribute_constraints", {})
+        or {}
+    )
     if constraints:
         original_attributes = detect_scene_attributes(original)
         candidate_attributes = detect_scene_attributes(candidate)
+        original_feedback = detect_scene_attribute_feedback(original)
+        candidate_feedback = detect_scene_attribute_feedback(candidate)
         for axis, constraint in constraints.items():
             if not isinstance(constraint, dict):
                 continue
@@ -4855,6 +5344,17 @@ def candidate_world_violation(original: str, candidate: str, scene_graph: Any) -
                     return (
                         f"模型响应越过场景属性约束：{axis_label}要求“{expected}”，"
                         f"却新增了“{marker}”。"
+                    )
+            original_feedback_values = set(original_feedback.get(axis, {}))
+            for value, evidence in candidate_feedback.get(axis, {}).items():
+                if value in original_feedback_values:
+                    continue
+                if value in negated_values or (required and value != required):
+                    axis_label = _clean(constraint.get("axis_label")) or axis
+                    expected = _clean(constraint.get("required_label")) or "排除状态"
+                    return (
+                        f"模型响应越过场景属性约束：{axis_label}要求“{expected}”，"
+                        f"却新增了相反的直接视觉反馈“{evidence[0]}”。"
                     )
     cardinality_constraint = dict(scene_graph.get("context_subject_cardinality_constraint", {}) or {})
     if cardinality_constraint:
@@ -5203,9 +5703,11 @@ def candidate_world_violation(original: str, candidate: str, scene_graph: Any) -
         required = _clean(atmospheric_medium_constraint.get("required_value"))
         negated_values = set(atmospheric_medium_constraint.get("negated_values", []) or [])
         original_atmosphere = set(detect_atmospheric_medium(original))
+        original_atmosphere_feedback = set(detect_atmospheric_medium_feedback(original))
+        mixed_atmosphere = bool(_MIXED_ATMOSPHERIC_MEDIUM_RE.search(_clean(candidate)))
         candidate_atmosphere = (
             {}
-            if _MIXED_ATMOSPHERIC_MEDIUM_RE.search(_clean(candidate))
+            if mixed_atmosphere
             else detect_atmospheric_medium(candidate)
         )
         for value, markers in candidate_atmosphere.items():
@@ -5219,6 +5721,21 @@ def candidate_world_violation(original: str, candidate: str, scene_graph: Any) -
                 return (
                     f"模型响应越过大气介质与能见度约束：要求“{expected}”，"
                     f"却新增了“{markers[0]}”。"
+                )
+        candidate_atmosphere_feedback = (
+            {} if mixed_atmosphere else detect_atmospheric_medium_feedback(candidate)
+        )
+        for value, evidence in candidate_atmosphere_feedback.items():
+            if value in original_atmosphere_feedback:
+                continue
+            if value in negated_values or (required and value != required):
+                expected = (
+                    _clean(atmospheric_medium_constraint.get("required_label"))
+                    or "排除大气介质与能见度"
+                )
+                return (
+                    f"模型响应越过大气介质与能见度约束：要求“{expected}”，"
+                    f"却新增了相反的直接视觉反馈“{evidence[0]}”。"
                 )
     background_complexity_constraint = dict(
         scene_graph.get("background_complexity_constraint", {}) or {}
@@ -5242,6 +5759,25 @@ def candidate_world_violation(original: str, candidate: str, scene_graph: Any) -
                 )
                 return (
                     f"模型响应越过背景复杂度约束：要求“{expected}”，"
+                    f"却新增了“{markers[0]}”。"
+                )
+    season_constraint = dict(scene_graph.get("season_constraint", {}) or {})
+    if season_constraint:
+        required = _clean(season_constraint.get("required_value"))
+        negated_values = set(season_constraint.get("negated_values", []) or [])
+        original_seasons = set(detect_season(original))
+        candidate_seasons = (
+            {}
+            if _MIXED_SEASON_RE.search(_clean(candidate))
+            else detect_season(candidate)
+        )
+        for value, markers in candidate_seasons.items():
+            if value in original_seasons:
+                continue
+            if value in negated_values or (required and value != required):
+                expected = _clean(season_constraint.get("required_label")) or "排除季节"
+                return (
+                    f"模型响应越过季节连续性约束：要求“{expected}”，"
                     f"却新增了“{markers[0]}”。"
                 )
     return ""
@@ -5318,8 +5854,10 @@ __all__ = [
     "VISUAL_MEDIUM_MARKERS",
     "PROJECTION_GEOMETRY_MARKERS",
     "ATMOSPHERIC_MEDIUM_MARKERS",
+    "ATMOSPHERIC_MEDIUM_FEEDBACK_PATTERNS",
     "BACKGROUND_COMPLEXITY_MARKERS",
     "INTELLIGENCE_V42_RULE_EXPANSIONS",
+    "SEASON_MARKERS",
     "apply_relation_hint_resolution",
     "build_intelligence_profile",
     "build_scene_relationship_graph",
@@ -5333,7 +5871,9 @@ __all__ = [
     "detect_visual_medium",
     "detect_projection_geometry",
     "detect_atmospheric_medium",
+    "detect_atmospheric_medium_feedback",
     "detect_background_complexity",
+    "detect_season",
     "detect_depth_of_field",
     "detect_exposure_key",
     "detect_focal_perspective",
@@ -5354,6 +5894,7 @@ __all__ = [
     "detect_negated_projection_geometry",
     "detect_negated_atmospheric_medium",
     "detect_negated_background_complexity",
+    "detect_negated_season",
     "detect_negated_depth_of_field",
     "detect_negated_exposure_key",
     "detect_negated_focal_perspective",
