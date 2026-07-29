@@ -18,7 +18,11 @@ try:
         resolve_visual_layout_mode,
         visual_layout_contract,
     )
-    from .intelligence import candidate_world_violation, classify_repair_reason
+    from .intelligence import (
+        candidate_world_violation,
+        classify_repair_reason,
+        introduced_human_subject_intrusions,
+    )
 except Exception:  # pragma: no cover - exercised by direct import tests
     from stage_prompt_narrative_test import (  # type: ignore
         GLOBAL_NARRATIVE_MODEL_CONTRACT,
@@ -26,7 +30,11 @@ except Exception:  # pragma: no cover - exercised by direct import tests
         resolve_visual_layout_mode,
         visual_layout_contract,
     )
-    from stage_prompt_intelligence_test import candidate_world_violation, classify_repair_reason  # type: ignore
+    from stage_prompt_intelligence_test import (  # type: ignore
+        candidate_world_violation,
+        classify_repair_reason,
+        introduced_human_subject_intrusions,
+    )
 
 DEFAULT_STAGE_PROMPT_SYSTEM_TEMPLATE = """
 你是 Qwen TE 阶段式提示词生成器的默认图像提示词整理模板，兼具资深视觉艺术总监、电影摄影指导、高端人像修图审美和生成式图像 Prompt 工程能力。
@@ -1540,80 +1548,14 @@ def _looks_like_narrative_prompt(text: str, settings: dict[str, Any]) -> bool:
     return hits >= 5
 
 
-_NON_PERSON_HUMAN_INTRUSION_TERMS = (
-    "成年女性",
-    "成年男性",
-    "年轻成年女性",
-    "青春感成年女性",
-    "中年女性",
-    "中年男性",
-    "东亚成年女性",
-    "女性",
-    "男性",
-    "女孩",
-    "少女",
-    "模特",
-    "人像",
-    "人物写真",
-    "角色肖像",
-    "脸部",
-    "面部",
-    "五官",
-    "发型",
-    "发丝",
-    "皮肤",
-    "手指",
-    "解剖",
-    "身材",
-    "胸针",
-    "手提包",
-    "高跟鞋",
-    "礼服",
-    "内衣",
-)
-_NON_PERSON_HUMAN_INTRUSION_TERMS_EN = (
-    "adult woman",
-    "adult man",
-    "young woman",
-    "young man",
-    "female model",
-    "male model",
-    "fashion portrait",
-    "beauty portrait",
-    "human portrait",
-    "woman portrait",
-    "man portrait",
-    "visible face",
-    "human face",
-    "facial features",
-    "visible skin",
-    "natural skin",
-    "skin texture",
-    "detailed hair",
-    "flowing hair",
-    "elegant dress",
-    "evening dress",
-    "lingerie",
-    "high heels",
-)
-
-
 def _violates_subject_type(original_prompt: str, candidate_prompt: str, settings: dict[str, Any]) -> bool:
     subject_type = str(settings.get("主体类型解析结果", "") or settings.get("主体类型", "自动") or "自动").strip()
     if subject_type != "非人物主体":
         return False
-    original = str(original_prompt or "")
     candidate = str(candidate_prompt or "")
     if not candidate:
         return False
-    if any(term in candidate and term not in original for term in _NON_PERSON_HUMAN_INTRUSION_TERMS):
-        return True
-    original_en = original.casefold()
-    candidate_en = candidate.casefold()
-    return any(
-        term in candidate_en and term not in original_en
-        for term in _NON_PERSON_HUMAN_INTRUSION_TERMS_EN
-    )
+    return bool(introduced_human_subject_intrusions(original_prompt, candidate))
 
 
 def _batch_language_instruction(settings: dict[str, Any]) -> str:
@@ -1861,6 +1803,14 @@ def _skill_context_for_model(settings: dict[str, Any]) -> str:
             + "。任务类型和模型策略已经确定，不得在润色时改换任务。"
         )
     if isinstance(scene_graph, dict):
+        presence_constraint = dict(scene_graph.get("context_subject_presence_constraint", {}) or {})
+        if presence_constraint:
+            required_label = str(presence_constraint.get("required_label", "") or "").strip()
+            extra_lines.append(
+                "智能主体存在性：当前固定为" + (required_label or "非人物画面")
+                + "。图片、智能文本和每段视频分镜都不得自行增加人物、脸、皮肤、发型、人体细节或人物服装；"
+                "产品、载具、建筑、机甲和环境主体只扩写其结构、材质、功能、尺度与光影。"
+            )
         orientation_constraint = dict(scene_graph.get("context_subject_orientation_constraint", {}) or {})
         if orientation_constraint:
             required_label = str(orientation_constraint.get("required_label", "") or "").strip()
@@ -1877,6 +1827,195 @@ def _skill_context_for_model(settings: dict[str, Any]) -> str:
             extra_lines.append(
                 "智能主体朝向：" + orientation_text
                 + "。单帧只能采用该朝向；显式三视图或连续转身剧情不受单朝向收敛影响。"
+            )
+        pose_constraint = dict(scene_graph.get("context_subject_pose_constraint", {}) or {})
+        if pose_constraint:
+            required_label = str(pose_constraint.get("required_label", "") or "").strip()
+            negated_labels = [
+                str(item).strip()
+                for item in list(pose_constraint.get("negated_labels", []) or [])
+                if str(item).strip()
+            ]
+            pose_text = (
+                f"主体姿态固定为{required_label}"
+                if required_label
+                else "主体姿态不得采用" + "、".join(negated_labels)
+            )
+            extra_lines.append(
+                "智能主体姿态：" + pose_text
+                + "。单帧保持该姿态；明确的连续起身、落座或姿态转换剧情不受单姿态收敛影响。"
+            )
+        shot_scale_constraint = dict(scene_graph.get("context_shot_scale_constraint", {}) or {})
+        if shot_scale_constraint:
+            required_label = str(shot_scale_constraint.get("required_label", "") or "").strip()
+            negated_labels = [
+                str(item).strip()
+                for item in list(shot_scale_constraint.get("negated_labels", []) or [])
+                if str(item).strip()
+            ]
+            shot_scale_text = (
+                f"景别固定为{required_label}"
+                if required_label
+                else "景别不得采用" + "、".join(negated_labels)
+            )
+            extra_lines.append(
+                "智能景别约束：" + shot_scale_text
+                + "。图片保持该取景范围；明确的连续推拉镜头可按剧情改变景别。"
+            )
+        camera_angle_constraint = dict(scene_graph.get("context_camera_angle_constraint", {}) or {})
+        if camera_angle_constraint:
+            required_label = str(camera_angle_constraint.get("required_label", "") or "").strip()
+            negated_labels = [
+                str(item).strip()
+                for item in list(camera_angle_constraint.get("negated_labels", []) or [])
+                if str(item).strip()
+            ]
+            camera_angle_text = (
+                f"机位固定为{required_label}"
+                if required_label
+                else "机位不得采用" + "、".join(negated_labels)
+            )
+            extra_lines.append(
+                "智能机位约束：" + camera_angle_text
+                + "。图片保持该拍摄角度；明确的连续升降、俯仰或机位切换可按剧情变化。"
+            )
+        light_temperature_constraint = dict(
+            scene_graph.get("context_light_temperature_constraint", {}) or {}
+        )
+        if light_temperature_constraint:
+            required_label = str(light_temperature_constraint.get("required_label", "") or "").strip()
+            negated_labels = [
+                str(item).strip()
+                for item in list(light_temperature_constraint.get("negated_labels", []) or [])
+                if str(item).strip()
+            ]
+            temperature_text = (
+                f"整体色温固定为{required_label}"
+                if required_label
+                else "整体色温不得采用" + "、".join(negated_labels)
+            )
+            extra_lines.append(
+                "智能整体色温：" + temperature_text
+                + "。图片和每段视频分镜不得自行加入相反色温；明确的冷暖对比布光或连续色温转场保持开放。"
+            )
+        color_rendering_constraint = dict(scene_graph.get("color_rendering_constraint", {}) or {})
+        if color_rendering_constraint:
+            required_label = str(color_rendering_constraint.get("required_label", "") or "").strip()
+            negated_labels = [
+                str(item).strip()
+                for item in list(color_rendering_constraint.get("negated_labels", []) or [])
+                if str(item).strip()
+            ]
+            rendering_text = (
+                f"颜色呈现固定为{required_label}"
+                if required_label
+                else "颜色呈现不得采用" + "、".join(negated_labels)
+            )
+            extra_lines.append(
+                "智能颜色呈现：" + rendering_text
+                + "。图片和每段视频分镜不得自行切换黑白、单色或全彩模式；明确的局部点色与连续上色剧情保持开放。"
+            )
+        depth_of_field_constraint = dict(scene_graph.get("depth_of_field_constraint", {}) or {})
+        if depth_of_field_constraint:
+            required_label = str(depth_of_field_constraint.get("required_label", "") or "").strip()
+            negated_labels = [
+                str(item).strip()
+                for item in list(depth_of_field_constraint.get("negated_labels", []) or [])
+                if str(item).strip()
+            ]
+            depth_text = (
+                f"景深固定为{required_label}"
+                if required_label
+                else "景深不得采用" + "、".join(negated_labels)
+            )
+            extra_lines.append(
+                "智能景深约束：" + depth_text
+                + "。图片和每段视频分镜不得自行切换浅景深、背景虚化或深焦模式；明确的移焦、分区对焦和景深转换保持开放。"
+            )
+        lighting_quality_constraint = dict(scene_graph.get("lighting_quality_constraint", {}) or {})
+        if lighting_quality_constraint:
+            required_label = str(lighting_quality_constraint.get("required_label", "") or "").strip()
+            negated_labels = [
+                str(item).strip()
+                for item in list(lighting_quality_constraint.get("negated_labels", []) or [])
+                if str(item).strip()
+            ]
+            quality_text = (
+                f"光质固定为{required_label}"
+                if required_label
+                else "光质不得采用" + "、".join(negated_labels)
+            )
+            extra_lines.append(
+                "智能光质约束：" + quality_text
+                + "。图片和每段视频分镜不得自行切换硬光、柔光或漫射光；明确的硬主光与柔补光组合及连续光质变化保持开放。"
+            )
+        motion_rendering_constraint = dict(scene_graph.get("motion_rendering_constraint", {}) or {})
+        if motion_rendering_constraint:
+            required_label = str(motion_rendering_constraint.get("required_label", "") or "").strip()
+            negated_labels = [
+                str(item).strip()
+                for item in list(motion_rendering_constraint.get("negated_labels", []) or [])
+                if str(item).strip()
+            ]
+            motion_text = (
+                f"运动呈现固定为{required_label}"
+                if required_label
+                else "运动呈现不得采用" + "、".join(negated_labels)
+            )
+            extra_lines.append(
+                "智能运动呈现：" + motion_text
+                + "。图片和每段视频分镜不得自行切换高速快门凝固、运动模糊或慢门拖影；明确的追焦、主体清晰背景拖影及连续快慢门变化保持开放。"
+            )
+        camera_stability_constraint = dict(scene_graph.get("camera_stability_constraint", {}) or {})
+        if camera_stability_constraint:
+            required_label = str(camera_stability_constraint.get("required_label", "") or "").strip()
+            negated_labels = [
+                str(item).strip()
+                for item in list(camera_stability_constraint.get("negated_labels", []) or [])
+                if str(item).strip()
+            ]
+            stability_text = (
+                f"镜头稳定性固定为{required_label}"
+                if required_label
+                else "镜头稳定性不得采用" + "、".join(negated_labels)
+            )
+            extra_lines.append(
+                "智能镜头稳定性：" + stability_text
+                + "。图片摄影语言和每段视频分镜不得自行切换固定稳定镜头或手持晃动镜头；手持稳定器、明确混合设计及连续稳定性转换保持开放。"
+            )
+        focal_perspective_constraint = dict(scene_graph.get("focal_perspective_constraint", {}) or {})
+        if focal_perspective_constraint:
+            required_label = str(focal_perspective_constraint.get("required_label", "") or "").strip()
+            negated_labels = [
+                str(item).strip()
+                for item in list(focal_perspective_constraint.get("negated_labels", []) or [])
+                if str(item).strip()
+            ]
+            focal_text = (
+                f"焦段透视固定为{required_label}"
+                if required_label
+                else "焦段透视不得采用" + "、".join(negated_labels)
+            )
+            extra_lines.append(
+                "智能焦段透视：" + focal_text
+                + "。图片和每段视频分镜不得自行切换广角空间延展或长焦空间压缩；明确的变焦推拉、希区柯克变焦及连续焦段切换保持开放。"
+            )
+        key_light_direction_constraint = dict(scene_graph.get("key_light_direction_constraint", {}) or {})
+        if key_light_direction_constraint:
+            required_label = str(key_light_direction_constraint.get("required_label", "") or "").strip()
+            negated_labels = [
+                str(item).strip()
+                for item in list(key_light_direction_constraint.get("negated_labels", []) or [])
+                if str(item).strip()
+            ]
+            direction_text = (
+                f"主光方向固定为{required_label}"
+                if required_label
+                else "主光方向不得采用" + "、".join(negated_labels)
+            )
+            extra_lines.append(
+                "智能主光方向：" + direction_text
+                + "。图片和每段视频分镜不得自行切换正面、侧向、背后或顶部主光；侧逆光、轮廓补光、三点布光及连续灯位变化保持开放。"
             )
         cardinality_constraint = dict(scene_graph.get("context_subject_cardinality_constraint", {}) or {})
         if cardinality_constraint:
