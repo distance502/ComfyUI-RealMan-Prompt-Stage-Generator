@@ -197,6 +197,82 @@ _MOTION_RENDERING_VALUE_MODEL_GUIDANCE = {
     "frozen": "运动主体轮廓保持单一清楚，动作部件各自占据离散位置，事件只呈现一个确定相位",
     "motion_trail": "运动主体沿当前方向形成连续位移带，起点与终点由同向轨迹连接，既有点光沿运动方向拉长",
 }
+_CAMERA_STABILITY_VALUE_MODEL_GUIDANCE = {
+    "stable": "连续帧之间的背景锚点保持同一画面位置，地平线不发生随机摆动，取景中心沿既定机位或运镜路径平滑移动",
+    "handheld": "相邻帧之间的背景锚点产生细小不规则位移，地平线保留受控随机摆动，取景中心围绕主体轻微漂移",
+}
+_FOCAL_PERSPECTIVE_VALUE_MODEL_GUIDANCE = {
+    "wide": "近处对象相对远处背景明显放大，前景、中景与远景的尺度差迅速拉开，沿视轴的空间间距被夸张延展",
+    "telephoto": "近处主体与远处背景保持相近视觉尺度，前景、中景与远景层级紧密叠合，沿视轴的空间间距被明显压缩",
+}
+_EXPOSURE_KEY_VALUE_MODEL_GUIDANCE = {
+    "high_key": "画面大部分区域分布在中高亮度，深阴影只占很小面积且仍保留层次，黑位整体抬高但高光不过曝",
+    "low_key": "画面大部分区域停留在低亮度，亮部只集中在少量受光区域，阴影占据大面积并保留可辨层次",
+}
+_CONTRAST_LEVEL_VALUE_MODEL_GUIDANCE = {
+    "high": "全画面最亮部与最暗部保持很大明度跨度，中间调只占狭窄范围，亮度直方图同时延伸到亮暗两端",
+    "low": "全画面亮部与暗部保持较小明度跨度，中间调覆盖宽广范围，亮度直方图集中在中部且两端保留余量",
+}
+_SATURATION_LEVEL_VALUE_MODEL_GUIDANCE = {
+    "high": "全画面大多数彩色区域保持较高综合色度，综合色度分布集中在中高值区，鲜艳颜色覆盖主体与环境的主要色块，中性灰只占少量必要区域",
+    "low": "全画面大多数彩色区域靠近中性灰轴，综合色度分布集中在低值区，鲜艳颜色只占少量必要区域，同时仍保留可辨的主色相关系",
+}
+_IMAGE_GRAIN_VALUE_MODEL_GUIDANCE = {
+    "grainy": "全画面的平坦色块和中间调区域分布细小随机亮度颗粒，颗粒尺度在主体与背景间保持一致，轮廓边缘上仍可见连续但不规则的颗粒起伏",
+    "clean": "全画面的平坦色块和中间调区域保持均匀纯净，不出现随机亮度或色彩斑点，主体与背景的轮廓边缘保持连续平滑且不被噪点打断",
+}
+_IMAGE_SHARPNESS_VALUE_MODEL_GUIDANCE = {
+    "sharp": "全画面的主体与背景轮廓具有狭窄明确的亮度过渡，细线与相邻纹理保持清楚分离，微细材质边缘呈现稳定的局部反差且没有扩散光晕",
+    "soft_focus": "全画面的主体与背景轮廓具有宽缓连续的亮度过渡，细线与相邻纹理轻微融合，微细材质边缘的局部反差被均匀压低并形成受控柔化",
+}
+_DETAIL_DENSITY_VALUE_MODEL_GUIDANCE = {
+    "high": "全画面单位区域内保留大量彼此独立的小尺度结构，主纹理继续分解出次级和三级纹理，简化留白区域只占少量面积且不吞并关键材质信息",
+    "low": "全画面单位区域内只保留少量必要结构，主纹理不再分解为多级细纹，简化留白区域占据较大面积但主体轮廓和关键识别特征保持完整",
+}
+_VISUAL_MEDIUM_VALUE_MODEL_GUIDANCE = {
+    "drawn_2d": "全画面轮廓由闭合线条与平面色块边界组织，明暗层次通过排线密度或离散色阶表达，表面纹理固定在画面平面上而不随空间法线连续变化",
+    "rendered_3d": "全画面轮廓由连续几何曲面投影形成，材质高光沿表面法线连续变化，接触阴影与物体遮挡服从同一空间光照关系",
+    "photographic": "全画面细节保留非周期微噪声，焦点前后呈连续光学弥散，强光边缘出现轻微色散并具有自然的高光滚降",
+}
+_PROJECTION_GEOMETRY_VALUE_MODEL_GUIDANCE = {
+    "orthographic": "全画面同方向平行边始终保持平行，同尺寸对象不因深度改变画面尺度，沿视轴延伸的结构不产生消失点汇聚",
+    "perspective": "全画面同方向平行边向一致消失点汇聚，同尺寸对象随深度增加逐渐缩小，沿视轴延伸的结构产生连续透视缩短",
+    "axonometric": "全画面每组同方向轴线始终保持平行，对应轴上的同长度线段保持恒定画面尺度，所有主轴都不向消失点汇聚",
+    "fisheye": "全画面直线结构从光学中心向画幅边缘逐渐产生径向弯曲，边缘空间间距连续压缩，全部曲率围绕同一光学中心组织",
+}
+_PERSPECTIVE_LAYOUT_VALUE_MODEL_GUIDANCE = {
+    "one_point": "全画面沿视轴延伸的水平边统一汇聚到地平线上的单一消失点，正对镜头平面的竖直边与水平边保持平行，不产生第二个水平消失点",
+    "two_point": "全画面两组水平方向边分别汇聚到地平线左右两个消失点，竖直边始终保持平行，不向第三个消失点汇聚",
+    "three_point": "全画面两组水平边与竖直边分别向三个独立消失点汇聚，垂直结构随高度连续收束，不存在保持平行的全局竖直线族",
+}
+_CAMERA_ROLL_VALUE_MODEL_GUIDANCE = {
+    "level": "全画面中心的重力竖直方向与画幅竖轴重合，地平基准始终平行于画幅横轴，主体与环境共享零度镜头滚转基准",
+    "dutch": "全画面中心的重力竖直方向与画幅竖轴形成一致的非零夹角，地平基准相对画幅横轴稳定倾斜，主体与环境共享同一镜头滚转角",
+}
+_COMPOSITION_PLACEMENT_VALUE_MODEL_GUIDANCE = {
+    "centered": "全画面主体主要视觉重心落在画幅竖直中轴，左右主要视觉质量和留白形成近似镜像平衡，主体视线或动作轴保持中央组织",
+    "offset": "全画面主体主要视觉重心稳定落在左或右三分线及其交点，主体视线或动作方向前方保留较大负空间，画面不回到中央对称平衡",
+}
+_SCREEN_DIRECTION_VALUE_MODEL_GUIDANCE = {
+    "left_to_right": "全画面主体头肩、躯干或动作轴稳定指向画面右侧，视线、运动或动作方向前方在画面右侧保留引导空间，运动轨迹、道具指向或衣摆拖曳统一沿左到右的屏幕方向",
+    "right_to_left": "全画面主体头肩、躯干或动作轴稳定指向画面左侧，视线、运动或动作方向前方在画面左侧保留引导空间，运动轨迹、道具指向或衣摆拖曳统一沿右到左的屏幕方向",
+}
+_SPATIAL_AXIS_CONTINUITY_VALUE_MODEL_GUIDANCE = {
+    "axis_hold": "整个分镜序列中摄影机始终停留在人物互动轴线同一侧，角色与关键道具的画面左右位置保持稳定，反打镜头继续服从同一空间半区",
+    "planned_cross": "整个分镜序列中摄影机沿连续可见路径跨越人物互动轴线，角色与关键道具只在越轴过程完成后交换画面左右位置，越轴前后环境锚点保持可追踪",
+}
+_FOREGROUND_OCCLUSION_VALUE_MODEL_GUIDANCE = {
+    "clear_subject": "全画面主体主要轮廓保持连续可读，任何前景物都不覆盖面部、双手或动作关节，主体与背景的边界始终清楚分离",
+    "foreground_frame": "全画面仅由场景中已有前景元素覆盖主体次要边缘，面部、双手与动作支点保持可见，前景、主体与背景的遮挡顺序保持稳定一致",
+}
+_SUBJECT_SUPPORT_STATE_VALUE_MODEL_GUIDANCE = {
+    "supported": "全画面主体重量通过双脚、膝部、髋部或躯干传递到场景中已有支撑面，承重点出现受压、形变或接触阴影反馈，身体重心投影落在支撑范围内",
+    "suspended": "全画面主体整体轮廓与地面、座面或支撑面保持可见离地间隙，身体姿态、发丝衣摆与周围颗粒共同响应同一上升、飞行或浮力状态，投影与接触线索不形成虚假承重接触",
+}
+_GAZE_TARGET_VALUE_MODEL_GUIDANCE = {
+    "camera_lock": "全画面主体双眼视线向同一镜头光轴汇聚，瞳孔方向与镜头中心保持一致，面部朝向可以独立变化且双眼不偏离既定光轴",
+    "off_camera": "全画面主体双眼视线避开镜头光轴并汇聚到画面内明确对象或区域，目标方向与对象位置保持一致，不回到镜头对视",
+}
 
 DEFAULT_STAGE_PROMPT_SYSTEM_TEMPLATE = """
 你是 Qwen TE 阶段式提示词生成器的默认图像提示词整理模板，兼具资深视觉艺术总监、电影摄影指导、高端人像修图审美和生成式图像 Prompt 工程能力。
@@ -2342,6 +2418,516 @@ def _motion_rendering_context_for_model(scene_graph: Any) -> str:
     )
 
 
+def _camera_stability_context_for_model(scene_graph: Any) -> str:
+    if not isinstance(scene_graph, dict):
+        return ""
+    constraint = dict(scene_graph.get("camera_stability_constraint", {}) or {})
+    if not constraint:
+        return ""
+    required_value = str(constraint.get("required_value", "") or "").strip()
+    required_label = str(constraint.get("required_label", "") or "").strip()
+    negated_labels = [
+        str(item).strip()
+        for item in list(constraint.get("negated_labels", []) or [])
+        if str(item).strip()
+    ]
+    if required_label:
+        stability_text = f"镜头稳定性固定为{required_label}"
+    elif negated_labels:
+        stability_text = "镜头稳定性不得采用" + "、".join(negated_labels)
+    else:
+        return ""
+    guidance = _CAMERA_STABILITY_VALUE_MODEL_GUIDANCE.get(required_value, "")
+    guidance_text = f"；{guidance}" if guidance else ""
+    return (
+        "智能镜头稳定性：" + stability_text + guidance_text
+        + "。图片摄影语言和每段视频分镜持续保持该帧间背景锚点、地平线与取景中心关系；"
+        "未由 Skill 底稿给出的镜头稳定性变化不作补充。"
+    )
+
+
+def _focal_perspective_context_for_model(scene_graph: Any) -> str:
+    if not isinstance(scene_graph, dict):
+        return ""
+    constraint = dict(scene_graph.get("focal_perspective_constraint", {}) or {})
+    if not constraint:
+        return ""
+    required_value = str(constraint.get("required_value", "") or "").strip()
+    required_label = str(constraint.get("required_label", "") or "").strip()
+    negated_labels = [
+        str(item).strip()
+        for item in list(constraint.get("negated_labels", []) or [])
+        if str(item).strip()
+    ]
+    if required_label:
+        focal_text = f"焦段透视固定为{required_label}"
+    elif negated_labels:
+        focal_text = "焦段透视不得采用" + "、".join(negated_labels)
+    else:
+        return ""
+    guidance = _FOCAL_PERSPECTIVE_VALUE_MODEL_GUIDANCE.get(required_value, "")
+    guidance_text = f"；{guidance}" if guidance else ""
+    return (
+        "智能焦段透视：" + focal_text + guidance_text
+        + "。图片和每段视频分镜持续保持该近远尺度、空间层叠与视轴距离关系；"
+        "未由 Skill 底稿给出的焦段或空间透视变化不作补充。"
+    )
+
+
+def _exposure_key_context_for_model(scene_graph: Any) -> str:
+    if not isinstance(scene_graph, dict):
+        return ""
+    constraint = dict(scene_graph.get("exposure_key_constraint", {}) or {})
+    if not constraint:
+        return ""
+    required_value = str(constraint.get("required_value", "") or "").strip()
+    required_label = str(constraint.get("required_label", "") or "").strip()
+    negated_labels = [
+        str(item).strip()
+        for item in list(constraint.get("negated_labels", []) or [])
+        if str(item).strip()
+    ]
+    if required_label:
+        exposure_text = f"曝光调性固定为{required_label}"
+    elif negated_labels:
+        exposure_text = "曝光调性不得采用" + "、".join(negated_labels)
+    else:
+        return ""
+    guidance = _EXPOSURE_KEY_VALUE_MODEL_GUIDANCE.get(required_value, "")
+    guidance_text = f"；{guidance}" if guidance else ""
+    return (
+        "智能曝光调性：" + exposure_text + guidance_text
+        + "。图片和每段视频分镜持续保持该全局亮度分布、暗部占比与黑位关系；"
+        "未由 Skill 底稿给出的高键、低键或曝光调性变化不作补充。"
+    )
+
+
+def _contrast_level_context_for_model(scene_graph: Any) -> str:
+    if not isinstance(scene_graph, dict):
+        return ""
+    constraint = dict(scene_graph.get("contrast_level_constraint", {}) or {})
+    if not constraint:
+        return ""
+    required_value = str(constraint.get("required_value", "") or "").strip()
+    required_label = str(constraint.get("required_label", "") or "").strip()
+    negated_labels = [
+        str(item).strip()
+        for item in list(constraint.get("negated_labels", []) or [])
+        if str(item).strip()
+    ]
+    if required_label:
+        contrast_text = f"整体对比度固定为{required_label}"
+    elif negated_labels:
+        contrast_text = "整体对比度不得采用" + "、".join(negated_labels)
+    else:
+        return ""
+    guidance = _CONTRAST_LEVEL_VALUE_MODEL_GUIDANCE.get(required_value, "")
+    guidance_text = f"；{guidance}" if guidance else ""
+    return (
+        "智能整体对比度：" + contrast_text + guidance_text
+        + "。图片和每段视频分镜持续保持该全局明度跨度、中间调范围与直方图分布；"
+        "未由 Skill 底稿给出的整体反差等级变化不作补充，局部对比、HDR、镜像或前景弱化及分区对比保持开放。"
+    )
+
+
+def _saturation_level_context_for_model(scene_graph: Any) -> str:
+    if not isinstance(scene_graph, dict):
+        return ""
+    constraint = dict(scene_graph.get("saturation_level_constraint", {}) or {})
+    if not constraint:
+        return ""
+    required_value = str(constraint.get("required_value", "") or "").strip()
+    required_label = str(constraint.get("required_label", "") or "").strip()
+    negated_labels = [
+        str(item).strip()
+        for item in list(constraint.get("negated_labels", []) or [])
+        if str(item).strip()
+    ]
+    if required_label:
+        saturation_text = f"整体饱和度固定为{required_label}"
+    elif negated_labels:
+        saturation_text = "整体饱和度不得采用" + "、".join(negated_labels)
+    else:
+        return ""
+    guidance = _SATURATION_LEVEL_VALUE_MODEL_GUIDANCE.get(required_value, "")
+    guidance_text = f"；{guidance}" if guidance else ""
+    return (
+        "智能整体饱和度：" + saturation_text + guidance_text
+        + "。图片和每段视频分镜持续保持该全局综合色度分布、中性灰占比与鲜艳色覆盖关系；"
+        "未由 Skill 底稿给出的整体色彩浓度等级变化不作补充，局部彩色、选择性饱和、肤色独立控制及连续褪色变化保持开放。"
+    )
+
+
+def _image_grain_context_for_model(scene_graph: Any) -> str:
+    if not isinstance(scene_graph, dict):
+        return ""
+    constraint = dict(scene_graph.get("image_grain_constraint", {}) or {})
+    if not constraint:
+        return ""
+    required_value = str(constraint.get("required_value", "") or "").strip()
+    required_label = str(constraint.get("required_label", "") or "").strip()
+    negated_labels = [
+        str(item).strip()
+        for item in list(constraint.get("negated_labels", []) or [])
+        if str(item).strip()
+    ]
+    if required_label:
+        grain_text = f"成像颗粒质感固定为{required_label}"
+    elif negated_labels:
+        grain_text = "成像颗粒质感不得采用" + "、".join(negated_labels)
+    else:
+        return ""
+    guidance = _IMAGE_GRAIN_VALUE_MODEL_GUIDANCE.get(required_value, "")
+    guidance_text = f"；{guidance}" if guidance else ""
+    return (
+        "智能成像颗粒质感：" + grain_text + guidance_text
+        + "。图片和每段视频分镜持续保持该平坦区域噪点分布、颗粒尺度与轮廓连续性；"
+        "未由 Skill 底稿给出的全局成像纹理变化不作补充，局部成像纹理、扫描或印刷纹理、材质表面纹理、主体背景分区及连续质感转换保持开放。"
+    )
+
+
+def _image_sharpness_context_for_model(scene_graph: Any) -> str:
+    if not isinstance(scene_graph, dict):
+        return ""
+    constraint = dict(scene_graph.get("image_sharpness_constraint", {}) or {})
+    if not constraint:
+        return ""
+    required_value = str(constraint.get("required_value", "") or "").strip()
+    required_label = str(constraint.get("required_label", "") or "").strip()
+    negated_labels = [
+        str(item).strip()
+        for item in list(constraint.get("negated_labels", []) or [])
+        if str(item).strip()
+    ]
+    if required_label:
+        sharpness_text = f"整体成像锐度固定为{required_label}"
+    elif negated_labels:
+        sharpness_text = "整体成像锐度不得采用" + "、".join(negated_labels)
+    else:
+        return ""
+    guidance = _IMAGE_SHARPNESS_VALUE_MODEL_GUIDANCE.get(required_value, "")
+    guidance_text = f"；{guidance}" if guidance else ""
+    return (
+        "智能整体成像锐度：" + sharpness_text + guidance_text
+        + "。图片和每段视频分镜持续保持该轮廓过渡宽度、细线分离度与微细纹理边缘响应；"
+        "未由 Skill 底稿给出的全局边缘响应等级变化不作补充，景深虚化、运动模糊、雾气、局部皮肤处理、扩散光晕和分区锐度保持开放。"
+    )
+
+
+def _detail_density_context_for_model(scene_graph: Any) -> str:
+    if not isinstance(scene_graph, dict):
+        return ""
+    constraint = dict(scene_graph.get("detail_density_constraint", {}) or {})
+    if not constraint:
+        return ""
+    required_value = str(constraint.get("required_value", "") or "").strip()
+    required_label = str(constraint.get("required_label", "") or "").strip()
+    negated_labels = [
+        str(item).strip()
+        for item in list(constraint.get("negated_labels", []) or [])
+        if str(item).strip()
+    ]
+    if required_label:
+        detail_text = f"整体细节密度固定为{required_label}"
+    elif negated_labels:
+        detail_text = "整体细节密度不得采用" + "、".join(negated_labels)
+    else:
+        return ""
+    guidance = _DETAIL_DENSITY_VALUE_MODEL_GUIDANCE.get(required_value, "")
+    guidance_text = f"；{guidance}" if guidance else ""
+    return (
+        "智能整体细节密度：" + detail_text + guidance_text
+        + "。图片和每段视频分镜持续保持该单位区域结构数量、纹理层级与简化区域占比；"
+        "未由 Skill 底稿给出的全局信息密度等级变化不作补充，主体背景分区、距离层级、局部精细化和连续细节变化保持开放，分辨率、锐度与颗粒按独立事实处理。"
+    )
+
+
+def _visual_medium_context_for_model(scene_graph: Any) -> str:
+    if not isinstance(scene_graph, dict):
+        return ""
+    constraint = dict(scene_graph.get("visual_medium_constraint", {}) or {})
+    if not constraint:
+        return ""
+    required_value = str(constraint.get("required_value", "") or "").strip()
+    required_label = str(constraint.get("required_label", "") or "").strip()
+    negated_labels = [
+        str(item).strip()
+        for item in list(constraint.get("negated_labels", []) or [])
+        if str(item).strip()
+    ]
+    if required_label:
+        medium_text = f"画面媒介固定为{required_label}"
+    elif negated_labels:
+        medium_text = "画面媒介不得采用" + "、".join(negated_labels)
+    else:
+        return ""
+    guidance = _VISUAL_MEDIUM_VALUE_MODEL_GUIDANCE.get(required_value, "")
+    guidance_text = f"；{guidance}" if guidance else ""
+    return (
+        "智能画面媒介：" + medium_text + guidance_text
+        + "。图片和每段视频分镜持续保持该轮廓生成方式、表面响应与采样特征；"
+        "未由 Skill 底稿给出的成片媒介变化不作补充，明确混合媒介、2.5D、屏幕或海报内嵌画面、连续媒介转场与投影几何保持开放。"
+    )
+
+
+def _projection_geometry_context_for_model(scene_graph: Any) -> str:
+    if not isinstance(scene_graph, dict):
+        return ""
+    constraint = dict(scene_graph.get("projection_geometry_constraint", {}) or {})
+    if not constraint:
+        return ""
+    required_value = str(constraint.get("required_value", "") or "").strip()
+    required_label = str(constraint.get("required_label", "") or "").strip()
+    negated_labels = [
+        str(item).strip()
+        for item in list(constraint.get("negated_labels", []) or [])
+        if str(item).strip()
+    ]
+    if required_label:
+        projection_text = f"投影几何固定为{required_label}"
+    elif negated_labels:
+        projection_text = "投影几何不得采用" + "、".join(negated_labels)
+    else:
+        return ""
+    guidance = _PROJECTION_GEOMETRY_VALUE_MODEL_GUIDANCE.get(required_value, "")
+    guidance_text = f"；{guidance}" if guidance else ""
+    return (
+        "智能投影几何：" + projection_text + guidance_text
+        + "。图片和每段视频分镜持续保持该平行线汇聚、深度尺度变化与视轴缩短关系；"
+        "未由 Skill 底稿给出的全局投影变化不作补充，明确的辅助视图、示意图叠层、混合投影设计及连续投影转场保持开放，焦段和机位按独立事实处理。"
+    )
+
+
+def _perspective_layout_context_for_model(scene_graph: Any) -> str:
+    if not isinstance(scene_graph, dict):
+        return ""
+    constraint = dict(scene_graph.get("perspective_layout_constraint", {}) or {})
+    if not constraint:
+        return ""
+    required_value = str(constraint.get("required_value", "") or "").strip()
+    required_label = str(constraint.get("required_label", "") or "").strip()
+    negated_labels = [
+        str(item).strip()
+        for item in list(constraint.get("negated_labels", []) or [])
+        if str(item).strip()
+    ]
+    if required_label:
+        layout_text = f"透视消失点结构固定为{required_label}"
+    elif negated_labels:
+        layout_text = "透视消失点结构不得采用" + "、".join(negated_labels)
+    else:
+        return ""
+    guidance = _PERSPECTIVE_LAYOUT_VALUE_MODEL_GUIDANCE.get(required_value, "")
+    guidance_text = f"；{guidance}" if guidance else ""
+    return (
+        "智能透视消失点结构：" + layout_text + guidance_text
+        + "。图片和每段视频分镜持续保持该水平边消失点数量与竖直线汇聚关系；"
+        "未由 Skill 底稿给出的消失点结构变化不作补充，明确的辅助视图、局部示意图、混合透视布局及连续消失点转场保持开放，投影类型、焦段和机位按独立事实处理。"
+    )
+
+
+def _camera_roll_context_for_model(scene_graph: Any) -> str:
+    if not isinstance(scene_graph, dict):
+        return ""
+    constraint = dict(scene_graph.get("camera_roll_constraint", {}) or {})
+    if not constraint:
+        return ""
+    required_value = str(constraint.get("required_value", "") or "").strip()
+    required_label = str(constraint.get("required_label", "") or "").strip()
+    negated_labels = [
+        str(item).strip()
+        for item in list(constraint.get("negated_labels", []) or [])
+        if str(item).strip()
+    ]
+    if required_label:
+        roll_text = f"画幅滚转固定为{required_label}"
+    elif negated_labels:
+        roll_text = "画幅滚转不得采用" + "、".join(negated_labels)
+    else:
+        return ""
+    guidance = _CAMERA_ROLL_VALUE_MODEL_GUIDANCE.get(required_value, "")
+    guidance_text = f"；{guidance}" if guidance else ""
+    return (
+        "智能画幅滚转：" + roll_text + guidance_text
+        + "。图片和每段视频分镜持续保持该重力竖直方向、地平基准与全局滚转关系；"
+        "未由 Skill 底稿给出的画幅滚转变化不作补充，明确的辅助视图、局部示意图、混合滚转布局及连续滚转转场保持开放，高低机位、透视消失点和焦段按独立事实处理。"
+    )
+
+
+def _composition_placement_context_for_model(scene_graph: Any) -> str:
+    if not isinstance(scene_graph, dict):
+        return ""
+    constraint = dict(scene_graph.get("composition_placement_constraint", {}) or {})
+    if not constraint:
+        return ""
+    required_value = str(constraint.get("required_value", "") or "").strip()
+    required_label = str(constraint.get("required_label", "") or "").strip()
+    negated_labels = [
+        str(item).strip()
+        for item in list(constraint.get("negated_labels", []) or [])
+        if str(item).strip()
+    ]
+    if required_label:
+        placement_text = f"主体构图落点固定为{required_label}"
+    elif negated_labels:
+        placement_text = "主体构图落点不得采用" + "、".join(negated_labels)
+    else:
+        return ""
+    guidance = _COMPOSITION_PLACEMENT_VALUE_MODEL_GUIDANCE.get(required_value, "")
+    guidance_text = f"；{guidance}" if guidance else ""
+    return (
+        "智能主体构图落点：" + placement_text + guidance_text
+        + "。图片和每段视频分镜持续保持该主体视觉重心、左右质量平衡与视线/动作负空间关系；"
+        "未由 Skill 底稿给出的全局落点变化不作补充，明确的辅助视图、局部示意图、混合构图落点及连续重心转场保持开放，景别、机位和画幅滚转按独立事实处理。"
+    )
+
+
+def _screen_direction_context_for_model(scene_graph: Any) -> str:
+    if not isinstance(scene_graph, dict):
+        return ""
+    constraint = dict(scene_graph.get("screen_direction_constraint", {}) or {})
+    if not constraint:
+        return ""
+    required_value = str(constraint.get("required_value", "") or "").strip()
+    required_label = str(constraint.get("required_label", "") or "").strip()
+    negated_labels = [
+        str(item).strip()
+        for item in list(constraint.get("negated_labels", []) or [])
+        if str(item).strip()
+    ]
+    if required_label:
+        direction_text = f"横向屏幕方向固定为{required_label}"
+    elif negated_labels:
+        direction_text = "横向屏幕方向不得采用" + "、".join(negated_labels)
+    else:
+        return ""
+    guidance = _SCREEN_DIRECTION_VALUE_MODEL_GUIDANCE.get(required_value, "")
+    guidance_text = f"；{guidance}" if guidance else ""
+    return (
+        "智能横向屏幕方向：" + direction_text + guidance_text
+        + "。图片和每段视频分镜持续保持该主体指向、前导空间与运动轨迹方向；"
+        "未由 Skill 底稿给出的横向方向变化不作补充，明确的越轴、转身、反向动作、辅助视图与连续方向转场保持开放，主体朝向、景别、机位和构图落点按独立事实处理。"
+    )
+
+
+def _spatial_axis_continuity_context_for_model(scene_graph: Any) -> str:
+    if not isinstance(scene_graph, dict):
+        return ""
+    constraint = dict(scene_graph.get("spatial_axis_continuity_constraint", {}) or {})
+    if not constraint:
+        return ""
+    required_value = str(constraint.get("required_value", "") or "").strip()
+    required_label = str(constraint.get("required_label", "") or "").strip()
+    negated_labels = [
+        str(item).strip()
+        for item in list(constraint.get("negated_labels", []) or [])
+        if str(item).strip()
+    ]
+    if required_label:
+        axis_text = f"空间轴线连续性固定为{required_label}"
+    elif negated_labels:
+        axis_text = "空间轴线连续性不得采用" + "、".join(negated_labels)
+    else:
+        return ""
+    guidance = _SPATIAL_AXIS_CONTINUITY_VALUE_MODEL_GUIDANCE.get(required_value, "")
+    guidance_text = f"；{guidance}" if guidance else ""
+    return (
+        "智能空间轴线连续性：" + axis_text + guidance_text
+        + "。单张图片只建立当前互动轴线的摄影机半空间与角色左右位置，不虚构前后镜头；"
+        "每段视频分镜持续保持该空间关系和环境锚点。未由 Skill 底稿给出的越轴不作补充，"
+        "明确的转身、反打、辅助视图、双人站位变化或连续越轴转场保持开放；"
+        "主体朝向、视线目标、横向运动方向、景别、机位和构图落点按独立事实处理。"
+    )
+
+
+def _foreground_occlusion_context_for_model(scene_graph: Any) -> str:
+    if not isinstance(scene_graph, dict):
+        return ""
+    constraint = dict(scene_graph.get("foreground_occlusion_constraint", {}) or {})
+    if not constraint:
+        return ""
+    required_value = str(constraint.get("required_value", "") or "").strip()
+    required_label = str(constraint.get("required_label", "") or "").strip()
+    negated_labels = [
+        str(item).strip()
+        for item in list(constraint.get("negated_labels", []) or [])
+        if str(item).strip()
+    ]
+    if required_label:
+        occlusion_text = f"前景遮挡关系固定为{required_label}"
+    elif negated_labels:
+        occlusion_text = "前景遮挡关系不得采用" + "、".join(negated_labels)
+    else:
+        return ""
+    guidance = _FOREGROUND_OCCLUSION_VALUE_MODEL_GUIDANCE.get(required_value, "")
+    guidance_text = f"；{guidance}" if guidance else ""
+    return (
+        "智能前景遮挡关系：" + occlusion_text + guidance_text
+        + "。图片和每段视频分镜持续保持该主体轮廓、关键部位可见性与前中后景遮挡顺序；"
+        "未由 Skill 底稿给出的门框、家具、植被、肩后人物或其他大件前景不得自行补入。"
+        "明确的手持道具接触、服装覆盖、局部动作交叠、辅助视图和连续遮挡转场保持开放；"
+        "景深、雾气、降水能见度、景别、机位、构图落点和服装覆盖按独立事实处理。"
+    )
+
+
+def _subject_support_state_context_for_model(scene_graph: Any) -> str:
+    if not isinstance(scene_graph, dict):
+        return ""
+    constraint = dict(scene_graph.get("subject_support_state_constraint", {}) or {})
+    if not constraint:
+        return ""
+    required_value = str(constraint.get("required_value", "") or "").strip()
+    required_label = str(constraint.get("required_label", "") or "").strip()
+    negated_labels = [
+        str(item).strip()
+        for item in list(constraint.get("negated_labels", []) or [])
+        if str(item).strip()
+    ]
+    if required_label:
+        support_text = f"主体支撑状态固定为{required_label}"
+    elif negated_labels:
+        support_text = "主体支撑状态不得采用" + "、".join(negated_labels)
+    else:
+        return ""
+    guidance = _SUBJECT_SUPPORT_STATE_VALUE_MODEL_GUIDANCE.get(required_value, "")
+    guidance_text = f"；{guidance}" if guidance else ""
+    return (
+        "智能主体支撑状态：" + support_text + guidance_text
+        + "。图片和每段视频分镜持续保持该承重点、离地间隙、重心投影与接触阴影关系；"
+        "未由 Skill 底稿给出的椅子、台阶、平台、吊索、飞行器或法术支撑不得自行补入。"
+        "明确的起跳、落地、坐下、跪地、游泳、水下悬停、飞行转场与辅助视图保持开放；"
+        "站坐跪躺姿态、动作内容、运动呈现、机位、景别和场景地表按独立事实处理。"
+    )
+
+
+def _gaze_target_context_for_model(scene_graph: Any) -> str:
+    if not isinstance(scene_graph, dict):
+        return ""
+    constraint = dict(scene_graph.get("gaze_target_constraint", {}) or {})
+    if not constraint:
+        return ""
+    required_value = str(constraint.get("required_value", "") or "").strip()
+    required_label = str(constraint.get("required_label", "") or "").strip()
+    negated_labels = [
+        str(item).strip()
+        for item in list(constraint.get("negated_labels", []) or [])
+        if str(item).strip()
+    ]
+    if required_label:
+        gaze_text = f"视线目标固定为{required_label}"
+    elif negated_labels:
+        gaze_text = "视线目标不得采用" + "、".join(negated_labels)
+    else:
+        return ""
+    guidance = _GAZE_TARGET_VALUE_MODEL_GUIDANCE.get(required_value, "")
+    guidance_text = f"；{guidance}" if guidance else ""
+    return (
+        "智能视线目标：" + gaze_text + guidance_text
+        + "。图片和每段视频分镜持续保持该镜头光轴、瞳孔方向与场景目标关系；"
+        "未由 Skill 底稿给出的视线目标变化不作补充，明确的转头、回望、双人对视、视线转移与连续注视转场保持开放，面部朝向、主体姿态和屏幕方向按独立事实处理。"
+    )
+
+
 def _compact_environment_context_for_model(scene_graph: Any) -> str:
     return "\n".join(
         part
@@ -2355,9 +2941,27 @@ def _compact_environment_context_for_model(scene_graph: Any) -> str:
             _depth_of_field_context_for_model(scene_graph),
             _lighting_quality_context_for_model(scene_graph),
             _motion_rendering_context_for_model(scene_graph),
+            _camera_stability_context_for_model(scene_graph),
+            _focal_perspective_context_for_model(scene_graph),
             _atmospheric_medium_context_for_model(scene_graph),
             _scene_attribute_context_for_model(scene_graph),
             _key_light_direction_context_for_model(scene_graph),
+            _exposure_key_context_for_model(scene_graph),
+            _contrast_level_context_for_model(scene_graph),
+            _saturation_level_context_for_model(scene_graph),
+            _image_grain_context_for_model(scene_graph),
+            _image_sharpness_context_for_model(scene_graph),
+            _detail_density_context_for_model(scene_graph),
+            _visual_medium_context_for_model(scene_graph),
+            _projection_geometry_context_for_model(scene_graph),
+            _perspective_layout_context_for_model(scene_graph),
+            _camera_roll_context_for_model(scene_graph),
+            _composition_placement_context_for_model(scene_graph),
+            _screen_direction_context_for_model(scene_graph),
+            _spatial_axis_continuity_context_for_model(scene_graph),
+            _foreground_occlusion_context_for_model(scene_graph),
+            _subject_support_state_context_for_model(scene_graph),
+            _gaze_target_context_for_model(scene_graph),
         )
         if part
     )
@@ -2512,38 +3116,14 @@ def _skill_context_for_model(settings: dict[str, Any]) -> str:
                 extra_lines.append(motion_context)
         camera_stability_constraint = dict(scene_graph.get("camera_stability_constraint", {}) or {})
         if camera_stability_constraint:
-            required_label = str(camera_stability_constraint.get("required_label", "") or "").strip()
-            negated_labels = [
-                str(item).strip()
-                for item in list(camera_stability_constraint.get("negated_labels", []) or [])
-                if str(item).strip()
-            ]
-            stability_text = (
-                f"镜头稳定性固定为{required_label}"
-                if required_label
-                else "镜头稳定性不得采用" + "、".join(negated_labels)
-            )
-            extra_lines.append(
-                "智能镜头稳定性：" + stability_text
-                + "。图片摄影语言和每段视频分镜不得自行切换固定稳定镜头或手持晃动镜头；手持稳定器、明确混合设计及连续稳定性转换保持开放。"
-            )
+            stability_context = _camera_stability_context_for_model(scene_graph)
+            if stability_context:
+                extra_lines.append(stability_context)
         focal_perspective_constraint = dict(scene_graph.get("focal_perspective_constraint", {}) or {})
         if focal_perspective_constraint:
-            required_label = str(focal_perspective_constraint.get("required_label", "") or "").strip()
-            negated_labels = [
-                str(item).strip()
-                for item in list(focal_perspective_constraint.get("negated_labels", []) or [])
-                if str(item).strip()
-            ]
-            focal_text = (
-                f"焦段透视固定为{required_label}"
-                if required_label
-                else "焦段透视不得采用" + "、".join(negated_labels)
-            )
-            extra_lines.append(
-                "智能焦段透视：" + focal_text
-                + "。图片和每段视频分镜不得自行切换广角空间延展或长焦空间压缩；明确的变焦推拉、希区柯克变焦及连续焦段切换保持开放。"
-            )
+            focal_context = _focal_perspective_context_for_model(scene_graph)
+            if focal_context:
+                extra_lines.append(focal_context)
         key_light_direction_constraint = dict(scene_graph.get("key_light_direction_constraint", {}) or {})
         if key_light_direction_constraint:
             direction_context = _key_light_direction_context_for_model(scene_graph)
@@ -2551,144 +3131,98 @@ def _skill_context_for_model(settings: dict[str, Any]) -> str:
                 extra_lines.append(direction_context)
         exposure_key_constraint = dict(scene_graph.get("exposure_key_constraint", {}) or {})
         if exposure_key_constraint:
-            required_label = str(exposure_key_constraint.get("required_label", "") or "").strip()
-            negated_labels = [
-                str(item).strip()
-                for item in list(exposure_key_constraint.get("negated_labels", []) or [])
-                if str(item).strip()
-            ]
-            exposure_text = (
-                f"曝光调性固定为{required_label}"
-                if required_label
-                else "曝光调性不得采用" + "、".join(negated_labels)
-            )
-            extra_lines.append(
-                "智能曝光调性：" + exposure_text
-                + "。图片和每段视频分镜不得自行切换高调高键或低调低键曝光；明确的明暗分区、混合曝光设计及连续调性变化保持开放。"
-            )
+            exposure_context = _exposure_key_context_for_model(scene_graph)
+            if exposure_context:
+                extra_lines.append(exposure_context)
         contrast_level_constraint = dict(scene_graph.get("contrast_level_constraint", {}) or {})
         if contrast_level_constraint:
-            required_label = str(contrast_level_constraint.get("required_label", "") or "").strip()
-            negated_labels = [
-                str(item).strip()
-                for item in list(contrast_level_constraint.get("negated_labels", []) or [])
-                if str(item).strip()
-            ]
-            contrast_text = (
-                f"整体对比度固定为{required_label}"
-                if required_label
-                else "整体对比度不得采用" + "、".join(negated_labels)
-            )
-            extra_lines.append(
-                "智能整体对比度：" + contrast_text
-                + "。图片和每段视频分镜不得自行切换整体高反差或低反差；局部对比、HDR、镜像或前景弱化、分区对比及连续反差变化保持开放。"
-            )
+            contrast_context = _contrast_level_context_for_model(scene_graph)
+            if contrast_context:
+                extra_lines.append(contrast_context)
         saturation_level_constraint = dict(scene_graph.get("saturation_level_constraint", {}) or {})
         if saturation_level_constraint:
-            required_label = str(saturation_level_constraint.get("required_label", "") or "").strip()
-            negated_labels = [
-                str(item).strip()
-                for item in list(saturation_level_constraint.get("negated_labels", []) or [])
-                if str(item).strip()
-            ]
-            saturation_text = (
-                f"整体饱和度固定为{required_label}"
-                if required_label
-                else "整体饱和度不得采用" + "、".join(negated_labels)
-            )
-            extra_lines.append(
-                "智能整体饱和度：" + saturation_text
-                + "。图片和每段视频分镜不得自行切换整体高饱和或低饱和、去饱和色彩；局部彩色、选择性饱和、肤色独立控制及连续褪色变化保持开放。"
-            )
+            saturation_context = _saturation_level_context_for_model(scene_graph)
+            if saturation_context:
+                extra_lines.append(saturation_context)
         image_grain_constraint = dict(scene_graph.get("image_grain_constraint", {}) or {})
         if image_grain_constraint:
-            required_label = str(image_grain_constraint.get("required_label", "") or "").strip()
-            negated_labels = [
-                str(item).strip()
-                for item in list(image_grain_constraint.get("negated_labels", []) or [])
-                if str(item).strip()
-            ]
-            grain_text = (
-                f"成像颗粒质感固定为{required_label}"
-                if required_label
-                else "成像颗粒质感不得采用" + "、".join(negated_labels)
-            )
-            extra_lines.append(
-                "智能成像颗粒质感：" + grain_text
-                + "。图片和每段视频分镜不得自行加入或移除全局胶片颗粒、可见噪点；局部颗粒、扫描或印刷纹理、主体与背景分区及连续质感转换保持开放。"
-            )
+            grain_context = _image_grain_context_for_model(scene_graph)
+            if grain_context:
+                extra_lines.append(grain_context)
         image_sharpness_constraint = dict(scene_graph.get("image_sharpness_constraint", {}) or {})
         if image_sharpness_constraint:
-            required_label = str(image_sharpness_constraint.get("required_label", "") or "").strip()
-            negated_labels = [
-                str(item).strip()
-                for item in list(image_sharpness_constraint.get("negated_labels", []) or [])
-                if str(item).strip()
-            ]
-            sharpness_text = (
-                f"整体成像锐度固定为{required_label}"
-                if required_label
-                else "整体成像锐度不得采用" + "、".join(negated_labels)
-            )
-            extra_lines.append(
-                "智能整体成像锐度：" + sharpness_text
-                + "。图片和每段视频分镜不得自行切换全局锐利清晰与柔焦软焦；浅景深、背景或前景虚化、运动模糊、皮肤柔化、雾气和局部锐度设计保持独立。"
-            )
+            sharpness_context = _image_sharpness_context_for_model(scene_graph)
+            if sharpness_context:
+                extra_lines.append(sharpness_context)
         detail_density_constraint = dict(scene_graph.get("detail_density_constraint", {}) or {})
         if detail_density_constraint:
-            required_label = str(detail_density_constraint.get("required_label", "") or "").strip()
-            negated_labels = [
-                str(item).strip()
-                for item in list(detail_density_constraint.get("negated_labels", []) or [])
-                if str(item).strip()
-            ]
-            detail_text = (
-                f"整体细节密度固定为{required_label}"
-                if required_label
-                else "整体细节密度不得采用" + "、".join(negated_labels)
-            )
-            extra_lines.append(
-                "智能整体细节密度：" + detail_text
-                + "。图片和每段视频分镜不得自行切换高密度纹理与简化低细节渲染；主体背景分区、距离层级、局部细化及连续细节变化保持开放，分辨率与锐度按独立事实处理。"
-            )
+            detail_context = _detail_density_context_for_model(scene_graph)
+            if detail_context:
+                extra_lines.append(detail_context)
         visual_medium_constraint = dict(scene_graph.get("visual_medium_constraint", {}) or {})
         if visual_medium_constraint:
-            required_label = str(visual_medium_constraint.get("required_label", "") or "").strip()
-            negated_labels = [
-                str(item).strip()
-                for item in list(visual_medium_constraint.get("negated_labels", []) or [])
-                if str(item).strip()
-            ]
-            medium_text = (
-                f"画面媒介固定为{required_label}"
-                if required_label
-                else "画面媒介不得采用" + "、".join(negated_labels)
-            )
-            extra_lines.append(
-                "智能画面媒介：" + medium_text
-                + "。图片和每段视频分镜不得自行在二维绘制、三维或 CG 渲染、摄影实拍之间切换；明确的混合媒介、2.5D、屏幕或海报内嵌画面及连续媒介转场保持开放。"
-            )
+            medium_context = _visual_medium_context_for_model(scene_graph)
+            if medium_context:
+                extra_lines.append(medium_context)
         projection_geometry_constraint = dict(
             scene_graph.get("projection_geometry_constraint", {}) or {}
         )
         if projection_geometry_constraint:
-            required_label = str(
-                projection_geometry_constraint.get("required_label", "") or ""
-            ).strip()
-            negated_labels = [
-                str(item).strip()
-                for item in list(projection_geometry_constraint.get("negated_labels", []) or [])
-                if str(item).strip()
-            ]
-            projection_text = (
-                f"投影几何固定为{required_label}"
-                if required_label
-                else "投影几何不得采用" + "、".join(negated_labels)
-            )
-            extra_lines.append(
-                "智能投影几何：" + projection_text
-                + "。图片和每段视频分镜不得自行在正交、线性透视、轴测或鱼眼投影之间切换；明确的辅助视图、示意图叠层、混合投影设计及连续投影转场保持开放。"
-            )
+            projection_context = _projection_geometry_context_for_model(scene_graph)
+            if projection_context:
+                extra_lines.append(projection_context)
+        perspective_layout_constraint = dict(
+            scene_graph.get("perspective_layout_constraint", {}) or {}
+        )
+        if perspective_layout_constraint:
+            layout_context = _perspective_layout_context_for_model(scene_graph)
+            if layout_context:
+                extra_lines.append(layout_context)
+        camera_roll_constraint = dict(scene_graph.get("camera_roll_constraint", {}) or {})
+        if camera_roll_constraint:
+            roll_context = _camera_roll_context_for_model(scene_graph)
+            if roll_context:
+                extra_lines.append(roll_context)
+        composition_placement_constraint = dict(
+            scene_graph.get("composition_placement_constraint", {}) or {}
+        )
+        if composition_placement_constraint:
+            placement_context = _composition_placement_context_for_model(scene_graph)
+            if placement_context:
+                extra_lines.append(placement_context)
+        screen_direction_constraint = dict(
+            scene_graph.get("screen_direction_constraint", {}) or {}
+        )
+        if screen_direction_constraint:
+            direction_context = _screen_direction_context_for_model(scene_graph)
+            if direction_context:
+                extra_lines.append(direction_context)
+        spatial_axis_continuity_constraint = dict(
+            scene_graph.get("spatial_axis_continuity_constraint", {}) or {}
+        )
+        if spatial_axis_continuity_constraint:
+            axis_context = _spatial_axis_continuity_context_for_model(scene_graph)
+            if axis_context:
+                extra_lines.append(axis_context)
+        foreground_occlusion_constraint = dict(
+            scene_graph.get("foreground_occlusion_constraint", {}) or {}
+        )
+        if foreground_occlusion_constraint:
+            occlusion_context = _foreground_occlusion_context_for_model(scene_graph)
+            if occlusion_context:
+                extra_lines.append(occlusion_context)
+        subject_support_state_constraint = dict(
+            scene_graph.get("subject_support_state_constraint", {}) or {}
+        )
+        if subject_support_state_constraint:
+            support_context = _subject_support_state_context_for_model(scene_graph)
+            if support_context:
+                extra_lines.append(support_context)
+        gaze_target_constraint = dict(scene_graph.get("gaze_target_constraint", {}) or {})
+        if gaze_target_constraint:
+            gaze_context = _gaze_target_context_for_model(scene_graph)
+            if gaze_context:
+                extra_lines.append(gaze_context)
         atmospheric_medium_context = _atmospheric_medium_context_for_model(scene_graph)
         if atmospheric_medium_context:
             extra_lines.append(atmospheric_medium_context)

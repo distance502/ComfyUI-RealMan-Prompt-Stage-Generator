@@ -749,7 +749,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
             )
 
         payload = json.loads(result[3])
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v71")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 2)
         self.assertEqual(payload["scene_coherence_status"], "coherent")
         self.assertEqual(payload["model_intelligence_skip_count"], 0)
@@ -1033,7 +1033,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
             )
 
         payload = json.loads(result[3])
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v71")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 2)
         self.assertEqual(payload["scene_relationship_graph"]["primary_world_family"], "natural_wilderness")
         self.assertEqual(payload["scene_coherence_status"], "coherent")
@@ -1125,7 +1125,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
             )
 
         payload = json.loads(result[3])
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v71")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(payload["scene_relationship_graph"]["primary_world_family"], "natural_wilderness")
         self.assertEqual(payload["scene_coherence_status"], "coherent")
@@ -1231,7 +1231,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
             )
 
         payload = json.loads(result[3])
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v71")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(payload["scene_coherence_status"], "coherent")
         self.assertNotIn("操作控制台", payload["selected_tags_flat"])
@@ -1321,7 +1321,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v71")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["primary_world_family"], "urban_space")
         self.assertEqual(graph["context_primary_world_source"], "natural_context_override")
@@ -1649,7 +1649,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
             )
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v71")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["scene_attribute_constraints"]["wind"]["required_value"], "calm")
         self.assertNotIn("狂风卷动衣摆", payload["selected_tags_flat"])
@@ -1759,7 +1759,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
             )
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v71")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(
             graph["scene_attribute_constraints"]["ambient_temperature"]["required_value"],
@@ -1880,7 +1880,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
             )
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v71")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(
             graph["scene_attribute_constraints"]["ground_surface"]["required_value"],
@@ -1994,7 +1994,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
             )
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v71")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(
             graph["scene_attribute_constraints"]["spatial_enclosure"]["required_value"],
@@ -2120,7 +2120,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
             )
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v71")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(
             graph["scene_attribute_constraints"]["dominant_light_source"]["required_value"],
@@ -2875,7 +2875,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v71")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["context_scene_attribute_constraints"]["time_of_day"]["required_value"], "day")
         self.assertEqual(graph["context_scene_attribute_constraints"]["precipitation"]["required_value"], "clear")
@@ -3005,7 +3005,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v71")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["context_subject_cardinality_constraint"]["required_value"], "single")
         self.assertEqual(payload["scene_coherence_status"], "coherent")
@@ -3310,7 +3310,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v71")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["context_subject_orientation_constraint"]["required_value"], "back")
         self.assertEqual(payload["scene_coherence_status"], "coherent")
@@ -3850,7 +3850,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
                 "智能场景关系图": graph,
             },
         )
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v71")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["context_subject_pose_constraint"]["required_value"], "standing")
         self.assertNotIn("坐姿慵懒", payload["selected_tags_flat"])
@@ -4163,7 +4163,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
                 "智能场景关系图": graph,
             },
         )
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v71")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["context_camera_angle_constraint"]["required_value"], "low_angle")
         self.assertNotIn("高角度俯拍", payload["selected_tags_flat"])
@@ -4254,7 +4254,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
                 "智能场景关系图": graph,
             },
         )
-        self.assertEqual(profile["version"], "qwen-te-intelligence-v71")
+        self.assertEqual(profile["version"], "qwen-te-intelligence-v90")
         self.assertEqual(graph["context_subject_presence_constraint"]["required_value"], "non_person")
         self.assertIn("主体存在性约束", violation)
         self.assertIn("成年女性", violation)
@@ -4304,7 +4304,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v71")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["context_subject_presence_constraint"]["required_value"], "none")
         self.assertNotIn("成年女性模特", payload["selected_tags_flat"])
@@ -4615,7 +4615,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v71")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["context_light_temperature_constraint"]["required_value"], "cool")
         self.assertNotIn("烛火暖光", payload["selected_tags_flat"])
@@ -4920,7 +4920,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v71")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["color_rendering_constraint"]["required_value"], "monochrome")
         self.assertNotIn("彩色霓虹光", payload["selected_tags_flat"])
@@ -5233,7 +5233,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v71")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["depth_of_field_constraint"]["required_value"], "deep")
         self.assertNotIn("浅景深", payload["selected_tags_flat"])
@@ -5539,7 +5539,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v71")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["lighting_quality_constraint"]["required_value"], "hard")
         self.assertNotIn("柔光", payload["selected_tags_flat"])
@@ -5851,7 +5851,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v71")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["motion_rendering_constraint"]["required_value"], "frozen")
         self.assertNotIn("运动模糊", payload["selected_tags_flat"])
@@ -5923,6 +5923,170 @@ class TestStagePromptIntelligence(unittest.TestCase):
         self.assertIn("三脚架固定机位", violation)
         self.assertIn("智能镜头稳定性：镜头稳定性固定为手持/晃动镜头", model_prompt)
 
+    def test_selected_camera_stability_and_frame_feedback_share_one_guard(self) -> None:
+        samples = {
+            "stable": "连续帧之间的背景锚点保持同一画面位置，地平线不发生随机摆动，取景中心沿既定运镜路径平滑移动。",
+            "handheld": "相邻帧之间的背景锚点产生细小不规则位移，地平线保留受控随机摆动，取景中心围绕主体轻微漂移。",
+        }
+        english_samples = {
+            "stable": "Across consecutive frames, background anchors remain in the same screen position, the horizon shows no random wobble, and the framing center moves smoothly along the intended camera path.",
+            "handheld": "Across adjacent frames, background anchors show small irregular shifts, the horizon retains controlled random wobble, and the framing center drifts slightly around the subject.",
+        }
+        combined_samples = {
+            **samples,
+            **{f"en_{key}": text for key, text in english_samples.items()},
+        }
+        for value, sample in combined_samples.items():
+            expected = value.removeprefix("en_")
+            with self.subTest(detector=value):
+                self.assertEqual(
+                    set(intelligence.detect_camera_stability_feedback(sample)),
+                    {expected},
+                )
+
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["成年女性冒险者"],
+                    "构图视角": ["手持纪实镜头"],
+                    "场景背景": ["地下城遗迹"],
+                }
+            )
+        )
+        constraint = graph["camera_stability_constraint"]
+        self.assertEqual(constraint["required_value"], "handheld")
+        self.assertEqual(constraint["source"], "selected_state")
+        original = "手持纪实镜头贴近冒险者穿过地下城。"
+        violation = intelligence.candidate_world_violation(
+            original,
+            original + samples["stable"],
+            graph,
+        )
+        repair = intelligence.classify_repair_reason(violation)
+        self.assertIn("镜头稳定性约束", violation)
+        self.assertIn("帧间背景锚点、地平线或取景中心反馈", violation)
+        self.assertEqual(repair["kind"], "camera_stability")
+        self.assertEqual(
+            intelligence.candidate_world_violation(
+                original,
+                original + samples["handheld"],
+                graph,
+            ),
+            "",
+        )
+
+    def test_camera_stability_feedback_preserves_negation_static_tilt_and_open_axes(self) -> None:
+        handheld_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"], "构图视角": ["手持镜头"]})
+        )
+        negated = "不要让连续帧之间的背景锚点保持同一画面位置，地平线不发生随机摆动，取景中心沿既定运镜路径平滑移动。"
+        static_tilt = "画面采用固定荷兰角构图，地平线保持同一个倾斜角度，背景垂直线不发生帧间变化。"
+        self.assertEqual(intelligence.detect_camera_stability_feedback(negated), {})
+        self.assertEqual(intelligence.detect_camera_stability_feedback(static_tilt), {})
+        self.assertEqual(
+            intelligence.candidate_world_violation(
+                "手持镜头跟随冒险者前进。",
+                "手持镜头跟随冒险者前进。" + negated + static_tilt,
+                handheld_graph,
+            ),
+            "",
+        )
+
+        handheld_gimbal = intelligence.build_scene_relationship_graph(
+            OrderedDict({"构图视角": ["稳定器拍摄"]}),
+            context_text="使用手持稳定器跟拍，保留轻微手持质感但主体运动平稳。",
+        )
+        transition = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"]}),
+            context_text="开场采用手持镜头，进入大厅后切换三脚架固定机位。",
+        )
+        open_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"], "场景背景": ["地下城遗迹"]})
+        )
+        for graph in (handheld_gimbal, transition, open_graph):
+            self.assertEqual(graph["camera_stability_constraint"], {})
+        self.assertEqual(
+            intelligence.candidate_world_violation(
+                "冒险者穿过地下城。",
+                "冒险者穿过地下城。相邻帧之间的背景锚点产生细小不规则位移，地平线保留受控随机摆动，取景中心围绕主体轻微漂移。",
+                open_graph,
+            ),
+            "",
+        )
+
+    def test_camera_stability_contract_reaches_all_model_paths_with_active_vocabulary_only(self) -> None:
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["成年女性冒险者"],
+                    "构图视角": ["手持纪实镜头"],
+                    "场景背景": ["地下城遗迹"],
+                }
+            )
+        )
+        qwen_settings = {
+            "提示词语言": "纯中文",
+            "模型来源": "本地模型",
+            "模型调用基础来源": "本地模型",
+            "内置模型系列": "Qwen3.5-VL",
+            "内置主模型": "Qwen3.5-4B-Q4_K_M.gguf",
+            "智能模型策略": {"mode": "incremental_blend"},
+            "智能场景关系图": graph,
+        }
+        requests = (
+            model_refiner._compact_environment_context_for_model(graph),
+            model_refiner._compose_model_user_prompt("Skill 图像底稿。", qwen_settings),
+            model_refiner._compose_model_user_prompt(
+                "Skill 视频底稿。",
+                {**qwen_settings, "模型任务": "视频提示词"},
+            ),
+            model_refiner._compose_batch_prompt(
+                ["第一份底稿。", "第二份底稿。"],
+                qwen_settings,
+            ),
+            model_refiner._compose_model_user_prompt(
+                "API 视频底稿。",
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "模型任务": "视频提示词",
+                    "智能场景关系图": graph,
+                },
+            ),
+            model_refiner._compose_model_user_prompt(
+                "API 图像底稿。",
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "智能场景关系图": graph,
+                },
+            ),
+            model_refiner._compose_batch_prompt(
+                ["第一份完整底稿。", "第二份完整底稿。"],
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "智能场景关系图": graph,
+                },
+            ),
+        )
+        for request in requests:
+            self.assertIn("镜头稳定性固定为手持/晃动镜头", request)
+            self.assertIn("背景锚点产生细小不规则位移", request)
+            self.assertIn("未由 Skill 底稿给出的镜头稳定性变化不作补充", request)
+            self.assertEqual(request.count("智能镜头稳定性："), 1)
+            for forbidden in (
+                "镜头稳定性固定为稳定/固定机位",
+                "背景锚点保持同一画面位置",
+                "地平线不发生随机摆动",
+            ):
+                self.assertNotIn(forbidden, request)
+
+        open_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"], "场景背景": ["地下城遗迹"]})
+        )
+        self.assertEqual(model_refiner._camera_stability_context_for_model(open_graph), "")
+
     def test_handheld_gimbal_and_camera_stability_transition_remain_open(self) -> None:
         handheld_gimbal = intelligence.build_scene_relationship_graph(
             OrderedDict({"构图视角": ["稳定器拍摄"]}),
@@ -5990,7 +6154,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v71")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["camera_stability_constraint"]["required_value"], "stable")
         self.assertNotIn("手持镜头", payload["selected_tags_flat"])
@@ -6062,6 +6226,170 @@ class TestStagePromptIntelligence(unittest.TestCase):
         self.assertIn("广角镜头", violation)
         self.assertIn("智能焦段透视：焦段透视固定为长焦空间压缩", model_prompt)
 
+    def test_selected_focal_perspective_and_spatial_feedback_share_one_guard(self) -> None:
+        samples = {
+            "wide": "近处对象相对远处背景明显放大，前景、中景与远景的尺度差迅速拉开，沿视轴的空间间距被夸张延展。",
+            "telephoto": "近处主体与远处背景保持相近视觉尺度，前景、中景与远景层级紧密叠合，沿视轴的空间间距被明显压缩。",
+        }
+        english_samples = {
+            "wide": "The near object appears noticeably larger than the distant background, the scale difference across the foreground, midground, and far background expands rapidly, and spacing along the viewing axis is visibly stretched.",
+            "telephoto": "The near subject and the distant background retain a similar visual scale, the foreground, midground, and far background stack tightly together, and spacing along the viewing axis is visibly compressed.",
+        }
+        combined_samples = {
+            **samples,
+            **{f"en_{key}": text for key, text in english_samples.items()},
+        }
+        for value, sample in combined_samples.items():
+            expected = value.removeprefix("en_")
+            with self.subTest(detector=value):
+                self.assertEqual(
+                    set(intelligence.detect_focal_perspective_feedback(sample)),
+                    {expected},
+                )
+
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["成年女性冒险者"],
+                    "构图视角": ["200mm长焦压缩"],
+                    "场景背景": ["地下城遗迹"],
+                }
+            )
+        )
+        constraint = graph["focal_perspective_constraint"]
+        self.assertEqual(constraint["required_value"], "telephoto")
+        self.assertEqual(constraint["source"], "selected_state")
+        original = "200mm长焦压缩石柱与冒险者之间的纵深。"
+        violation = intelligence.candidate_world_violation(
+            original,
+            original + samples["wide"],
+            graph,
+        )
+        repair = intelligence.classify_repair_reason(violation)
+        self.assertIn("焦段透视约束", violation)
+        self.assertIn("近远尺度、空间层叠或视轴距离反馈", violation)
+        self.assertEqual(repair["kind"], "focal_perspective")
+        self.assertEqual(
+            intelligence.candidate_world_violation(
+                original,
+                original + samples["telephoto"],
+                graph,
+            ),
+            "",
+        )
+
+    def test_focal_feedback_preserves_negation_orthographic_language_and_open_axes(self) -> None:
+        telephoto_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"], "构图视角": ["200mm长焦压缩"]})
+        )
+        negated = "不要让近处对象相对远处背景明显放大，前景、中景与远景的尺度差迅速拉开，沿视轴的空间间距被夸张延展。"
+        orthographic = "正交设定图中三个角色视图保持相同高度和尺度，背景只保留中性平面，不建立纵深层叠。"
+        narrative_scale = "近处的角色目标与远方故乡具有相同叙事分量，剧情层级逐步展开。"
+        for sample in (negated, orthographic, narrative_scale):
+            self.assertEqual(intelligence.detect_focal_perspective_feedback(sample), {})
+        self.assertEqual(
+            intelligence.candidate_world_violation(
+                "长焦镜头压缩地下城走廊。",
+                "长焦镜头压缩地下城走廊。" + negated + orthographic + narrative_scale,
+                telephoto_graph,
+            ),
+            "",
+        )
+
+        mixed = intelligence.build_scene_relationship_graph(
+            OrderedDict({"构图视角": ["广角镜头", "200mm长焦压缩"]})
+        )
+        dolly_zoom = intelligence.build_scene_relationship_graph(
+            OrderedDict({"构图视角": ["广角镜头"]}),
+            context_text="执行希区柯克变焦，机位后移并同步改变焦段。",
+        )
+        open_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"], "场景背景": ["地下城遗迹"]})
+        )
+        for graph in (mixed, dolly_zoom, open_graph):
+            self.assertEqual(graph["focal_perspective_constraint"], {})
+        self.assertEqual(
+            intelligence.candidate_world_violation(
+                "冒险者穿过地下城。",
+                "冒险者穿过地下城。近处主体与远处背景保持相近视觉尺度，前景、中景与远景层级紧密叠合，沿视轴的空间间距被明显压缩。",
+                open_graph,
+            ),
+            "",
+        )
+
+    def test_focal_perspective_contract_reaches_all_model_paths_with_active_vocabulary_only(self) -> None:
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["成年女性冒险者"],
+                    "构图视角": ["200mm长焦压缩"],
+                    "场景背景": ["地下城遗迹"],
+                }
+            )
+        )
+        qwen_settings = {
+            "提示词语言": "纯中文",
+            "模型来源": "本地模型",
+            "模型调用基础来源": "本地模型",
+            "内置模型系列": "Qwen3.5-VL",
+            "内置主模型": "Qwen3.5-4B-Q4_K_M.gguf",
+            "智能模型策略": {"mode": "incremental_blend"},
+            "智能场景关系图": graph,
+        }
+        requests = (
+            model_refiner._compact_environment_context_for_model(graph),
+            model_refiner._compose_model_user_prompt("Skill 图像底稿。", qwen_settings),
+            model_refiner._compose_model_user_prompt(
+                "Skill 视频底稿。",
+                {**qwen_settings, "模型任务": "视频提示词"},
+            ),
+            model_refiner._compose_batch_prompt(
+                ["第一份底稿。", "第二份底稿。"],
+                qwen_settings,
+            ),
+            model_refiner._compose_model_user_prompt(
+                "API 视频底稿。",
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "模型任务": "视频提示词",
+                    "智能场景关系图": graph,
+                },
+            ),
+            model_refiner._compose_model_user_prompt(
+                "API 图像底稿。",
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "智能场景关系图": graph,
+                },
+            ),
+            model_refiner._compose_batch_prompt(
+                ["第一份完整底稿。", "第二份完整底稿。"],
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "智能场景关系图": graph,
+                },
+            ),
+        )
+        for request in requests:
+            self.assertIn("焦段透视固定为长焦空间压缩", request)
+            self.assertIn("近处主体与远处背景保持相近视觉尺度", request)
+            self.assertIn("未由 Skill 底稿给出的焦段或空间透视变化不作补充", request)
+            self.assertEqual(request.count("智能焦段透视："), 1)
+            for forbidden in (
+                "焦段透视固定为广角空间延展",
+                "近处对象相对远处背景明显放大",
+                "空间间距被夸张延展",
+            ):
+                self.assertNotIn(forbidden, request)
+
+        open_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"], "场景背景": ["地下城遗迹"]})
+        )
+        self.assertEqual(model_refiner._focal_perspective_context_for_model(open_graph), "")
+
     def test_dolly_zoom_and_focal_transition_remain_open(self) -> None:
         dolly_zoom = intelligence.build_scene_relationship_graph(
             OrderedDict({"构图视角": ["广角镜头"]}),
@@ -6129,7 +6457,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v71")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["focal_perspective_constraint"]["required_value"], "wide")
         self.assertNotIn("200mm长焦压缩", payload["selected_tags_flat"])
@@ -6438,7 +6766,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v71")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["key_light_direction_constraint"]["required_value"], "side")
         self.assertNotIn("顶光烟雾", payload["selected_tags_flat"])
@@ -6510,6 +6838,171 @@ class TestStagePromptIntelligence(unittest.TestCase):
         self.assertIn("明亮高调棚拍", violation)
         self.assertIn("智能曝光调性：曝光调性固定为低调/低键曝光", model_prompt)
 
+    def test_selected_exposure_key_and_luminance_feedback_share_one_guard(self) -> None:
+        samples = {
+            "high_key": "画面大部分区域分布在中高亮度，深阴影只占很小面积且仍保留层次，黑位整体抬高但高光不过曝。",
+            "low_key": "画面大部分区域停留在低亮度，亮部只集中在少量受光区域，阴影占据大面积并保留可辨层次。",
+        }
+        english_samples = {
+            "high_key": "Most of the frame occupies the upper midtones, deep shadows cover only a small area while retaining readable detail, and the black level is lifted without highlight clipping.",
+            "low_key": "Most of the frame remains in the low luminance range, highlights are confined to small lit areas, and shadows occupy a large area while retaining readable detail.",
+        }
+        combined_samples = {
+            **samples,
+            **{f"en_{key}": text for key, text in english_samples.items()},
+        }
+        for value, sample in combined_samples.items():
+            expected = value.removeprefix("en_")
+            with self.subTest(detector=value):
+                self.assertEqual(
+                    set(intelligence.detect_exposure_key_feedback(sample)),
+                    {expected},
+                )
+
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["成年女性冒险者"],
+                    "光影氛围": ["低键光"],
+                    "场景背景": ["地下城遗迹"],
+                }
+            )
+        )
+        constraint = graph["exposure_key_constraint"]
+        self.assertEqual(constraint["required_value"], "low_key")
+        self.assertEqual(constraint["source"], "selected_state")
+        original = "低键光让地下城的大部分空间沉入阴影。"
+        violation = intelligence.candidate_world_violation(
+            original,
+            original + samples["high_key"],
+            graph,
+        )
+        repair = intelligence.classify_repair_reason(violation)
+        self.assertIn("曝光调性约束", violation)
+        self.assertIn("全局亮度分布、暗部占比或黑位反馈", violation)
+        self.assertEqual(repair["kind"], "exposure_key")
+        self.assertEqual(
+            intelligence.candidate_world_violation(
+                original,
+                original + samples["low_key"],
+                graph,
+            ),
+            "",
+        )
+
+    def test_exposure_feedback_preserves_negation_contrast_language_and_open_axes(self) -> None:
+        low_key_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"], "光影氛围": ["低键光"]})
+        )
+        negated = "不要让画面大部分区域分布在中高亮度，深阴影只占很小面积且仍保留层次，黑位整体抬高但高光不过曝。"
+        high_contrast = "亮部与暗部保持强烈反差，阴影边缘清楚锐利，但整体曝光分布不作规定。"
+        local_fill = "人物面部获得局部补光，背景亮度和全局黑位保持原样。"
+        for sample in (negated, high_contrast, local_fill):
+            self.assertEqual(intelligence.detect_exposure_key_feedback(sample), {})
+        self.assertEqual(
+            intelligence.candidate_world_violation(
+                "低键光塑造地下城空间。",
+                "低键光塑造地下城空间。" + negated + high_contrast + local_fill,
+                low_key_graph,
+            ),
+            "",
+        )
+
+        split_exposure = intelligence.build_scene_relationship_graph(
+            OrderedDict({"光影氛围": ["高键光"]}),
+            context_text="采用明暗分区曝光，主体高调，背景低调。",
+        )
+        transition = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"]}),
+            context_text="开场使用低键光，石门开启后转为高键照明。",
+        )
+        open_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"], "场景背景": ["地下城遗迹"]})
+        )
+        for graph in (split_exposure, transition, open_graph):
+            self.assertEqual(graph["exposure_key_constraint"], {})
+        self.assertEqual(
+            intelligence.candidate_world_violation(
+                "冒险者穿过地下城。",
+                "冒险者穿过地下城。画面大部分区域停留在低亮度，亮部只集中在少量受光区域，阴影占据大面积并保留可辨层次。",
+                open_graph,
+            ),
+            "",
+        )
+
+    def test_exposure_key_contract_reaches_all_model_paths_with_active_vocabulary_only(self) -> None:
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["成年女性冒险者"],
+                    "光影氛围": ["低键光"],
+                    "场景背景": ["地下城遗迹"],
+                }
+            )
+        )
+        qwen_settings = {
+            "提示词语言": "纯中文",
+            "模型来源": "本地模型",
+            "模型调用基础来源": "本地模型",
+            "内置模型系列": "Qwen3.5-VL",
+            "内置主模型": "Qwen3.5-4B-Q4_K_M.gguf",
+            "智能模型策略": {"mode": "incremental_blend"},
+            "智能场景关系图": graph,
+        }
+        requests = (
+            model_refiner._compact_environment_context_for_model(graph),
+            model_refiner._compose_model_user_prompt("Skill 图像底稿。", qwen_settings),
+            model_refiner._compose_model_user_prompt(
+                "Skill 视频底稿。",
+                {**qwen_settings, "模型任务": "视频提示词"},
+            ),
+            model_refiner._compose_batch_prompt(
+                ["第一份底稿。", "第二份底稿。"],
+                qwen_settings,
+            ),
+            model_refiner._compose_model_user_prompt(
+                "API 视频底稿。",
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "模型任务": "视频提示词",
+                    "智能场景关系图": graph,
+                },
+            ),
+            model_refiner._compose_model_user_prompt(
+                "API 图像底稿。",
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "智能场景关系图": graph,
+                },
+            ),
+            model_refiner._compose_batch_prompt(
+                ["第一份完整底稿。", "第二份完整底稿。"],
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "智能场景关系图": graph,
+                },
+            ),
+        )
+        for request in requests:
+            self.assertIn("曝光调性固定为低调/低键曝光", request)
+            self.assertIn("画面大部分区域停留在低亮度", request)
+            self.assertIn("未由 Skill 底稿给出的高键、低键或曝光调性变化不作补充", request)
+            self.assertEqual(request.count("智能曝光调性："), 1)
+            for forbidden in (
+                "曝光调性固定为高调/高键曝光",
+                "画面大部分区域分布在中高亮度",
+                "黑位整体抬高",
+            ):
+                self.assertNotIn(forbidden, request)
+
+        open_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"], "场景背景": ["地下城遗迹"]})
+        )
+        self.assertEqual(model_refiner._exposure_key_context_for_model(open_graph), "")
+
     def test_split_exposure_and_exposure_transition_remain_open(self) -> None:
         split_exposure = intelligence.build_scene_relationship_graph(
             OrderedDict({"光影氛围": ["高键光"]}),
@@ -6577,7 +7070,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v71")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["exposure_key_constraint"]["required_value"], "high_key")
         self.assertNotIn("低键光", payload["selected_tags_flat"])
@@ -6648,6 +7141,164 @@ class TestStagePromptIntelligence(unittest.TestCase):
         self.assertIn("整体对比度约束", violation)
         self.assertIn("高对比戏剧光", violation)
         self.assertIn("智能整体对比度：整体对比度固定为低对比/低反差", model_prompt)
+
+    def test_selected_contrast_level_and_histogram_feedback_share_one_guard(self) -> None:
+        samples = {
+            "high": "全画面最亮部与最暗部保持很大明度跨度，中间调只占狭窄范围，亮度直方图同时延伸到亮暗两端。",
+            "low": "全画面亮部与暗部保持较小明度跨度，中间调覆盖宽广范围，亮度直方图集中在中部且两端保留余量。",
+        }
+        english_samples = {
+            "high": "The entire frame's brightest region and darkest region maintain a wide luminance span, midtones occupy a narrow band, and the luminance histogram reaches toward both the bright and dark ends.",
+            "low": "The whole image's bright areas and dark areas maintain a small tonal range, midtones cover a broad band, and the brightness histogram is concentrated in the middle with room at both ends.",
+        }
+        for value, sample in {**samples, **{f"en_{key}": text for key, text in english_samples.items()}}.items():
+            expected = value.removeprefix("en_")
+            with self.subTest(detector=value):
+                self.assertEqual(
+                    set(intelligence.detect_contrast_level_feedback(sample)),
+                    {expected},
+                )
+
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["成年女性冒险者"],
+                    "光影氛围": ["低对比"],
+                    "场景背景": ["地下城遗迹"],
+                }
+            )
+        )
+        original = "整体低对比让地下城保持连续灰阶。"
+        violation = intelligence.candidate_world_violation(
+            original,
+            original + samples["high"],
+            graph,
+        )
+        repair = intelligence.classify_repair_reason(violation)
+        self.assertIn("整体对比度约束", violation)
+        self.assertIn("全局明度跨度、中间调范围或直方图反馈", violation)
+        self.assertEqual(repair["kind"], "contrast_level")
+        self.assertEqual(
+            intelligence.candidate_world_violation(
+                original,
+                original + samples["low"],
+                graph,
+            ),
+            "",
+        )
+
+    def test_contrast_feedback_preserves_exposure_light_quality_and_open_axes(self) -> None:
+        low_contrast_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"], "光影氛围": ["低对比"]})
+        )
+        negated = "不要让全画面最亮部与最暗部保持很大明度跨度，中间调只占狭窄范围，亮度直方图同时延伸到亮暗两端。"
+        high_key = "画面大部分区域分布在中高亮度，深阴影只占很小面积，黑位整体抬高但高光不过曝。"
+        hard_light = "硬光形成清楚锐利的阴影边缘，但不规定全局亮度跨度。"
+        local_contrast = "只增强人物皮革护甲的局部对比，背景整体反差保持原样。"
+        hdr = "HDR 高动态范围同时保留窗外高光与室内暗部细节，不改变整体反差。"
+        for sample in (negated, high_key, hard_light, local_contrast, hdr):
+            with self.subTest(sample=sample):
+                self.assertEqual(intelligence.detect_contrast_level_feedback(sample), {})
+        self.assertEqual(
+            intelligence.candidate_world_violation(
+                "低对比地下城中，冒险者检查石门。",
+                "低对比地下城中，冒险者检查石门。" + negated + high_key + hard_light + local_contrast + hdr,
+                low_contrast_graph,
+            ),
+            "",
+        )
+
+        transition = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"]}),
+            context_text="开场保持低反差，警报触发后转为高反差。",
+        )
+        feedback_only = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"]}),
+            context_text="全画面最亮部与最暗部保持很大明度跨度，中间调只占狭窄范围，亮度直方图同时延伸到亮暗两端。",
+        )
+        for graph in (transition, feedback_only):
+            self.assertEqual(graph["contrast_level_constraint"], {})
+            self.assertEqual(
+                intelligence.candidate_world_violation(
+                    "冒险者穿过地下城。",
+                    "冒险者穿过地下城。全画面亮部与暗部保持较小明度跨度，中间调覆盖宽广范围，亮度直方图集中在中部且两端保留余量。",
+                    graph,
+                ),
+                "",
+            )
+
+    def test_contrast_level_contract_reaches_all_model_paths_with_active_vocabulary_only(self) -> None:
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["成年女性冒险者"],
+                    "光影氛围": ["低对比"],
+                    "场景背景": ["地下城遗迹"],
+                }
+            )
+        )
+        qwen_settings = {
+            "提示词语言": "纯中文",
+            "模型来源": "本地模型",
+            "模型调用基础来源": "本地模型",
+            "内置模型系列": "Qwen3.5-VL",
+            "内置主模型": "Qwen3.5-4B-Q4_K_M.gguf",
+            "智能模型策略": {"mode": "incremental_blend"},
+            "智能场景关系图": graph,
+        }
+        requests = (
+            model_refiner._compact_environment_context_for_model(graph),
+            model_refiner._compose_model_user_prompt("Skill 图像底稿。", qwen_settings),
+            model_refiner._compose_model_user_prompt(
+                "Skill 视频底稿。",
+                {**qwen_settings, "模型任务": "视频提示词"},
+            ),
+            model_refiner._compose_batch_prompt(
+                ["第一份底稿。", "第二份底稿。"],
+                qwen_settings,
+            ),
+            model_refiner._compose_model_user_prompt(
+                "API 视频底稿。",
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "模型任务": "视频提示词",
+                    "智能场景关系图": graph,
+                },
+            ),
+            model_refiner._compose_model_user_prompt(
+                "API 图像底稿。",
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "智能场景关系图": graph,
+                },
+            ),
+            model_refiner._compose_batch_prompt(
+                ["第一份完整底稿。", "第二份完整底稿。"],
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "智能场景关系图": graph,
+                },
+            ),
+        )
+        for request in requests:
+            self.assertIn("整体对比度固定为低对比/低反差", request)
+            self.assertIn("全画面亮部与暗部保持较小明度跨度", request)
+            self.assertIn("局部对比、HDR", request)
+            self.assertEqual(request.count("智能整体对比度："), 1)
+            for forbidden in (
+                "整体对比度固定为高对比/高反差",
+                "最亮部与最暗部保持很大明度跨度",
+                "中间调只占狭窄范围",
+            ):
+                self.assertNotIn(forbidden, request)
+
+        open_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"], "场景背景": ["地下城遗迹"]})
+        )
+        self.assertEqual(model_refiner._contrast_level_context_for_model(open_graph), "")
 
     def test_local_low_contrast_hdr_and_contrast_transition_remain_open(self) -> None:
         local_reflection = intelligence.build_scene_relationship_graph(
@@ -6721,7 +7372,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v71")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["contrast_level_constraint"]["required_value"], "high")
         self.assertNotIn("低反差画面", payload["selected_tags_flat"])
@@ -6792,6 +7443,164 @@ class TestStagePromptIntelligence(unittest.TestCase):
         self.assertIn("整体饱和度约束", violation)
         self.assertIn("高饱和感官色调", violation)
         self.assertIn("智能整体饱和度：整体饱和度固定为低饱和/去饱和", model_prompt)
+
+    def test_selected_saturation_level_and_chroma_feedback_share_one_guard(self) -> None:
+        samples = {
+            "high": "全画面大多数彩色区域保持较高综合色度，综合色度分布集中在中高值区，鲜艳颜色覆盖主体与环境的主要色块，中性灰只占少量必要区域。",
+            "low": "全画面大多数彩色区域靠近中性灰轴，综合色度分布集中在低值区，鲜艳颜色只占少量必要区域，同时仍保留可辨的主色相关系。",
+        }
+        english_samples = {
+            "high": "Across the full image, most colored regions maintain high overall chroma, the chroma distribution clusters in the mid-to-high range, vivid colors cover the main color masses, and neutral gray occupies only a small necessary area.",
+            "low": "Across the entire frame, most colored regions remain close to the neutral gray axis, the chroma distribution clusters in the low range, vivid colors occupy only a small necessary area, while the primary hue relationships remain distinguishable.",
+        }
+        for value, sample in {**samples, **{f"en_{key}": text for key, text in english_samples.items()}}.items():
+            expected = value.removeprefix("en_")
+            with self.subTest(detector=value):
+                self.assertEqual(
+                    set(intelligence.detect_saturation_level_feedback(sample)),
+                    {expected},
+                )
+
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["成年女性冒险者"],
+                    "光影氛围": ["低饱和冷灰"],
+                    "场景背景": ["地下城遗迹"],
+                }
+            )
+        )
+        original = "低饱和冷灰让地下城维持克制的色彩浓度。"
+        violation = intelligence.candidate_world_violation(
+            original,
+            original + samples["high"],
+            graph,
+        )
+        repair = intelligence.classify_repair_reason(violation)
+        self.assertIn("整体饱和度约束", violation)
+        self.assertIn("全局综合色度分布、中性灰占比或鲜艳色覆盖反馈", violation)
+        self.assertEqual(repair["kind"], "saturation_level")
+        self.assertEqual(
+            intelligence.candidate_world_violation(
+                original,
+                original + samples["low"],
+                graph,
+            ),
+            "",
+        )
+
+    def test_saturation_feedback_preserves_hue_monochrome_selective_and_open_axes(self) -> None:
+        low_saturation_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"], "光影氛围": ["低饱和冷灰"]})
+        )
+        negated = "不要让全画面大多数彩色区域保持较高综合色度，综合色度分布集中在中高值区，鲜艳颜色覆盖主体与环境的主要色块，中性灰只占少量必要区域。"
+        hue_palette = "全画面以冷青与暖橙建立色相关系，但不规定综合色度分布。"
+        monochrome = "黑白线稿只使用灰阶表达明暗，不将媒介选择解释成饱和度要求。"
+        selective = "环境保持克制，只有红色围巾作为局部彩色点缀。"
+        skin_control = "肤色独立维持自然色彩，背景综合色度保持原样。"
+        for sample in (negated, hue_palette, monochrome, selective, skin_control):
+            with self.subTest(sample=sample):
+                self.assertEqual(intelligence.detect_saturation_level_feedback(sample), {})
+        self.assertEqual(
+            intelligence.candidate_world_violation(
+                "低饱和地下城中，冒险者检查石门。",
+                "低饱和地下城中，冒险者检查石门。" + negated + hue_palette + monochrome + selective + skin_control,
+                low_saturation_graph,
+            ),
+            "",
+        )
+
+        transition = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"]}),
+            context_text="开场色彩浓艳，危机解除后逐渐褪色为克制色调。",
+        )
+        feedback_only = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"]}),
+            context_text="全画面大多数彩色区域保持较高综合色度，综合色度分布集中在中高值区，鲜艳颜色覆盖主体与环境的主要色块，中性灰只占少量必要区域。",
+        )
+        for graph in (transition, feedback_only):
+            self.assertEqual(graph["saturation_level_constraint"], {})
+            self.assertEqual(
+                intelligence.candidate_world_violation(
+                    "冒险者穿过地下城。",
+                    "冒险者穿过地下城。全画面大多数彩色区域靠近中性灰轴，综合色度分布集中在低值区，鲜艳颜色只占少量必要区域，同时仍保留可辨的主色相关系。",
+                    graph,
+                ),
+                "",
+            )
+
+    def test_saturation_level_contract_reaches_all_model_paths_with_active_vocabulary_only(self) -> None:
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["成年女性冒险者"],
+                    "光影氛围": ["低饱和冷灰"],
+                    "场景背景": ["地下城遗迹"],
+                }
+            )
+        )
+        qwen_settings = {
+            "提示词语言": "纯中文",
+            "模型来源": "本地模型",
+            "模型调用基础来源": "本地模型",
+            "内置模型系列": "Qwen3.5-VL",
+            "内置主模型": "Qwen3.5-4B-Q4_K_M.gguf",
+            "智能模型策略": {"mode": "incremental_blend"},
+            "智能场景关系图": graph,
+        }
+        requests = (
+            model_refiner._compact_environment_context_for_model(graph),
+            model_refiner._compose_model_user_prompt("Skill 图像底稿。", qwen_settings),
+            model_refiner._compose_model_user_prompt(
+                "Skill 视频底稿。",
+                {**qwen_settings, "模型任务": "视频提示词"},
+            ),
+            model_refiner._compose_batch_prompt(
+                ["第一份底稿。", "第二份底稿。"],
+                qwen_settings,
+            ),
+            model_refiner._compose_model_user_prompt(
+                "API 视频底稿。",
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "模型任务": "视频提示词",
+                    "智能场景关系图": graph,
+                },
+            ),
+            model_refiner._compose_model_user_prompt(
+                "API 图像底稿。",
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "智能场景关系图": graph,
+                },
+            ),
+            model_refiner._compose_batch_prompt(
+                ["第一份完整底稿。", "第二份完整底稿。"],
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "智能场景关系图": graph,
+                },
+            ),
+        )
+        for request in requests:
+            self.assertIn("整体饱和度固定为低饱和/去饱和", request)
+            self.assertIn("全画面大多数彩色区域靠近中性灰轴", request)
+            self.assertIn("局部彩色、选择性饱和", request)
+            self.assertEqual(request.count("智能整体饱和度："), 1)
+            for forbidden in (
+                "整体饱和度固定为高饱和",
+                "大多数彩色区域保持较高综合色度",
+                "综合色度分布集中在中高值区",
+            ):
+                self.assertNotIn(forbidden, request)
+
+        open_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"], "场景背景": ["地下城遗迹"]})
+        )
+        self.assertEqual(model_refiner._saturation_level_context_for_model(open_graph), "")
 
     def test_selective_saturation_skin_control_and_saturation_transition_remain_open(self) -> None:
         skin_control = intelligence.build_scene_relationship_graph(
@@ -6865,7 +7674,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v71")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["saturation_level_constraint"]["required_value"], "high")
         self.assertNotIn("低饱和", payload["selected_tags_flat"])
@@ -6939,6 +7748,164 @@ class TestStagePromptIntelligence(unittest.TestCase):
             "智能成像颗粒质感：成像颗粒质感固定为胶片颗粒/可见噪点",
             model_prompt,
         )
+
+    def test_selected_image_grain_and_texture_feedback_share_one_guard(self) -> None:
+        samples = {
+            "grainy": "全画面的平坦色块和中间调区域分布细小随机亮度颗粒，颗粒尺度在主体与背景间保持一致，轮廓边缘上仍可见连续但不规则的颗粒起伏。",
+            "clean": "全画面的平坦色块和中间调区域保持均匀纯净，不出现随机亮度或色彩斑点，主体与背景的轮廓边缘保持连续平滑且不被噪点打断。",
+        }
+        english_samples = {
+            "grainy": "Across the full image, flat color fields and midtone regions contain fine random luminance speckles, grain size stays consistent between the subject and the background, and contour edges retain continuous but irregular grain fluctuations.",
+            "clean": "Throughout the entire frame, flat color fields and midtone regions remain uniformly clean, no random luminance or color speckles appear, and contour edges of the subject and the background stay continuous and smooth without noise interruptions.",
+        }
+        for value, sample in {**samples, **{f"en_{key}": text for key, text in english_samples.items()}}.items():
+            expected = value.removeprefix("en_")
+            with self.subTest(detector=value):
+                self.assertEqual(
+                    set(intelligence.detect_image_grain_feedback(sample)),
+                    {expected},
+                )
+
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["成年女性冒险者"],
+                    "技术画质": ["35mm胶片颗粒"],
+                    "场景背景": ["地下城遗迹"],
+                }
+            )
+        )
+        original = "35mm胶片颗粒覆盖地下城画面。"
+        violation = intelligence.candidate_world_violation(
+            original,
+            original + samples["clean"],
+            graph,
+        )
+        repair = intelligence.classify_repair_reason(violation)
+        self.assertIn("成像颗粒质感约束", violation)
+        self.assertIn("平坦区域噪点分布、颗粒尺度或轮廓连续性反馈", violation)
+        self.assertEqual(repair["kind"], "image_grain")
+        self.assertEqual(
+            intelligence.candidate_world_violation(
+                original,
+                original + samples["grainy"],
+                graph,
+            ),
+            "",
+        )
+
+    def test_image_grain_feedback_preserves_material_weather_print_and_open_axes(self) -> None:
+        grainy_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"], "技术画质": ["35mm胶片颗粒"]})
+        )
+        negated = "不要让全画面的平坦色块和中间调区域保持均匀纯净，不出现随机亮度或色彩斑点，主体与背景的轮廓边缘保持连续平滑且不被噪点打断。"
+        material = "石墙保留粗糙砂砾颗粒和皮革毛孔，成像层本身不作规定。"
+        weather = "雨滴、雪粒与尘埃在空间中穿过斜光，不改变成像纹理。"
+        print_texture = "纸面使用印刷网点和扫描纹理，属于媒介表面而非全局成像噪点。"
+        sharpness = "人物轮廓清晰锐利，边缘连续，整体锐度不影响噪点策略。"
+        for sample in (negated, material, weather, print_texture, sharpness):
+            with self.subTest(sample=sample):
+                self.assertEqual(intelligence.detect_image_grain_feedback(sample), {})
+        self.assertEqual(
+            intelligence.candidate_world_violation(
+                "胶片成像覆盖地下城画面。",
+                "胶片成像覆盖地下城画面。" + negated + material + weather + print_texture + sharpness,
+                grainy_graph,
+            ),
+            "",
+        )
+
+        transition = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"]}),
+            context_text="开场保留35mm胶片颗粒，传送门开启后逐渐转为纯净数字成像。",
+        )
+        feedback_only = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"]}),
+            context_text="全画面的平坦色块和中间调区域分布细小随机亮度颗粒，颗粒尺度在主体与背景间保持一致，轮廓边缘上仍可见连续但不规则的颗粒起伏。",
+        )
+        for graph in (transition, feedback_only):
+            self.assertEqual(graph["image_grain_constraint"], {})
+            self.assertEqual(
+                intelligence.candidate_world_violation(
+                    "冒险者穿过地下城。",
+                    "冒险者穿过地下城。全画面的平坦色块和中间调区域保持均匀纯净，不出现随机亮度或色彩斑点，主体与背景的轮廓边缘保持连续平滑且不被噪点打断。",
+                    graph,
+                ),
+                "",
+            )
+
+    def test_image_grain_contract_reaches_all_model_paths_with_active_vocabulary_only(self) -> None:
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["成年女性冒险者"],
+                    "技术画质": ["纯净数字成像"],
+                    "场景背景": ["地下城遗迹"],
+                }
+            )
+        )
+        qwen_settings = {
+            "提示词语言": "纯中文",
+            "模型来源": "本地模型",
+            "模型调用基础来源": "本地模型",
+            "内置模型系列": "Qwen3.5-VL",
+            "内置主模型": "Qwen3.5-4B-Q4_K_M.gguf",
+            "智能模型策略": {"mode": "incremental_blend"},
+            "智能场景关系图": graph,
+        }
+        requests = (
+            model_refiner._compact_environment_context_for_model(graph),
+            model_refiner._compose_model_user_prompt("Skill 图像底稿。", qwen_settings),
+            model_refiner._compose_model_user_prompt(
+                "Skill 视频底稿。",
+                {**qwen_settings, "模型任务": "视频提示词"},
+            ),
+            model_refiner._compose_batch_prompt(
+                ["第一份底稿。", "第二份底稿。"],
+                qwen_settings,
+            ),
+            model_refiner._compose_model_user_prompt(
+                "API 视频底稿。",
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "模型任务": "视频提示词",
+                    "智能场景关系图": graph,
+                },
+            ),
+            model_refiner._compose_model_user_prompt(
+                "API 图像底稿。",
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "智能场景关系图": graph,
+                },
+            ),
+            model_refiner._compose_batch_prompt(
+                ["第一份完整底稿。", "第二份完整底稿。"],
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "智能场景关系图": graph,
+                },
+            ),
+        )
+        for request in requests:
+            self.assertIn("成像颗粒质感固定为干净无颗粒数字成像", request)
+            self.assertIn("平坦色块和中间调区域保持均匀纯净", request)
+            self.assertIn("扫描或印刷纹理、材质表面纹理", request)
+            self.assertEqual(request.count("智能成像颗粒质感："), 1)
+            for forbidden in (
+                "成像颗粒质感固定为胶片颗粒/可见噪点",
+                "平坦色块和中间调区域分布细小随机亮度颗粒",
+                "连续但不规则的颗粒起伏",
+            ):
+                self.assertNotIn(forbidden, request)
+
+        open_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"], "场景背景": ["地下城遗迹"]})
+        )
+        self.assertEqual(model_refiner._image_grain_context_for_model(open_graph), "")
 
     def test_local_grain_print_texture_and_grain_transition_remain_open(self) -> None:
         local_grain = intelligence.build_scene_relationship_graph(
@@ -7021,7 +7988,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v71")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["image_grain_constraint"]["required_value"], "grainy")
         self.assertNotIn("纯净数字成像", payload["selected_tags_flat"])
@@ -7095,6 +8062,165 @@ class TestStagePromptIntelligence(unittest.TestCase):
             "智能整体成像锐度：整体成像锐度固定为整体柔焦/软焦成像",
             model_prompt,
         )
+
+    def test_selected_image_sharpness_and_edge_feedback_share_one_guard(self) -> None:
+        samples = {
+            "sharp": "全画面的主体与背景轮廓具有狭窄明确的亮度过渡，细线与相邻纹理保持清楚分离，微细材质边缘呈现稳定的局部反差且没有扩散光晕。",
+            "soft_focus": "全画面的主体与背景轮廓具有宽缓连续的亮度过渡，细线与相邻纹理轻微融合，微细材质边缘的局部反差被均匀压低并形成受控柔化。",
+        }
+        english_samples = {
+            "sharp": "Across the full image, contours of the subject and the background have narrow well-defined luminance transitions, fine lines remain separated from neighboring textures, and microtexture edges retain stable local contrast without diffusion halos.",
+            "soft_focus": "Throughout the entire frame, contours of the subject and the background show broad gradual luminance transitions, fine lines blend slightly into adjacent textures, and local contrast at microtexture edges is uniformly reduced into controlled softness.",
+        }
+        for value, sample in {**samples, **{f"en_{key}": text for key, text in english_samples.items()}}.items():
+            expected = value.removeprefix("en_")
+            with self.subTest(detector=value):
+                self.assertEqual(
+                    set(intelligence.detect_image_sharpness_feedback(sample)),
+                    {expected},
+                )
+
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["成年女性冒险者"],
+                    "技术画质": ["柔焦滤镜"],
+                    "场景背景": ["地下城遗迹"],
+                }
+            )
+        )
+        original = "柔焦滤镜统一覆盖人物与地下城背景。"
+        violation = intelligence.candidate_world_violation(
+            original,
+            original + samples["sharp"],
+            graph,
+        )
+        repair = intelligence.classify_repair_reason(violation)
+        self.assertIn("整体成像锐度约束", violation)
+        self.assertIn("轮廓过渡宽度、细线分离度或微纹理边缘反馈", violation)
+        self.assertEqual(repair["kind"], "image_sharpness")
+        self.assertEqual(
+            intelligence.candidate_world_violation(
+                original,
+                original + samples["soft_focus"],
+                graph,
+            ),
+            "",
+        )
+
+    def test_image_sharpness_feedback_preserves_focus_motion_atmosphere_and_open_axes(self) -> None:
+        soft_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"], "技术画质": ["柔焦滤镜"]})
+        )
+        negated = "不要让全画面的主体与背景轮廓具有狭窄明确的亮度过渡，细线与相邻纹理保持清楚分离，微细材质边缘呈现稳定的局部反差且没有扩散光晕。"
+        depth = "人物面部对焦，背景通过浅景深形成散景，不规定全局边缘响应。"
+        motion = "人物保持当前质感，只有挥动衣摆产生运动模糊和同向拖影。"
+        atmosphere = "冷雾降低远景可见度，近处主体的既有成像质感保持原样。"
+        skin = "只对皮肤进行局部柔化，眼睛、发丝和服装不跟随处理。"
+        low_contrast = "全局明度跨度保持较小，但轮廓过渡宽度不作规定。"
+        for sample in (negated, depth, motion, atmosphere, skin, low_contrast):
+            with self.subTest(sample=sample):
+                self.assertEqual(intelligence.detect_image_sharpness_feedback(sample), {})
+        self.assertEqual(
+            intelligence.candidate_world_violation(
+                "柔焦成像覆盖整个画面。",
+                "柔焦成像覆盖整个画面。" + negated + depth + motion + atmosphere + skin + low_contrast,
+                soft_graph,
+            ),
+            "",
+        )
+
+        transition = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"]}),
+            context_text="开场采用整体柔焦画面，警报响起后逐渐转为整体锐利清晰。",
+        )
+        feedback_only = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"]}),
+            context_text="全画面的主体与背景轮廓具有狭窄明确的亮度过渡，细线与相邻纹理保持清楚分离，微细材质边缘呈现稳定的局部反差且没有扩散光晕。",
+        )
+        for graph in (transition, feedback_only):
+            self.assertEqual(graph["image_sharpness_constraint"], {})
+            self.assertEqual(
+                intelligence.candidate_world_violation(
+                    "冒险者穿过地下城。",
+                    "冒险者穿过地下城。全画面的主体与背景轮廓具有宽缓连续的亮度过渡，细线与相邻纹理轻微融合，微细材质边缘的局部反差被均匀压低并形成受控柔化。",
+                    graph,
+                ),
+                "",
+            )
+
+    def test_image_sharpness_contract_reaches_all_model_paths_with_active_vocabulary_only(self) -> None:
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["成年女性冒险者"],
+                    "技术画质": ["柔焦滤镜"],
+                    "场景背景": ["地下城遗迹"],
+                }
+            )
+        )
+        qwen_settings = {
+            "提示词语言": "纯中文",
+            "模型来源": "本地模型",
+            "模型调用基础来源": "本地模型",
+            "内置模型系列": "Qwen3.5-VL",
+            "内置主模型": "Qwen3.5-4B-Q4_K_M.gguf",
+            "智能模型策略": {"mode": "incremental_blend"},
+            "智能场景关系图": graph,
+        }
+        requests = (
+            model_refiner._compact_environment_context_for_model(graph),
+            model_refiner._compose_model_user_prompt("Skill 图像底稿。", qwen_settings),
+            model_refiner._compose_model_user_prompt(
+                "Skill 视频底稿。",
+                {**qwen_settings, "模型任务": "视频提示词"},
+            ),
+            model_refiner._compose_batch_prompt(
+                ["第一份底稿。", "第二份底稿。"],
+                qwen_settings,
+            ),
+            model_refiner._compose_model_user_prompt(
+                "API 视频底稿。",
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "模型任务": "视频提示词",
+                    "智能场景关系图": graph,
+                },
+            ),
+            model_refiner._compose_model_user_prompt(
+                "API 图像底稿。",
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "智能场景关系图": graph,
+                },
+            ),
+            model_refiner._compose_batch_prompt(
+                ["第一份完整底稿。", "第二份完整底稿。"],
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "智能场景关系图": graph,
+                },
+            ),
+        )
+        for request in requests:
+            self.assertIn("整体成像锐度固定为整体柔焦/软焦成像", request)
+            self.assertIn("主体与背景轮廓具有宽缓连续的亮度过渡", request)
+            self.assertIn("景深虚化、运动模糊、雾气", request)
+            self.assertEqual(request.count("智能整体成像锐度："), 1)
+            for forbidden in (
+                "整体成像锐度固定为锐利清晰成像",
+                "主体与背景轮廓具有狭窄明确的亮度过渡",
+                "稳定的局部反差且没有扩散光晕",
+            ):
+                self.assertNotIn(forbidden, request)
+
+        open_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"], "场景背景": ["地下城遗迹"]})
+        )
+        self.assertEqual(model_refiner._image_sharpness_context_for_model(open_graph), "")
 
     def test_selective_focus_motion_blur_fog_and_sharpness_transition_remain_open(self) -> None:
         selective_focus = intelligence.build_scene_relationship_graph(
@@ -7187,7 +8313,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v71")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["image_sharpness_constraint"]["required_value"], "sharp")
         self.assertNotIn("柔焦", payload["selected_tags_flat"])
@@ -7261,6 +8387,165 @@ class TestStagePromptIntelligence(unittest.TestCase):
             "智能整体细节密度：整体细节密度固定为高细节/高密度纹理",
             model_prompt,
         )
+
+    def test_selected_detail_density_and_structure_feedback_share_one_guard(self) -> None:
+        samples = {
+            "high": "全画面单位区域内保留大量彼此独立的小尺度结构，主纹理继续分解出次级和三级纹理，简化留白区域只占少量面积且不吞并关键材质信息。",
+            "low": "全画面单位区域内只保留少量必要结构，主纹理不再分解为多级细纹，简化留白区域占据较大面积但主体轮廓和关键识别特征保持完整。",
+        }
+        english_samples = {
+            "high": "Across the full image, each unit area retains many independent small-scale structures, primary textures split into secondary and tertiary texture layers, and simplified blank regions occupy only a small area without erasing key material information.",
+            "low": "Throughout the entire frame, every unit area retains only a few necessary structures, primary textures no longer split into multiple fine layers, and simplified low-information regions occupy a large area while the subject contours and key identifying features remain intact.",
+        }
+        for value, sample in {**samples, **{f"en_{key}": text for key, text in english_samples.items()}}.items():
+            expected = value.removeprefix("en_")
+            with self.subTest(detector=value):
+                self.assertEqual(
+                    set(intelligence.detect_detail_density_feedback(sample)),
+                    {expected},
+                )
+
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["成年女性冒险者"],
+                    "技术画质": ["高细节"],
+                    "场景背景": ["地下城遗迹"],
+                }
+            )
+        )
+        original = "高细节呈现人物装备和地下城材质。"
+        violation = intelligence.candidate_world_violation(
+            original,
+            original + samples["low"],
+            graph,
+        )
+        repair = intelligence.classify_repair_reason(violation)
+        self.assertIn("整体细节密度约束", violation)
+        self.assertIn("单位区域结构数量、纹理层级或简化区域占比反馈", violation)
+        self.assertEqual(repair["kind"], "detail_density")
+        self.assertEqual(
+            intelligence.candidate_world_violation(
+                original,
+                original + samples["high"],
+                graph,
+            ),
+            "",
+        )
+
+    def test_detail_density_feedback_preserves_resolution_sharpness_lod_and_open_axes(self) -> None:
+        high_detail_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"], "技术画质": ["高细节"]})
+        )
+        negated = "不要让全画面单位区域内只保留少量必要结构，主纹理不再分解为多级细纹，简化留白区域占据较大面积但主体轮廓和关键识别特征保持完整。"
+        resolution = "画面以 8K 分辨率输出，但单位区域的结构数量不作规定。"
+        sharpness = "轮廓边缘保持清楚分离，整体锐度不改变纹理层级。"
+        grain = "平坦区域保留细小成像颗粒，颗粒数量不代表材质结构数量。"
+        busy_scene = "背景摆放许多独立道具，空间较满，但材质细节密度保持原样。"
+        lod = "人物服装局部精细化，远景随距离降低细节并保留层级。"
+        for sample in (negated, resolution, sharpness, grain, busy_scene, lod):
+            with self.subTest(sample=sample):
+                self.assertEqual(intelligence.detect_detail_density_feedback(sample), {})
+        self.assertEqual(
+            intelligence.candidate_world_violation(
+                "高细节画面保持既定纹理层级。",
+                "高细节画面保持既定纹理层级。" + negated + resolution + sharpness + grain + busy_scene + lod,
+                high_detail_graph,
+            ),
+            "",
+        )
+
+        transition = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"]}),
+            context_text="开场采用整体低细节渲染，接近遗迹核心后逐渐转为高细节画面。",
+        )
+        feedback_only = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"]}),
+            context_text="全画面单位区域内保留大量彼此独立的小尺度结构，主纹理继续分解出次级和三级纹理，简化留白区域只占少量面积且不吞并关键材质信息。",
+        )
+        for graph in (transition, feedback_only):
+            self.assertEqual(graph["detail_density_constraint"], {})
+            self.assertEqual(
+                intelligence.candidate_world_violation(
+                    "冒险者穿过地下城。",
+                    "冒险者穿过地下城。全画面单位区域内只保留少量必要结构，主纹理不再分解为多级细纹，简化留白区域占据较大面积但主体轮廓和关键识别特征保持完整。",
+                    graph,
+                ),
+                "",
+            )
+
+    def test_detail_density_contract_reaches_all_model_paths_with_active_vocabulary_only(self) -> None:
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["成年女性冒险者"],
+                    "技术画质": ["低细节渲染"],
+                    "场景背景": ["地下城遗迹"],
+                }
+            )
+        )
+        qwen_settings = {
+            "提示词语言": "纯中文",
+            "模型来源": "本地模型",
+            "模型调用基础来源": "本地模型",
+            "内置模型系列": "Qwen3.5-VL",
+            "内置主模型": "Qwen3.5-4B-Q4_K_M.gguf",
+            "智能模型策略": {"mode": "incremental_blend"},
+            "智能场景关系图": graph,
+        }
+        requests = (
+            model_refiner._compact_environment_context_for_model(graph),
+            model_refiner._compose_model_user_prompt("Skill 图像底稿。", qwen_settings),
+            model_refiner._compose_model_user_prompt(
+                "Skill 视频底稿。",
+                {**qwen_settings, "模型任务": "视频提示词"},
+            ),
+            model_refiner._compose_batch_prompt(
+                ["第一份底稿。", "第二份底稿。"],
+                qwen_settings,
+            ),
+            model_refiner._compose_model_user_prompt(
+                "API 视频底稿。",
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "模型任务": "视频提示词",
+                    "智能场景关系图": graph,
+                },
+            ),
+            model_refiner._compose_model_user_prompt(
+                "API 图像底稿。",
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "智能场景关系图": graph,
+                },
+            ),
+            model_refiner._compose_batch_prompt(
+                ["第一份完整底稿。", "第二份完整底稿。"],
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "智能场景关系图": graph,
+                },
+            ),
+        )
+        for request in requests:
+            self.assertIn("整体细节密度固定为简化/低细节渲染", request)
+            self.assertIn("单位区域内只保留少量必要结构", request)
+            self.assertIn("分辨率、锐度与颗粒按独立事实处理", request)
+            self.assertEqual(request.count("智能整体细节密度："), 1)
+            for forbidden in (
+                "整体细节密度固定为高细节/高密度纹理",
+                "单位区域内保留大量彼此独立的小尺度结构",
+                "主纹理继续分解出次级和三级纹理",
+            ):
+                self.assertNotIn(forbidden, request)
+
+        open_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"], "场景背景": ["地下城遗迹"]})
+        )
+        self.assertEqual(model_refiner._detail_density_context_for_model(open_graph), "")
 
     def test_detail_zoning_lod_minimal_background_and_detail_transition_remain_open(self) -> None:
         zoned = intelligence.build_scene_relationship_graph(
@@ -7352,7 +8637,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v71")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 2)
         self.assertEqual(graph["detail_density_constraint"]["required_value"], "low")
         self.assertNotIn("高细节", payload["selected_tags_flat"])
@@ -7457,6 +8742,179 @@ class TestStagePromptIntelligence(unittest.TestCase):
             model_prompt,
         )
 
+    def test_selected_visual_medium_and_render_feedback_share_one_guard(self) -> None:
+        samples = {
+            "drawn_2d": "全画面轮廓由闭合线条与平面色块边界组织，明暗层次通过排线密度或离散色阶表达，表面纹理固定在画面平面上而不随空间法线连续变化。",
+            "rendered_3d": "全画面轮廓由连续几何曲面投影形成，材质高光沿表面法线连续变化，接触阴影与物体遮挡服从同一空间光照关系。",
+            "photographic": "全画面细节保留非周期微噪声，焦点前后呈连续光学弥散，强光边缘出现轻微色散并具有自然的高光滚降。",
+        }
+        english_samples = {
+            "drawn_2d": "Across the full image, contours are organized by closed lines and flat color-block boundaries, tonal layers are expressed through hatching density or discrete value steps, and surface textures stay on the image plane instead of changing continuously with spatial normals.",
+            "rendered_3d": "Throughout the entire frame, contours are formed by the projection of continuous geometric surfaces, material highlights move continuously along surface normals, and contact shadows and object occlusion follow the same spatial lighting relationship.",
+            "photographic": "Across the whole image, pixel details retain non-periodic micro-noise, around the focus plane shows continuous optical diffusion, and highlight edges retain slight chromatic dispersion with natural highlight roll-off.",
+        }
+        for value, sample in {**samples, **{f"en_{key}": text for key, text in english_samples.items()}}.items():
+            expected = value.removeprefix("en_")
+            with self.subTest(detector=value):
+                self.assertEqual(
+                    set(intelligence.detect_visual_medium_feedback(sample)),
+                    {expected},
+                )
+
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["成年女性冒险者"],
+                    "画面风格": ["暗黑漫画"],
+                    "技术画质": ["黑白线稿"],
+                    "场景背景": ["地下城遗迹"],
+                }
+            )
+        )
+        original = "暗黑漫画以黑白线稿描绘地下城。"
+        for value in ("rendered_3d", "photographic"):
+            with self.subTest(candidate=value):
+                violation = intelligence.candidate_world_violation(
+                    original,
+                    original + samples[value],
+                    graph,
+                )
+                repair = intelligence.classify_repair_reason(violation)
+                self.assertIn("画面媒介约束", violation)
+                self.assertIn("线条色块组织、曲面材质响应或光学采样反馈", violation)
+                self.assertEqual(repair["kind"], "visual_medium")
+        self.assertEqual(
+            intelligence.candidate_world_violation(
+                original,
+                original + samples["drawn_2d"],
+                graph,
+            ),
+            "",
+        )
+
+    def test_visual_medium_feedback_preserves_projection_optics_hybrid_and_open_axes(self) -> None:
+        drawn_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"], "画面风格": ["暗黑漫画"]})
+        )
+        negated = "不要让全画面轮廓由连续几何曲面投影形成，材质高光沿表面法线连续变化，接触阴影与物体遮挡服从同一空间光照关系。"
+        projection = "画面采用正交投影，平行线保持平行，但成片媒介不作规定。"
+        optics = "背景保留浅景深光学弥散，其他采样特征保持原样。"
+        grain = "平坦色块包含非周期微噪声，但轮廓组织与媒介保持原样。"
+        material = "皮革高光随曲面方向变化，但其余物体仍遵循当前画面表达。"
+        for sample in (negated, projection, optics, grain, material):
+            with self.subTest(sample=sample):
+                self.assertEqual(intelligence.detect_visual_medium_feedback(sample), {})
+        self.assertEqual(
+            intelligence.candidate_world_violation(
+                "暗黑漫画描绘地下城。",
+                "暗黑漫画描绘地下城。" + negated + projection + optics + grain + material,
+                drawn_graph,
+            ),
+            "",
+        )
+
+        hybrid_candidate = (
+            "画面明确采用二维插画与三维渲染融合的 2.5D 设计。"
+            "全画面轮廓由连续几何曲面投影形成，材质高光沿表面法线连续变化，"
+            "接触阴影与物体遮挡服从同一空间光照关系。"
+        )
+        self.assertEqual(
+            intelligence.candidate_world_violation(
+                "暗黑漫画描绘地下城。",
+                hybrid_candidate,
+                drawn_graph,
+            ),
+            "",
+        )
+        feedback_only = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"]}),
+            context_text="全画面细节保留非周期微噪声，焦点前后呈连续光学弥散，强光边缘出现轻微色散并具有自然的高光滚降。",
+        )
+        self.assertEqual(feedback_only["visual_medium_constraint"], {})
+        self.assertEqual(
+            intelligence.candidate_world_violation(
+                "冒险者穿过地下城。",
+                "冒险者穿过地下城。全画面轮廓由闭合线条与平面色块边界组织，明暗层次通过排线密度或离散色阶表达，表面纹理固定在画面平面上而不随空间法线连续变化。",
+                feedback_only,
+            ),
+            "",
+        )
+
+    def test_visual_medium_contract_reaches_all_model_paths_with_active_vocabulary_only(self) -> None:
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["成年女性冒险者"],
+                    "画面风格": ["暗黑漫画"],
+                    "技术画质": ["黑白线稿"],
+                    "场景背景": ["地下城遗迹"],
+                }
+            )
+        )
+        qwen_settings = {
+            "提示词语言": "纯中文",
+            "模型来源": "本地模型",
+            "模型调用基础来源": "本地模型",
+            "内置模型系列": "Qwen3.5-VL",
+            "内置主模型": "Qwen3.5-4B-Q4_K_M.gguf",
+            "智能模型策略": {"mode": "incremental_blend"},
+            "智能场景关系图": graph,
+        }
+        requests = (
+            model_refiner._compact_environment_context_for_model(graph),
+            model_refiner._compose_model_user_prompt("Skill 图像底稿。", qwen_settings),
+            model_refiner._compose_model_user_prompt(
+                "Skill 视频底稿。",
+                {**qwen_settings, "模型任务": "视频提示词"},
+            ),
+            model_refiner._compose_batch_prompt(
+                ["第一份底稿。", "第二份底稿。"],
+                qwen_settings,
+            ),
+            model_refiner._compose_model_user_prompt(
+                "API 视频底稿。",
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "模型任务": "视频提示词",
+                    "智能场景关系图": graph,
+                },
+            ),
+            model_refiner._compose_model_user_prompt(
+                "API 图像底稿。",
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "智能场景关系图": graph,
+                },
+            ),
+            model_refiner._compose_batch_prompt(
+                ["第一份完整底稿。", "第二份完整底稿。"],
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "智能场景关系图": graph,
+                },
+            ),
+        )
+        for request in requests:
+            self.assertIn("画面媒介固定为二维绘制/插画漫画", request)
+            self.assertIn("轮廓由闭合线条与平面色块边界组织", request)
+            self.assertIn("连续媒介转场与投影几何保持开放", request)
+            self.assertEqual(request.count("智能画面媒介："), 1)
+            for forbidden in (
+                "画面媒介固定为三维/CG 渲染",
+                "画面媒介固定为摄影实拍",
+                "轮廓由连续几何曲面投影形成",
+                "细节保留非周期微噪声，焦点前后呈连续光学弥散",
+            ):
+                self.assertNotIn(forbidden, request)
+
+        open_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"], "场景背景": ["地下城遗迹"]})
+        )
+        self.assertEqual(model_refiner._visual_medium_context_for_model(open_graph), "")
+
     def test_mixed_local_and_transition_visual_media_remain_open(self) -> None:
         mixed = intelligence.build_scene_relationship_graph(
             OrderedDict({"主体": ["成年女性冒险者"]}),
@@ -7537,11 +8995,377 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v71")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["visual_medium_constraint"]["required_value"], "drawn_2d")
         self.assertNotIn("3D渲染", payload["selected_tags_flat"])
         self.assertEqual(payload["scene_coherence_status"], "coherent")
+
+    def test_projection_geometry_labels_and_visible_feedback_share_one_guard(self) -> None:
+        samples = {
+            "orthographic": "全画面同方向平行边始终保持平行，同尺寸对象不因深度改变画面尺度，沿视轴延伸的结构不产生消失点汇聚。",
+            "perspective": "全画面同方向平行边向一致消失点汇聚，同尺寸对象随深度增加逐渐缩小，沿视轴延伸的结构产生连续透视缩短。",
+        }
+        english_samples = {
+            "orthographic": "Across the full image, parallel edges sharing the same direction remain parallel, equally sized objects do not change their image scale with depth, and structures extending along the view axis do not converge toward a vanishing point.",
+            "perspective": "Throughout the entire frame, parallel lines with the same direction converge toward a consistent vanishing point, same-sized objects become smaller with increasing depth, and structures extending along the camera axis show continuous perspective foreshortening.",
+        }
+        for value, sample in {**samples, **{f"en_{key}": text for key, text in english_samples.items()}}.items():
+            expected = value.removeprefix("en_")
+            with self.subTest(detector=value):
+                self.assertEqual(
+                    set(intelligence.detect_projection_geometry_feedback(sample)),
+                    {expected},
+                )
+
+        orthographic_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["机械少女"],
+                    "构图视角": ["正交投影视角"],
+                    "场景背景": ["简洁连续中性背景"],
+                }
+            )
+        )
+        perspective_violation = intelligence.candidate_world_violation(
+            "正交投影展示机械少女的完整结构。",
+            "正交投影展示机械少女的完整结构。" + samples["perspective"],
+            orthographic_graph,
+        )
+        self.assertIn("投影几何约束", perspective_violation)
+        self.assertIn("平行线汇聚、深度尺度变化或视轴缩短反馈", perspective_violation)
+        self.assertEqual(
+            intelligence.classify_repair_reason(perspective_violation)["kind"],
+            "projection_geometry",
+        )
+        self.assertEqual(
+            intelligence.candidate_world_violation(
+                "正交投影展示机械少女的完整结构。",
+                "正交投影展示机械少女的完整结构。" + samples["orthographic"],
+                orthographic_graph,
+            ),
+            "",
+        )
+
+        perspective_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["机械少女"], "构图视角": ["两点透视"]})
+        )
+        orthographic_violation = intelligence.candidate_world_violation(
+            "两点透视展示地下城走廊。",
+            "两点透视展示地下城走廊。" + samples["orthographic"],
+            perspective_graph,
+        )
+        self.assertIn("投影几何约束", orthographic_violation)
+        self.assertEqual(
+            intelligence.classify_repair_reason(orthographic_violation)["kind"],
+            "projection_geometry",
+        )
+
+    def test_axonometric_and_fisheye_visible_feedback_share_projection_guard(self) -> None:
+        samples = {
+            "axonometric": "全画面每组同方向轴线始终保持平行，对应轴上的同长度线段保持恒定画面尺度，所有主轴都不向消失点汇聚。",
+            "fisheye": "全画面直线结构从光学中心向画幅边缘逐渐产生径向弯曲，边缘空间间距连续压缩，全部曲率围绕同一光学中心组织。",
+        }
+        english_samples = {
+            "axonometric": "Across the full frame, each family of same-direction axes remains parallel, equal-length segments along corresponding axes keep a constant image scale, and no principal axis converges toward a vanishing point.",
+            "fisheye": "Throughout the entire image, straight structures develop increasing radial curvature from the optical center toward the frame edge, peripheral spatial intervals compress continuously, and all curvature is organized around one optical center.",
+        }
+        for value, sample in {**samples, **{f"en_{key}": text for key, text in english_samples.items()}}.items():
+            expected = value.removeprefix("en_")
+            with self.subTest(detector=value):
+                self.assertEqual(
+                    set(intelligence.detect_projection_geometry_feedback(sample)),
+                    {expected},
+                )
+
+        axonometric_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["机械少女"], "构图视角": ["标准等轴测视图"]})
+        )
+        fisheye_violation = intelligence.candidate_world_violation(
+            "标准等轴测视图展示机械少女。",
+            "标准等轴测视图展示机械少女。" + samples["fisheye"],
+            axonometric_graph,
+        )
+        self.assertIn("投影几何约束", fisheye_violation)
+        self.assertIn("平行线汇聚、深度尺度变化或视轴缩短反馈", fisheye_violation)
+        self.assertEqual(
+            intelligence.classify_repair_reason(fisheye_violation)["kind"],
+            "projection_geometry",
+        )
+
+        fisheye_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["机械少女"], "构图视角": ["鱼眼镜头"]})
+        )
+        axonometric_violation = intelligence.candidate_world_violation(
+            "鱼眼镜头贴近机械少女。",
+            "鱼眼镜头贴近机械少女。" + samples["axonometric"],
+            fisheye_graph,
+        )
+        self.assertIn("投影几何约束", axonometric_violation)
+        self.assertEqual(
+            intelligence.classify_repair_reason(axonometric_violation)["kind"],
+            "projection_geometry",
+        )
+        self.assertEqual(
+            intelligence.candidate_world_violation(
+                "鱼眼镜头贴近机械少女。",
+                "鱼眼镜头贴近机械少女。" + samples["fisheye"],
+                fisheye_graph,
+            ),
+            "",
+        )
+
+    def test_axonometric_and_fisheye_feedback_preserve_local_curves_and_mixed_projection(self) -> None:
+        unrelated_samples = (
+            "拱门本身带有弧形石梁，人物手中的金属杆仍然笔直。",
+            "广角镜头拉开近远尺度差，画幅边缘只保留轻微桶形畸变。",
+            "低机位仰拍让屋檐形成斜线，镜头俯仰关系保持稳定。",
+            "圆形构图围绕人物组织道具，但直线建筑没有径向弯曲。",
+            "局部水滴透镜让火炬反光弯曲，主画面投影保持原样。",
+        )
+        for sample in unrelated_samples:
+            with self.subTest(sample=sample):
+                self.assertEqual(
+                    intelligence.detect_projection_geometry_feedback(sample),
+                    {},
+                )
+
+        axonometric_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["机械少女"], "构图视角": ["标准等轴测视图"]})
+        )
+        fisheye_feedback = "全画面直线结构从光学中心向画幅边缘逐渐产生径向弯曲，边缘空间间距连续压缩，全部曲率围绕同一光学中心组织。"
+        mixed_candidate = "主视图采用轴测投影与鱼眼投影结合的混合设计。" + fisheye_feedback
+        transition_candidate = "画面从轴测投影逐渐切换到鱼眼投影。" + fisheye_feedback
+        for candidate in (mixed_candidate, transition_candidate):
+            with self.subTest(candidate=candidate):
+                self.assertEqual(
+                    intelligence.candidate_world_violation(
+                        "标准等轴测视图展示机械少女。",
+                        candidate,
+                        axonometric_graph,
+                    ),
+                    "",
+                )
+
+        feedback_only_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["机械少女"]}),
+            context_text=fisheye_feedback,
+        )
+        self.assertEqual(feedback_only_graph["projection_geometry_constraint"], {})
+
+    def test_axonometric_and_fisheye_contracts_reach_local_api_image_video_and_batch_paths(self) -> None:
+        expected_guidance = {
+            "axonometric": (
+                "标准等轴测视图",
+                "投影几何固定为轴测/等距投影",
+                "每组同方向轴线始终保持平行",
+                "投影几何固定为鱼眼投影",
+                "直线结构从光学中心向画幅边缘逐渐产生径向弯曲",
+            ),
+            "fisheye": (
+                "鱼眼镜头",
+                "投影几何固定为鱼眼投影",
+                "直线结构从光学中心向画幅边缘逐渐产生径向弯曲",
+                "投影几何固定为轴测/等距投影",
+                "每组同方向轴线始终保持平行",
+            ),
+        }
+        for value, (
+            selected_value,
+            required_text,
+            guidance_text,
+            forbidden_required,
+            forbidden_guidance,
+        ) in expected_guidance.items():
+            with self.subTest(value=value):
+                graph = intelligence.build_scene_relationship_graph(
+                    OrderedDict({"主体": ["机械少女"], "构图视角": [selected_value]})
+                )
+                local_settings = {
+                    "提示词语言": "纯中文",
+                    "模型来源": "本地模型",
+                    "模型调用基础来源": "本地模型",
+                    "内置模型系列": "Qwen3.5-VL",
+                    "内置主模型": "Qwen3.5-4B-Q4_K_M.gguf",
+                    "智能模型策略": {"mode": "incremental_blend"},
+                    "智能场景关系图": graph,
+                }
+                requests = (
+                    model_refiner._compact_environment_context_for_model(graph),
+                    model_refiner._compose_model_user_prompt("Skill 图像底稿。", local_settings),
+                    model_refiner._compose_model_user_prompt(
+                        "Skill 视频底稿。",
+                        {**local_settings, "模型任务": "视频提示词"},
+                    ),
+                    model_refiner._compose_batch_prompt(
+                        ["第一份底稿。", "第二份底稿。"],
+                        local_settings,
+                    ),
+                    model_refiner._compose_model_user_prompt(
+                        "API 图像底稿。",
+                        {
+                            "提示词语言": "纯中文",
+                            "模型来源": "API接口",
+                            "智能场景关系图": graph,
+                        },
+                    ),
+                    model_refiner._compose_model_user_prompt(
+                        "API 视频底稿。",
+                        {
+                            "提示词语言": "纯中文",
+                            "模型来源": "API接口",
+                            "模型任务": "视频提示词",
+                            "智能场景关系图": graph,
+                        },
+                    ),
+                    model_refiner._compose_batch_prompt(
+                        ["第一份完整底稿。", "第二份完整底稿。"],
+                        {
+                            "提示词语言": "纯中文",
+                            "模型来源": "API接口",
+                            "智能场景关系图": graph,
+                        },
+                    ),
+                )
+                for request in requests:
+                    self.assertIn(required_text, request)
+                    self.assertIn(guidance_text, request)
+                    self.assertIn("焦段和机位按独立事实处理", request)
+                    self.assertEqual(request.count("智能投影几何："), 1)
+                    self.assertNotIn(forbidden_required, request)
+                    self.assertNotIn(forbidden_guidance, request)
+
+    def test_projection_feedback_preserves_optics_views_mixed_states_and_open_axes(self) -> None:
+        samples = (
+            "不要让全画面同方向平行边向一致消失点汇聚，同尺寸对象随深度增加逐渐缩小，沿视轴延伸的结构产生连续透视缩短。",
+            "广角镜头拉开近远尺度差，长焦镜头则压缩纵深，但投影几何保持原样。",
+            "低机位仰拍让朝下表面可见，地平线与镜头俯仰关系保持稳定。",
+            "标准等轴测视图沿三条轴线展示结构，不改写为正交或线性透视结果合同。",
+            "正面、侧面和背面三视图以等比例并列，辅助图只解释结构。",
+            "设计师从观众观点讨论项目前景和透视问题，不描述任何可见画面。",
+        )
+        for sample in samples:
+            with self.subTest(sample=sample):
+                self.assertEqual(
+                    intelligence.detect_projection_geometry_feedback(sample),
+                    {},
+                )
+
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["机械少女"], "构图视角": ["正交投影视角"]})
+        )
+        perspective_feedback = "全画面同方向平行边向一致消失点汇聚，同尺寸对象随深度增加逐渐缩小，沿视轴延伸的结构产生连续透视缩短。"
+        mixed_candidate = (
+            "主画面采用正交投影与透视投影结合的混合设计。"
+            + perspective_feedback
+        )
+        transition_candidate = (
+            "画面从正交投影逐渐切换到透视投影。"
+            + perspective_feedback
+        )
+        for candidate in (mixed_candidate, transition_candidate):
+            with self.subTest(candidate=candidate):
+                self.assertEqual(
+                    intelligence.candidate_world_violation(
+                        "正交投影展示机械少女。",
+                        candidate,
+                        graph,
+                    ),
+                    "",
+                )
+
+        feedback_only_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["机械少女"]}),
+            context_text=perspective_feedback,
+        )
+        self.assertEqual(feedback_only_graph["projection_geometry_constraint"], {})
+        self.assertEqual(
+            intelligence.candidate_world_violation(
+                "机械少女站在地下城入口。",
+                "机械少女站在地下城入口。全画面同方向平行边始终保持平行，同尺寸对象不因深度改变画面尺度，沿视轴延伸的结构不产生消失点汇聚。",
+                feedback_only_graph,
+            ),
+            "",
+        )
+
+    def test_projection_geometry_contract_reaches_all_model_paths_with_active_vocabulary_only(self) -> None:
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["机械少女"],
+                    "构图视角": ["正交投影视角"],
+                    "场景背景": ["简洁连续中性背景"],
+                }
+            )
+        )
+        qwen_settings = {
+            "提示词语言": "纯中文",
+            "模型来源": "本地模型",
+            "模型调用基础来源": "本地模型",
+            "内置模型系列": "Qwen3.5-VL",
+            "内置主模型": "Qwen3.5-4B-Q4_K_M.gguf",
+            "智能模型策略": {"mode": "incremental_blend"},
+            "智能场景关系图": graph,
+        }
+        requests = (
+            model_refiner._compact_environment_context_for_model(graph),
+            model_refiner._compose_model_user_prompt("Skill 图像底稿。", qwen_settings),
+            model_refiner._compose_model_user_prompt(
+                "Skill 视频底稿。",
+                {**qwen_settings, "模型任务": "视频提示词"},
+            ),
+            model_refiner._compose_batch_prompt(
+                ["第一份底稿。", "第二份底稿。"],
+                qwen_settings,
+            ),
+            model_refiner._compose_model_user_prompt(
+                "API 视频底稿。",
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "模型任务": "视频提示词",
+                    "智能场景关系图": graph,
+                },
+            ),
+            model_refiner._compose_model_user_prompt(
+                "API 图像底稿。",
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "智能场景关系图": graph,
+                },
+            ),
+            model_refiner._compose_batch_prompt(
+                ["第一份完整底稿。", "第二份完整底稿。"],
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "智能场景关系图": graph,
+                },
+            ),
+        )
+        for request in requests:
+            self.assertIn("投影几何固定为正交/平行投影", request)
+            self.assertIn("同方向平行边始终保持平行", request)
+            self.assertIn("同尺寸对象不因深度改变画面尺度", request)
+            self.assertIn("辅助视图、示意图叠层、混合投影设计及连续投影转场保持开放", request)
+            self.assertEqual(request.count("智能投影几何："), 1)
+            for forbidden in (
+                "投影几何固定为线性透视投影",
+                "投影几何固定为轴测/等距投影",
+                "投影几何固定为鱼眼投影",
+                "同方向平行边向一致消失点汇聚",
+                "同尺寸对象随深度增加逐渐缩小",
+            ):
+                self.assertNotIn(forbidden, request)
+
+        open_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["机械少女"], "场景背景": ["地下城遗迹"]})
+        )
+        self.assertEqual(
+            model_refiner._projection_geometry_context_for_model(open_graph),
+            "",
+        )
 
     def test_projection_geometry_context_removes_only_conflicting_soft_anchors(self) -> None:
         selected = OrderedDict(
@@ -7690,7 +9514,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v71")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
         self.assertEqual(
             graph["projection_geometry_constraint"]["required_value"],
             "orthographic",
@@ -7709,6 +9533,1530 @@ class TestStagePromptIntelligence(unittest.TestCase):
         )
         self.assertIn("正交投影", result[1])
         self.assertEqual(payload["scene_coherence_status"], "coherent")
+
+    def test_perspective_layout_context_removes_only_conflicting_soft_anchors(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["成年女性冒险者"],
+                "构图视角": ["两点透视", "三点透视"],
+                "场景背景": ["地下城遗迹"],
+            }
+        )
+        custom = ["一点透视", "高细节"]
+        context = "透视结构固定为两点透视，不要一点透视或三点透视。"
+        graph = intelligence.build_scene_relationship_graph(selected, custom, context_text=context)
+        constraint = graph["perspective_layout_constraint"]
+        issues = [
+            item for item in graph["coherence_issues"]
+            if item["kind"] == "context_perspective_layout_conflict"
+        ]
+        self.assertEqual(constraint["required_value"], "two_point")
+        self.assertEqual(constraint["negated_values"], ["one_point", "three_point"])
+        self.assertEqual(constraint["source"], "natural_context")
+        self.assertEqual(
+            [item["value"] for item in issues[0]["conflicting_anchors"]],
+            ["三点透视", "一点透视"],
+        )
+
+        repaired, repaired_custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            custom,
+            graph,
+            soft_tags=["三点透视", "一点透视"],
+        )
+        rebuilt = intelligence.build_scene_relationship_graph(
+            repaired,
+            repaired_custom,
+            context_text=context,
+        )
+        self.assertEqual(repaired["构图视角"], ["两点透视"])
+        self.assertEqual(repaired_custom, ["高细节"])
+        self.assertEqual(report["removed_count"], 2)
+        self.assertEqual(rebuilt["coherence_status"], "coherent")
+
+    def test_perspective_layout_labels_visible_feedback_and_open_states_share_one_guard(self) -> None:
+        samples = {
+            "one_point": "全画面沿视轴延伸的水平边统一汇聚到地平线上的单一消失点，正对镜头平面的竖直边与水平边保持平行，不产生第二个水平消失点。",
+            "two_point": "全画面两组水平方向边分别汇聚到地平线左右两个消失点，竖直边始终保持平行，不向第三个消失点汇聚。",
+            "three_point": "全画面两组水平边与竖直边分别向三个独立消失点汇聚，垂直结构随高度连续收束，不存在保持平行的全局竖直线族。",
+        }
+        english_samples = {
+            "one_point": "Across the full frame, horizontal edges extending along the view axis converge together to a single vanishing point on the horizon, vertical and horizontal edges on the camera-facing plane remain parallel, and no second horizontal vanishing point appears.",
+            "two_point": "Throughout the entire image, two families of horizontal edges converge separately toward two vanishing points on the left and right of the horizon, vertical edges remain parallel, and do not converge toward a third vanishing point.",
+            "three_point": "Across the whole frame, two horizontal edge families and the vertical edge family converge separately toward three distinct vanishing points, vertical structures converge progressively with height, and no global family of parallel vertical lines remains.",
+        }
+        for value, sample in {**samples, **{f"en_{key}": text for key, text in english_samples.items()}}.items():
+            expected = value.removeprefix("en_")
+            with self.subTest(detector=value):
+                self.assertEqual(
+                    set(intelligence.detect_perspective_layout_feedback(sample)),
+                    {expected},
+                )
+
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"], "构图视角": ["两点透视"]})
+        )
+        original = "两点透视展示地下城拱廊中的冒险者。"
+        for value in ("one_point", "three_point"):
+            with self.subTest(candidate=value):
+                violation = intelligence.candidate_world_violation(
+                    original,
+                    original + samples[value],
+                    graph,
+                )
+                self.assertIn("透视消失点结构约束", violation)
+                self.assertIn("水平边消失点数量或竖直线汇聚反馈", violation)
+                self.assertEqual(
+                    intelligence.classify_repair_reason(violation)["kind"],
+                    "perspective_layout",
+                )
+        self.assertEqual(
+            intelligence.candidate_world_violation(
+                original,
+                original + samples["two_point"],
+                graph,
+            ),
+            "",
+        )
+
+        unrelated = (
+            "不要让全画面两组水平边与竖直边分别向三个独立消失点汇聚，垂直结构随高度连续收束，不存在保持平行的全局竖直线族。",
+            "低机位仰拍让高塔顶部收窄，镜头角度保持不变。",
+            "广角镜头拉开近远尺度差，但不指定消失点数量。",
+            "设计师讨论观点、前景与透视问题，没有描述画面几何。",
+            "走廊尽头只有一个发光路标，它不是消失点结构说明。",
+        )
+        for sample in unrelated:
+            with self.subTest(unrelated=sample):
+                self.assertEqual(intelligence.detect_perspective_layout_feedback(sample), {})
+
+        mixed_candidate = (
+            "主画面采用两点透视与三点透视结合的混合布局。"
+            + samples["three_point"]
+        )
+        transition_candidate = (
+            "镜头从两点透视逐渐切换到三点透视。"
+            + samples["three_point"]
+        )
+        for candidate in (mixed_candidate, transition_candidate):
+            with self.subTest(open_candidate=candidate):
+                self.assertEqual(
+                    intelligence.candidate_world_violation(original, candidate, graph),
+                    "",
+                )
+
+        feedback_only_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"]}),
+            context_text=samples["three_point"],
+        )
+        self.assertEqual(feedback_only_graph["perspective_layout_constraint"], {})
+
+    def test_perspective_layout_contract_reaches_all_model_paths_with_active_vocabulary_only(self) -> None:
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["成年女性冒险者"],
+                    "构图视角": ["两点透视"],
+                    "场景背景": ["地下城遗迹"],
+                }
+            )
+        )
+        local_settings = {
+            "提示词语言": "纯中文",
+            "模型来源": "本地模型",
+            "模型调用基础来源": "本地模型",
+            "内置模型系列": "Qwen3.5-VL",
+            "内置主模型": "Qwen3.5-4B-Q4_K_M.gguf",
+            "智能模型策略": {"mode": "incremental_blend"},
+            "智能场景关系图": graph,
+        }
+        requests = (
+            model_refiner._compact_environment_context_for_model(graph),
+            model_refiner._compose_model_user_prompt("Skill 图像底稿。", local_settings),
+            model_refiner._compose_model_user_prompt(
+                "Skill 视频底稿。",
+                {**local_settings, "模型任务": "视频提示词"},
+            ),
+            model_refiner._compose_batch_prompt(
+                ["第一份底稿。", "第二份底稿。"],
+                local_settings,
+            ),
+            model_refiner._compose_model_user_prompt(
+                "API 图像底稿。",
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "智能场景关系图": graph,
+                },
+            ),
+            model_refiner._compose_model_user_prompt(
+                "API 视频底稿。",
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "模型任务": "视频提示词",
+                    "智能场景关系图": graph,
+                },
+            ),
+            model_refiner._compose_batch_prompt(
+                ["第一份完整底稿。", "第二份完整底稿。"],
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "智能场景关系图": graph,
+                },
+            ),
+        )
+        for request in requests:
+            self.assertIn("透视消失点结构固定为两点/双消失点透视", request)
+            self.assertIn("两组水平方向边分别汇聚到地平线左右两个消失点", request)
+            self.assertIn("竖直边始终保持平行", request)
+            self.assertIn("混合透视布局及连续消失点转场保持开放", request)
+            self.assertEqual(request.count("智能透视消失点结构："), 1)
+            for forbidden in (
+                "透视消失点结构固定为一点/单消失点透视",
+                "透视消失点结构固定为三点/三消失点透视",
+                "沿视轴延伸的水平边统一汇聚到地平线上的单一消失点",
+                "两组水平边与竖直边分别向三个独立消失点汇聚",
+            ):
+                self.assertNotIn(forbidden, request)
+
+        open_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"], "构图视角": ["透视投影"]})
+        )
+        self.assertEqual(
+            model_refiner._perspective_layout_context_for_model(open_graph),
+            "",
+        )
+
+    def test_camera_roll_context_removes_only_conflicting_soft_anchors(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["成年女性冒险者"],
+                "构图视角": ["水平地平线", "荷兰角"],
+                "场景背景": ["地下城遗迹"],
+            }
+        )
+        custom = ["倾斜画幅", "高细节"]
+        context = "画幅固定为零度滚转并保持水平地平线，不要荷兰角或倾斜构图。"
+        graph = intelligence.build_scene_relationship_graph(selected, custom, context_text=context)
+        constraint = graph["camera_roll_constraint"]
+        issues = [
+            item for item in graph["coherence_issues"]
+            if item["kind"] == "context_camera_roll_conflict"
+        ]
+        self.assertEqual(constraint["required_value"], "level")
+        self.assertEqual(constraint["negated_values"], ["dutch"])
+        self.assertEqual(constraint["source"], "natural_context")
+        self.assertEqual(
+            [item["value"] for item in issues[0]["conflicting_anchors"]],
+            ["荷兰角", "倾斜画幅"],
+        )
+
+        repaired, repaired_custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            custom,
+            graph,
+            soft_tags=["荷兰角", "倾斜画幅"],
+        )
+        rebuilt = intelligence.build_scene_relationship_graph(
+            repaired,
+            repaired_custom,
+            context_text=context,
+        )
+        self.assertEqual(repaired["构图视角"], ["水平地平线"])
+        self.assertEqual(repaired_custom, ["高细节"])
+        self.assertEqual(report["removed_count"], 2)
+        self.assertEqual(rebuilt["coherence_status"], "coherent")
+
+    def test_camera_roll_labels_visible_feedback_and_open_states_share_one_guard(self) -> None:
+        samples = {
+            "level": "全画面中心的重力竖直方向与画幅竖轴重合，地平基准始终平行于画幅横轴，主体与环境共享零度镜头滚转基准。",
+            "dutch": "全画面中心的重力竖直方向与画幅竖轴形成一致的非零夹角，地平基准相对画幅横轴稳定倾斜，主体与环境共享同一镜头滚转角。",
+        }
+        english_samples = {
+            "level": "Across the full frame, the gravity-vertical direction at the frame center aligns with the frame vertical axis, the horizon reference remains parallel to the frame horizontal axis, and the subject and environment share a zero camera-roll reference.",
+            "dutch": "Throughout the entire image, the gravity-vertical direction at the frame centre forms a consistent nonzero angle with the frame vertical axis, the horizon reference remains tilted relative to the frame horizontal axis, and the subject and environment share the same camera-roll angle.",
+        }
+        for value, sample in {**samples, **{f"en_{key}": text for key, text in english_samples.items()}}.items():
+            expected = value.removeprefix("en_")
+            with self.subTest(detector=value):
+                self.assertEqual(
+                    set(intelligence.detect_camera_roll_feedback(sample)),
+                    {expected},
+                )
+
+        level_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"], "构图视角": ["水平地平线"]})
+        )
+        original = "水平地平线构图展示地下城中的冒险者。"
+        violation = intelligence.candidate_world_violation(
+            original,
+            original + samples["dutch"],
+            level_graph,
+        )
+        self.assertIn("画幅滚转约束", violation)
+        self.assertIn("重力竖直方向、地平基准或全局滚转反馈", violation)
+        self.assertEqual(
+            intelligence.classify_repair_reason(violation)["kind"],
+            "camera_roll",
+        )
+        self.assertEqual(
+            intelligence.candidate_world_violation(
+                original,
+                original + samples["level"],
+                level_graph,
+            ),
+            "",
+        )
+
+        unrelated = (
+            "不要让全画面中心的重力竖直方向与画幅竖轴形成一致的非零夹角，地平基准相对画幅横轴稳定倾斜，主体与环境共享同一镜头滚转角。",
+            "人物轻轻歪头，手中的长剑斜向地面。",
+            "山坡从左下向右上延伸，镜头仍保持稳定。",
+            "低机位仰拍高塔，塔身因三点透视逐渐收束。",
+            "斜向引导线穿过画面，但地平基准没有被指定。",
+        )
+        for sample in unrelated:
+            with self.subTest(unrelated=sample):
+                self.assertEqual(intelligence.detect_camera_roll_feedback(sample), {})
+
+        mixed_candidate = "主画面采用零度滚转与荷兰角结合的混合布局。" + samples["dutch"]
+        transition_candidate = "镜头从零度滚转逐渐切换到荷兰角。" + samples["dutch"]
+        for candidate in (mixed_candidate, transition_candidate):
+            with self.subTest(open_candidate=candidate):
+                self.assertEqual(
+                    intelligence.candidate_world_violation(original, candidate, level_graph),
+                    "",
+                )
+
+        feedback_only_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"]}),
+            context_text=samples["dutch"],
+        )
+        self.assertEqual(feedback_only_graph["camera_roll_constraint"], {})
+
+    def test_camera_roll_contract_reaches_all_model_paths_with_active_vocabulary_only(self) -> None:
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["成年女性冒险者"],
+                    "构图视角": ["荷兰角"],
+                    "场景背景": ["地下城遗迹"],
+                }
+            )
+        )
+        local_settings = {
+            "提示词语言": "纯中文",
+            "模型来源": "本地模型",
+            "模型调用基础来源": "本地模型",
+            "内置模型系列": "Qwen3.5-VL",
+            "内置主模型": "Qwen3.5-4B-Q4_K_M.gguf",
+            "智能模型策略": {"mode": "incremental_blend"},
+            "智能场景关系图": graph,
+        }
+        requests = (
+            model_refiner._compact_environment_context_for_model(graph),
+            model_refiner._compose_model_user_prompt("Skill 图像底稿。", local_settings),
+            model_refiner._compose_model_user_prompt(
+                "Skill 视频底稿。",
+                {**local_settings, "模型任务": "视频提示词"},
+            ),
+            model_refiner._compose_batch_prompt(
+                ["第一份底稿。", "第二份底稿。"],
+                local_settings,
+            ),
+            model_refiner._compose_model_user_prompt(
+                "API 图像底稿。",
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "智能场景关系图": graph,
+                },
+            ),
+            model_refiner._compose_model_user_prompt(
+                "API 视频底稿。",
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "模型任务": "视频提示词",
+                    "智能场景关系图": graph,
+                },
+            ),
+            model_refiner._compose_batch_prompt(
+                ["第一份完整底稿。", "第二份完整底稿。"],
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "智能场景关系图": graph,
+                },
+            ),
+        )
+        for request in requests:
+            self.assertIn("画幅滚转固定为荷兰角/倾斜画幅", request)
+            self.assertIn("重力竖直方向与画幅竖轴形成一致的非零夹角", request)
+            self.assertIn("主体与环境共享同一镜头滚转角", request)
+            self.assertIn("混合滚转布局及连续滚转转场保持开放", request)
+            self.assertEqual(request.count("智能画幅滚转："), 1)
+            for forbidden in (
+                "画幅滚转固定为零度滚转/水平地平线",
+                "重力竖直方向与画幅竖轴重合",
+                "主体与环境共享零度镜头滚转基准",
+            ):
+                self.assertNotIn(forbidden, request)
+
+        open_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"], "构图视角": ["低机位仰拍"]})
+        )
+        self.assertEqual(model_refiner._camera_roll_context_for_model(open_graph), "")
+
+    def test_composition_placement_context_removes_only_conflicting_soft_anchors(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["成年女性冒险者"],
+                "构图视角": ["中心构图", "三分法"],
+                "场景背景": ["地下城遗迹"],
+            }
+        )
+        custom = ["主体偏置", "高细节"]
+        context = "整体采用中心构图，不要三分法或偏心构图。"
+        graph = intelligence.build_scene_relationship_graph(selected, custom, context_text=context)
+        constraint = graph["composition_placement_constraint"]
+        issues = [
+            item for item in graph["coherence_issues"]
+            if item["kind"] == "context_composition_placement_conflict"
+        ]
+        self.assertEqual(constraint["required_value"], "centered")
+        self.assertEqual(constraint["negated_values"], ["offset"])
+        self.assertEqual(constraint["source"], "natural_context")
+        self.assertEqual(
+            [item["value"] for item in issues[0]["conflicting_anchors"]],
+            ["三分法", "主体偏置"],
+        )
+
+        repaired, repaired_custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            custom,
+            graph,
+            soft_tags=["三分法", "主体偏置"],
+        )
+        rebuilt = intelligence.build_scene_relationship_graph(
+            repaired,
+            repaired_custom,
+            context_text=context,
+        )
+        self.assertEqual(repaired["构图视角"], ["中心构图"])
+        self.assertEqual(repaired_custom, ["高细节"])
+        self.assertEqual(report["removed_count"], 2)
+        self.assertEqual(rebuilt["coherence_status"], "coherent")
+
+    def test_composition_placement_labels_visible_feedback_and_open_states_share_one_guard(self) -> None:
+        samples = {
+            "centered": "全画面主体主要视觉重心落在画幅竖直中轴，左右主要视觉质量和留白形成近似镜像平衡，主体视线或动作轴保持中央组织。",
+            "offset": "全画面主体主要视觉重心稳定落在右侧三分线及交点，主体视线或动作方向前方保留较大负空间，画面不回到中央对称平衡。",
+        }
+        english_samples = {
+            "centered": "Across the full frame, the subject's primary visual centroid falls on the frame vertical centerline, left and right visual masses and negative space form near-mirror balance, and the gaze or action axis remains centered.",
+            "offset": "Throughout the entire image, the subject's primary visual centroid falls steadily on the left or right third line or intersection, the space ahead of the gaze or action direction retains broad negative space, and the composition does not return to centered mirror balance.",
+        }
+        for value, sample in {**samples, **{f"en_{key}": text for key, text in english_samples.items()}}.items():
+            expected = value.removeprefix("en_")
+            with self.subTest(detector=value):
+                self.assertEqual(
+                    set(intelligence.detect_composition_placement_feedback(sample)),
+                    {expected},
+                )
+
+        centered_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"], "构图视角": ["中心构图"]})
+        )
+        original = "中心构图展示地下城中的冒险者。"
+        violation = intelligence.candidate_world_violation(
+            original,
+            original + samples["offset"],
+            centered_graph,
+        )
+        self.assertIn("主体构图落点约束", violation)
+        self.assertIn("视觉重心、三分线落点或中央平衡反馈", violation)
+        self.assertEqual(
+            intelligence.classify_repair_reason(violation)["kind"],
+            "composition_placement",
+        )
+        self.assertEqual(
+            intelligence.candidate_world_violation(
+                original,
+                original + samples["centered"],
+                centered_graph,
+            ),
+            "",
+        )
+
+        unrelated = (
+            "不要让全画面主体主要视觉重心稳定落在右侧三分线及交点，主体视线或动作方向前方保留较大负空间，画面不回到中央对称平衡。",
+            "人物偏左站立，但右手的剑尖指向画面中央。",
+            "服装采用左右不对称的肩甲，主体位置保持原样。",
+            "背景道具偏右，人物仍按原有中心构图。",
+            "三分法只作为构图标签说明，没有描述可见重心反馈。",
+        )
+        for sample in unrelated:
+            with self.subTest(unrelated=sample):
+                self.assertEqual(intelligence.detect_composition_placement_feedback(sample), {})
+
+        mixed_candidate = "主画面采用中心构图与三分法结合的混合落点。" + samples["offset"]
+        transition_candidate = "主体重心从中心构图逐渐切换到三分法。" + samples["offset"]
+        for candidate in (mixed_candidate, transition_candidate):
+            with self.subTest(open_candidate=candidate):
+                self.assertEqual(
+                    intelligence.candidate_world_violation(original, candidate, centered_graph),
+                    "",
+                )
+
+        feedback_only_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"]}),
+            context_text=samples["offset"],
+        )
+        self.assertEqual(feedback_only_graph["composition_placement_constraint"], {})
+
+    def test_composition_placement_contract_reaches_all_model_paths_with_active_vocabulary_only(self) -> None:
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["成年女性冒险者"],
+                    "构图视角": ["三分法"],
+                    "场景背景": ["地下城遗迹"],
+                }
+            )
+        )
+        local_settings = {
+            "提示词语言": "纯中文",
+            "模型来源": "本地模型",
+            "模型调用基础来源": "本地模型",
+            "内置模型系列": "Qwen3.5-VL",
+            "内置主模型": "Qwen3.5-4B-Q4_K_M.gguf",
+            "智能模型策略": {"mode": "incremental_blend"},
+            "智能场景关系图": graph,
+        }
+        requests = (
+            model_refiner._compact_environment_context_for_model(graph),
+            model_refiner._compose_model_user_prompt("Skill 图像底稿。", local_settings),
+            model_refiner._compose_model_user_prompt(
+                "Skill 视频底稿。",
+                {**local_settings, "模型任务": "视频提示词"},
+            ),
+            model_refiner._compose_batch_prompt(
+                ["第一份底稿。", "第二份底稿。"],
+                local_settings,
+            ),
+            model_refiner._compose_model_user_prompt(
+                "API 图像底稿。",
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "智能场景关系图": graph,
+                },
+            ),
+            model_refiner._compose_model_user_prompt(
+                "API 视频底稿。",
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "模型任务": "视频提示词",
+                    "智能场景关系图": graph,
+                },
+            ),
+            model_refiner._compose_batch_prompt(
+                ["第一份完整底稿。", "第二份完整底稿。"],
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "智能场景关系图": graph,
+                },
+            ),
+        )
+        for request in requests:
+            self.assertIn("主体构图落点固定为三分法/偏心落点", request)
+            self.assertIn("主体主要视觉重心稳定落在左或右三分线及其交点", request)
+            self.assertIn("主体视线或动作方向前方保留较大负空间", request)
+            self.assertIn("混合构图落点及连续重心转场保持开放", request)
+            self.assertEqual(request.count("智能主体构图落点："), 1)
+            for forbidden in (
+                "主体构图落点固定为居中/轴对称落点",
+                "主体主要视觉重心落在画幅竖直中轴",
+                "主体视线或动作轴保持中央组织",
+            ):
+                self.assertNotIn(forbidden, request)
+
+        open_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"], "构图视角": ["侧面"]})
+        )
+        self.assertEqual(
+            model_refiner._composition_placement_context_for_model(open_graph),
+            "",
+        )
+
+    def test_screen_direction_context_removes_only_conflicting_soft_anchors(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["成年女性冒险者"],
+                "动作姿态": ["从左向右疾跑", "从右向左移动"],
+                "场景背景": ["地下城遗迹"],
+            }
+        )
+        custom = ["面向画面左侧", "高细节"]
+        context = "主体从左向右移动，不要人物从右向左移动或面向画面左侧。"
+        graph = intelligence.build_scene_relationship_graph(selected, custom, context_text=context)
+        constraint = graph["screen_direction_constraint"]
+        issues = [
+            item for item in graph["coherence_issues"]
+            if item["kind"] == "context_screen_direction_conflict"
+        ]
+        self.assertEqual(constraint["required_value"], "left_to_right")
+        self.assertEqual(constraint["negated_values"], ["right_to_left"])
+        self.assertEqual(constraint["source"], "natural_context")
+        self.assertEqual(
+            [item["value"] for item in issues[0]["conflicting_anchors"]],
+            ["从右向左移动", "面向画面左侧"],
+        )
+
+        repaired, repaired_custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            custom,
+            graph,
+            soft_tags=["从右向左移动", "面向画面左侧"],
+        )
+        rebuilt = intelligence.build_scene_relationship_graph(
+            repaired,
+            repaired_custom,
+            context_text=context,
+        )
+        self.assertEqual(repaired["动作姿态"], ["从左向右疾跑"])
+        self.assertEqual(repaired_custom, ["高细节"])
+        self.assertEqual(report["removed_count"], 2)
+        self.assertEqual(rebuilt["coherence_status"], "coherent")
+
+    def test_screen_direction_labels_visible_feedback_and_open_states_share_one_guard(self) -> None:
+        samples = {
+            "left_to_right": "全画面主体头肩、躯干或动作轴稳定指向画面右侧，视线、运动或动作方向前方在画面右侧保留引导空间，运动轨迹、道具指向或衣摆拖曳统一沿左到右的屏幕方向。",
+            "right_to_left": "全画面主体头肩、躯干或动作轴稳定指向画面左侧，视线、运动或动作方向前方在画面左侧保留引导空间，运动轨迹、道具指向或衣摆拖曳统一沿右到左的屏幕方向。",
+        }
+        english_samples = {
+            "left_to_right": "Across the full frame, the subject's head, torso, or action axis points steadily toward screen right, the space ahead of the gaze, motion, or action is retained on the right side of the frame, and motion traces, prop direction, or trailing fabric continue from left toward right across the frame.",
+            "right_to_left": "Throughout the entire image, the subject's head, torso, or action axis points steadily toward screen left, the space ahead of the gaze, motion, or action is retained on the left side of the frame, and motion traces, prop direction, or trailing fabric continue from right toward left across the frame.",
+        }
+        for value, sample in {**samples, **{f"en_{key}": text for key, text in english_samples.items()}}.items():
+            expected = value.removeprefix("en_")
+            with self.subTest(detector=value):
+                self.assertEqual(
+                    set(intelligence.detect_screen_direction_feedback(sample)),
+                    {expected},
+                )
+
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"], "动作姿态": ["从左向右移动"]})
+        )
+        original = "冒险者从左向右移动，穿过地下城拱廊。"
+        violation = intelligence.candidate_world_violation(
+            original,
+            original + samples["right_to_left"],
+            graph,
+        )
+        self.assertIn("横向屏幕方向约束", violation)
+        self.assertIn("主体指向、前导空间或运动轨迹反馈", violation)
+        self.assertEqual(
+            intelligence.classify_repair_reason(violation)["kind"],
+            "screen_direction",
+        )
+        self.assertEqual(
+            intelligence.candidate_world_violation(
+                original,
+                original + samples["left_to_right"],
+                graph,
+            ),
+            "",
+        )
+
+        unrelated = (
+            "不要让全画面主体头肩、躯干或动作轴稳定指向画面左侧，视线、运动或动作方向前方在画面左侧保留引导空间，运动轨迹、道具指向或衣摆拖曳统一沿右到左的屏幕方向。",
+            "左手握剑，右肩披着磨损斗篷。",
+            "侧光从左向右扫过石墙，但人物保持原有动作。",
+            "人物站在画面左侧并直视镜头，没有横向移动。",
+            "墙面文字从左向右排列，主体动作方向未指定。",
+        )
+        for sample in unrelated:
+            with self.subTest(unrelated=sample):
+                self.assertEqual(intelligence.detect_screen_direction_feedback(sample), {})
+        self.assertEqual(intelligence.detect_screen_direction("墙面文字从左向右排列。"), {})
+        self.assertEqual(intelligence.detect_screen_direction("侧光从左向右扫过石墙。"), {})
+
+        mixed_candidate = (
+            "主画面结合人物从左向右移动与人物从右向左移动的双向调度。"
+            + samples["right_to_left"]
+        )
+        transition_candidate = (
+            "人物从左向右移动，随后转身，人物从右向左移动。"
+            + samples["right_to_left"]
+        )
+        for candidate in (mixed_candidate, transition_candidate):
+            with self.subTest(open_candidate=candidate):
+                self.assertEqual(
+                    intelligence.candidate_world_violation(original, candidate, graph),
+                    "",
+                )
+
+        feedback_only_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"]}),
+            context_text=samples["right_to_left"],
+        )
+        self.assertEqual(feedback_only_graph["screen_direction_constraint"], {})
+
+    def test_screen_direction_contract_reaches_all_model_paths_with_active_vocabulary_only(self) -> None:
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["成年女性冒险者"],
+                    "动作姿态": ["从右向左移动"],
+                    "场景背景": ["地下城遗迹"],
+                }
+            )
+        )
+        local_settings = {
+            "提示词语言": "纯中文",
+            "模型来源": "本地模型",
+            "模型调用基础来源": "本地模型",
+            "内置模型系列": "Qwen3.5-VL",
+            "内置主模型": "Qwen3.5-4B-Q4_K_M.gguf",
+            "智能模型策略": {"mode": "incremental_blend"},
+            "智能场景关系图": graph,
+        }
+        requests = (
+            model_refiner._compact_environment_context_for_model(graph),
+            model_refiner._compose_model_user_prompt("Skill 图像底稿。", local_settings),
+            model_refiner._compose_model_user_prompt(
+                "Skill 视频底稿。",
+                {**local_settings, "模型任务": "视频提示词"},
+            ),
+            model_refiner._compose_batch_prompt(
+                ["第一份底稿。", "第二份底稿。"],
+                local_settings,
+            ),
+            model_refiner._compose_model_user_prompt(
+                "API 图像底稿。",
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "智能场景关系图": graph,
+                },
+            ),
+            model_refiner._compose_model_user_prompt(
+                "API 视频底稿。",
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "模型任务": "视频提示词",
+                    "智能场景关系图": graph,
+                },
+            ),
+            model_refiner._compose_batch_prompt(
+                ["第一份完整底稿。", "第二份完整底稿。"],
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "智能场景关系图": graph,
+                },
+            ),
+        )
+        for request in requests:
+            self.assertIn("横向屏幕方向固定为从右向左/朝画面左侧", request)
+            self.assertIn("主体头肩、躯干或动作轴稳定指向画面左侧", request)
+            self.assertIn("画面左侧保留引导空间", request)
+            self.assertIn("越轴、转身、反向动作", request)
+            self.assertEqual(request.count("智能横向屏幕方向："), 1)
+            for forbidden in (
+                "横向屏幕方向固定为从左向右/朝画面右侧",
+                "主体头肩、躯干或动作轴稳定指向画面右侧",
+                "画面右侧保留引导空间",
+            ):
+                self.assertNotIn(forbidden, request)
+
+        open_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"], "动作姿态": ["站姿放松"]})
+        )
+        self.assertEqual(model_refiner._screen_direction_context_for_model(open_graph), "")
+
+    def test_gaze_target_context_removes_only_conflicting_soft_anchors(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["成年女性冒险者"],
+                "动作姿态": ["看向镜头", "侧目看向远处"],
+                "场景背景": ["地下城遗迹"],
+            }
+        )
+        custom = ["看向道具", "高细节"]
+        context = "人物固定直视镜头，不要侧目看向远处或看向道具。"
+        graph = intelligence.build_scene_relationship_graph(selected, custom, context_text=context)
+        constraint = graph["gaze_target_constraint"]
+        issues = [
+            item for item in graph["coherence_issues"]
+            if item["kind"] == "context_gaze_target_conflict"
+        ]
+        self.assertEqual(constraint["required_value"], "camera_lock")
+        self.assertEqual(constraint["negated_values"], ["off_camera"])
+        self.assertEqual(constraint["source"], "natural_context")
+        self.assertEqual(
+            [item["value"] for item in issues[0]["conflicting_anchors"]],
+            ["侧目看向远处", "看向道具"],
+        )
+
+        repaired, repaired_custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            custom,
+            graph,
+            soft_tags=["侧目看向远处", "看向道具"],
+        )
+        rebuilt = intelligence.build_scene_relationship_graph(
+            repaired,
+            repaired_custom,
+            context_text=context,
+        )
+        self.assertEqual(repaired["动作姿态"], ["看向镜头"])
+        self.assertEqual(repaired_custom, ["高细节"])
+        self.assertEqual(report["removed_count"], 2)
+        self.assertEqual(rebuilt["coherence_status"], "coherent")
+
+    def test_gaze_target_labels_visible_feedback_and_open_states_share_one_guard(self) -> None:
+        samples = {
+            "camera_lock": "全画面主体双眼视线向同一镜头光轴汇聚，瞳孔方向与镜头中心保持一致，面部朝向可以独立变化且双眼不偏离既定光轴。",
+            "off_camera": "全画面主体双眼视线避开镜头光轴，并汇聚到画面内明确对象，目标方向与对象位置保持一致，不回到镜头对视。",
+        }
+        english_samples = {
+            "camera_lock": "Across the full frame, the subject's two eyes converge toward the same camera optical axis, pupil directions align with the camera center, head orientation may change independently, without the gaze passing beyond the camera.",
+            "off_camera": "Throughout the entire image, the subject's two eyes avoid the camera optical axis and converge on an explicit object or region inside the frame, the gaze direction matches the object's position, without redirecting the pupils toward the lens.",
+        }
+        for value, sample in {**samples, **{f"en_{key}": text for key, text in english_samples.items()}}.items():
+            expected = value.removeprefix("en_")
+            with self.subTest(detector=value):
+                self.assertEqual(
+                    set(intelligence.detect_gaze_target_feedback(sample)),
+                    {expected},
+                )
+
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"], "动作姿态": ["看向镜头"]})
+        )
+        original = "冒险者侧身站在地下城中，回头看向镜头。"
+        violation = intelligence.candidate_world_violation(
+            original,
+            original + samples["off_camera"],
+            graph,
+        )
+        self.assertIn("视线目标约束", violation)
+        self.assertIn("镜头光轴、瞳孔方向或场景目标反馈", violation)
+        self.assertEqual(
+            intelligence.classify_repair_reason(violation)["kind"],
+            "gaze_target",
+        )
+        self.assertEqual(
+            intelligence.candidate_world_violation(
+                original,
+                original + samples["camera_lock"],
+                graph,
+            ),
+            "",
+        )
+
+        unrelated = (
+            "不要让全画面主体双眼视线避开镜头光轴，并汇聚到画面内明确对象，目标方向与对象位置保持一致，不回到镜头对视。",
+            "人物正面站立，但视线目标没有指定。",
+            "人物侧身抬起火炬，面部朝向保持原样。",
+            "镜头中心保留宝石高光，不描述人物瞳孔方向。",
+            "角色闭眼倾听回声，不建立可见视线目标。",
+        )
+        for sample in unrelated:
+            with self.subTest(unrelated=sample):
+                self.assertEqual(intelligence.detect_gaze_target_feedback(sample), {})
+
+        mixed_candidate = "人物将看向镜头与看向道具结合成双重视线设计。" + samples["off_camera"]
+        transition_candidate = "人物看向镜头，随后转头看向道具。" + samples["off_camera"]
+        for candidate in (mixed_candidate, transition_candidate):
+            with self.subTest(open_candidate=candidate):
+                self.assertEqual(
+                    intelligence.candidate_world_violation(original, candidate, graph),
+                    "",
+                )
+
+        mutual = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["双人角色"], "动作姿态": ["双人互相对视"]})
+        )
+        self.assertEqual(mutual["gaze_target_constraint"], {})
+        for sample in samples.values():
+            feedback_only_graph = intelligence.build_scene_relationship_graph(
+                OrderedDict({"主体": ["成年女性冒险者"]}),
+                context_text=sample,
+            )
+            self.assertEqual(feedback_only_graph["gaze_target_constraint"], {})
+
+    def test_gaze_target_contract_reaches_all_model_paths_with_active_vocabulary_only(self) -> None:
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["成年女性冒险者"],
+                    "动作姿态": ["看向镜头"],
+                    "场景背景": ["地下城遗迹"],
+                }
+            )
+        )
+        local_settings = {
+            "提示词语言": "纯中文",
+            "模型来源": "本地模型",
+            "模型调用基础来源": "本地模型",
+            "内置模型系列": "Qwen3.5-VL",
+            "内置主模型": "Qwen3.5-4B-Q4_K_M.gguf",
+            "智能模型策略": {"mode": "incremental_blend"},
+            "智能场景关系图": graph,
+        }
+        requests = (
+            model_refiner._compact_environment_context_for_model(graph),
+            model_refiner._compose_model_user_prompt("Skill 图像底稿。", local_settings),
+            model_refiner._compose_model_user_prompt(
+                "Skill 视频底稿。",
+                {**local_settings, "模型任务": "视频提示词"},
+            ),
+            model_refiner._compose_batch_prompt(
+                ["第一份底稿。", "第二份底稿。"],
+                local_settings,
+            ),
+            model_refiner._compose_model_user_prompt(
+                "API 图像底稿。",
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "智能场景关系图": graph,
+                },
+            ),
+            model_refiner._compose_model_user_prompt(
+                "API 视频底稿。",
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "模型任务": "视频提示词",
+                    "智能场景关系图": graph,
+                },
+            ),
+            model_refiner._compose_batch_prompt(
+                ["第一份完整底稿。", "第二份完整底稿。"],
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "智能场景关系图": graph,
+                },
+            ),
+        )
+        for request in requests:
+            self.assertIn("视线目标固定为直视镜头/镜头对视", request)
+            self.assertIn("双眼视线向同一镜头光轴汇聚", request)
+            self.assertIn("瞳孔方向与镜头中心保持一致", request)
+            self.assertIn("转头、回望、双人对视、视线转移", request)
+            self.assertEqual(request.count("智能视线目标："), 1)
+            for forbidden in (
+                "视线目标固定为离开镜头/锁定场景目标",
+                "双眼视线避开镜头光轴",
+                "目标方向与对象位置保持一致",
+            ):
+                self.assertNotIn(forbidden, request)
+
+        open_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"], "动作姿态": ["站姿放松"]})
+        )
+        self.assertEqual(model_refiner._gaze_target_context_for_model(open_graph), "")
+
+    def test_spatial_axis_continuity_removes_only_conflicting_soft_anchors(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["双人角色"],
+                "构图视角": ["180度轴线规则", "计划越轴"],
+                "场景背景": ["地下城遗迹"],
+            }
+        )
+        custom = ["镜头跨越动作轴", "高细节"]
+        context = "所有镜头固定遵守180度轴线规则，不越轴，不要计划越轴。"
+        graph = intelligence.build_scene_relationship_graph(selected, custom, context_text=context)
+        constraint = graph["spatial_axis_continuity_constraint"]
+        issues = [
+            item for item in graph["coherence_issues"]
+            if item["kind"] == "context_spatial_axis_continuity_conflict"
+        ]
+        self.assertEqual(constraint["required_value"], "axis_hold")
+        self.assertEqual(constraint["negated_values"], ["planned_cross"])
+        self.assertEqual(constraint["source"], "natural_context")
+        self.assertEqual(
+            [item["value"] for item in issues[0]["conflicting_anchors"]],
+            ["计划越轴", "镜头跨越动作轴"],
+        )
+
+        repaired, repaired_custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            custom,
+            graph,
+            soft_tags=["计划越轴", "镜头跨越动作轴"],
+        )
+        rebuilt = intelligence.build_scene_relationship_graph(
+            repaired,
+            repaired_custom,
+            context_text=context,
+        )
+        self.assertEqual(repaired["构图视角"], ["180度轴线规则"])
+        self.assertEqual(repaired_custom, ["高细节"])
+        self.assertEqual(report["removed_count"], 2)
+        self.assertEqual(rebuilt["coherence_status"], "coherent")
+
+    def test_spatial_axis_labels_visible_feedback_and_open_states_share_one_guard(self) -> None:
+        samples = {
+            "axis_hold": "整个分镜序列中，摄影机始终停留在人物互动轴线同一侧，角色与关键道具的画面左右位置保持稳定，反打镜头继续服从同一空间半区。",
+            "planned_cross": "整个分镜序列中，摄影机沿连续可见路径跨越人物互动轴线，角色与关键道具只在越轴过程完成后交换画面左右位置，越轴前后环境锚点保持可追踪。",
+        }
+        english_samples = {
+            "axis_hold": "Throughout the entire storyboard sequence, the camera remains on the same side of the interaction axis, the screen-left and screen-right positions of the characters and key props remain stable, and reverse angles continue to obey the same spatial half-space.",
+            "planned_cross": "Across the complete shot sequence, the camera crosses the interaction axis along a continuous visible path, characters and key props exchange screen sides only after the crossing move is complete, and environmental anchors remain traceable before and after the crossing.",
+        }
+        for value, sample in {
+            **samples,
+            **{f"en_{key}": text for key, text in english_samples.items()},
+        }.items():
+            expected = value.removeprefix("en_")
+            with self.subTest(detector=value):
+                self.assertEqual(
+                    set(intelligence.detect_spatial_axis_continuity_feedback(sample)),
+                    {expected},
+                )
+
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["双人角色"], "构图视角": ["180度轴线规则"]})
+        )
+        original = "两名角色隔着石桌交谈，镜头固定不越轴。"
+        violation = intelligence.candidate_world_violation(
+            original,
+            original + samples["planned_cross"],
+            graph,
+        )
+        self.assertIn("空间轴线连续性约束", violation)
+        self.assertIn("摄影机半空间、角色左右位置或越轴路径反馈", violation)
+        self.assertEqual(
+            intelligence.classify_repair_reason(violation)["kind"],
+            "spatial_axis_continuity",
+        )
+        self.assertEqual(
+            intelligence.candidate_world_violation(
+                original,
+                original + samples["axis_hold"],
+                graph,
+            ),
+            "",
+        )
+
+        unrelated = (
+            "不要让整个分镜序列中摄影机沿连续可见路径跨越人物互动轴线，角色与关键道具只在越轴过程完成后交换画面左右位置，越轴前后环境锚点保持可追踪。",
+            "人物从左向右穿过走廊，运动方向保持一致。",
+            "角色直视镜头，视线目标没有改变。",
+            "镜头采用低角度反打，但未规定动作轴线。",
+        )
+        for sample in unrelated:
+            with self.subTest(unrelated=sample):
+                self.assertEqual(
+                    intelligence.detect_spatial_axis_continuity_feedback(sample),
+                    {},
+                )
+
+        mixed = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["双人角色"]}),
+            context_text="开场保持不越轴，随后通过连续可见路径转为计划越轴。",
+        )
+        self.assertEqual(mixed["spatial_axis_continuity_constraint"], {})
+        for sample in samples.values():
+            feedback_only_graph = intelligence.build_scene_relationship_graph(
+                OrderedDict({"主体": ["双人角色"]}),
+                context_text=sample,
+            )
+            self.assertEqual(feedback_only_graph["spatial_axis_continuity_constraint"], {})
+
+    def test_spatial_axis_continuity_contract_reaches_all_model_paths(self) -> None:
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["双人角色"],
+                    "构图视角": ["180度轴线规则"],
+                    "场景背景": ["地下城遗迹"],
+                }
+            )
+        )
+        local_settings = {
+            "提示词语言": "纯中文",
+            "模型来源": "本地模型",
+            "模型调用基础来源": "本地模型",
+            "内置模型系列": "Qwen3.5-VL",
+            "内置主模型": "Qwen3.5-4B-Q4_K_M.gguf",
+            "智能模型策略": {"mode": "incremental_blend"},
+            "智能场景关系图": graph,
+        }
+        requests = (
+            model_refiner._compact_environment_context_for_model(graph),
+            model_refiner._compose_model_user_prompt("Skill 图像底稿。", local_settings),
+            model_refiner._compose_model_user_prompt(
+                "Skill 视频底稿。",
+                {**local_settings, "模型任务": "视频提示词"},
+            ),
+            model_refiner._compose_batch_prompt(
+                ["第一份底稿。", "第二份底稿。"],
+                local_settings,
+            ),
+            model_refiner._compose_model_user_prompt(
+                "API 图像底稿。",
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "智能场景关系图": graph,
+                },
+            ),
+            model_refiner._compose_model_user_prompt(
+                "API 视频底稿。",
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "模型任务": "视频提示词",
+                    "智能场景关系图": graph,
+                },
+            ),
+            model_refiner._compose_batch_prompt(
+                ["第一份完整底稿。", "第二份完整底稿。"],
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "智能场景关系图": graph,
+                },
+            ),
+        )
+        for request in requests:
+            self.assertIn("空间轴线连续性固定为遵守180度轴线/不越轴", request)
+            self.assertIn("摄影机始终停留在人物互动轴线同一侧", request)
+            self.assertIn("角色与关键道具的画面左右位置保持稳定", request)
+            self.assertIn("连续越轴转场保持开放", request)
+            self.assertEqual(request.count("智能空间轴线连续性："), 1)
+            for forbidden in (
+                "空间轴线连续性固定为计划越轴/可见路径换边",
+                "摄影机沿连续可见路径跨越人物互动轴线",
+                "越轴过程完成后交换画面左右位置",
+            ):
+                self.assertNotIn(forbidden, request)
+
+        open_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["双人角色"], "动作姿态": ["站姿放松"]})
+        )
+        self.assertEqual(
+            model_refiner._spatial_axis_continuity_context_for_model(open_graph),
+            "",
+        )
+
+    def test_foreground_occlusion_removes_only_conflicting_soft_anchors(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["成年女性冒险者"],
+                "构图视角": ["主体无遮挡", "前景遮挡"],
+                "场景背景": ["地下城遗迹"],
+            }
+        )
+        custom = ["前景框景", "高细节"]
+        context = "人物固定主体无遮挡，不要前景遮挡或前景框景。"
+        graph = intelligence.build_scene_relationship_graph(selected, custom, context_text=context)
+        constraint = graph["foreground_occlusion_constraint"]
+        issues = [
+            item for item in graph["coherence_issues"]
+            if item["kind"] == "context_foreground_occlusion_conflict"
+        ]
+        self.assertEqual(constraint["required_value"], "clear_subject")
+        self.assertEqual(constraint["negated_values"], ["foreground_frame"])
+        self.assertEqual(constraint["source"], "natural_context")
+        self.assertEqual(
+            [item["value"] for item in issues[0]["conflicting_anchors"]],
+            ["前景遮挡", "前景框景"],
+        )
+
+        repaired, repaired_custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            custom,
+            graph,
+            soft_tags=["前景遮挡", "前景框景"],
+        )
+        rebuilt = intelligence.build_scene_relationship_graph(
+            repaired,
+            repaired_custom,
+            context_text=context,
+        )
+        self.assertEqual(repaired["构图视角"], ["主体无遮挡"])
+        self.assertEqual(repaired_custom, ["高细节"])
+        self.assertEqual(report["removed_count"], 2)
+        self.assertEqual(rebuilt["coherence_status"], "coherent")
+
+    def test_foreground_occlusion_feedback_and_ambiguous_states_share_one_guard(self) -> None:
+        samples = {
+            "clear_subject": "全画面主体主要轮廓保持连续可读，任何前景物都不覆盖面部、双手或动作关节，主体与背景的边界始终清楚分离。",
+            "foreground_frame": "全画面仅由场景中已有前景元素覆盖主体次要边缘，面部、双手与动作支点保持可见，前景、主体与背景的遮挡顺序保持稳定一致。",
+        }
+        english_samples = {
+            "clear_subject": "Across the full frame, the subject's primary silhouette remains continuously readable, no foreground element covers the face, hands, or action joints, and the boundary between the subject and background stays clearly separated.",
+            "foreground_frame": "Throughout the entire image, only foreground elements already present in the scene overlap the subject's secondary edges, the face, hands, and action fulcrum remain visible, and the occlusion order of foreground, subject, and background remains stable.",
+        }
+        for value, sample in {
+            **samples,
+            **{f"en_{key}": text for key, text in english_samples.items()},
+        }.items():
+            expected = value.removeprefix("en_")
+            with self.subTest(detector=value):
+                self.assertEqual(
+                    set(intelligence.detect_foreground_occlusion_feedback(sample)),
+                    {expected},
+                )
+
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {"主体": ["成年女性冒险者"], "构图视角": ["主体无遮挡"]}
+            )
+        )
+        original = "冒险者完整站在石门前，主体无遮挡。"
+        violation = intelligence.candidate_world_violation(
+            original,
+            original + samples["foreground_frame"],
+            graph,
+        )
+        self.assertIn("前景遮挡关系约束", violation)
+        self.assertIn("主体轮廓、关键部位可见性或遮挡层级反馈", violation)
+        self.assertEqual(
+            intelligence.classify_repair_reason(violation)["kind"],
+            "foreground_occlusion",
+        )
+        self.assertEqual(
+            intelligence.candidate_world_violation(
+                original,
+                original + samples["clear_subject"],
+                graph,
+            ),
+            "",
+        )
+
+        unrelated = (
+            "不要让全画面仅由场景中已有前景元素覆盖主体次要边缘，面部、双手与动作支点保持可见，前景、主体与背景的遮挡顺序保持稳定一致。",
+            "服装保持完整覆盖，衣领与肩甲结构清楚。",
+            "降雨形成环境遮挡反馈，远处石墙逐渐衰减。",
+            "冷雾降低远景能见度，但没有指定构图遮挡。",
+            "人物手持火炬，手掌与握柄自然接触。",
+        )
+        for sample in unrelated:
+            with self.subTest(unrelated=sample):
+                self.assertEqual(
+                    intelligence.detect_foreground_occlusion_feedback(sample),
+                    {},
+                )
+
+        ambiguous_graphs = (
+            intelligence.build_scene_relationship_graph(
+                OrderedDict({"主体": ["成年女性冒险者"]}),
+                ["无遮挡感"],
+            ),
+            intelligence.build_scene_relationship_graph(
+                OrderedDict(
+                    {"主体": ["成年女性冒险者"], "构图视角": ["环境遮挡"]}
+                )
+            ),
+            intelligence.build_scene_relationship_graph(
+                OrderedDict({"主体": ["成年女性冒险者"]}),
+                context_text="开场主体无遮挡，随后逐渐转为前景遮挡。",
+            ),
+        )
+        for ambiguous in ambiguous_graphs:
+            self.assertEqual(ambiguous["foreground_occlusion_constraint"], {})
+        for sample in samples.values():
+            feedback_only_graph = intelligence.build_scene_relationship_graph(
+                OrderedDict({"主体": ["成年女性冒险者"]}),
+                context_text=sample,
+            )
+            self.assertEqual(feedback_only_graph["foreground_occlusion_constraint"], {})
+
+    def test_foreground_occlusion_contract_reaches_all_model_paths(self) -> None:
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["成年女性冒险者"],
+                    "构图视角": ["主体无遮挡"],
+                    "场景背景": ["地下城遗迹"],
+                }
+            )
+        )
+        local_settings = {
+            "提示词语言": "纯中文",
+            "模型来源": "本地模型",
+            "模型调用基础来源": "本地模型",
+            "内置模型系列": "Qwen3.5-VL",
+            "内置主模型": "Qwen3.5-4B-Q4_K_M.gguf",
+            "智能模型策略": {"mode": "incremental_blend"},
+            "智能场景关系图": graph,
+        }
+        requests = (
+            model_refiner._compact_environment_context_for_model(graph),
+            model_refiner._compose_model_user_prompt("Skill 图像底稿。", local_settings),
+            model_refiner._compose_model_user_prompt(
+                "Skill 视频底稿。",
+                {**local_settings, "模型任务": "视频提示词"},
+            ),
+            model_refiner._compose_batch_prompt(
+                ["第一份底稿。", "第二份底稿。"],
+                local_settings,
+            ),
+            model_refiner._compose_model_user_prompt(
+                "API 图像底稿。",
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "智能场景关系图": graph,
+                },
+            ),
+            model_refiner._compose_model_user_prompt(
+                "API 视频底稿。",
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "模型任务": "视频提示词",
+                    "智能场景关系图": graph,
+                },
+            ),
+            model_refiner._compose_batch_prompt(
+                ["第一份完整底稿。", "第二份完整底稿。"],
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "智能场景关系图": graph,
+                },
+            ),
+        )
+        for request in requests:
+            self.assertIn("前景遮挡关系固定为主体无遮挡/轮廓清楚", request)
+            self.assertIn("任何前景物都不覆盖面部、双手或动作关节", request)
+            self.assertIn("门框、家具、植被、肩后人物", request)
+            self.assertIn("服装覆盖、局部动作交叠", request)
+            self.assertEqual(request.count("智能前景遮挡关系："), 1)
+            for forbidden in (
+                "前景遮挡关系固定为受控前景遮挡/框景",
+                "场景中已有前景元素覆盖主体次要边缘",
+                "遮挡顺序保持稳定一致",
+            ):
+                self.assertNotIn(forbidden, request)
+
+        open_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"], "动作姿态": ["站姿放松"]})
+        )
+        self.assertEqual(
+            model_refiner._foreground_occlusion_context_for_model(open_graph),
+            "",
+        )
+
+    def test_subject_support_state_removes_only_conflicting_soft_anchors(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["成年女性冒险者"],
+                "动作姿态": ["双脚稳定着地", "悬浮待机"],
+                "场景背景": ["地下城遗迹"],
+            }
+        )
+        custom = ["人物腾空", "高细节"]
+        context = "人物固定双脚稳定着地，不要悬浮待机或人物腾空。"
+        graph = intelligence.build_scene_relationship_graph(selected, custom, context_text=context)
+        constraint = graph["subject_support_state_constraint"]
+        issues = [
+            item for item in graph["coherence_issues"]
+            if item["kind"] == "context_subject_support_state_conflict"
+        ]
+        self.assertEqual(constraint["required_value"], "supported")
+        self.assertEqual(constraint["negated_values"], ["suspended"])
+        self.assertEqual(constraint["source"], "natural_context")
+        self.assertEqual(
+            [item["value"] for item in issues[0]["conflicting_anchors"]],
+            ["悬浮待机", "人物腾空"],
+        )
+
+        repaired, repaired_custom, report = intelligence.resolve_soft_scene_conflicts(
+            selected,
+            custom,
+            graph,
+            soft_tags=["悬浮待机", "人物腾空"],
+        )
+        rebuilt = intelligence.build_scene_relationship_graph(
+            repaired,
+            repaired_custom,
+            context_text=context,
+        )
+        self.assertEqual(repaired["动作姿态"], ["双脚稳定着地"])
+        self.assertEqual(repaired_custom, ["高细节"])
+        self.assertEqual(report["removed_count"], 2)
+        self.assertEqual(rebuilt["coherence_status"], "coherent")
+
+    def test_subject_support_feedback_and_non_subject_states_share_one_guard(self) -> None:
+        samples = {
+            "supported": "全画面主体重量通过双脚、膝部、髋部或躯干传递到场景中已有支撑面，承重点出现受压、形变或接触阴影反馈，身体重心投影落在支撑范围内。",
+            "suspended": "全画面主体整体轮廓与地面、座面或支撑面保持可见离地间隙，身体姿态、发丝衣摆与周围颗粒共同响应同一上升、飞行或浮力状态，投影与接触线索不形成虚假承重接触。",
+        }
+        english_samples = {
+            "supported": "Across the full frame, the subject's weight transfers through the feet, knees, hips, or torso to an existing support surface, compression, deformation, or contact-shadow feedback appears at the load-bearing points, and the body's projected center of mass falls within the support area.",
+            "suspended": "Throughout the entire image, the subject's complete silhouette keeps a visible gap from the ground, seat, or support surface, the body pose, hair, clothing, and surrounding particles respond to the same upward, flight, or buoyant force, and shadow or contact cues do not create false load-bearing contact.",
+        }
+        for value, sample in {
+            **samples,
+            **{f"en_{key}": text for key, text in english_samples.items()},
+        }.items():
+            expected = value.removeprefix("en_")
+            with self.subTest(detector=value):
+                self.assertEqual(
+                    set(intelligence.detect_subject_support_state_feedback(sample)),
+                    {expected},
+                )
+
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {"主体": ["成年女性冒险者"], "动作姿态": ["双脚稳定着地"]}
+            )
+        )
+        original = "冒险者双脚稳定着地，站在石门前。"
+        violation = intelligence.candidate_world_violation(
+            original,
+            original + samples["suspended"],
+            graph,
+        )
+        self.assertIn("主体支撑状态约束", violation)
+        self.assertIn("承重点、离地间隙、重心或接触阴影反馈", violation)
+        self.assertEqual(
+            intelligence.classify_repair_reason(violation)["kind"],
+            "subject_support_state",
+        )
+        self.assertEqual(
+            intelligence.candidate_world_violation(
+                original,
+                original + samples["supported"],
+                graph,
+            ),
+            "",
+        )
+
+        unrelated = (
+            "不要让全画面主体整体轮廓与支撑面保持可见离地间隙，身体姿态与衣摆响应浮力状态，投影不形成虚假承重接触。",
+            "悬浮水汽在远景中逐层衰减。",
+            "浮空城漂浮在云海上，人物状态没有指定。",
+            "泳池里漂浮花瓣环绕水面。",
+            "灰黑悬浮颗粒穿过光束。",
+        )
+        for sample in unrelated:
+            with self.subTest(unrelated=sample):
+                self.assertEqual(
+                    intelligence.detect_subject_support_state_feedback(sample),
+                    {},
+                )
+
+        ambiguous_graphs = (
+            intelligence.build_scene_relationship_graph(
+                OrderedDict({"场景背景": ["浮空城"]})
+            ),
+            intelligence.build_scene_relationship_graph(
+                OrderedDict({"道具世界观": ["浮空水晶"]})
+            ),
+            intelligence.build_scene_relationship_graph(
+                OrderedDict({"主体": ["成年女性冒险者"]}),
+                context_text="人物先双脚稳定着地，随后突然跃起腾空。",
+            ),
+            intelligence.build_scene_relationship_graph(
+                OrderedDict({"主体": ["潜水员"]}),
+                context_text="潜水员在水下游泳并保持中性浮力，没有规定地面接触。",
+            ),
+        )
+        for ambiguous in ambiguous_graphs:
+            self.assertEqual(ambiguous["subject_support_state_constraint"], {})
+        for sample in samples.values():
+            feedback_only_graph = intelligence.build_scene_relationship_graph(
+                OrderedDict({"主体": ["成年女性冒险者"]}),
+                context_text=sample,
+            )
+            self.assertEqual(feedback_only_graph["subject_support_state_constraint"], {})
+
+    def test_subject_support_state_contract_reaches_all_model_paths(self) -> None:
+        graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["成年女性冒险者"],
+                    "动作姿态": ["双脚稳定着地"],
+                    "场景背景": ["地下城遗迹"],
+                }
+            )
+        )
+        local_settings = {
+            "提示词语言": "纯中文",
+            "模型来源": "本地模型",
+            "模型调用基础来源": "本地模型",
+            "内置模型系列": "Qwen3.5-VL",
+            "内置主模型": "Qwen3.5-4B-Q4_K_M.gguf",
+            "智能模型策略": {"mode": "incremental_blend"},
+            "智能场景关系图": graph,
+        }
+        requests = (
+            model_refiner._compact_environment_context_for_model(graph),
+            model_refiner._compose_model_user_prompt("Skill 图像底稿。", local_settings),
+            model_refiner._compose_model_user_prompt(
+                "Skill 视频底稿。",
+                {**local_settings, "模型任务": "视频提示词"},
+            ),
+            model_refiner._compose_batch_prompt(
+                ["第一份底稿。", "第二份底稿。"],
+                local_settings,
+            ),
+            model_refiner._compose_model_user_prompt(
+                "API 图像底稿。",
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "智能场景关系图": graph,
+                },
+            ),
+            model_refiner._compose_model_user_prompt(
+                "API 视频底稿。",
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "模型任务": "视频提示词",
+                    "智能场景关系图": graph,
+                },
+            ),
+            model_refiner._compose_batch_prompt(
+                ["第一份完整底稿。", "第二份完整底稿。"],
+                {
+                    "提示词语言": "纯中文",
+                    "模型来源": "API接口",
+                    "智能场景关系图": graph,
+                },
+            ),
+        )
+        for request in requests:
+            self.assertIn("主体支撑状态固定为稳定承重/接触支撑面", request)
+            self.assertIn("主体重量通过双脚、膝部、髋部或躯干传递", request)
+            self.assertIn("椅子、台阶、平台、吊索、飞行器或法术支撑", request)
+            self.assertIn("起跳、落地、坐下、跪地、游泳、水下悬停", request)
+            self.assertEqual(request.count("智能主体支撑状态："), 1)
+            for forbidden in (
+                "主体支撑状态固定为整体离地/悬浮腾空",
+                "整体轮廓与地面、座面或支撑面保持可见离地间隙",
+                "不形成虚假承重接触",
+            ):
+                self.assertNotIn(forbidden, request)
+
+        open_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({"主体": ["成年女性冒险者"], "动作姿态": ["站姿放松"]})
+        )
+        self.assertEqual(
+            model_refiner._subject_support_state_context_for_model(open_graph),
+            "",
+        )
 
     def test_atmospheric_medium_context_removes_only_conflicting_soft_anchors(self) -> None:
         selected = OrderedDict(
@@ -7974,7 +11322,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v71")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(
             graph["atmospheric_medium_constraint"]["required_value"],
@@ -8228,7 +11576,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
             )
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v71")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["season_constraint"]["required_value"], "winter")
         self.assertNotIn("盛夏浓荫", payload["selected_tags_flat"])
