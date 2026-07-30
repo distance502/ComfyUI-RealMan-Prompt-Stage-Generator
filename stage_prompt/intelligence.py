@@ -9,7 +9,7 @@ import re
 from typing import Any, Iterable
 
 
-INTELLIGENCE_PROFILE_VERSION = "qwen-te-intelligence-v61"
+INTELLIGENCE_PROFILE_VERSION = "qwen-te-intelligence-v71"
 
 _GROUP_LIMITS = {
     "主体": 6,
@@ -466,6 +466,31 @@ _SUBJECT_ORIENTATION_LABELS = {
     "side": "侧面",
     "back": "背面",
 }
+SUBJECT_ORIENTATION_FEEDBACK_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
+    "front": (
+        re.compile(
+            r"(?:双眼|两眼)[^。！？.!?\n]{0,18}(?:同时|均|都)?[^。！？.!?\n]{0,8}(?:清晰)?可见[^。！？.!?\n]{0,24}(?:完整五官|面部中线|左右对称的脸部)|"
+            r"(?:完整五官|面部中线|左右对称的脸部)[^。！？.!?\n]{0,24}(?:双眼|两眼)[^。！？.!?\n]{0,16}(?:同时|均|都)?[^。！？.!?\n]{0,8}(?:清晰)?可见|"
+            r"\bboth eyes\b[^.!?\n]{0,24}\b(?:clearly )?visible\b[^.!?\n]{0,32}\b(?:full facial features|facial midline|symmetrical face)\b|"
+            r"\b(?:full facial features|facial midline|symmetrical face)\b[^.!?\n]{0,32}\bboth eyes\b[^.!?\n]{0,24}\b(?:clearly )?visible\b",
+            re.IGNORECASE,
+        ),
+    ),
+    "side": (
+        re.compile(
+            r"(?:只有|仅有|只露出)[^。！？.!?\n]{0,6}(?:一只眼睛|单眼)[^。！？.!?\n]{0,18}(?:可见|入镜)[^。！？.!?\n]{0,28}(?:鼻梁|鼻尖|下颌)[^。！？.!?\n]{0,16}(?:形成|构成|呈现)[^。！？.!?\n]{0,8}(?:单侧)?轮廓|"
+            r"\bonly one eye\b[^.!?\n]{0,24}\bvisible\b[^.!?\n]{0,36}\b(?:nose|nasal bridge|chin|jaw)\b[^.!?\n]{0,24}\b(?:profile|silhouette|outline)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    "back": (
+        re.compile(
+            r"(?:后脑|后脑勺)[^。！？.!?\n]{0,24}(?:双肩|肩背|背部)[^。！？.!?\n]{0,24}(?:朝向镜头|面向镜头|成为主要可见面)|"
+            r"\bback of (?:the )?head\b[^.!?\n]{0,36}\b(?:both shoulders|shoulders|upper back|back)\b[^.!?\n]{0,36}\b(?:faces? (?:the )?camera|forms? the primary visible surface)\b",
+            re.IGNORECASE,
+        ),
+    ),
+}
 _GENERIC_ORIENTATION_MARKERS = {"正面", "侧面", "背面"}
 _ORIENTATION_GLOBAL_SCOPE_RE = re.compile(
     r"(?:角色设定图|人物设定图|三视图|三幅视图|正侧背|正面侧面背面)",
@@ -477,6 +502,11 @@ _ORIENTATION_PREFIX_SCOPE_RE = re.compile(
 )
 _ORIENTATION_SUFFIX_SCOPE_RE = re.compile(
     r"^(?:视图|全身|构图|朝向|镜头|站姿|轮廓|[、，,；;。/])",
+    flags=re.IGNORECASE,
+)
+_OPEN_ORIENTATION_LAYOUT_RE = re.compile(
+    r"(?:角色设定图|人物设定图|三视图|三幅视图|正侧背|正面侧面背面|镜中视图|镜中倒影|镜前[^，,；;。！？.!?\n]{0,20}倒影|"
+    r"character sheet|character turnaround|front side back|mirror view|mirrored view)",
     flags=re.IGNORECASE,
 )
 SUBJECT_POSE_MARKERS: dict[str, tuple[str, ...]] = {
@@ -492,6 +522,43 @@ _SUBJECT_POSE_LABELS = {
     "kneeling": "跪姿",
     "lying": "躺姿",
     "crouching": "蹲姿",
+}
+SUBJECT_POSE_FEEDBACK_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
+    "standing": (
+        re.compile(
+            r"(?:人物|角色|主体)[^。！？.!?\n]{0,28}(?:双脚|两脚)[^。！？.!?\n]{0,18}(?:落地|着地|承重)[^。！？.!?\n]{0,28}(?:髋部|膝盖|双腿)[^。！？.!?\n]{0,18}(?:伸展|伸直|直立)|"
+            r"\b(?:subject|character)\b[^.!?\n]{0,36}\bboth feet\b[^.!?\n]{0,24}\b(?:planted|bear(?:ing)? weight|supporting the body)\b[^.!?\n]{0,36}\b(?:hips?|knees?|legs?)\b[^.!?\n]{0,24}\b(?:extended|straight|upright)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    "sitting": (
+        re.compile(
+            r"(?:人物|角色|主体)[^。！？.!?\n]{0,28}(?:臀部|髋部)[^。！？.!?\n]{0,18}(?:由|被)?(?:座面|座椅|椅面|台阶|石沿)[^。！？.!?\n]{0,14}(?:承托|支撑|托住)[^。！？.!?\n]{0,28}(?:双腿|双膝|膝盖)[^。！？.!?\n]{0,18}(?:向前|弯曲|垂落)|"
+            r"\b(?:subject|character)\b[^.!?\n]{0,36}\b(?:hips?|pelvis)\b[^.!?\n]{0,28}\b(?:supported|resting) (?:on|by) (?:the )?(?:seat|chair|step|ledge)\b[^.!?\n]{0,40}\b(?:legs?|knees?)\b[^.!?\n]{0,24}\b(?:bent|forward|hanging)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    "kneeling": (
+        re.compile(
+            r"(?:人物|角色|主体)[^。！？.!?\n]{0,28}(?:单膝|双膝|膝盖)[^。！？.!?\n]{0,18}(?:着地|触地|压在地面|跪压地面|以膝承重)|"
+            r"\b(?:subject|character)\b[^.!?\n]{0,36}\b(?:one knee|both knees|knees?)\b[^.!?\n]{0,24}\b(?:touch(?:es|ing)?|press(?:es|ing)? (?:against|into)|bear(?:s|ing)? weight on) (?:the )?(?:ground|floor)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    "lying": (
+        re.compile(
+            r"(?:人物|角色|主体)[^。！？.!?\n]{0,28}(?:背部|胸腹|躯干|身体侧面)[^。！？.!?\n]{0,18}(?:贴住|接触|由|被)[^。！？.!?\n]{0,8}(?:地面|床面|平台)[^。！？.!?\n]{0,16}(?:支撑|承托|托住|展开)|"
+            r"\b(?:subject|character)\b[^.!?\n]{0,36}\b(?:back|torso|chest|side of the body)\b[^.!?\n]{0,28}\b(?:rests?|lies?|is supported) (?:flat )?(?:on|by) (?:the )?(?:ground|floor|bed|platform)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    "crouching": (
+        re.compile(
+            r"(?:人物|角色|主体)[^。！？.!?\n]{0,28}(?:髋部|重心)[^。！？.!?\n]{0,18}(?:降低|下沉|贴近地面)[^。！？.!?\n]{0,28}(?:双膝|膝盖)[^。！？.!?\n]{0,18}(?:深度弯曲|大幅弯曲)[^。！？.!?\n]{0,28}(?:双脚|脚掌)[^。！？.!?\n]{0,14}(?:承重|着地)|"
+            r"\b(?:subject|character)\b[^.!?\n]{0,36}\b(?:hips?|center of gravity)\b[^.!?\n]{0,24}\b(?:lowered|close to the ground)\b[^.!?\n]{0,36}\bknees?\b[^.!?\n]{0,24}\bdeeply bent\b[^.!?\n]{0,36}\bfeet\b[^.!?\n]{0,20}\b(?:planted|bearing weight)\b",
+            re.IGNORECASE,
+        ),
+    ),
 }
 SHOT_SCALE_MARKERS: dict[str, tuple[str, ...]] = {
     "closeup": (
@@ -516,6 +583,36 @@ _SHOT_SCALE_LABELS = {
     "medium": "半身/中景",
     "full_body": "全身",
     "wide": "远景",
+}
+SHOT_SCALE_FEEDBACK_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
+    "closeup": (
+        re.compile(
+            r"(?:画面|取景|构图)[^。！？.!?\n]{0,20}(?:边界|裁切|下缘)[^。！？.!?\n]{0,16}(?:收在|停在|裁到)[^。！？.!?\n]{0,10}(?:肩部|锁骨)[^。！？.!?\n]{0,28}(?:脸部|面部)[^。！？.!?\n]{0,16}(?:占据|填满)[^。！？.!?\n]{0,10}(?:大部分|主要)(?:画幅|面积)|"
+            r"\b(?:frame|framing)\b[^.!?\n]{0,28}\b(?:ends?|crops?|stops?) just below (?:the )?(?:shoulders|collarbone)\b[^.!?\n]{0,40}\b(?:face|facial area)\b[^.!?\n]{0,24}\b(?:fills?|occupies?) most of (?:the )?frame\b",
+            re.IGNORECASE,
+        ),
+    ),
+    "medium": (
+        re.compile(
+            r"(?:画面|取景|构图)[^。！？.!?\n]{0,20}(?:从|覆盖)[^。！？.!?\n]{0,8}(?:头顶|头部)[^。！？.!?\n]{0,18}(?:延伸到|收至|裁到)[^。！？.!?\n]{0,10}(?:腰部|胯部|大腿中段)[^。！？.!?\n]{0,28}(?:躯干|双臂|上半身)[^。！？.!?\n]{0,18}(?:完整|清晰)(?:可见|入镜)?|"
+            r"\b(?:frame|framing)\b[^.!?\n]{0,28}\b(?:runs?|extends?|crops?) from (?:the )?(?:head|top of the head) to (?:the )?(?:waist|hips|mid-thigh)\b[^.!?\n]{0,40}\b(?:torso|arms|upper body)\b[^.!?\n]{0,24}\b(?:fully |clearly )?(?:visible|framed)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    "full_body": (
+        re.compile(
+            r"(?:人物|角色|主体)[^。！？.!?\n]{0,24}(?:从头顶到双脚|从头到脚|头顶至双脚)[^。！？.!?\n]{0,16}(?:完整入镜|完整可见|全部纳入画面)[^。！？.!?\n]{0,28}(?:双脚|鞋底)[^。！？.!?\n]{0,18}(?:位于|留在|保持在)[^。！？.!?\n]{0,10}(?:画面|取景|构图)(?:边界)?(?:内|以内)|"
+            r"\b(?:subject|character)\b[^.!?\n]{0,32}\b(?:head to toe|from head to feet)\b[^.!?\n]{0,24}\b(?:fully visible|fully contained|inside the frame)\b[^.!?\n]{0,40}\b(?:both feet|shoes)\b[^.!?\n]{0,24}\b(?:inside|within) (?:the )?frame\b",
+            re.IGNORECASE,
+        ),
+    ),
+    "wide": (
+        re.compile(
+            r"(?:人物|角色|主体)[^。！？.!?\n]{0,24}(?:只占|仅占)[^。！？.!?\n]{0,10}(?:画面|画幅|构图)[^。！？.!?\n]{0,10}(?:很小|小比例|少量)[^。！？.!?\n]{0,28}(?:环境|场景|空间)[^。！？.!?\n]{0,16}(?:占据|覆盖|构成)[^。！？.!?\n]{0,10}(?:大部分|主要)(?:画幅|面积|视觉信息)|"
+            r"\b(?:subject|character)\b[^.!?\n]{0,28}\boccupies? (?:only )?a small (?:part|fraction|portion) of (?:the )?frame\b[^.!?\n]{0,40}\b(?:environment|setting|space)\b[^.!?\n]{0,24}\b(?:fills?|occupies?|dominates?) most of (?:the )?frame\b",
+            re.IGNORECASE,
+        ),
+    ),
 }
 _GENERIC_SHOT_SCALE_MARKERS = {"半身", "全身", "远景"}
 _SHOT_SCALE_GLOBAL_SCOPE_RE = re.compile(
@@ -556,6 +653,36 @@ _CAMERA_ANGLE_LABELS = {
     "high_angle": "高角度俯拍",
     "top_down": "顶视/鸟瞰",
 }
+CAMERA_ANGLE_FEEDBACK_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
+    "low_angle": (
+        re.compile(
+            r"(?:摄影机|摄像机|镜头|机位)[^。！？.!?\n]{0,24}(?:低于|处于)[^。！？.!?\n]{0,12}(?:视线|眼平线|眼睛)[^。！？.!?\n]{0,36}(?:下颌|下巴)(?:底面|下侧|下方)[^。！？.!?\n]{0,12}(?:可见|显露|入镜)[^。！？.!?\n]{0,36}(?:垂直线|竖线|垂直结构)[^。！？.!?\n]{0,16}(?:向上汇聚|朝上汇聚|上方汇聚)|"
+            r"\b(?:camera|lens)\b[^.!?\n]{0,32}\bbelow (?:the )?(?:subject(?:'s)? )?(?:eye line|eyes)\b[^.!?\n]{0,40}\b(?:underside|bottom) of (?:the )?(?:chin|jaw)\b[^.!?\n]{0,20}\b(?:visible|shown)\b[^.!?\n]{0,40}\bverticals?\b[^.!?\n]{0,20}\bconverge(?:s|d)? upward\b",
+            re.IGNORECASE,
+        ),
+    ),
+    "eye_level": (
+        re.compile(
+            r"(?:镜头|机位|镜头轴线|摄影机轴线)[^。！？.!?\n]{0,20}(?:与|对齐)[^。！？.!?\n]{0,10}(?:双眼|眼睛|视线|眼平线)[^。！？.!?\n]{0,36}(?:地平线|水平线)[^。！？.!?\n]{0,16}(?:位于|保持在|对齐)[^。！？.!?\n]{0,10}(?:眼高|眼睛高度|视线高度)[^。！？.!?\n]{0,36}(?:垂直线|竖线|垂直结构)[^。！？.!?\n]{0,16}(?:保持中性|没有倾斜|不发生汇聚|平直)|"
+            r"\b(?:lens|camera) axis\b[^.!?\n]{0,28}\b(?:aligned|level) with (?:the )?(?:subject(?:'s)? )?(?:eyes|eye line)\b[^.!?\n]{0,40}\bhorizon\b[^.!?\n]{0,20}\bat eye (?:height|level)\b[^.!?\n]{0,40}\bverticals?\b[^.!?\n]{0,20}\b(?:remain(?:s)? neutral|stay(?:s)? neutral|are neutral)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    "high_angle": (
+        re.compile(
+            r"(?:摄影机|摄像机|镜头|机位)[^。！？.!?\n]{0,24}(?:高于|处于)[^。！？.!?\n]{0,12}(?:视线|眼平线|眼睛)[^。！？.!?\n]{0,36}(?:头顶|头冠|肩部上表面|双肩上表面)[^。！？.!?\n]{0,16}(?:可见|显露|入镜)[^。！？.!?\n]{0,36}(?:地面|地表)[^。！？.!?\n]{0,18}(?:向主体后方展开|在主体后方展开|向后铺开)|"
+            r"\b(?:camera|lens)\b[^.!?\n]{0,32}\babove (?:the )?(?:subject(?:'s)? )?(?:eye line|eyes)\b[^.!?\n]{0,40}\b(?:crown|top of (?:the )?head|tops? of (?:the )?shoulders)\b[^.!?\n]{0,20}\b(?:visible|shown)\b[^.!?\n]{0,40}\bground\b[^.!?\n]{0,24}\b(?:expands?|extends?|opens?) behind (?:the )?subject\b",
+            re.IGNORECASE,
+        ),
+    ),
+    "top_down": (
+        re.compile(
+            r"(?:摄影机|摄像机|镜头|机位)(?:轴线)?[^。！？.!?\n]{0,24}(?:垂直向下|竖直向下|正对地面)[^。！？.!?\n]{0,36}(?:头顶|顶部表面|朝上表面)[^。！？.!?\n]{0,16}(?:占据|成为|构成)[^。！？.!?\n]{0,12}(?:主要|大部分)[^。！？.!?\n]{0,12}(?:画面|视觉信息)[^。！？.!?\n]{0,36}(?:地面|地平面|地表)[^。！？.!?\n]{0,16}(?:铺满|填满|占满)(?:画面|画幅)|"
+            r"\b(?:camera|lens) axis\b[^.!?\n]{0,28}\bpoints? vertically downward\b[^.!?\n]{0,40}\b(?:crown|top surfaces?|upward-facing surfaces?)\b[^.!?\n]{0,24}\b(?:dominates?|fills?) (?:the )?frame\b[^.!?\n]{0,40}\bground plane\b[^.!?\n]{0,20}\b(?:fills?|covers?) (?:the )?frame\b",
+            re.IGNORECASE,
+        ),
+    ),
+}
 _GENERIC_CAMERA_ANGLE_MARKERS = {"低角度", "高角度", "low-angle", "low angle", "high-angle", "high angle"}
 _CAMERA_ANGLE_GLOBAL_SCOPE_RE = re.compile(
     r"(?:机位|镜头|摄影机|摄像机|拍摄|取景|构图|视角|camera|shot|view)",
@@ -594,6 +721,29 @@ _LIGHT_TEMPERATURE_LABELS = {
     "cool": "冷色温",
     "neutral": "中性色温",
 }
+LIGHT_TEMPERATURE_FEEDBACK_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
+    "warm": (
+        re.compile(
+            r"(?:全局|整体)(?:画面)?(?:白点|白平衡)[^。！？.!?\n]{0,18}(?:偏向|移向|落在)[^。！？.!?\n]{0,10}(?:琥珀|橙金|黄橙)[^。！？.!?\n]{0,36}(?:中性白色|白色参考|中性灰|灰色表面)[^。！？.!?\n]{0,28}(?:一致|统一|持续)[^。！？.!?\n]{0,12}(?:偏黄|琥珀染色|橙金染色|暖染)|"
+            r"\b(?:global|overall) white point\b[^.!?\n]{0,28}\b(?:shifts?|leans?|moves?) (?:toward|to)\b[^.!?\n]{0,16}\b(?:amber|orange-gold|yellow-orange)\b[^.!?\n]{0,44}\b(?:neutral whites?|neutral grays?|neutral greys?|white reference surfaces?)\b[^.!?\n]{0,32}\b(?:carry|show|have) (?:a )?consistent (?:amber|golden|yellow) cast\b",
+            re.IGNORECASE,
+        ),
+    ),
+    "cool": (
+        re.compile(
+            r"(?:全局|整体)(?:画面)?(?:白点|白平衡)[^。！？.!?\n]{0,18}(?:偏向|移向|落在)[^。！？.!?\n]{0,10}(?:蓝青|青蓝|蓝灰)[^。！？.!?\n]{0,36}(?:中性白色|白色参考|中性灰|灰色表面)[^。！？.!?\n]{0,28}(?:一致|统一|持续)[^。！？.!?\n]{0,12}(?:偏蓝|蓝青染色|青蓝染色|冷染)|"
+            r"\b(?:global|overall) white point\b[^.!?\n]{0,28}\b(?:shifts?|leans?|moves?) (?:toward|to)\b[^.!?\n]{0,16}\b(?:blue-cyan|cyan-blue|blue-gray|blue-grey)\b[^.!?\n]{0,44}\b(?:neutral whites?|neutral grays?|neutral greys?|white reference surfaces?)\b[^.!?\n]{0,32}\b(?:carry|show|have) (?:a )?consistent (?:blue|cyan|blue-cyan) cast\b",
+            re.IGNORECASE,
+        ),
+    ),
+    "neutral": (
+        re.compile(
+            r"(?:全局|整体)(?:画面)?(?:白点|白平衡)[^。！？.!?\n]{0,20}(?:保持|呈现)[^。！？.!?\n]{0,12}(?:色彩平衡|准确白平衡|无偏色)[^。！？.!?\n]{0,36}(?:中性白色|白色参考|中性灰|灰色表面)[^。！？.!?\n]{0,28}(?:没有|不带|不呈现)[^。！？.!?\n]{0,12}(?:持续|统一|整体)?(?:综合色偏|偏色|染色)|"
+            r"\b(?:global|overall) white point\b[^.!?\n]{0,28}\b(?:remains?|stays?|is) (?:chromatically )?balanced\b[^.!?\n]{0,44}\b(?:neutral whites?|neutral grays?|neutral greys?|white reference surfaces?)\b[^.!?\n]{0,32}\b(?:show|carry|have) no (?:consistent |overall )?colou?r cast\b",
+            re.IGNORECASE,
+        ),
+    ),
+}
 _GENERIC_LIGHT_TEMPERATURE_MARKERS = {"暖色", "冷色"}
 _LIGHT_TEMPERATURE_GLOBAL_SCOPE_RE = re.compile(
     r"(?:色温|色调|调色|配色|灯光|光线|照明|主光|辅光|轮廓光|氛围|"
@@ -629,6 +779,22 @@ _COLOR_RENDERING_LABELS = {
     "monochrome": "黑白/单色",
     "full_color": "全彩",
 }
+COLOR_RENDERING_FEEDBACK_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
+    "monochrome": (
+        re.compile(
+            r"(?:全局|整体|全幅|整个画面)(?:综合色度|色彩信息|颜色通道)[^。！？.!?\n]{0,18}(?:归零|消失|关闭)[^。！？.!?\n]{0,28}(?:所有|各个|可见)(?:表面|区域)[^。！？.!?\n]{0,18}(?:只由|仅由)[^。！？.!?\n]{0,12}(?:亮度|明度)[^。！？.!?\n]{0,18}(?:层级|差异)[^。！？.!?\n]{0,12}(?:区分|表达)[^。！？.!?\n]{0,24}(?:不再形成|没有)(?:可辨色相|独立色相)|"
+            r"\b(?:global|overall) chroma\b[^.!?\n]{0,18}\b(?:is absent|disappears|is removed)\b[^.!?\n]{0,36}\b(?:every|all) (?:visible )?surfaces?\b[^.!?\n]{0,24}\b(?:represented|defined) only by luminance\b[^.!?\n]{0,36}\b(?:no distinct hues?|no recognizable color separation)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    "full_color": (
+        re.compile(
+            r"(?:红、蓝、绿|红色[^。！？.!?\n]{0,10}蓝色[^。！？.!?\n]{0,10}绿色)(?:三个)?(?:区域|表面|色块)[^。！？.!?\n]{0,24}(?:保持|呈现|拥有)[^。！？.!?\n]{0,16}(?:彼此可辨|独立|清晰分离)[^。！？.!?\n]{0,16}(?:色相|色彩)[^。！？.!?\n]{0,20}(?:与|和)[^。！？.!?\n]{0,8}(?:饱和度|综合色度)|"
+            r"\bred, blue, and green\b[^.!?\n]{0,20}\b(?:regions?|areas?|surfaces?)\b[^.!?\n]{0,28}\b(?:retain|keep|show)\b[^.!?\n]{0,18}\b(?:distinct|separate) hues?\b[^.!?\n]{0,20}\b(?:and|with)\b[^.!?\n]{0,12}\b(?:preserved )?(?:saturation|chroma)\b",
+            re.IGNORECASE,
+        ),
+    ),
+}
 _SELECTIVE_COLOR_RE = re.compile(
     r"(?:局部彩色|选择性色彩|单色点缀|只保留[^，,；;。！？.!?\n]{0,12}(?:红|橙|黄|绿|青|蓝|紫|粉|金|银)色|"
     r"selective colou?r|colou?r splash|single colou?r accent)",
@@ -651,6 +817,22 @@ DEPTH_OF_FIELD_MARKERS: dict[str, tuple[str, ...]] = {
 _DEPTH_OF_FIELD_LABELS = {
     "shallow": "浅景深",
     "deep": "深景深/深焦",
+}
+DEPTH_OF_FIELD_FEEDBACK_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
+    "shallow": (
+        re.compile(
+            r"(?:主体|主要对象)[^。！？.!?\n]{0,24}(?:所在)?焦平面[^。！？.!?\n]{0,24}(?:细节|纹理|边缘)[^。！？.!?\n]{0,12}(?:保持|呈现)[^。！？.!?\n]{0,10}(?:锐利|清晰)[^。！？.!?\n]{0,36}(?:离开|远离)焦平面[^。！？.!?\n]{0,24}(?:前景|背景)[^。！？.!?\n]{0,12}(?:与|和|及)[^。！？.!?\n]{0,10}(?:背景|前景)[^。！？.!?\n]{0,24}(?:迅速|逐渐)[^。！？.!?\n]{0,12}(?:失去|衰减)[^。！？.!?\n]{0,10}(?:细节|纹理)|"
+            r"\b(?:subject|main object)\b[^.!?\n]{0,28}\b(?:on|within) (?:the )?focus plane\b[^.!?\n]{0,28}\b(?:details?|textures?|edges?)\b[^.!?\n]{0,16}\b(?:remain|stay|are) sharp\b[^.!?\n]{0,44}\b(?:foreground and background|background and foreground)\b[^.!?\n]{0,32}\b(?:lose|shed) (?:fine )?detail\b[^.!?\n]{0,24}\baway from (?:the )?focus plane\b",
+            re.IGNORECASE,
+        ),
+    ),
+    "deep": (
+        re.compile(
+            r"(?:近处前景|近距离前景)[^。！？.!?\n]{0,18}(?:中距离主体|中景主体|中距离区域)[^。！？.!?\n]{0,18}(?:远处背景|远距离背景)[^。！？.!?\n]{0,28}(?:纹理|边缘|细节)[^。！？.!?\n]{0,16}(?:保持|呈现)[^。！？.!?\n]{0,12}(?:同等|一致)[^。！？.!?\n]{0,8}(?:清晰|可读)[^。！？.!?\n]{0,28}(?:各距离|所有距离|不同距离)(?:层级)?[^。！？.!?\n]{0,16}(?:同时可辨|同时清楚|均可辨认)|"
+            r"\bnear foreground\b[^.!?\n]{0,24}\b(?:mid-distance subject|middle distance|midground)\b[^.!?\n]{0,24}\bfar background\b[^.!?\n]{0,36}\b(?:textures?|edges?|details?)\b[^.!?\n]{0,20}\b(?:remain|stay|are) equally (?:clear|readable|resolved)\b[^.!?\n]{0,36}\b(?:all|each) distance (?:layer|plane)s?\b[^.!?\n]{0,20}\b(?:remain|are) simultaneously discernible\b",
+            re.IGNORECASE,
+        ),
+    ),
 }
 _COMPLEX_FOCUS_RE = re.compile(
     r"(?:分区对焦|双焦点|分割焦点|移焦|焦点转移|焦点拉动|焦点从[^，,；;。！？.!?\n]{0,32}(?:转向|移动到)|"
@@ -676,6 +858,22 @@ _LIGHTING_QUALITY_LABELS = {
     "hard": "硬光",
     "soft": "柔光/漫射光",
 }
+LIGHTING_QUALITY_FEEDBACK_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
+    "hard": (
+        re.compile(
+            r"(?:主体|主要对象)(?:的)?主要投影[^。！？.!?\n]{0,20}(?:边缘|边界)[^。！？.!?\n]{0,12}(?:清楚|清晰|锐利)[^。！？.!?\n]{0,8}(?:且|而|并且)[^。！？.!?\n]{0,8}(?:狭窄|窄)[^。！？.!?\n]{0,32}(?:明暗交界|明暗过渡)[^。！？.!?\n]{0,20}(?:很短|极短|狭小)[^。！？.!?\n]{0,10}(?:距离|范围)[^。！？.!?\n]{0,12}(?:内完成|内结束)[^。！？.!?\n]{0,32}(?:材质)?高光[^。！？.!?\n]{0,16}(?:集中|收束)[^。！？.!?\n]{0,12}(?:小面积|窄小)(?:亮斑|亮区)|"
+            r"\b(?:subject|main object)(?:'s)? primary shadow\b[^.!?\n]{0,28}\b(?:edge|boundary)\b[^.!?\n]{0,16}\b(?:is|remains) (?:crisp|sharp) and narrow\b[^.!?\n]{0,40}\btonal transition\b[^.!?\n]{0,24}\b(?:completes|occurs) over (?:a )?(?:very )?short distance\b[^.!?\n]{0,40}\b(?:material )?highlights?\b[^.!?\n]{0,20}\b(?:concentrate|contract) into (?:a )?small bright (?:spot|area)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    "soft": (
+        re.compile(
+            r"(?:主体|主要对象)(?:的)?主要投影[^。！？.!?\n]{0,20}(?:边缘|边界)[^。！？.!?\n]{0,12}(?:宽阔|宽大)[^。！？.!?\n]{0,8}(?:且|而|并且)[^。！？.!?\n]{0,8}(?:渐变|羽化)[^。！？.!?\n]{0,32}(?:明暗交界|明暗过渡)[^。！？.!?\n]{0,20}(?:较大|宽广|较宽)[^。！？.!?\n]{0,10}(?:距离|范围)[^。！？.!?\n]{0,12}(?:内完成|内展开|内延伸)[^。！？.!?\n]{0,32}(?:材质)?高光[^。！？.!?\n]{0,16}(?:扩散|铺开)[^。！？.!?\n]{0,12}(?:宽面积|大面积)(?:亮斑|亮区)|"
+            r"\b(?:subject|main object)(?:'s)? primary shadow\b[^.!?\n]{0,28}\b(?:edge|boundary)\b[^.!?\n]{0,16}\b(?:is|remains) broad and (?:feathered|gradual)\b[^.!?\n]{0,40}\btonal transition\b[^.!?\n]{0,24}\b(?:extends|spreads) across (?:a )?(?:wide|broad) range\b[^.!?\n]{0,40}\b(?:material )?highlights?\b[^.!?\n]{0,20}\b(?:spread|diffuse) into (?:a )?(?:wide|broad) bright area\b",
+            re.IGNORECASE,
+        ),
+    ),
+}
 MOTION_RENDERING_MARKERS: dict[str, tuple[str, ...]] = {
     "frozen": (
         "高速快门凝固动作", "高速快门冻结", "高速快门", "动作冻结", "凝固动作", "瞬间凝固",
@@ -693,6 +891,22 @@ MOTION_RENDERING_MARKERS: dict[str, tuple[str, ...]] = {
 _MOTION_RENDERING_LABELS = {
     "frozen": "高速快门凝固",
     "motion_trail": "运动模糊/慢门拖影",
+}
+MOTION_RENDERING_FEEDBACK_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
+    "frozen": (
+        re.compile(
+            r"(?:运动中的|移动中的)(?:主体|对象)[^。！？.!?\n]{0,18}(?:轮廓|边缘)[^。！？.!?\n]{0,12}(?:保持|呈现)[^。！？.!?\n]{0,10}(?:单一|唯一)[^。！？.!?\n]{0,8}(?:清楚|清晰)[^。！？.!?\n]{0,32}(?:动作部件|运动部件|肢体)[^。！？.!?\n]{0,24}(?:连续路径|运动路径)[^。！？.!?\n]{0,16}(?:只占|位于)[^。！？.!?\n]{0,10}(?:一个|单个)[^。！？.!?\n]{0,8}(?:离散位置|确定位置)[^。！？.!?\n]{0,32}(?:动作阶段|整个动作)[^。！？.!?\n]{0,16}(?:呈现|停留在)[^。！？.!?\n]{0,12}(?:同一|一个)[^。！？.!?\n]{0,8}(?:确定瞬间|确定相位)|"
+            r"\b(?:moving subject|moving object)\b[^.!?\n]{0,28}\b(?:outline|edges?)\b[^.!?\n]{0,16}\b(?:remains?|stays?|are) single and (?:clear|crisp)\b[^.!?\n]{0,40}\b(?:moving parts?|limbs?)\b[^.!?\n]{0,28}\b(?:occupy|hold) one discrete position\b[^.!?\n]{0,40}\b(?:action phase|entire action)\b[^.!?\n]{0,24}\b(?:shows?|presents?) one definite instant\b",
+            re.IGNORECASE,
+        ),
+    ),
+    "motion_trail": (
+        re.compile(
+            r"(?:运动|移动)(?:主体|对象)[^。！？.!?\n]{0,20}(?:沿|顺着)[^。！？.!?\n]{0,12}(?:移动方向|运动方向)[^。！？.!?\n]{0,18}(?:留下|形成)[^。！？.!?\n]{0,12}(?:连续|连贯)[^。！？.!?\n]{0,10}(?:半透明)?(?:位移带|轮廓带)[^。！？.!?\n]{0,32}(?:起点|初始位置)[^。！？.!?\n]{0,12}(?:与|和)[^。！？.!?\n]{0,10}(?:终点|最终位置)[^。！？.!?\n]{0,22}(?:轨迹|路径)[^。！？.!?\n]{0,14}(?:连接|连成一体)[^。！？.!?\n]{0,32}(?:点状亮光|点光|亮点)[^。！？.!?\n]{0,18}(?:被拉成|延伸为)[^。！？.!?\n]{0,10}(?:长线|线状亮带)|"
+            r"\b(?:moving subject|moving object)\b[^.!?\n]{0,28}\b(?:leaves?|forms?) (?:a )?continuous (?:translucent )?(?:displacement|outline) band\b[^.!?\n]{0,40}\b(?:start|initial position)\b[^.!?\n]{0,20}\b(?:and|to) (?:the )?(?:end|final position)\b[^.!?\n]{0,28}\b(?:connected|linked) by (?:the )?same directional path\b[^.!?\n]{0,40}\bpoint lights?\b[^.!?\n]{0,20}\b(?:stretch|extend) into long lines?\b",
+            re.IGNORECASE,
+        ),
+    ),
 }
 _PANNING_MOTION_RE = re.compile(
     r"(?:追焦拍摄|追随摇摄|摇摄追随|横向摇摄|主体清晰[^，,；;。！？.!?\n]{0,32}背景[^，,；;。！？.!?\n]{0,16}(?:模糊|拖影)|"
@@ -775,6 +989,49 @@ _KEY_LIGHT_DIRECTION_LABELS = {
     "side": "侧向主光",
     "back": "逆光/背后主光",
     "top": "顶部主光",
+}
+# Candidate-only physical feedback. These patterns do not create a user
+# constraint; they only expose a model candidate that implies another key
+# light direction without naming that direction directly.
+KEY_LIGHT_DIRECTION_FEEDBACK_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
+    "front": (
+        re.compile(
+            r"(?:主体|人物|角色)[^。！？.!?\n]{0,24}(?:投影|主阴影)[^。！？.!?\n]{0,18}(?:收在|落在|延伸到?)[^。！？.!?\n]{0,8}(?:身后|正后方)|"
+            r"\b(?:the )?(?:subject|character)'?s? (?:cast |main )?shadow\b[^.!?\n]{0,32}\b(?:falls?|extends?|stays?) directly behind\b",
+            re.IGNORECASE,
+        ),
+    ),
+    "side": (
+        re.compile(
+            r"(?:面部|脸部|主体|人物)[^。！？.!?\n]{0,24}(?:一侧|一边)[^。！？.!?\n]{0,16}(?:受光|明亮|照亮)[^。！？.!?\n]{0,24}(?:另一侧|另一边|对侧)[^。！？.!?\n]{0,16}(?:入暗|沉入阴影|保持阴影|压暗)|"
+            r"\b(?:one side of (?:the )?(?:face|subject|character))\b[^.!?\n]{0,32}\b(?:lit|illuminated|bright)\b[^.!?\n]{0,32}\b(?:opposite|other) side\b[^.!?\n]{0,24}\b(?:shadow|darkness|dark)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    "back": (
+        re.compile(
+            r"(?:主体|人物|角色|面部|脸部)[^。！？.!?\n]{0,24}(?:迎镜头一面|正面|面部)[^。！？.!?\n]{0,16}(?:沉入阴影|保持阴影|相对压暗)[^。！？.!?\n]{0,28}(?:轮廓|边缘)[^。！？.!?\n]{0,16}(?:亮线|高光|勾亮|发亮)|"
+            r"\b(?:front|camera-facing side) of (?:the )?(?:subject|character|face)\b[^.!?\n]{0,32}\b(?:remains?|falls?|stays?) (?:in )?(?:shadow|dark)\b[^.!?\n]{0,40}\b(?:rim|edge|silhouette) (?:highlight|highlights|light|glow)\b",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"(?:主体|人物|角色)[^。！？.!?\n]{0,24}(?:投影|主阴影)[^。！？.!?\n]{0,18}(?:朝向|延伸向|伸向)[^。！？.!?\n]{0,8}(?:镜头|前景)|"
+            r"\b(?:the )?(?:subject|character)'?s? (?:cast |main )?shadow\b[^.!?\n]{0,32}\b(?:extends?|reaches?|falls?) toward (?:the )?(?:camera|foreground)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    "top": (
+        re.compile(
+            r"(?:眼窝|下颌|眉骨)[^。！？.!?\n]{0,18}(?:下方|下侧)?[^。！？.!?\n]{0,12}(?:形成|留下|压出)[^。！？.!?\n]{0,10}(?:向下|垂直)?(?:阴影|暗部)|"
+            r"\b(?:eye sockets?|brow ridge|under (?:the )?chin)\b[^.!?\n]{0,28}\b(?:cast|form|hold|show) (?:a )?(?:downward |vertical )?(?:shadow|shadows|darkness)\b",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"(?:脚下|足下|主体正下方)[^。！？.!?\n]{0,18}(?:阴影|投影)[^。！？.!?\n]{0,16}(?:紧凑|短促|收束|集中)|"
+            r"\b(?:compact|short|tight) (?:cast )?shadow\b[^.!?\n]{0,24}\b(?:directly )?(?:beneath|under) (?:the )?(?:feet|subject|character)\b",
+            re.IGNORECASE,
+        ),
+    ),
 }
 _COMPLEX_LIGHT_DIRECTION_RE = re.compile(
     r"(?:侧逆光|侧后方(?:主)?光|三点布光|交叉布光|双侧布光|多方向布光|多灯位|"
@@ -1709,6 +1966,24 @@ def detect_subject_orientation(text: Any) -> dict[str, list[str]]:
     return _detect_subject_orientation(text, negated=False)
 
 
+def detect_subject_orientation_feedback(text: Any) -> dict[str, list[str]]:
+    source = _clean(text)
+    folded = source.casefold()
+    hits: dict[str, list[str]] = {}
+    for value, patterns in SUBJECT_ORIENTATION_FEEDBACK_PATTERNS.items():
+        evidence: list[str] = []
+        for pattern in patterns:
+            for match in pattern.finditer(source):
+                if _marker_match_is_negated(folded, match.start()):
+                    continue
+                fragment = _clean(match.group(0))
+                if fragment and fragment not in evidence:
+                    evidence.append(fragment)
+        if evidence:
+            hits[value] = evidence
+    return hits
+
+
 def detect_negated_subject_orientation(text: Any) -> dict[str, list[str]]:
     return _detect_subject_orientation(text, negated=True)
 
@@ -1732,6 +2007,41 @@ def _context_subject_orientation_constraint(text: Any) -> dict[str, Any]:
         "negated_labels": [_SUBJECT_ORIENTATION_LABELS.get(value, value) for value in negated_values],
         "positive_evidence": {value: list(positive.get(value, [])) for value in positive_values},
         "negated_evidence": {value: list(negated.get(value, [])) for value in negated_values},
+        "source": "natural_context",
+    }
+
+
+def _resolve_subject_orientation_constraint(
+    context_text: Any,
+    selected_values: Iterable[Any],
+) -> dict[str, Any]:
+    context = _clean(context_text)
+    context_positive = _detect_subject_orientation(
+        context,
+        negated=False,
+        require_context_scope=True,
+    )
+    if len(context_positive) > 1 or _OPEN_ORIENTATION_LAYOUT_RE.search(context):
+        return {}
+    context_constraint = _context_subject_orientation_constraint(context)
+    if context_constraint:
+        return context_constraint
+    selected_text = "，".join(_unique(selected_values, 32))
+    if _OPEN_ORIENTATION_LAYOUT_RE.search(selected_text):
+        return {}
+    positive = detect_subject_orientation(selected_text)
+    if len(positive) != 1:
+        return {}
+    required = next(iter(positive))
+    return {
+        "required_value": required,
+        "required_label": _SUBJECT_ORIENTATION_LABELS.get(required, required),
+        "positive_values": [required],
+        "negated_values": [],
+        "negated_labels": [],
+        "positive_evidence": {required: list(positive.get(required, []))},
+        "negated_evidence": {},
+        "source": "selected_state",
     }
 
 
@@ -1820,6 +2130,24 @@ def detect_subject_pose(text: Any) -> dict[str, list[str]]:
     return _detect_exclusive_visual_axis(text, SUBJECT_POSE_MARKERS, negated=False)
 
 
+def detect_subject_pose_feedback(text: Any) -> dict[str, list[str]]:
+    source = _clean(text)
+    folded = source.casefold()
+    hits: dict[str, list[str]] = {}
+    for value, patterns in SUBJECT_POSE_FEEDBACK_PATTERNS.items():
+        evidence: list[str] = []
+        for pattern in patterns:
+            for match in pattern.finditer(source):
+                if _marker_match_is_negated(folded, match.start()):
+                    continue
+                fragment = _clean(match.group(0))
+                if fragment and fragment not in evidence:
+                    evidence.append(fragment)
+        if evidence:
+            hits[value] = evidence
+    return hits
+
+
 def detect_negated_subject_pose(text: Any) -> dict[str, list[str]]:
     return _detect_exclusive_visual_axis(text, SUBJECT_POSE_MARKERS, negated=True)
 
@@ -1827,12 +2155,41 @@ def detect_negated_subject_pose(text: Any) -> dict[str, list[str]]:
 def _context_subject_pose_constraint(text: Any) -> dict[str, Any]:
     positive = detect_subject_pose(text)
     negated = detect_negated_subject_pose(text)
-    return _exclusive_visual_axis_constraint(
+    constraint = _exclusive_visual_axis_constraint(
         positive,
         negated,
         _SUBJECT_POSE_LABELS,
         axis_label="主体姿态",
     )
+    if constraint:
+        constraint["source"] = "natural_context"
+    return constraint
+
+
+def _resolve_subject_pose_constraint(
+    context_text: Any,
+    selected_values: Iterable[Any],
+) -> dict[str, Any]:
+    context = _clean(context_text)
+    context_positive = detect_subject_pose(context)
+    if len(context_positive) > 1:
+        return {}
+    context_constraint = _context_subject_pose_constraint(context)
+    if context_constraint:
+        return context_constraint
+    selected_text = "，".join(_unique(selected_values, 32))
+    positive = detect_subject_pose(selected_text)
+    if len(positive) != 1:
+        return {}
+    constraint = _exclusive_visual_axis_constraint(
+        positive,
+        {},
+        _SUBJECT_POSE_LABELS,
+        axis_label="主体姿态",
+    )
+    if constraint:
+        constraint["source"] = "selected_state"
+    return constraint
 
 
 def detect_shot_scale(text: Any, *, require_context_scope: bool = False) -> dict[str, list[str]]:
@@ -1846,6 +2203,24 @@ def detect_shot_scale(text: Any, *, require_context_scope: bool = False) -> dict
         prefix_scope_re=_SHOT_SCALE_PREFIX_SCOPE_RE,
         suffix_scope_re=_SHOT_SCALE_SUFFIX_SCOPE_RE,
     )
+
+
+def detect_shot_scale_feedback(text: Any) -> dict[str, list[str]]:
+    source = _clean(text)
+    folded = source.casefold()
+    hits: dict[str, list[str]] = {}
+    for value, patterns in SHOT_SCALE_FEEDBACK_PATTERNS.items():
+        evidence: list[str] = []
+        for pattern in patterns:
+            for match in pattern.finditer(source):
+                if _marker_match_is_negated(folded, match.start()):
+                    continue
+                fragment = _clean(match.group(0))
+                if fragment and fragment not in evidence:
+                    evidence.append(fragment)
+        if evidence:
+            hits[value] = evidence
+    return hits
 
 
 def detect_negated_shot_scale(text: Any, *, require_context_scope: bool = False) -> dict[str, list[str]]:
@@ -1864,12 +2239,41 @@ def detect_negated_shot_scale(text: Any, *, require_context_scope: bool = False)
 def _context_shot_scale_constraint(text: Any) -> dict[str, Any]:
     positive = detect_shot_scale(text, require_context_scope=True)
     negated = detect_negated_shot_scale(text, require_context_scope=True)
-    return _exclusive_visual_axis_constraint(
+    constraint = _exclusive_visual_axis_constraint(
         positive,
         negated,
         _SHOT_SCALE_LABELS,
         axis_label="景别",
     )
+    if constraint:
+        constraint["source"] = "natural_context"
+    return constraint
+
+
+def _resolve_shot_scale_constraint(
+    context_text: Any,
+    selected_values: Iterable[Any],
+) -> dict[str, Any]:
+    context = _clean(context_text)
+    context_positive = detect_shot_scale(context, require_context_scope=True)
+    if len(context_positive) > 1:
+        return {}
+    context_constraint = _context_shot_scale_constraint(context)
+    if context_constraint:
+        return context_constraint
+    selected_text = "，".join(_unique(selected_values, 32))
+    positive = detect_shot_scale(selected_text, require_context_scope=True)
+    if len(positive) != 1:
+        return {}
+    constraint = _exclusive_visual_axis_constraint(
+        positive,
+        {},
+        _SHOT_SCALE_LABELS,
+        axis_label="景别",
+    )
+    if constraint:
+        constraint["source"] = "selected_state"
+    return constraint
 
 
 def detect_camera_angle(text: Any, *, require_context_scope: bool = False) -> dict[str, list[str]]:
@@ -1883,6 +2287,24 @@ def detect_camera_angle(text: Any, *, require_context_scope: bool = False) -> di
         prefix_scope_re=_CAMERA_ANGLE_PREFIX_SCOPE_RE,
         suffix_scope_re=_CAMERA_ANGLE_SUFFIX_SCOPE_RE,
     )
+
+
+def detect_camera_angle_feedback(text: Any) -> dict[str, list[str]]:
+    source = _clean(text)
+    folded = source.casefold()
+    hits: dict[str, list[str]] = {}
+    for value, patterns in CAMERA_ANGLE_FEEDBACK_PATTERNS.items():
+        evidence: list[str] = []
+        for pattern in patterns:
+            for match in pattern.finditer(source):
+                if _marker_match_is_negated(folded, match.start()):
+                    continue
+                fragment = _clean(match.group(0))
+                if fragment and fragment not in evidence:
+                    evidence.append(fragment)
+        if evidence:
+            hits[value] = evidence
+    return hits
 
 
 def detect_negated_camera_angle(text: Any, *, require_context_scope: bool = False) -> dict[str, list[str]]:
@@ -1901,12 +2323,41 @@ def detect_negated_camera_angle(text: Any, *, require_context_scope: bool = Fals
 def _context_camera_angle_constraint(text: Any) -> dict[str, Any]:
     positive = detect_camera_angle(text, require_context_scope=True)
     negated = detect_negated_camera_angle(text, require_context_scope=True)
-    return _exclusive_visual_axis_constraint(
+    constraint = _exclusive_visual_axis_constraint(
         positive,
         negated,
         _CAMERA_ANGLE_LABELS,
         axis_label="机位",
     )
+    if constraint:
+        constraint["source"] = "natural_context"
+    return constraint
+
+
+def _resolve_camera_angle_constraint(
+    context_text: Any,
+    selected_values: Iterable[Any],
+) -> dict[str, Any]:
+    context = _clean(context_text)
+    context_positive = detect_camera_angle(context, require_context_scope=True)
+    if len(context_positive) > 1:
+        return {}
+    context_constraint = _context_camera_angle_constraint(context)
+    if context_constraint:
+        return context_constraint
+    selected_text = "，".join(_unique(selected_values, 32))
+    positive = detect_camera_angle(selected_text, require_context_scope=True)
+    if len(positive) != 1:
+        return {}
+    constraint = _exclusive_visual_axis_constraint(
+        positive,
+        {},
+        _CAMERA_ANGLE_LABELS,
+        axis_label="机位",
+    )
+    if constraint:
+        constraint["source"] = "selected_state"
+    return constraint
 
 
 def detect_light_temperature(text: Any, *, require_context_scope: bool = False) -> dict[str, list[str]]:
@@ -1920,6 +2371,24 @@ def detect_light_temperature(text: Any, *, require_context_scope: bool = False) 
         prefix_scope_re=_LIGHT_TEMPERATURE_PREFIX_SCOPE_RE,
         suffix_scope_re=_LIGHT_TEMPERATURE_SUFFIX_SCOPE_RE,
     )
+
+
+def detect_light_temperature_feedback(text: Any) -> dict[str, list[str]]:
+    source = _clean(text)
+    folded = source.casefold()
+    hits: dict[str, list[str]] = {}
+    for value, patterns in LIGHT_TEMPERATURE_FEEDBACK_PATTERNS.items():
+        evidence: list[str] = []
+        for pattern in patterns:
+            for match in pattern.finditer(source):
+                if _marker_match_is_negated(folded, match.start()):
+                    continue
+                fragment = _clean(match.group(0))
+                if fragment and fragment not in evidence:
+                    evidence.append(fragment)
+        if evidence:
+            hits[value] = evidence
+    return hits
 
 
 def detect_negated_light_temperature(
@@ -1942,12 +2411,41 @@ def detect_negated_light_temperature(
 def _context_light_temperature_constraint(text: Any) -> dict[str, Any]:
     positive = detect_light_temperature(text, require_context_scope=True)
     negated = detect_negated_light_temperature(text, require_context_scope=True)
-    return _exclusive_visual_axis_constraint(
+    constraint = _exclusive_visual_axis_constraint(
         positive,
         negated,
         _LIGHT_TEMPERATURE_LABELS,
         axis_label="整体色温",
     )
+    if constraint:
+        constraint["source"] = "natural_context"
+    return constraint
+
+
+def _resolve_light_temperature_constraint(
+    context_text: Any,
+    selected_values: Iterable[Any],
+) -> dict[str, Any]:
+    context = _clean(context_text)
+    context_positive = detect_light_temperature(context, require_context_scope=True)
+    if len(context_positive) > 1:
+        return {}
+    context_constraint = _context_light_temperature_constraint(context)
+    if context_constraint:
+        return context_constraint
+    selected_text = "，".join(_unique(selected_values, 32))
+    positive = detect_light_temperature(selected_text, require_context_scope=True)
+    if len(positive) != 1:
+        return {}
+    constraint = _exclusive_visual_axis_constraint(
+        positive,
+        {},
+        _LIGHT_TEMPERATURE_LABELS,
+        axis_label="整体色温",
+    )
+    if constraint:
+        constraint["source"] = "selected_state"
+    return constraint
 
 
 def detect_color_rendering(text: Any) -> dict[str, list[str]]:
@@ -1956,6 +2454,24 @@ def detect_color_rendering(text: Any) -> dict[str, list[str]]:
         COLOR_RENDERING_MARKERS,
         negated=False,
     )
+
+
+def detect_color_rendering_feedback(text: Any) -> dict[str, list[str]]:
+    source = _clean(text)
+    folded = source.casefold()
+    hits: dict[str, list[str]] = {}
+    for value, patterns in COLOR_RENDERING_FEEDBACK_PATTERNS.items():
+        evidence: list[str] = []
+        for pattern in patterns:
+            for match in pattern.finditer(source):
+                if _marker_match_is_negated(folded, match.start()):
+                    continue
+                fragment = _clean(match.group(0))
+                if fragment and fragment not in evidence:
+                    evidence.append(fragment)
+        if evidence:
+            hits[value] = evidence
+    return hits
 
 
 def detect_negated_color_rendering(text: Any) -> dict[str, list[str]]:
@@ -2016,6 +2532,24 @@ def detect_depth_of_field(text: Any) -> dict[str, list[str]]:
     )
 
 
+def detect_depth_of_field_feedback(text: Any) -> dict[str, list[str]]:
+    source = _clean(text)
+    folded = source.casefold()
+    hits: dict[str, list[str]] = {}
+    for value, patterns in DEPTH_OF_FIELD_FEEDBACK_PATTERNS.items():
+        evidence: list[str] = []
+        for pattern in patterns:
+            for match in pattern.finditer(source):
+                if _marker_match_is_negated(folded, match.start()):
+                    continue
+                fragment = _clean(match.group(0))
+                if fragment and fragment not in evidence:
+                    evidence.append(fragment)
+        if evidence:
+            hits[value] = evidence
+    return hits
+
+
 def detect_negated_depth_of_field(text: Any) -> dict[str, list[str]]:
     return _detect_exclusive_visual_axis(
         text,
@@ -2074,6 +2608,24 @@ def detect_lighting_quality(text: Any) -> dict[str, list[str]]:
     )
 
 
+def detect_lighting_quality_feedback(text: Any) -> dict[str, list[str]]:
+    source = _clean(text)
+    folded = source.casefold()
+    hits: dict[str, list[str]] = {}
+    for value, patterns in LIGHTING_QUALITY_FEEDBACK_PATTERNS.items():
+        evidence: list[str] = []
+        for pattern in patterns:
+            for match in pattern.finditer(source):
+                if _marker_match_is_negated(folded, match.start()):
+                    continue
+                fragment = _clean(match.group(0))
+                if fragment and fragment not in evidence:
+                    evidence.append(fragment)
+        if evidence:
+            hits[value] = evidence
+    return hits
+
+
 def detect_negated_lighting_quality(text: Any) -> dict[str, list[str]]:
     return _detect_exclusive_visual_axis(
         text,
@@ -2127,6 +2679,24 @@ def detect_motion_rendering(text: Any) -> dict[str, list[str]]:
         MOTION_RENDERING_MARKERS,
         negated=False,
     )
+
+
+def detect_motion_rendering_feedback(text: Any) -> dict[str, list[str]]:
+    source = _clean(text)
+    folded = source.casefold()
+    hits: dict[str, list[str]] = {}
+    for value, patterns in MOTION_RENDERING_FEEDBACK_PATTERNS.items():
+        evidence: list[str] = []
+        for pattern in patterns:
+            for match in pattern.finditer(source):
+                if _marker_match_is_negated(folded, match.start()):
+                    continue
+                fragment = _clean(match.group(0))
+                if fragment and fragment not in evidence:
+                    evidence.append(fragment)
+        if evidence:
+            hits[value] = evidence
+    return hits
 
 
 def detect_negated_motion_rendering(text: Any) -> dict[str, list[str]]:
@@ -2305,6 +2875,24 @@ def detect_key_light_direction(text: Any) -> dict[str, list[str]]:
         KEY_LIGHT_DIRECTION_MARKERS,
         negated=False,
     )
+
+
+def detect_key_light_direction_feedback(text: Any) -> dict[str, list[str]]:
+    source = _clean(text)
+    folded = source.casefold()
+    hits: dict[str, list[str]] = {}
+    for value, patterns in KEY_LIGHT_DIRECTION_FEEDBACK_PATTERNS.items():
+        evidence: list[str] = []
+        for pattern in patterns:
+            for match in pattern.finditer(source):
+                if _marker_match_is_negated(folded, match.start()):
+                    continue
+                fragment = _clean(match.group(0))
+                if fragment and fragment not in evidence:
+                    evidence.append(fragment)
+        if evidence:
+            hits[value] = evidence
+    return hits
 
 
 def detect_negated_key_light_direction(text: Any) -> dict[str, list[str]]:
@@ -3426,22 +4014,50 @@ def build_scene_relationship_graph(
         negated=True,
         require_context_scope=True,
     )
-    context_subject_orientation_constraint = _context_subject_orientation_constraint(natural_context)
+    subject_orientation_values = [
+        value
+        for group in ("构图视角", "动作姿态")
+        for value in groups.get(group, [])
+    ] + list(custom)
+    context_subject_orientation_constraint = _resolve_subject_orientation_constraint(
+        natural_context,
+        subject_orientation_values,
+    )
     context_subject_pose = detect_subject_pose(natural_context)
     negated_context_subject_pose = detect_negated_subject_pose(natural_context)
-    context_subject_pose_constraint = _context_subject_pose_constraint(natural_context)
+    subject_pose_values = list(groups.get("动作姿态", [])) + list(custom)
+    context_subject_pose_constraint = _resolve_subject_pose_constraint(
+        natural_context,
+        subject_pose_values,
+    )
     context_shot_scale = detect_shot_scale(natural_context, require_context_scope=True)
     negated_context_shot_scale = detect_negated_shot_scale(natural_context, require_context_scope=True)
-    context_shot_scale_constraint = _context_shot_scale_constraint(natural_context)
+    shot_scale_values = list(groups.get("构图视角", [])) + list(custom)
+    context_shot_scale_constraint = _resolve_shot_scale_constraint(
+        natural_context,
+        shot_scale_values,
+    )
     context_camera_angle = detect_camera_angle(natural_context, require_context_scope=True)
     negated_context_camera_angle = detect_negated_camera_angle(natural_context, require_context_scope=True)
-    context_camera_angle_constraint = _context_camera_angle_constraint(natural_context)
+    camera_angle_values = list(groups.get("构图视角", [])) + list(custom)
+    context_camera_angle_constraint = _resolve_camera_angle_constraint(
+        natural_context,
+        camera_angle_values,
+    )
     context_light_temperature = detect_light_temperature(natural_context, require_context_scope=True)
     negated_context_light_temperature = detect_negated_light_temperature(
         natural_context,
         require_context_scope=True,
     )
-    context_light_temperature_constraint = _context_light_temperature_constraint(natural_context)
+    light_temperature_values = [
+        value
+        for group in ("光影氛围", "画面风格", "场景背景", "技术画质")
+        for value in groups.get(group, [])
+    ] + list(custom)
+    context_light_temperature_constraint = _resolve_light_temperature_constraint(
+        natural_context,
+        light_temperature_values,
+    )
     context_color_rendering = detect_color_rendering(natural_context)
     negated_context_color_rendering = detect_negated_color_rendering(natural_context)
     color_rendering_values = [
@@ -5376,6 +5992,7 @@ def candidate_world_violation(original: str, candidate: str, scene_graph: Any) -
         required = _clean(orientation_constraint.get("required_value"))
         negated_values = set(orientation_constraint.get("negated_values", []) or [])
         original_orientation = set(detect_subject_orientation(original))
+        original_orientation_feedback = set(detect_subject_orientation_feedback(original))
         candidate_orientation = detect_subject_orientation(candidate)
         for value, markers in candidate_orientation.items():
             if value in original_orientation:
@@ -5386,11 +6003,22 @@ def candidate_world_violation(original: str, candidate: str, scene_graph: Any) -
                     f"模型响应越过主体朝向约束：要求“{expected}”，"
                     f"却新增了“{markers[0]}”。"
                 )
+        candidate_orientation_feedback = detect_subject_orientation_feedback(candidate)
+        for value, evidence in candidate_orientation_feedback.items():
+            if value in original_orientation_feedback:
+                continue
+            if value in negated_values or (required and value != required):
+                expected = _clean(orientation_constraint.get("required_label")) or "排除朝向"
+                return (
+                    f"模型响应越过主体朝向约束：要求“{expected}”，"
+                    f"却新增了相反的五官可见性、侧面轮廓或头肩反馈“{evidence[0]}”。"
+                )
     pose_constraint = dict(scene_graph.get("context_subject_pose_constraint", {}) or {})
     if pose_constraint:
         required = _clean(pose_constraint.get("required_value"))
         negated_values = set(pose_constraint.get("negated_values", []) or [])
         original_pose = set(detect_subject_pose(original))
+        original_pose_feedback = set(detect_subject_pose_feedback(original))
         candidate_pose = detect_subject_pose(candidate)
         for value, markers in candidate_pose.items():
             if value in original_pose:
@@ -5401,11 +6029,22 @@ def candidate_world_violation(original: str, candidate: str, scene_graph: Any) -
                     f"模型响应越过主体姿态约束：要求“{expected}”，"
                     f"却新增了“{markers[0]}”。"
                 )
+        candidate_pose_feedback = detect_subject_pose_feedback(candidate)
+        for value, evidence in candidate_pose_feedback.items():
+            if value in original_pose_feedback:
+                continue
+            if value in negated_values or (required and value != required):
+                expected = _clean(pose_constraint.get("required_label")) or "排除姿态"
+                return (
+                    f"模型响应越过主体姿态约束：要求“{expected}”，"
+                    f"却新增了相反的身体承重、支撑面或关节反馈“{evidence[0]}”。"
+                )
     shot_scale_constraint = dict(scene_graph.get("context_shot_scale_constraint", {}) or {})
     if shot_scale_constraint:
         required = _clean(shot_scale_constraint.get("required_value"))
         negated_values = set(shot_scale_constraint.get("negated_values", []) or [])
         original_shot_scale = set(detect_shot_scale(original, require_context_scope=True))
+        original_shot_scale_feedback = set(detect_shot_scale_feedback(original))
         candidate_shot_scale = detect_shot_scale(candidate, require_context_scope=True)
         for value, markers in candidate_shot_scale.items():
             if value in original_shot_scale:
@@ -5416,11 +6055,22 @@ def candidate_world_violation(original: str, candidate: str, scene_graph: Any) -
                     f"模型响应越过景别约束：要求“{expected}”，"
                     f"却新增了“{markers[0]}”。"
                 )
+        candidate_shot_scale_feedback = detect_shot_scale_feedback(candidate)
+        for value, evidence in candidate_shot_scale_feedback.items():
+            if value in original_shot_scale_feedback:
+                continue
+            if value in negated_values or (required and value != required):
+                expected = _clean(shot_scale_constraint.get("required_label")) or "排除景别"
+                return (
+                    f"模型响应越过景别约束：要求“{expected}”，"
+                    f"却新增了相反的画幅边界、身体覆盖范围或主体占比反馈“{evidence[0]}”。"
+                )
     camera_angle_constraint = dict(scene_graph.get("context_camera_angle_constraint", {}) or {})
     if camera_angle_constraint:
         required = _clean(camera_angle_constraint.get("required_value"))
         negated_values = set(camera_angle_constraint.get("negated_values", []) or [])
         original_camera_angle = set(detect_camera_angle(original, require_context_scope=True))
+        original_camera_angle_feedback = set(detect_camera_angle_feedback(original))
         candidate_camera_angle = detect_camera_angle(candidate, require_context_scope=True)
         for value, markers in candidate_camera_angle.items():
             if value in original_camera_angle:
@@ -5431,6 +6081,16 @@ def candidate_world_violation(original: str, candidate: str, scene_graph: Any) -
                     f"模型响应越过机位约束：要求“{expected}”，"
                     f"却新增了“{markers[0]}”。"
                 )
+        candidate_camera_angle_feedback = detect_camera_angle_feedback(candidate)
+        for value, evidence in candidate_camera_angle_feedback.items():
+            if value in original_camera_angle_feedback:
+                continue
+            if value in negated_values or (required and value != required):
+                expected = _clean(camera_angle_constraint.get("required_label")) or "排除机位"
+                return (
+                    f"模型响应越过机位约束：要求“{expected}”，"
+                    f"却新增了相反的镜头高度、主体可见表面或地面透视反馈“{evidence[0]}”。"
+                )
     light_temperature_constraint = dict(
         scene_graph.get("context_light_temperature_constraint", {}) or {}
     )
@@ -5438,6 +6098,7 @@ def candidate_world_violation(original: str, candidate: str, scene_graph: Any) -
         required = _clean(light_temperature_constraint.get("required_value"))
         negated_values = set(light_temperature_constraint.get("negated_values", []) or [])
         original_temperature = set(detect_light_temperature(original, require_context_scope=True))
+        original_temperature_feedback = set(detect_light_temperature_feedback(original))
         candidate_temperature = detect_light_temperature(candidate, require_context_scope=True)
         for value, markers in candidate_temperature.items():
             if value in original_temperature:
@@ -5448,11 +6109,22 @@ def candidate_world_violation(original: str, candidate: str, scene_graph: Any) -
                     f"模型响应越过整体色温约束：要求“{expected}”，"
                     f"却新增了“{markers[0]}”。"
                 )
+        candidate_temperature_feedback = detect_light_temperature_feedback(candidate)
+        for value, evidence in candidate_temperature_feedback.items():
+            if value in original_temperature_feedback:
+                continue
+            if value in negated_values or (required and value != required):
+                expected = _clean(light_temperature_constraint.get("required_label")) or "排除色温"
+                return (
+                    f"模型响应越过整体色温约束：要求“{expected}”，"
+                    f"却新增了相反的全局白点、中性表面或综合色偏反馈“{evidence[0]}”。"
+                )
     color_rendering_constraint = dict(scene_graph.get("color_rendering_constraint", {}) or {})
     if color_rendering_constraint:
         required = _clean(color_rendering_constraint.get("required_value"))
         negated_values = set(color_rendering_constraint.get("negated_values", []) or [])
         original_rendering = set(detect_color_rendering(original))
+        original_rendering_feedback = set(detect_color_rendering_feedback(original))
         candidate_rendering = detect_color_rendering(candidate)
         for value, markers in candidate_rendering.items():
             if value in original_rendering:
@@ -5463,11 +6135,22 @@ def candidate_world_violation(original: str, candidate: str, scene_graph: Any) -
                     f"模型响应越过颜色呈现约束：要求“{expected}”，"
                     f"却新增了“{markers[0]}”。"
                 )
+        candidate_rendering_feedback = detect_color_rendering_feedback(candidate)
+        for value, evidence in candidate_rendering_feedback.items():
+            if value in original_rendering_feedback:
+                continue
+            if value in negated_values or (required and value != required):
+                expected = _clean(color_rendering_constraint.get("required_label")) or "排除颜色模式"
+                return (
+                    f"模型响应越过颜色呈现约束：要求“{expected}”，"
+                    f"却新增了相反的色度、独立色相或明度反馈“{evidence[0]}”。"
+                )
     depth_of_field_constraint = dict(scene_graph.get("depth_of_field_constraint", {}) or {})
     if depth_of_field_constraint:
         required = _clean(depth_of_field_constraint.get("required_value"))
         negated_values = set(depth_of_field_constraint.get("negated_values", []) or [])
         original_depth = set(detect_depth_of_field(original))
+        original_depth_feedback = set(detect_depth_of_field_feedback(original))
         candidate_depth = detect_depth_of_field(candidate)
         for value, markers in candidate_depth.items():
             if value in original_depth:
@@ -5478,11 +6161,22 @@ def candidate_world_violation(original: str, candidate: str, scene_graph: Any) -
                     f"模型响应越过景深约束：要求“{expected}”，"
                     f"却新增了“{markers[0]}”。"
                 )
+        candidate_depth_feedback = detect_depth_of_field_feedback(candidate)
+        for value, evidence in candidate_depth_feedback.items():
+            if value in original_depth_feedback:
+                continue
+            if value in negated_values or (required and value != required):
+                expected = _clean(depth_of_field_constraint.get("required_label")) or "排除景深"
+                return (
+                    f"模型响应越过景深约束：要求“{expected}”，"
+                    f"却新增了相反的焦平面、距离层级或细节衰减反馈“{evidence[0]}”。"
+                )
     lighting_quality_constraint = dict(scene_graph.get("lighting_quality_constraint", {}) or {})
     if lighting_quality_constraint:
         required = _clean(lighting_quality_constraint.get("required_value"))
         negated_values = set(lighting_quality_constraint.get("negated_values", []) or [])
         original_quality = set(detect_lighting_quality(original))
+        original_quality_feedback = set(detect_lighting_quality_feedback(original))
         candidate_quality = detect_lighting_quality(candidate)
         for value, markers in candidate_quality.items():
             if value in original_quality:
@@ -5493,11 +6187,22 @@ def candidate_world_violation(original: str, candidate: str, scene_graph: Any) -
                     f"模型响应越过光质约束：要求“{expected}”，"
                     f"却新增了“{markers[0]}”。"
                 )
+        candidate_quality_feedback = detect_lighting_quality_feedback(candidate)
+        for value, evidence in candidate_quality_feedback.items():
+            if value in original_quality_feedback:
+                continue
+            if value in negated_values or (required and value != required):
+                expected = _clean(lighting_quality_constraint.get("required_label")) or "排除光质"
+                return (
+                    f"模型响应越过光质约束：要求“{expected}”，"
+                    f"却新增了相反的投影边缘、明暗过渡或高光范围反馈“{evidence[0]}”。"
+                )
     motion_rendering_constraint = dict(scene_graph.get("motion_rendering_constraint", {}) or {})
     if motion_rendering_constraint:
         required = _clean(motion_rendering_constraint.get("required_value"))
         negated_values = set(motion_rendering_constraint.get("negated_values", []) or [])
         original_motion = set(detect_motion_rendering(original))
+        original_motion_feedback = set(detect_motion_rendering_feedback(original))
         candidate_motion = detect_motion_rendering(candidate)
         for value, markers in candidate_motion.items():
             if value in original_motion:
@@ -5507,6 +6212,16 @@ def candidate_world_violation(original: str, candidate: str, scene_graph: Any) -
                 return (
                     f"模型响应越过运动呈现约束：要求“{expected}”，"
                     f"却新增了“{markers[0]}”。"
+                )
+        candidate_motion_feedback = detect_motion_rendering_feedback(candidate)
+        for value, evidence in candidate_motion_feedback.items():
+            if value in original_motion_feedback:
+                continue
+            if value in negated_values or (required and value != required):
+                expected = _clean(motion_rendering_constraint.get("required_label")) or "排除运动呈现"
+                return (
+                    f"模型响应越过运动呈现约束：要求“{expected}”，"
+                    f"却新增了相反的主体轮廓、位移连续性或动作相位反馈“{evidence[0]}”。"
                 )
     camera_stability_constraint = dict(scene_graph.get("camera_stability_constraint", {}) or {})
     if camera_stability_constraint:
@@ -5543,6 +6258,7 @@ def candidate_world_violation(original: str, candidate: str, scene_graph: Any) -
         required = _clean(key_light_direction_constraint.get("required_value"))
         negated_values = set(key_light_direction_constraint.get("negated_values", []) or [])
         original_direction = set(detect_key_light_direction(original))
+        original_direction_feedback = set(detect_key_light_direction_feedback(original))
         candidate_direction = detect_key_light_direction(candidate)
         for value, markers in candidate_direction.items():
             if value in original_direction:
@@ -5552,6 +6268,16 @@ def candidate_world_violation(original: str, candidate: str, scene_graph: Any) -
                 return (
                     f"模型响应越过主光方向约束：要求“{expected}”，"
                     f"却新增了“{markers[0]}”。"
+                )
+        candidate_direction_feedback = detect_key_light_direction_feedback(candidate)
+        for value, evidence in candidate_direction_feedback.items():
+            if value in original_direction_feedback:
+                continue
+            if value in negated_values or (required and value != required):
+                expected = _clean(key_light_direction_constraint.get("required_label")) or "排除主光方向"
+                return (
+                    f"模型响应越过主光方向约束：要求“{expected}”，"
+                    f"却新增了相反的投影、受光面或轮廓反馈“{evidence[0]}”。"
                 )
     exposure_key_constraint = dict(scene_graph.get("exposure_key_constraint", {}) or {})
     if exposure_key_constraint:
@@ -5836,6 +6562,15 @@ def summarize_intelligence_profile(profile: Any) -> str:
 __all__ = [
     "INTELLIGENCE_PROFILE_VERSION",
     "WORLD_FAMILY_MARKERS",
+    "SUBJECT_ORIENTATION_FEEDBACK_PATTERNS",
+    "SUBJECT_POSE_FEEDBACK_PATTERNS",
+    "SHOT_SCALE_FEEDBACK_PATTERNS",
+    "CAMERA_ANGLE_FEEDBACK_PATTERNS",
+    "LIGHT_TEMPERATURE_FEEDBACK_PATTERNS",
+    "COLOR_RENDERING_FEEDBACK_PATTERNS",
+    "DEPTH_OF_FIELD_FEEDBACK_PATTERNS",
+    "LIGHTING_QUALITY_FEEDBACK_PATTERNS",
+    "MOTION_RENDERING_FEEDBACK_PATTERNS",
     "HUMAN_SUBJECT_INTRUSION_MARKERS",
     "LIGHT_TEMPERATURE_MARKERS",
     "COLOR_RENDERING_MARKERS",
@@ -5845,6 +6580,7 @@ __all__ = [
     "CAMERA_STABILITY_MARKERS",
     "FOCAL_PERSPECTIVE_MARKERS",
     "KEY_LIGHT_DIRECTION_MARKERS",
+    "KEY_LIGHT_DIRECTION_FEEDBACK_PATTERNS",
     "EXPOSURE_KEY_MARKERS",
     "CONTRAST_LEVEL_MARKERS",
     "SATURATION_LEVEL_MARKERS",
@@ -5864,8 +6600,10 @@ __all__ = [
     "candidate_world_violation",
     "classify_repair_reason",
     "detect_camera_angle",
+    "detect_camera_angle_feedback",
     "detect_camera_stability",
     "detect_color_rendering",
+    "detect_color_rendering_feedback",
     "detect_contrast_level",
     "detect_detail_density",
     "detect_visual_medium",
@@ -5875,16 +6613,21 @@ __all__ = [
     "detect_background_complexity",
     "detect_season",
     "detect_depth_of_field",
+    "detect_depth_of_field_feedback",
     "detect_exposure_key",
     "detect_focal_perspective",
     "detect_image_grain",
     "detect_image_sharpness",
     "detect_lighting_quality",
+    "detect_lighting_quality_feedback",
     "detect_motion_rendering",
+    "detect_motion_rendering_feedback",
     "detect_saturation_level",
     "detect_human_subject_intrusions",
     "detect_key_light_direction",
+    "detect_key_light_direction_feedback",
     "detect_light_temperature",
+    "detect_light_temperature_feedback",
     "detect_negated_camera_angle",
     "detect_negated_camera_stability",
     "detect_negated_color_rendering",
@@ -5914,8 +6657,11 @@ __all__ = [
     "detect_scene_attributes",
     "detect_subject_cardinality",
     "detect_subject_orientation",
+    "detect_subject_orientation_feedback",
     "detect_subject_pose",
+    "detect_subject_pose_feedback",
     "detect_shot_scale",
+    "detect_shot_scale_feedback",
     "introduced_human_subject_intrusions",
     "detect_world_families",
     "infer_task_intent",
