@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 import gc
+import io
 import json
 import pathlib
 import random
@@ -19193,6 +19194,8 @@ class TestStagePromptModules(unittest.TestCase):
             captured["timeout"] = timeout
             captured["body"] = json.loads(request.data.decode("utf-8"))
             captured["auth"] = request.headers.get("Authorization")
+            captured["accept"] = request.get_header("Accept")
+            captured["user_agent"] = request.get_header("User-agent")
             return DummyResponse()
 
         with mock.patch.object(module._API_HTTP_OPENER, "open", side_effect=fake_open):
@@ -19220,11 +19223,172 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertEqual(captured["url"], "https://api.example.com/v1/chat/completions")
         self.assertEqual(captured["timeout"], 33)
         self.assertEqual(captured["auth"], "Bearer test-key")
+        self.assertEqual(captured["accept"], "application/json")
+        self.assertEqual(captured["user_agent"], module._API_HTTP_USER_AGENT)
         self.assertEqual(captured["body"]["model"], "demo-model")
         self.assertEqual(captured["body"]["messages"][0]["content"], "hello")
         self.assertEqual(captured["body"]["frequency_penalty"], 0.25)
         self.assertEqual(captured["body"]["presence_penalty"], 0.15)
         self.assertEqual(captured["body"]["seed"], 1234)
+
+    def test_stage_api_supports_complete_openai_responses_endpoint(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        captured: dict[str, Any] = {}
+
+        def fake_http(url, payload, headers, timeout):
+            captured.update(url=url, payload=payload, headers=dict(headers), timeout=timeout)
+            return {
+                "output": [
+                    {"type": "reasoning", "content": [{"type": "text", "text": "private"}]},
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": "responses refined prompt"}],
+                    },
+                ]
+            }
+
+        model = module._创建API阶段模型(
+            {
+                "API服务商": "OpenAI兼容",
+                "API地址": "https://api.example.com/v1/responses/",
+                "API密钥": "test-key",
+                "API模型": "gpt-4.1-mini",
+                "API超时秒": 40,
+            }
+        )
+        chat_config = module._解析API模型配置(
+            {
+                "API服务商": "OpenAI兼容",
+                "API地址": "https://api.example.com/v1/chat/completions/",
+                "API密钥": "test-key",
+                "API模型": "demo-model",
+            }
+        )
+        messages = [
+            {"role": "system", "content": "system rule"},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "describe this image"},
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA", "detail": "high"}},
+                ],
+            },
+        ]
+        with mock.patch.object(module, "_http_post_json", side_effect=fake_http):
+            response = model.create_chat_completion(
+                messages=messages,
+                max_tokens=321,
+                temperature=0.4,
+                top_p=0.8,
+            )
+
+        self.assertEqual(model.config["kind"], "openai_responses")
+        self.assertEqual(captured["url"], "https://api.example.com/v1/responses")
+        self.assertEqual(chat_config["url"], "https://api.example.com/v1/chat/completions")
+        self.assertNotIn("messages", captured["payload"])
+        self.assertEqual(captured["payload"]["max_output_tokens"], 321)
+        self.assertEqual(captured["payload"]["input"][0], {"role": "system", "content": "system rule"})
+        image_part = captured["payload"]["input"][1]["content"][1]
+        self.assertEqual(image_part["type"], "input_image")
+        self.assertEqual(image_part["detail"], "high")
+        self.assertEqual(module._extract_chat_text(response), "responses refined prompt")
+
+    def test_stage_api_http_error_includes_server_json_detail_for_sanitized_fallback(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        secret = "sk-test-secret-value-123456"
+        body = json.dumps({"error": {"message": f"invalid model; received token {secret}"}}).encode("utf-8")
+        http_error = module.urllib.error.HTTPError(
+            "https://api.example.com/v1/chat/completions",
+            400,
+            "Bad Request",
+            {"Content-Type": "application/json; charset=utf-8"},
+            io.BytesIO(body),
+        )
+        opener = mock.Mock()
+        opener.open.side_effect = http_error
+
+        with mock.patch.object(module, "_API_HTTP_OPENER", opener):
+            with self.assertRaisesRegex(RuntimeError, "HTTP 400 Bad Request.*invalid model") as raised:
+                module._http_post_json(
+                    "https://api.example.com/v1/chat/completions",
+                    {"model": "missing-model"},
+                    {"Authorization": f"Bearer {secret}"},
+                    5.0,
+                )
+
+        sanitized = model_refiner.sanitize_model_error(
+            raised.exception,
+            {"_API密钥脱敏值": secret},
+        )
+        self.assertIn("invalid model", sanitized)
+        self.assertNotIn(secret, sanitized)
+        self.assertIn("[REDACTED]", sanitized)
+
+    def test_stage_api_retries_once_with_compatible_optional_parameters(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        calls: list[dict[str, Any]] = []
+
+        def fake_http(url, payload, headers, timeout):
+            calls.append(dict(payload))
+            if len(calls) == 1:
+                raise module._ModelAPIHTTPError(
+                    400,
+                    "Bad Request",
+                    "unsupported parameter: seed",
+                )
+            return {"choices": [{"message": {"content": "compatible retry result"}}]}
+
+        model = module._TEAPIChatModel(
+            {
+                "provider": "OpenAI兼容",
+                "kind": "openai",
+                "url": "https://api.example.com/v1/chat/completions",
+                "api_key": "test-key",
+                "model": "demo-model",
+                "timeout": 30,
+            }
+        )
+        with mock.patch.object(module, "_http_post_json", side_effect=fake_http):
+            response = model.create_chat_completion(
+                messages=[{"role": "user", "content": "hello"}],
+                max_tokens=128,
+                frequency_penalty=0.2,
+                presence_penalty=0.1,
+                seed=123,
+            )
+
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0]["seed"], 123)
+        for optional in ("seed", "frequency_penalty", "presence_penalty"):
+            self.assertNotIn(optional, calls[1])
+        self.assertEqual(response["choices"][0]["message"]["content"], "compatible retry result")
+
+    def test_stage_api_http_status_and_retry_after_reach_transient_retry_logic(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        body = json.dumps({"error": {"message": "temporary overload"}}).encode("utf-8")
+        http_error = module.urllib.error.HTTPError(
+            "https://api.example.com/v1/chat/completions",
+            503,
+            "Service Unavailable",
+            {"Content-Type": "application/json", "Retry-After": "1.25"},
+            io.BytesIO(body),
+        )
+        opener = mock.Mock()
+        opener.open.side_effect = http_error
+
+        with mock.patch.object(module, "_API_HTTP_OPENER", opener):
+            with self.assertRaises(module._ModelAPIHTTPError) as raised:
+                module._http_post_json(
+                    "https://api.example.com/v1/chat/completions",
+                    {"model": "demo-model"},
+                    {},
+                    5.0,
+                )
+
+        self.assertEqual(raised.exception.status, 503)
+        self.assertEqual(raised.exception.retry_after, 1.25)
+        self.assertTrue(model_refiner._is_transient_model_error(raised.exception))
 
     def test_model_response_extractor_is_strict_and_supports_content_blocks(self) -> None:
         self.assertEqual(
@@ -19359,6 +19523,8 @@ class TestStagePromptModules(unittest.TestCase):
 
         def fake_http(url, payload, headers, timeout):
             calls.append({"url": url, "payload": payload, "headers": headers, "timeout": timeout})
+            if str(url).endswith("/api/chat"):
+                return {"message": {"role": "assistant", "content": "ollama prompt"}, "done": True}
             if "anthropic" in url:
                 return {"content": [{"type": "text", "text": "anthropic prompt"}]}
             if "generativelanguage" in url:
@@ -19437,7 +19603,37 @@ class TestStagePromptModules(unittest.TestCase):
             )
             deepseek.create_chat_completion(messages=messages, max_tokens=67, temperature=0.6, top_p=0.84)
 
-        anthropic_call, gemini_call, openai_call, deepseek_call = calls
+            ollama = module._TEAPIChatModel(
+                {
+                    "provider": "Ollama本地",
+                    "kind": "ollama",
+                    "url": "http://127.0.0.1:11434/api/chat",
+                    "api_key": "",
+                    "model": "qwen2.5",
+                    "timeout": 34,
+                }
+            )
+            ollama_response = ollama.create_chat_completion(
+                messages=[
+                    messages[0],
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": "describe image"},
+                            {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}},
+                        ],
+                    },
+                ],
+                max_tokens=68,
+                temperature=0.5,
+                top_p=0.85,
+                top_k=31,
+                repeat_penalty=1.12,
+                seed=19,
+                stop=["END"],
+            )
+
+        anthropic_call, gemini_call, openai_call, deepseek_call, ollama_call = calls
         self.assertEqual(anthropic_call["payload"]["temperature"], 1.0)
         self.assertEqual(anthropic_call["payload"]["top_k"], 37)
         self.assertEqual(anthropic_call["payload"]["stop_sequences"], ["END"])
@@ -19456,6 +19652,73 @@ class TestStagePromptModules(unittest.TestCase):
 
         self.assertEqual(deepseek_call["payload"]["max_tokens"], 67)
         self.assertEqual(deepseek_call["payload"]["thinking"], {"type": "disabled"})
+
+        self.assertEqual(ollama_call["url"], "http://127.0.0.1:11434/api/chat")
+        self.assertEqual(ollama_call["payload"]["options"]["num_predict"], 68)
+        self.assertEqual(ollama_call["payload"]["options"]["top_k"], 31)
+        self.assertEqual(ollama_call["payload"]["options"]["repeat_penalty"], 1.12)
+        self.assertEqual(ollama_call["payload"]["options"]["seed"], 19)
+        self.assertEqual(ollama_call["payload"]["options"]["stop"], ["END"])
+        self.assertEqual(ollama_call["payload"]["messages"][1]["images"], ["AAAA"])
+        self.assertEqual(ollama_response["choices"][0]["message"]["content"], "ollama prompt")
+        custom_ollama = module._解析API模型配置(
+            {
+                "API服务商": "OpenAI兼容",
+                "API地址": "http://localhost:11434/api/chat/",
+                "API模型": "qwen2.5",
+                "API密钥": "",
+            }
+        )
+        self.assertEqual(custom_ollama["kind"], "ollama")
+        self.assertEqual(custom_ollama["url"], "http://localhost:11434/api/chat")
+
+    def test_every_api_provider_preset_builds_and_calls_its_transport(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        providers = list(module.API服务商预设)
+        self.assertEqual(set(providers), set(module.API服务商选项))
+
+        for provider in providers:
+            with self.subTest(provider=provider):
+                preset = module.API服务商预设[provider]
+                kwargs = {
+                    "API服务商": provider,
+                    "API密钥": "provider-test-key" if list(preset.get("env") or []) else "",
+                    "API模型": str(preset.get("model") or "provider-test-model"),
+                    "API超时秒": 30,
+                }
+                if provider in {"OpenAI兼容", "自定义"}:
+                    kwargs["API地址"] = "https://custom-api.example/v1"
+                config = module._解析API模型配置(kwargs)
+                captured: dict[str, Any] = {}
+
+                def fake_http(url, payload, headers, timeout):
+                    captured.update(url=url, payload=payload, headers=dict(headers), timeout=timeout)
+                    if config["kind"] == "anthropic":
+                        return {"content": [{"type": "text", "text": "provider ok"}]}
+                    if config["kind"] == "gemini":
+                        return {"candidates": [{"content": {"parts": [{"text": "provider ok"}]}}]}
+                    if config["kind"] == "ollama":
+                        return {"message": {"role": "assistant", "content": "provider ok"}, "done": True}
+                    return {"choices": [{"message": {"content": "provider ok"}}]}
+
+                with mock.patch.object(module, "_http_post_json", side_effect=fake_http):
+                    response = module._TEAPIChatModel(config).create_chat_completion(
+                        messages=[{"role": "user", "content": "hello"}],
+                        max_tokens=64,
+                    )
+
+                self.assertEqual(module._extract_chat_text(response), "provider ok")
+                self.assertEqual(captured["timeout"], 30)
+                if config["kind"] == "gemini":
+                    self.assertIn(f"/models/{config['model']}:generateContent", captured["url"])
+                else:
+                    self.assertEqual(captured["payload"]["model"], config["model"])
+                if config["kind"] == "anthropic":
+                    self.assertEqual(captured["headers"]["x-api-key"], "provider-test-key")
+                elif config["kind"] == "gemini":
+                    self.assertEqual(captured["headers"]["x-goog-api-key"], "provider-test-key")
+                elif config["api_key"]:
+                    self.assertEqual(captured["headers"]["Authorization"], "Bearer provider-test-key")
 
     def test_native_provider_blocked_responses_surface_reason(self) -> None:
         module = load_stage_prompt_generator_for_integration_test()
@@ -20509,6 +20772,46 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertGreaterEqual(captured["params"]["frequency_penalty"], 0.18)
         self.assertGreaterEqual(captured["params"]["presence_penalty"], 0.1)
         self.assertIn("top_k", captured["params"])
+
+    def test_model_refiner_splits_large_batches_so_every_item_has_a_response_slot(self) -> None:
+        class DummyChatLlm:
+            def create_chat_completion(self, *args, **kwargs):
+                return None
+
+        prompts = [f"第{index + 1}条原始自然语言画面。" for index in range(17)]
+        expected_batch_sizes = iter((8, 8, 1))
+        calls: list[int] = []
+
+        def fake_chat_completion(*_args, **_kwargs):
+            item_count = next(expected_batch_sizes)
+            calls.append(item_count)
+            return {"text": model_refiner._BATCH_SEPARATOR.join("模型草稿" for _ in range(item_count))}
+
+        def accept_candidate(original, _raw, _settings):
+            return f"{original} 模型已经细化这一条。", "direct", ""
+
+        settings = {
+            "系统提示词覆盖": "",
+            "最大生成token": 256,
+            "温度": 0.62,
+            "top_p": 0.9,
+            "模型来源": "API接口",
+        }
+        with mock.patch.object(model_refiner, "_resolve_model_prompt_candidate", side_effect=accept_candidate):
+            refined = model_refiner.maybe_model_refine_batch(
+                DummyChatLlm(),
+                prompts,
+                settings,
+                chat_completion=fake_chat_completion,
+                clean_think_text=lambda text: text,
+            )
+
+        self.assertEqual(calls, [8, 8, 1])
+        self.assertEqual(len(refined), len(prompts))
+        self.assertTrue(all(candidate != original for candidate, original in zip(refined, prompts)))
+        self.assertEqual(settings["模型调用成功次数"], 3)
+        self.assertEqual(settings["模型调用采纳次数"], 17)
+        self.assertIn("每批不超过 8 条", " | ".join(settings["推理纠偏说明"]))
 
     def test_model_refiner_batch_prompt_includes_per_item_diversity_contract(self) -> None:
         class DummyChatLlm:
@@ -27530,6 +27833,52 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertEqual(settings.get("模型传输重试次数"), 1)
         self.assertEqual(settings.get("模型活动回退数量", 0), 0)
         self.assertTrue(any("已恢复" in note for note in settings.get("推理纠偏说明", [])))
+
+    def test_model_refiner_honors_bounded_api_retry_after(self) -> None:
+        class RateLimitError(RuntimeError):
+            status = 429
+            retry_after = 1.25
+
+        class RateLimitedLLM:
+            def __init__(self):
+                self.calls = 0
+
+            def create_chat_completion(self, *args, **kwargs):
+                self.calls += 1
+                if self.calls == 1:
+                    raise RateLimitError("HTTP 429 Too Many Requests")
+                return {
+                    "choices": [{"message": {"content": (
+                        "成年女性在雨夜站台听见列车声，因此停下脚步回望。"
+                        "霓虹反射沿湿地面延伸，镜头最终停在她警觉的动作上。"
+                    )}}]
+                }
+
+        llm = RateLimitedLLM()
+        settings = {
+            "提示词语言": "纯中文",
+            "主体类型": "人物角色",
+            "主体类型解析结果": "人物角色",
+            "模型来源": "API接口",
+            "模型调用基础来源": "API接口",
+            "模型瞬时重试次数": 1,
+        }
+        with mock.patch.object(model_refiner.time, "sleep") as sleep:
+            result = model_refiner.maybe_model_refine(
+                llm,
+                "成年女性在雨夜站台等待，霓虹逆光，全景全身，高细节",
+                settings,
+                chat_completion=lambda model, messages, params: model.create_chat_completion(
+                    messages=messages,
+                    **params,
+                ),
+                clean_think_text=lambda value: value,
+            )
+
+        self.assertEqual(llm.calls, 2)
+        sleep.assert_called_once_with(1.25)
+        self.assertIn("因此", result)
+        self.assertEqual(settings.get("模型传输重试次数"), 1)
 
     def test_model_refiner_retries_empty_api_text_and_recovers_without_skill_fallback(self) -> None:
         class EmptyThenFinalLLM:

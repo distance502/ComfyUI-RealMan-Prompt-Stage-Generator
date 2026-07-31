@@ -285,6 +285,32 @@ class TestApiResponseLimits(unittest.TestCase):
 
         opener.open.assert_called_once()
 
+    def test_http_error_body_keeps_the_same_response_limit(self) -> None:
+        response = _BufferedResponse(
+            b"not-read",
+            content_length=self.stage_generator._API_RESPONSE_MAX_BYTES + 1,
+        )
+        http_error = self.stage_generator.urllib.error.HTTPError(
+            "https://api.example.test/chat",
+            413,
+            "Payload Too Large",
+            response.headers,
+            response,
+        )
+        opener = mock.Mock()
+        opener.open.side_effect = http_error
+
+        with mock.patch.object(self.stage_generator, "_API_HTTP_OPENER", opener):
+            with self.assertRaisesRegex(RuntimeError, "Content-Length"):
+                self.stage_generator._http_post_json(
+                    "https://api.example.test/chat",
+                    {"messages": []},
+                    {"Authorization": "Bearer secret"},
+                    1.0,
+                )
+
+        self.assertEqual(response._offset, 0)
+
     def test_api_redirect_handler_refuses_all_redirects(self) -> None:
         handler = self.stage_generator._NoSecretRedirectHandler()
         request = self.stage_generator.urllib.request.Request(

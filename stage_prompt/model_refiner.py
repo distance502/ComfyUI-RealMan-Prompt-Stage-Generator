@@ -3801,6 +3801,8 @@ _MODEL_TEXT_METHOD_NAMES = (
     "chat",
 )
 
+_MODEL_BATCH_MAX_ITEMS = 8
+
 
 def _supports_model_text_call(candidate: Any) -> bool:
     if candidate is None:
@@ -3990,7 +3992,13 @@ def _call_model_text_with_retry(
                 int(settings.get("模型传输重试次数", 0) or 0),
             ) + 1
             settings["模型最近瞬时错误"] = _safe_model_call_reason(exc, settings)
-            time.sleep(min(0.35, 0.12 * (2 ** (retry_index - 1))))
+            exponential_delay = min(0.35, 0.12 * (2 ** (retry_index - 1)))
+            server_delay = 0.0
+            try:
+                server_delay = min(5.0, max(0.0, float(getattr(exc, "retry_after", 0.0) or 0.0)))
+            except (TypeError, ValueError):
+                server_delay = 0.0
+            time.sleep(max(exponential_delay, server_delay))
 
 
 def _retry_invalid_model_output(
@@ -4303,6 +4311,24 @@ def maybe_model_refine_batch(
     llm = _resolve_model_backend(model)
     if llm is None:
         return list(clean_prompts)
+
+    if len(clean_prompts) > _MODEL_BATCH_MAX_ITEMS:
+        refined: list[str] = []
+        for start in range(0, len(clean_prompts), _MODEL_BATCH_MAX_ITEMS):
+            refined.extend(
+                maybe_model_refine_batch(
+                    model,
+                    clean_prompts[start : start + _MODEL_BATCH_MAX_ITEMS],
+                    settings,
+                    chat_completion=chat_completion,
+                    clean_think_text=clean_think_text,
+                )
+            )
+        _append_model_runtime_note(
+            settings,
+            f"批量请求已按每批不超过 {_MODEL_BATCH_MAX_ITEMS} 条拆分，确保长批次中的每条输出都有独立响应位置。",
+        )
+        return refined
 
     batch_prompt = _compose_batch_prompt(clean_prompts, settings)
     try:

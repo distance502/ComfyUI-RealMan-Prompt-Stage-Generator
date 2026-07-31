@@ -563,7 +563,7 @@ const MODEL_API_PROVIDER_BUTTONS = [
 	{ value: "Gemini OpenAI兼容", label: "Gemini兼容", baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", model: "gemini-2.5-flash", keyRef: "env:GEMINI_API_KEY" },
 	{ value: "Claude Anthropic", label: "Claude", baseUrl: "https://api.anthropic.com/v1/messages", model: "claude-haiku-4-5", keyRef: "env:ANTHROPIC_API_KEY" },
 	{ value: "Gemini 原生", label: "Gemini", baseUrl: "https://generativelanguage.googleapis.com/v1beta", model: "gemini-2.5-flash", keyRef: "env:GEMINI_API_KEY" },
-	{ value: "Ollama本地", label: "Ollama", baseUrl: "http://127.0.0.1:11434/v1", model: "qwen2.5", keyRef: "" },
+	{ value: "Ollama本地", label: "Ollama", baseUrl: "http://127.0.0.1:11434/api/chat", model: "qwen2.5", keyRef: "" },
 	{ value: "LM Studio本地", label: "LMStudio", baseUrl: "http://127.0.0.1:1234/v1", model: "", keyRef: "" },
 	{ value: "自定义", label: "自定义", baseUrl: "", model: "", keyRef: "", hint: "完全自定义：手动填写兼容接口地址、Key、模型名和额外请求头。" },
 ];
@@ -5909,13 +5909,13 @@ function buildModelLoaderDeck(node, options = {}) {
 		return button;
 	});
 
-	const apiTextSection = createModelSection("API 参数", "Base URL / Key / 模型名");
+	const apiTextSection = createModelSection("API 参数", "Base URL 或完整端点 / Key / 模型名");
 	apiTextSection.section.hidden = true;
 	card.appendChild(apiTextSection.section);
 	const apiInputGrid = document.createElement("div");
 	apiInputGrid.className = "qwen-te-model__api-grid";
 	apiTextSection.section.appendChild(apiInputGrid);
-	const apiBaseInput = createModelLoaderTextInput(node, "API地址", "API Base URL", { placeholder: "留空用服务商预设，或填 https://host/v1" });
+	const apiBaseInput = createModelLoaderTextInput(node, "API地址", "API 地址", { placeholder: "Base URL，或完整 /chat/completions、/responses、/api/chat 地址" });
 	const apiKeyInput = createModelLoaderTextInput(node, "API密钥", "API Key", { placeholder: "推荐 env:变量名；自定义地址需授权来源" });
 	const apiModelInput = createModelLoaderTextInput(node, "API模型", "API 模型名", { placeholder: "例如 gpt-4o-mini / deepseek-chat / qwen-plus" });
 	const apiTimeoutInput = createModelLoaderTextInput(node, "API超时秒", "超时秒", { placeholder: "建议 90-180，瞬时错误自动重试" });
