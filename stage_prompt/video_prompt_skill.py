@@ -9,14 +9,17 @@ from collections import OrderedDict
 from typing import Any, Mapping, Sequence
 
 try:
-    from .narrative import build_narrative_plan
+    from .narrative import build_narrative_plan, storyboard_number_token
 except Exception:  # pragma: no cover - direct file loading in focused tests
-    from stage_prompt_narrative_test import build_narrative_plan  # type: ignore
+    from stage_prompt_narrative_test import (  # type: ignore
+        build_narrative_plan,
+        storyboard_number_token,
+    )
 
 
-VIDEO_PROMPT_SKILL_VERSION = "video-prompt-skill-v4"
+VIDEO_PROMPT_SKILL_VERSION = "video-prompt-skill-v8"
 VIDEO_PROMPT_DURATION_SECONDS = 8
-VIDEO_PROMPT_MIN_CHARS_ZH = 0  # Compatibility export: v4 no longer enforces text length.
+VIDEO_PROMPT_MIN_CHARS_ZH = 0  # Compatibility export: text length has been unbounded since v4.
 VIDEO_PROMPT_MAX_CHARS_ZH = 0  # Zero means unbounded.
 VIDEO_PROMPT_MIN_STORYBOARD_PARAGRAPHS = 3
 VIDEO_PROMPT_MODEL_SYSTEM_TEMPLATE = """
@@ -24,9 +27,9 @@ VIDEO_PROMPT_MODEL_SYSTEM_TEMPLATE = """
 
 硬规则：
 1. 只输出最终视频提示词正文，不输出分析、思考过程、Markdown、标签列表、参数或“提示词：”。
-2. 输出至少三段分镜；每段以“分镜一/二/三……”或“Shot 1/2/3...”开头，并使用完整自然语言写清景别或机位、镜头运动、主体动作、环境或光影反馈以及与前后分镜的承接关系。
+2. 输出至少三段分镜；每段以“分镜一/二/三……”或“Shot 1/2/3...”开头，从 1 连续编号，不得重复、倒序或跳号，并使用完整自然语言写清景别或机位、镜头运动、主体动作、环境或光影反馈以及与前后分镜的承接关系。
 3. 所有分镜共同组成一条完整故事：建立处境与动机，出现触发事件，主体作出回应，局势升级并形成视觉高潮，最后给出结果或开放结尾。不得把互不相关的镜头拼在一起。
-4. 严格保留底稿中的主体、服装、场景、动作、道具、风格、光影和声音锚点；可以在故事需要时改变景别和机位，但不得无理由更换人物、世界观或主线。
+4. 严格保留底稿中的主体、服装、场景、动作、道具、风格、光影和声音锚点；首镜明确建立主体、主场景和关键道具，后续每镜都要用全称、代词、同一空间参照或可见状态变化保持三者可追踪。可以在故事需要时改变景别和机位，但不得无理由换人、换地点，或让道具凭空出现、消失。
 5. 使用连贯自然语言，不堆关键词，不复述规则，不写无法直接拍摄的抽象评价。每段必须是可独立拍摄、又能承接下一段的分镜描述。
 6. 不限制正文总字数、单段字数或英文单词数；长度由剧情和分镜需要决定。正文仍不得写具体秒数或时长参数。
 """.strip()
@@ -153,6 +156,32 @@ def video_prompt_required_anchors(
         if anchor and anchor not in anchors:
             anchors.append(anchor)
     return anchors
+
+
+def video_prompt_anchor_roles(
+    selected: Mapping[str, Sequence[Any]] | None,
+    custom_tags: Sequence[Any] | None,
+    settings: Mapping[str, Any],
+) -> dict[str, list[str]]:
+    """Return model-validation anchors grouped by their narrative role."""
+
+    groups = _normalized_groups(selected, custom_tags, settings)
+    role_groups = (
+        ("subject", "主体"),
+        ("scene", "场景背景"),
+        ("action", "动作姿态"),
+        ("outfit", "服装造型"),
+        ("prop", "道具世界观"),
+    )
+    result: dict[str, list[str]] = {}
+    for role, group_name in role_groups:
+        values = groups.get(group_name, [])
+        if not values:
+            continue
+        anchor = _clean(values[0], limit=96)
+        if anchor:
+            result[role] = [anchor]
+    return result
 
 
 def _first(groups: Mapping[str, list[str]], name: str, fallback: str = "") -> str:
@@ -413,8 +442,22 @@ def _build_english_video_prompt(settings: Mapping[str, Any], *, primary_prompt: 
     return _join_storyboard_paragraphs(paragraphs)
 
 
-_STORYBOARD_LABEL_ZH = re.compile(r"^(?:分镜|镜头)\s*[一二三四五六七八九十百0-9]+(?:[（(][^）)]+[）)])?\s*[:：]")
-_STORYBOARD_LABEL_EN = re.compile(r"^(?:shot|scene)\s*\d+(?:\s*[（(][^）)]+[）)])?\s*:", flags=re.IGNORECASE)
+_STORYBOARD_LABEL_ZH = re.compile(
+    r"^(?:分镜|镜头)\s*(?P<index>[零一二两三四五六七八九十百0-9]+)(?:[（(][^）)]+[）)])?\s*[:：]"
+)
+_STORYBOARD_LABEL_EN = re.compile(
+    r"^(?:shot|scene)\s*(?P<index>\d+)(?:\s*[（(][^）)]+[）)])?\s*:",
+    flags=re.IGNORECASE,
+)
+def _storyboard_paragraph_number(paragraph: str, *, english: bool) -> int | None:
+    pattern = _STORYBOARD_LABEL_EN if english else _STORYBOARD_LABEL_ZH
+    match = pattern.match(str(paragraph or "").strip())
+    return storyboard_number_token(match.group("index")) if match else None
+
+
+def _has_contiguous_storyboard_numbers(paragraphs: Sequence[str], *, english: bool) -> bool:
+    numbers = [_storyboard_paragraph_number(paragraph, english=english) for paragraph in paragraphs]
+    return bool(numbers) and numbers == list(range(1, len(numbers) + 1))
 
 
 def _storyboard_paragraphs(text: str) -> list[str]:
@@ -468,6 +511,7 @@ def is_natural_video_prompt(text: str, *, language: str = "纯中文") -> bool:
         return (
             not re.search(r"[\u4e00-\u9fff]", prompt)
             and len(paragraphs) >= VIDEO_PROMPT_MIN_STORYBOARD_PARAGRAPHS
+            and _has_contiguous_storyboard_numbers(paragraphs, english=True)
             and all(_valid_storyboard_paragraph(paragraph, english=True) for paragraph in paragraphs)
             and all(marker in lowered for marker in ("setup", "trigger", "action", "resolution"))
             and any(marker in lowered for marker in ("when", "because", "causes", "consequence"))
@@ -476,6 +520,7 @@ def is_natural_video_prompt(text: str, *, language: str = "纯中文") -> bool:
     paragraphs = _storyboard_paragraphs(body)
     return (
         len(paragraphs) >= VIDEO_PROMPT_MIN_STORYBOARD_PARAGRAPHS
+        and _has_contiguous_storyboard_numbers(paragraphs, english=False)
         and all(_valid_storyboard_paragraph(paragraph, english=False) for paragraph in paragraphs)
         and all(marker in body for marker in ("建立", "触发", "行动", "收束"))
         and any(marker in body for marker in ("因为", "带来", "随即", "结果"))
@@ -512,5 +557,6 @@ __all__ = [
     "VIDEO_PROMPT_SKILL_VERSION",
     "build_video_prompt",
     "is_natural_video_prompt",
+    "video_prompt_anchor_roles",
     "video_prompt_required_anchors",
 ]

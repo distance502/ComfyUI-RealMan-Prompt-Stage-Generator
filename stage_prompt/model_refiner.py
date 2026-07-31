@@ -16,6 +16,7 @@ try:
         GLOBAL_NARRATIVE_MODEL_CONTRACT,
         prompt_preserves_visual_layout,
         resolve_visual_layout_mode,
+        storyboard_number_token,
         visual_layout_contract,
     )
     from .intelligence import (
@@ -28,6 +29,7 @@ except Exception:  # pragma: no cover - exercised by direct import tests
         GLOBAL_NARRATIVE_MODEL_CONTRACT,
         prompt_preserves_visual_layout,
         resolve_visual_layout_mode,
+        storyboard_number_token,
         visual_layout_contract,
     )
     from stage_prompt_intelligence_test import (  # type: ignore
@@ -324,7 +326,7 @@ _QWEN35_LOCAL_IMAGE_INCREMENTAL_SYSTEM = """
 _QWEN35_LOCAL_VIDEO_INCREMENTAL_SYSTEM = """
 你是 Qwen TE 的视频提示词后置导演，也是 Qwen3.5 本地增量润色器。输入已经是 Skill 生成并通过分镜故事合同校验的多段视频底稿，不要重写整篇。
 
-只输出 2-4 句可以直接融入现有分镜的连续动作细节，不设字数限制。新增内容必须沿用同一主体与故事主线，写清动作触发、材质或环境响应、光线或声音变化以及它属于哪一段剧情；不得增加无关人物、地点、道具、世界观、具体秒数或新剧情线。不要输出分析、标题、标签列表、规则复述、Markdown 或占位符，也不要复述整份底稿。
+只输出 2-4 句可以直接融入现有分镜的连续动作细节，不设字数限制。新增内容必须沿用同一主体与故事主线，写清动作触发、材质或环境响应、光线或声音变化以及它属于哪一段剧情；能够确定目标镜头时以“分镜一/二/三……”或“Shot 1/2/3...”标明。不得增加无关人物、地点、道具、世界观、具体秒数或新剧情线。不要输出分析、标题、标签列表、规则复述、Markdown 或占位符，也不要复述整份底稿。
 """.strip()
 _PROMPT_LABEL_PATTERN = re.compile(
     r"^\s*(?:成品提示词|最终提示词|图像提示词|提示词|Prompt|prompt|image prompt|final prompt)\s*[:：]\s*",
@@ -935,10 +937,125 @@ def _repair_common_video_fragment_errors(text: str) -> str:
 
 
 _VIDEO_STORYBOARD_LABEL_PATTERN = re.compile(
-    r"^(?:(?:分镜|镜头)\s*[一二三四五六七八九十百0-9]+|(?:shot|scene)\s*\d+)"
+    r"^(?:(?:分镜|镜头)\s*(?P<zh_index>[零一二两三四五六七八九十百0-9]+)|"
+    r"(?:shot|scene)\s*(?P<en_index>\d+))"
     r"(?:\s*[（(][^）)]+[）)])?\s*[:：]\s*",
     flags=re.IGNORECASE,
 )
+_VIDEO_SUBJECT_TRACE_ZH = re.compile(
+    r"(?:她|他|它|其|主体|人物|角色|身影|视线|手部|脚步|重心|姿态|衣摆|外观|动作)"
+)
+_VIDEO_SUBJECT_TRACE_EN = re.compile(
+    r"\b(?:she|he|they|it|her|his|their|subject|character|figure|silhouette|gaze|hand|footstep|movement|posture|attention|reaction|emotion|action|choice)\b",
+    flags=re.IGNORECASE,
+)
+_VIDEO_SCENE_TRACE_ZH = re.compile(
+    r"(?:场景|环境|现场|背景|空间|原地|此处|这里|周围|前景|中景|后景|地面|墙面|回声|原有位置)"
+)
+_VIDEO_SCENE_TRACE_EN = re.compile(
+    r"\b(?:scene|environment|location|world|space|spatial|surroundings|foreground|middle ground|background|ground|wall|echo|same place|direction of travel)\b",
+    flags=re.IGNORECASE,
+)
+_VIDEO_PROP_TRACE_ZH = re.compile(
+    r"(?:道具|线索|物件|物品|手中|握柄|接触点|碎片|残片|状态|位置变化|材质接触|环境后果)"
+)
+_VIDEO_PROP_TRACE_EN = re.compile(
+    r"\b(?:prop|clue|object|item|handle|fragment|state|position|material contact|consequence|result)\b",
+    flags=re.IGNORECASE,
+)
+_VIDEO_NEW_SUBJECT_ZH = re.compile(
+    r"(?:另一名|另一个|新(?:的)?|陌生(?:的)?|无关(?:的)?)\s*(?:男人|男子|女人|女性|人物|角色|冒险者|侦探|士兵|守卫|机器人|生物|主体)"
+)
+_VIDEO_NEW_SUBJECT_EN = re.compile(
+    r"\b(?:another|a new|an unrelated|a strange|a different)\s+(?:man|woman|person|character|adventurer|detective|soldier|guard|robot|creature|subject)\b",
+    flags=re.IGNORECASE,
+)
+_VIDEO_SCENE_SWITCH_ZH = re.compile(
+    r"(?:镜头|画面|故事|场景)?\s*(?:突然|随即|随后)?\s*(?:切换|转场|跳转|来到)(?:至|到|为|成)?"
+)
+_VIDEO_SCENE_SWITCH_EN = re.compile(
+    r"\b(?:cut(?:s)?|switch(?:es)?|jump(?:s)?)\s+(?:away\s+)?(?:to|into)\b",
+    flags=re.IGNORECASE,
+)
+_VIDEO_SCENE_TRANSITION_CONTEXT_ZH = re.compile(
+    r"(?:同一|原有|原来|该处|此处|这里|相邻|内部|沿着|穿过|跟随|连续|承接|特写|近景|中景|全景|景别|视角|机位|视线|手部|脸部|细节|焦点)"
+)
+_VIDEO_SCENE_TRANSITION_CONTEXT_EN = re.compile(
+    r"\b(?:same|original|adjacent|inside|within|along|through|follows?|continuous|continuing|close-up|wide shot|medium shot|angle|viewpoint|gaze|hand|face|detail|focus)\b",
+    flags=re.IGNORECASE,
+)
+_VIDEO_PROP_TRANSITION_ZH = re.compile(
+    r"(?:放下|交给|递给|抛下|丢下|丢失|遗失|落下|脱手|拾起|捡起|接过|取出|碎裂|破碎|折断|烧毁|熄灭)"
+)
+_VIDEO_PROP_TRANSITION_EN = re.compile(
+    r"\b(?:puts? down|hands? over|passes?|gives?|throws? down|drops?|loses?|leaves? behind|picks? up|takes?|breaks?|shatters?|burns?|goes? out)\b",
+    flags=re.IGNORECASE,
+)
+_VIDEO_ABRUPT_PROP_CHANGE_ZH = re.compile(
+    r"(?:(?:突然|凭空|莫名(?:其妙)?).{0,24}(?:消失|不见)|(?:消失|不见).{0,12}(?:突然|凭空|莫名(?:其妙)?))"
+)
+_VIDEO_ABRUPT_PROP_CHANGE_EN = re.compile(
+    r"\b(?:(?:suddenly|inexplicably|without explanation).{0,40}(?:disappears?|vanishes?)|(?:disappears?|vanishes?).{0,24}(?:suddenly|inexplicably))\b",
+    flags=re.IGNORECASE,
+)
+_VIDEO_INCREMENT_PHASE_PATTERNS = (
+    (
+        "resolution",
+        re.compile(
+            r"(?:最后|最终|终于|收束|结尾|定格|余韵|尘埃落定|平静下来|\bfinally\b|\beventually\b|\bresolution\b|\bending\b|\baftermath\b|\bsettles?\b|\bcomes? to rest\b)",
+            flags=re.IGNORECASE,
+        ),
+    ),
+    (
+        "setup",
+        re.compile(
+            r"(?:开场|故事开始|最初画面|建立场景|先建立|\bopening\b|\bsetup\b|\bestablish(?:es|ing)?\b|\bthe story begins\b)",
+            flags=re.IGNORECASE,
+        ),
+    ),
+    (
+        "escalation",
+        re.compile(
+            r"(?:升级|加剧|高潮|连锁|失控|坍塌|爆炸|爆裂|裂开|扩大|增强|风险逼近|\bescalat(?:e|es|ed|ion)\b|\bintensif(?:y|ies|ied)\b|\bclimax\b|\bchain reaction\b|\bout of control\b|\bcollaps(?:e|es|ed|ing)\b|\bexplod(?:e|es|ed|ing)\b|\bshatters?\b)",
+            flags=re.IGNORECASE,
+        ),
+    ),
+    (
+        "trigger",
+        re.compile(
+            r"(?:突然|忽然|听见|发现|察觉|警报|异响|传出|亮起|触发|打破节奏|逼近|意外出现|\bsuddenly\b|\bhears?\b|\bnotices?\b|\bdiscovers?\b|\balarm\b|\btrigger(?:s|ed)?\b|\ban unexpected\b|\bbreaks? the rhythm\b|\bapproaches?\b)",
+            flags=re.IGNORECASE,
+        ),
+    ),
+    (
+        "action",
+        re.compile(
+            r"(?:随即|于是|立刻|马上|开始行动|作出回应|采取行动|转身|冲向|追向|拾起|捡起|举起|握紧|迈步|\bthen\b|\bimmediately\b|\bresponds?\b|\bbegins? to\b|\bturns?\b|\bruns? toward\b|\bfollows?\b|\bpicks? up\b|\braises?\b|\bgrips?\b|\bsteps? toward\b)",
+            flags=re.IGNORECASE,
+        ),
+    ),
+)
+_VIDEO_INCREMENT_NEGATED_PHASE_PATTERN = re.compile(
+    r"(?:不是|并非|不要|不应|尚未|还未|没有|未到)[^，,；;。.!?]{0,18}"
+    r"(?:最后(?:的)?(?:收束|结尾|定格)?|最终(?:的)?(?:收束|结尾|定格)?|收束|结尾|定格|开场|建立场景|升级|加剧|高潮|触发|开始行动|采取行动)"
+    r"|\b(?:not|isn't|is not|wasn't|was not|doesn't|does not|do not|without)\b.{0,48}"
+    r"\b(?:finally|resolution|ending|setup|opening|escalation|climax|trigger|action)\b",
+    flags=re.IGNORECASE,
+)
+_VIDEO_INCREMENT_PHASE_LABELS = {
+    "setup": "建立",
+    "trigger": "触发",
+    "action": "行动",
+    "escalation": "升级",
+    "resolution": "收束",
+}
+
+
+def _video_storyboard_paragraph_number(paragraph: str) -> int | None:
+    match = _VIDEO_STORYBOARD_LABEL_PATTERN.match(str(paragraph or "").strip())
+    if not match:
+        return None
+    return storyboard_number_token(match.group("zh_index") or match.group("en_index"))
 
 
 def _video_storyboard_paragraphs(text: str) -> list[str]:
@@ -951,7 +1068,180 @@ def _video_storyboard_paragraphs(text: str) -> list[str]:
     lines = [line.strip() for line in source.split("\n") if line.strip()]
     if sum(bool(_VIDEO_STORYBOARD_LABEL_PATTERN.match(line)) for line in lines) >= 3:
         return lines
+    if len(lines) == 2 and all(re.search(r"[。！？.!?]", line) for line in lines):
+        return lines
     return paragraphs
+
+
+def _video_increment_phase(text: str) -> str | None:
+    body = _VIDEO_STORYBOARD_LABEL_PATTERN.sub("", str(text or "").strip())
+    body = _VIDEO_INCREMENT_NEGATED_PHASE_PATTERN.sub(" ", body)
+    for phase, pattern in _VIDEO_INCREMENT_PHASE_PATTERNS:
+        if pattern.search(body):
+            return phase
+    return None
+
+
+def _video_increment_target(phase: str | None, shot_count: int) -> int | None:
+    count = max(0, int(shot_count))
+    if count < 3 or not phase:
+        return None
+    if phase == "setup":
+        return 0
+    if phase == "trigger":
+        return min(1, count - 1)
+    if phase == "action":
+        return min(2, count - 1)
+    if phase == "escalation":
+        return max(1, count - 2)
+    if phase == "resolution":
+        return count - 1
+    return None
+
+
+def _video_increment_targets(additions: list[str], shot_count: int) -> list[int] | None:
+    """Place short unnumbered additions by story phase without guessing through reversal."""
+
+    inferred = [
+        _video_increment_target(_video_increment_phase(addition), shot_count)
+        for addition in additions
+    ]
+    known = [target for target in inferred if target is not None]
+    if known and known != sorted(known):
+        return None
+    if not known:
+        return [max(1, shot_count - 2)] * len(additions)
+
+    resolved: list[int] = []
+    for index, target in enumerate(inferred):
+        if target is not None:
+            resolved.append(target)
+            continue
+        previous = next((value for value in reversed(inferred[:index]) if value is not None), None)
+        following = next((value for value in inferred[index + 1 :] if value is not None), None)
+        resolved.append(int(previous if previous is not None else following))
+    return resolved
+
+
+def _video_anchor_role_values(anchor_roles: Any) -> dict[str, list[str]]:
+    if not isinstance(anchor_roles, dict):
+        return {}
+    result: dict[str, list[str]] = {}
+    for role in ("subject", "scene", "action", "outfit", "prop"):
+        raw_values = anchor_roles.get(role, [])
+        if isinstance(raw_values, str):
+            raw_values = [raw_values]
+        if not isinstance(raw_values, (list, tuple, set)):
+            continue
+        values: list[str] = []
+        seen: set[str] = set()
+        for raw in raw_values:
+            value = re.sub(r"\s+", " ", str(raw or "")).strip(" ，,。；;：:")
+            key = value.casefold()
+            if value and key not in seen:
+                seen.add(key)
+                values.append(value)
+        if values:
+            result[role] = values
+    return result
+
+
+def _video_paragraph_has_anchor(paragraph: str, anchors: list[str]) -> bool:
+    lowered = str(paragraph or "").casefold()
+    return any(anchor.casefold() in lowered for anchor in anchors)
+
+
+def _video_story_continuity_section_violation(
+    text: str,
+    anchor_roles: dict[str, list[str]],
+    *,
+    english: bool,
+) -> str:
+    paragraphs = _video_storyboard_paragraphs(text)
+    if len(paragraphs) < 3:
+        return ""
+
+    subject_anchors = anchor_roles.get("subject", [])
+    scene_anchors = anchor_roles.get("scene", [])
+    prop_anchors = anchor_roles.get("prop", [])
+    first = paragraphs[0]
+    for role_name, anchors in (("主体", subject_anchors), ("场景", scene_anchors), ("道具", prop_anchors)):
+        applicable = [anchor for anchor in anchors if anchor.casefold() in str(text).casefold()]
+        if applicable and not _video_paragraph_has_anchor(first, applicable):
+            shot_name = "Shot 1" if english else "分镜一"
+            return f"视频模型候选在{shot_name}未建立{role_name}锚点。"
+
+    subject_trace = _VIDEO_SUBJECT_TRACE_EN if english else _VIDEO_SUBJECT_TRACE_ZH
+    scene_trace = _VIDEO_SCENE_TRACE_EN if english else _VIDEO_SCENE_TRACE_ZH
+    prop_trace = _VIDEO_PROP_TRACE_EN if english else _VIDEO_PROP_TRACE_ZH
+    new_subject = _VIDEO_NEW_SUBJECT_EN if english else _VIDEO_NEW_SUBJECT_ZH
+    scene_switch = _VIDEO_SCENE_SWITCH_EN if english else _VIDEO_SCENE_SWITCH_ZH
+    scene_context = _VIDEO_SCENE_TRANSITION_CONTEXT_EN if english else _VIDEO_SCENE_TRANSITION_CONTEXT_ZH
+    prop_transition = _VIDEO_PROP_TRANSITION_EN if english else _VIDEO_PROP_TRANSITION_ZH
+    abrupt_prop_change = _VIDEO_ABRUPT_PROP_CHANGE_EN if english else _VIDEO_ABRUPT_PROP_CHANGE_ZH
+
+    for index, paragraph in enumerate(paragraphs[1:], start=2):
+        shot_name = f"Shot {index}" if english else f"分镜{index}"
+        if new_subject.search(paragraph) and not _video_paragraph_has_anchor(paragraph, subject_anchors):
+            return f"视频模型候选在{shot_name}无解释引入新主体。"
+        scene_switch_match = scene_switch.search(paragraph)
+        if scene_switch_match:
+            transition_window = paragraph[
+                max(0, scene_switch_match.start() - 18) : scene_switch_match.end() + 24
+            ]
+            if not (
+                _video_paragraph_has_anchor(transition_window, scene_anchors)
+                or scene_context.search(transition_window)
+            ):
+                return f"视频模型候选在{shot_name}无解释切换主场景。"
+        if abrupt_prop_change.search(paragraph):
+            return f"视频模型候选在{shot_name}让关键道具无解释消失。"
+
+        missing_roles: list[str] = []
+        if subject_anchors and not (
+            _video_paragraph_has_anchor(paragraph, subject_anchors) or subject_trace.search(paragraph)
+        ):
+            missing_roles.append("主体")
+        if scene_anchors and not (
+            _video_paragraph_has_anchor(paragraph, scene_anchors) or scene_trace.search(paragraph)
+        ):
+            missing_roles.append("场景")
+        if prop_anchors and not (
+            _video_paragraph_has_anchor(paragraph, prop_anchors)
+            or prop_trace.search(paragraph)
+            or prop_transition.search(paragraph)
+        ):
+            missing_roles.append("道具")
+        if missing_roles:
+            return f"视频模型候选在{shot_name}失去{'、'.join(missing_roles)}连续性。"
+    return ""
+
+
+def _video_story_continuity_violation(text: str, anchor_roles: Any, *, language: str) -> str:
+    """Return a shot-aware anchor continuity failure for a complete storyboard."""
+
+    roles = _video_anchor_role_values(anchor_roles)
+    if not roles:
+        return ""
+    prompt = str(text or "").strip()
+    mode = str(language or "纯中文").strip()
+    if mode == "英文提示词+中文说明":
+        english_text, marker, chinese_text = prompt.partition("中文说明：")
+        if not marker:
+            return ""
+        english_reason = _video_story_continuity_section_violation(
+            english_text.strip(), roles, english=True
+        )
+        if english_reason:
+            return english_reason
+        return _video_story_continuity_section_violation(
+            chinese_text.strip(), roles, english=False
+        )
+    return _video_story_continuity_section_violation(
+        prompt,
+        roles,
+        english=mode == "纯英文",
+    )
 
 
 def _postprocess_video_prompt_text(text: str) -> str:
@@ -977,40 +1267,139 @@ def _postprocess_video_prompt_text(text: str) -> str:
     return "\n\n".join(cleaned)
 
 
-def _blend_video_draft_with_storyboard(original_prompt: str, model_prompt: str) -> str:
+def _blend_video_draft_with_storyboard(
+    original_prompt: str,
+    model_prompt: str,
+    *,
+    diagnostics: dict[str, Any] | None = None,
+) -> str:
     """Merge useful model prose into existing shots without flattening the storyboard."""
 
     original = str(original_prompt or "").strip()
     candidate = str(model_prompt or "").strip()
+    if isinstance(diagnostics, dict):
+        diagnostics.clear()
+
+    def reject(reason: str) -> str:
+        if isinstance(diagnostics, dict):
+            diagnostics.update({"status": "rejected", "reason": reason, "placements": []})
+        return original
+
+    def accept(mode: str, placements: list[dict[str, Any]], result: str) -> str:
+        if isinstance(diagnostics, dict):
+            diagnostics.update(
+                {
+                    "status": "accepted",
+                    "reason": "",
+                    "mode": mode,
+                    "placements": placements,
+                }
+            )
+        return result
+
     original_paragraphs = _video_storyboard_paragraphs(original)
     candidate_paragraphs = _video_storyboard_paragraphs(candidate)
     if len(original_paragraphs) < 3 or not candidate_paragraphs:
-        return original
+        return reject("视频 Skill 底稿或模型增量缺少可融合的分镜段落。")
     if _looks_like_broken_prompt(candidate) or _looks_like_tag_chain_prompt(candidate):
-        return original
+        return reject("视频模型增量仍是分析、占位符、标签串或不可用正文。")
     if len(re.findall(r"[。！？.!?]", candidate)) < 1:
-        return original
+        return reject("视频模型增量缺少完整自然语言句子。")
 
-    additions: list[str] = []
+    additions: list[tuple[int | None, str]] = []
     for paragraph in candidate_paragraphs:
         body = _VIDEO_STORYBOARD_LABEL_PATTERN.sub("", paragraph).strip()
         if body:
-            additions.append(body)
+            additions.append((_video_storyboard_paragraph_number(paragraph), body))
     if not additions:
-        return original
+        return reject("视频模型增量清洗后没有可融合正文。")
 
     merged = list(original_paragraphs)
-    if len(candidate_paragraphs) >= 3:
-        for index, addition in enumerate(additions):
+    placements: list[dict[str, Any]] = []
+    blend_mode = ""
+    explicit_numbers = [number for number, _addition in additions if number is not None]
+    if explicit_numbers:
+        if (
+            len(explicit_numbers) != len(additions)
+            or len(set(explicit_numbers)) != len(explicit_numbers)
+            or explicit_numbers != sorted(explicit_numbers)
+            or any(number > len(merged) for number in explicit_numbers)
+            or (
+                len(additions) >= 3
+                and explicit_numbers != list(range(1, len(explicit_numbers) + 1))
+            )
+        ):
+            return reject("视频模型增量的明确分镜编号重复、倒序、越界，或与无编号段混用。")
+        blend_mode = "explicit"
+        for number, addition in additions:
+            target = int(number or 1) - 1
+            if _normalize_for_compare(addition) not in _normalize_for_compare(merged[target]):
+                merged[target] = f"{merged[target].rstrip()} {addition}"
+                placements.append({"shot": target + 1, "phase": None, "source": "explicit"})
+    elif len(candidate_paragraphs) >= 3:
+        blend_mode = "ordered"
+        for index, (_number, addition) in enumerate(additions):
             target = min(index, len(merged) - 1)
             if _normalize_for_compare(addition) not in _normalize_for_compare(merged[target]):
                 merged[target] = f"{merged[target].rstrip()} {addition}"
+                placements.append({"shot": target + 1, "phase": None, "source": "ordered"})
     else:
-        target = max(1, len(merged) - 2)
-        addition = " ".join(additions)
-        if _normalize_for_compare(addition) not in _normalize_for_compare(merged[target]):
-            merged[target] = f"{merged[target].rstrip()} {addition}"
-    return "\n\n".join(merged).strip()
+        addition_texts = [text for _number, text in additions]
+        phases = [_video_increment_phase(text) for text in addition_texts]
+        targets = _video_increment_targets(addition_texts, len(merged))
+        if targets is None:
+            phase_path = "→".join(
+                _VIDEO_INCREMENT_PHASE_LABELS.get(phase, "未判定") for phase in phases
+            )
+            return reject(f"未编号视频增量的剧情阶段顺序为{phase_path}，属于倒序，无法安全落镜。")
+        blend_mode = "semantic" if any(phases) else "default"
+        for target, phase, addition in zip(targets, phases, addition_texts):
+            if _normalize_for_compare(addition) not in _normalize_for_compare(merged[target]):
+                merged[target] = f"{merged[target].rstrip()} {addition}"
+                placements.append(
+                    {
+                        "shot": target + 1,
+                        "phase": phase,
+                        "source": "semantic" if phase else "neighbor_or_default",
+                    }
+                )
+    result = "\n\n".join(merged).strip()
+    if result == original or not placements:
+        return reject("视频模型增量与目标分镜已有内容重复，没有形成有效变化。")
+    return accept(blend_mode, placements, result)
+
+
+def _video_blend_placement_summary(diagnostics: Any) -> str:
+    if not isinstance(diagnostics, dict):
+        return ""
+    placements = diagnostics.get("placements")
+    if not isinstance(placements, list):
+        return ""
+    labels: list[str] = []
+    seen: set[tuple[int, str]] = set()
+    for placement in placements:
+        if not isinstance(placement, dict):
+            continue
+        shot = max(0, int(placement.get("shot", 0) or 0))
+        phase = str(placement.get("phase", "") or "").strip()
+        source = str(placement.get("source", "") or "").strip()
+        if shot <= 0:
+            continue
+        detail = _VIDEO_INCREMENT_PHASE_LABELS.get(phase, "")
+        if not detail:
+            detail = {
+                "explicit": "明确编号",
+                "ordered": "顺序对应",
+                "neighbor_or_default": "保守落镜",
+            }.get(source, "增量")
+        key = (shot, detail)
+        if key in seen:
+            continue
+        seen.add(key)
+        labels.append(f"分镜{shot}（{detail}）")
+        if len(labels) >= 4:
+            break
+    return "、".join(labels)
 
 
 def _dedupe_prompt_fragments(text: str) -> str:
@@ -4169,18 +4558,26 @@ def maybe_model_refine_video(
     candidate = _repair_common_video_fragment_errors(_postprocess_video_prompt_text(prepared))
     language = str(settings.get("提示词语言", "纯中文") or "纯中文")
     anchors = [str(item).strip() for item in settings.get("视频提示词必保留锚点", []) if str(item).strip()]
+    anchor_roles = settings.get("视频提示词锚点角色")
     missing = [anchor for anchor in anchors if anchor not in candidate]
     world_reason = candidate_world_violation(
         original,
         candidate,
         video_settings.get("智能场景关系图"),
     )
+    candidate_structure_valid = bool(validator(candidate, language=language))
+    continuity_reason = (
+        _video_story_continuity_violation(candidate, anchor_roles, language=language)
+        if candidate_structure_valid
+        else ""
+    )
     candidate_valid = not (
         not candidate
         or _looks_like_broken_prompt(candidate)
         or missing
         or world_reason
-        or not bool(validator(candidate, language=language))
+        or not candidate_structure_valid
+        or continuity_reason
     )
 
     invalid_reason = ""
@@ -4190,27 +4587,66 @@ def maybe_model_refine_video(
         invalid_reason = f"视频模型候选缺少锚点：{'、'.join(missing[:3])}。"
     elif world_reason:
         invalid_reason = world_reason
-    elif not bool(validator(candidate, language=language)):
+    elif not candidate_structure_valid:
         invalid_reason = "视频模型候选未通过自然语言、分镜段落或完整剧情校验。"
+    elif continuity_reason:
+        invalid_reason = continuity_reason
+
+    last_blend_reason = ""
+
+    def has_specific_blend_reason() -> bool:
+        return bool(
+            last_blend_reason
+            and any(
+                marker in last_blend_reason
+                for marker in ("阶段顺序", "明确分镜编号", "融合后")
+            )
+        )
 
     def adopt_blended(draft: str) -> str:
-        blended_prompt = _blend_video_draft_with_storyboard(original, draft)
+        nonlocal last_blend_reason
+        blend_diagnostics: dict[str, Any] = {}
+        blended_prompt = _blend_video_draft_with_storyboard(
+            original,
+            draft,
+            diagnostics=blend_diagnostics,
+        )
+        last_blend_reason = str(blend_diagnostics.get("reason", "") or "").strip()
         blended_missing = [anchor for anchor in anchors if anchor not in blended_prompt]
         blended_world_reason = candidate_world_violation(
             original,
             blended_prompt,
             video_settings.get("智能场景关系图"),
         )
+        blended_structure_valid = bool(validator(blended_prompt, language=language))
+        blended_continuity_reason = (
+            _video_story_continuity_violation(blended_prompt, anchor_roles, language=language)
+            if blended_structure_valid
+            else ""
+        )
         if (
             blended_prompt == original
             or blended_missing
             or blended_world_reason
-            or not bool(validator(blended_prompt, language=language))
+            or not blended_structure_valid
+            or blended_continuity_reason
         ):
+            if blended_prompt != original:
+                if blended_missing:
+                    last_blend_reason = f"视频增量融合后缺少锚点：{'、'.join(blended_missing[:3])}。"
+                elif blended_world_reason:
+                    last_blend_reason = blended_world_reason
+                elif not blended_structure_valid:
+                    last_blend_reason = "视频增量融合后破坏了自然语言、分镜段落或完整剧情结构。"
+                elif blended_continuity_reason:
+                    last_blend_reason = blended_continuity_reason
             return ""
+        placement_summary = _video_blend_placement_summary(blend_diagnostics)
+        placement_note = f" 智能落镜：{placement_summary}。" if placement_summary else ""
         _append_model_runtime_note(
             video_settings,
-            "视频模型返回了可用短草稿，已融入 Skill 的多段分镜故事，主体、场景、动作与结尾锚点保持不变。",
+            "视频模型返回了可用短草稿，已融入 Skill 的多段分镜故事，主体、场景、动作与结尾锚点保持不变。"
+            + placement_note,
         )
         _record_model_call_result(video_settings, outcome="success", changed=True)
         settings.update({key: value for key, value in video_settings.items() if key.startswith(("模型", "智能定向修复")) or key == "推理纠偏说明"})
@@ -4221,12 +4657,14 @@ def maybe_model_refine_video(
         if blended:
             return blended
         candidate_valid = False
-        invalid_reason = "视频模型增量正文未能安全融入 Skill 分镜故事基线。"
+        invalid_reason = last_blend_reason or "视频模型增量正文未能安全融入 Skill 分镜故事基线。"
 
     if not candidate_valid:
         blended = adopt_blended(candidate)
         if blended:
             return blended
+        if has_specific_blend_reason():
+            invalid_reason = last_blend_reason
         repaired_raw = _retry_invalid_model_output(
             llm,
             original,
@@ -4244,12 +4682,23 @@ def maybe_model_refine_video(
                 repaired_candidate,
                 video_settings.get("智能场景关系图"),
             )
+            repaired_structure_valid = bool(validator(repaired_candidate, language=language))
+            repaired_continuity_reason = (
+                _video_story_continuity_violation(
+                    repaired_candidate,
+                    anchor_roles,
+                    language=language,
+                )
+                if repaired_structure_valid
+                else ""
+            )
             if (
                 repaired_candidate
                 and not _looks_like_broken_prompt(repaired_candidate)
                 and not repaired_missing
                 and not repaired_world_reason
-                and bool(validator(repaired_candidate, language=language))
+                and repaired_structure_valid
+                and not repaired_continuity_reason
             ):
                 candidate = repaired_candidate
                 missing = []
@@ -4264,11 +4713,15 @@ def maybe_model_refine_video(
                     if blended:
                         return blended
                     candidate_valid = False
-                    invalid_reason = "视频模型定向修复正文仍未能安全融入 Skill 分镜故事基线。"
+                    invalid_reason = last_blend_reason or "视频模型定向修复正文仍未能安全融入 Skill 分镜故事基线。"
             else:
+                if repaired_continuity_reason:
+                    invalid_reason = repaired_continuity_reason
                 blended = adopt_blended(repaired_candidate)
                 if blended:
                     return blended
+                if has_specific_blend_reason():
+                    invalid_reason = last_blend_reason
     if not candidate_valid:
         reason = invalid_reason or "视频模型候选未通过自然语言、分镜段落、完整剧情或锚点校验。"
         if missing:

@@ -28188,6 +28188,379 @@ class TestStagePromptModules(unittest.TestCase):
             video_prompt_skill.is_natural_video_prompt(prompt.replace("\n\n", " "), language="纯中文")
         )
 
+    def test_video_prompt_validation_requires_unique_contiguous_ordered_shot_numbers(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["女冒险者"],
+                "场景背景": ["地下城遗迹"],
+                "动作姿态": ["举起火炬探路"],
+                "道具世界观": ["火炬"],
+            }
+        )
+        settings = {"提示词语言": "纯中文", "seed": 31}
+        chinese = video_prompt_skill.build_video_prompt(selected, [], settings)
+        paragraphs = chinese.split("\n\n")
+        duplicate = "\n\n".join(
+            [paragraphs[0], paragraphs[1].replace("分镜二", "分镜一", 1), *paragraphs[2:]]
+        )
+        skipped = "\n\n".join(
+            [*paragraphs[:2], paragraphs[2].replace("分镜三", "分镜六", 1), *paragraphs[3:]]
+        )
+        out_of_order = "\n\n".join([paragraphs[1], paragraphs[0], *paragraphs[2:]])
+        for invalid in (duplicate, skipped, out_of_order):
+            with self.subTest(invalid=invalid[:24]):
+                self.assertFalse(video_prompt_skill.is_natural_video_prompt(invalid, language="纯中文"))
+
+        arabic = chinese
+        for index, numeral in enumerate(("一", "二", "三", "四", "五"), start=1):
+            arabic = arabic.replace(f"分镜{numeral}", f"分镜{index}", 1)
+        self.assertTrue(video_prompt_skill.is_natural_video_prompt(arabic, language="纯中文"))
+        self.assertEqual(narrative.storyboard_number_token("二十三"), 23)
+
+        english = video_prompt_skill.build_video_prompt(
+            selected,
+            [],
+            {**settings, "提示词语言": "纯英文"},
+        )
+        invalid_english = english.replace("Shot 2", "Shot 1", 1)
+        self.assertFalse(
+            video_prompt_skill.is_natural_video_prompt(invalid_english, language="纯英文")
+        )
+        bilingual = f"{english}\n中文说明：{duplicate}"
+        self.assertFalse(
+            video_prompt_skill.is_natural_video_prompt(bilingual, language="英文提示词+中文说明")
+        )
+
+    def test_video_incremental_blend_targets_explicit_shot_and_rejects_ambiguous_labels(self) -> None:
+        original = video_prompt_skill.build_video_prompt(
+            OrderedDict(
+                {
+                    "主体": ["女冒险者"],
+                    "场景背景": ["地下城遗迹"],
+                    "动作姿态": ["举起火炬探路"],
+                    "道具世界观": ["火炬"],
+                }
+            ),
+            [],
+            {"提示词语言": "纯中文", "seed": 37},
+        )
+        targeted = (
+            "分镜四（升级）：镜头贴近石门裂缝，火炬热流卷开尘埃，"
+            "石门内部的回声随裂纹扩大而增强。"
+        )
+        blended = model_refiner._blend_video_draft_with_storyboard(original, targeted)
+        blended_paragraphs = blended.split("\n\n")
+        self.assertIn("石门内部的回声", blended_paragraphs[3])
+        self.assertNotIn("石门内部的回声", "\n".join(blended_paragraphs[:3] + blended_paragraphs[4:]))
+        self.assertTrue(video_prompt_skill.is_natural_video_prompt(blended, language="纯中文"))
+
+        ambiguous_candidates = (
+            (
+                "分镜二（触发）：镜头看见第一条补充。\n\n"
+                "分镜二（触发）：镜头看见第二条补充。"
+            ),
+            (
+                "分镜四（升级）：镜头看见较晚结果。\n\n"
+                "分镜二（触发）：镜头才看见较早原因。"
+            ),
+            (
+                "分镜一（建立）：镜头保留开场。\n\n"
+                "分镜二（触发）：镜头保留触发。\n\n"
+                "分镜四（升级）：镜头跳过行动。"
+            ),
+            (
+                "分镜三（行动）：镜头补充动作。\n\n"
+                "这一句没有分镜编号，不能确定写入位置。"
+            ),
+        )
+        for candidate in ambiguous_candidates:
+            with self.subTest(candidate=candidate[:24]):
+                self.assertEqual(
+                    model_refiner._blend_video_draft_with_storyboard(original, candidate),
+                    original,
+                )
+
+    def test_video_incremental_blend_routes_unnumbered_fragments_by_story_phase(self) -> None:
+        original = video_prompt_skill.build_video_prompt(
+            OrderedDict(
+                {
+                    "主体": ["女冒险者"],
+                    "场景背景": ["地下城遗迹"],
+                    "动作姿态": ["举起火炬探路"],
+                    "道具世界观": ["火炬"],
+                }
+            ),
+            [],
+            {"提示词语言": "纯中文", "seed": 37},
+        )
+        phase_fragments = (
+            ("开场先让远处滴水声建立空间深度。", 0),
+            ("她忽然听见石门后传出短促敲击声。", 1),
+            ("她随即举起火炬，迈步靠近石门。", 2),
+            ("门缝突然爆裂，扩大的裂纹引发连锁震动。", 3),
+            ("最后她停下脚步，镜头定格在火光稳定的瞬间。", 4),
+        )
+        for fragment, expected_index in phase_fragments:
+            with self.subTest(fragment=fragment):
+                blended = model_refiner._blend_video_draft_with_storyboard(original, fragment)
+                paragraphs = blended.split("\n\n")
+                self.assertIn(fragment, paragraphs[expected_index])
+                self.assertNotIn(
+                    fragment,
+                    "\n".join(
+                        paragraph
+                        for index, paragraph in enumerate(paragraphs)
+                        if index != expected_index
+                    ),
+                )
+
+        ordered = (
+            "她忽然听见石门后传出短促敲击声。\n\n"
+            "她随即举起火炬，迈步靠近石门。"
+        )
+        ordered_diagnostics: dict[str, object] = {}
+        ordered_blend = model_refiner._blend_video_draft_with_storyboard(
+            original,
+            ordered,
+            diagnostics=ordered_diagnostics,
+        )
+        ordered_paragraphs = ordered_blend.split("\n\n")
+        self.assertIn("短促敲击声", ordered_paragraphs[1])
+        self.assertIn("迈步靠近石门", ordered_paragraphs[2])
+        self.assertEqual(ordered_diagnostics["status"], "accepted")
+        self.assertEqual(
+            model_refiner._video_blend_placement_summary(ordered_diagnostics),
+            "分镜2（触发）、分镜3（行动）",
+        )
+
+        reversed_fragments = (
+            "她随即举起火炬，迈步靠近石门。\n\n"
+            "她忽然听见石门后传出短促敲击声。"
+        )
+        reversed_diagnostics: dict[str, object] = {}
+        self.assertEqual(
+            model_refiner._blend_video_draft_with_storyboard(
+                original,
+                reversed_fragments,
+                diagnostics=reversed_diagnostics,
+            ),
+            original,
+        )
+        self.assertEqual(reversed_diagnostics["status"], "rejected")
+        self.assertIn("行动→触发", str(reversed_diagnostics["reason"]))
+
+        ambiguous = "火炬表面的水珠沿握柄滑落，石墙反光随之轻微移动。"
+        ambiguous_blend = model_refiner._blend_video_draft_with_storyboard(original, ambiguous)
+        self.assertIn(ambiguous, ambiguous_blend.split("\n\n")[3])
+
+        self.assertEqual(
+            model_refiner._video_increment_phase(
+                "这不是最后收束，门缝的爆裂声反而让冲突继续升级。"
+            ),
+            "escalation",
+        )
+        self.assertEqual(
+            model_refiner._video_increment_phase(
+                "This is not the ending; the fracture intensifies into a chain reaction."
+            ),
+            "escalation",
+        )
+
+    def test_video_story_continuity_tracks_subject_scene_and_prop_by_shot(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["成年女性侦探"],
+                "场景背景": ["雨夜旧车站"],
+                "动作姿态": ["转身追查线索"],
+                "服装造型": ["深色长风衣"],
+                "道具世界观": ["旧信封"],
+            }
+        )
+        settings = {"提示词语言": "纯中文", "seed": 23}
+        original = video_prompt_skill.build_video_prompt(selected, [], settings)
+        roles = video_prompt_skill.video_prompt_anchor_roles(selected, [], settings)
+
+        self.assertEqual(
+            roles,
+            {
+                "subject": ["成年女性侦探"],
+                "scene": ["雨夜旧车站"],
+                "action": ["转身追查线索"],
+                "outfit": ["深色长风衣"],
+                "prop": ["旧信封"],
+            },
+        )
+        self.assertEqual(
+            model_refiner._video_story_continuity_violation(
+                original,
+                roles,
+                language="纯中文",
+            ),
+            "",
+        )
+
+        bilingual = video_prompt_skill.build_video_prompt(
+            selected,
+            [],
+            {**settings, "提示词语言": "英文提示词+中文说明"},
+            primary_prompt=(
+                "An adult female detective in a dark trench coat turns to pursue a clue "
+                "through a rain-soaked old station while holding an old envelope."
+            ),
+        )
+        self.assertEqual(
+            model_refiner._video_story_continuity_violation(
+                bilingual,
+                roles,
+                language="英文提示词+中文说明",
+            ),
+            "",
+        )
+
+        continuous_move = original.replace(
+            "镜头改变景别观察行动造成的连锁结果",
+            "镜头沿着同一雨夜旧车站的站台切换到相邻候车区，观察行动造成的连锁结果",
+            1,
+        )
+        self.assertEqual(
+            model_refiner._video_story_continuity_violation(
+                continuous_move,
+                roles,
+                language="纯中文",
+            ),
+            "",
+        )
+
+        camera_reframe = original.replace(
+            "镜头改变景别观察行动造成的连锁结果",
+            "镜头切换到她的手部特写，观察行动造成的连锁结果",
+            1,
+        )
+        self.assertEqual(
+            model_refiner._video_story_continuity_violation(
+                camera_reframe,
+                roles,
+                language="纯中文",
+            ),
+            "",
+        )
+
+        explicit_handoff = original.replace(
+            "关键道具发生位移或状态改变",
+            "她把旧信封交给固定在墙边的接收装置",
+            1,
+        )
+        self.assertEqual(
+            model_refiner._video_story_continuity_violation(
+                explicit_handoff,
+                roles,
+                language="纯中文",
+            ),
+            "",
+        )
+
+        abrupt_loss = original.replace(
+            "关键道具发生位移或状态改变",
+            "旧信封突然凭空消失",
+            1,
+        )
+        self.assertIn(
+            "道具无解释消失",
+            model_refiner._video_story_continuity_violation(
+                abrupt_loss,
+                roles,
+                language="纯中文",
+            ),
+        )
+
+        unexplained_location = original.replace(
+            "镜头改变景别观察行动造成的连锁结果",
+            "镜头切换到海边咖啡馆，她继续观察行动造成的结果",
+            1,
+        )
+        self.assertIn(
+            "无解释切换主场景",
+            model_refiner._video_story_continuity_violation(
+                unexplained_location,
+                roles,
+                language="纯中文",
+            ),
+        )
+
+        new_subject = original.replace(
+            "镜头改变景别观察行动造成的连锁结果",
+            "镜头转向另一名陌生男子观察行动造成的结果",
+            1,
+        )
+        self.assertIn(
+            "无解释引入新主体",
+            model_refiner._video_story_continuity_violation(
+                new_subject,
+                roles,
+                language="纯中文",
+            ),
+        )
+
+    def test_video_model_refiner_rejects_anchor_dump_followed_by_unrelated_story(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["成年女性侦探"],
+                "场景背景": ["雨夜旧车站"],
+                "动作姿态": ["转身追查线索"],
+                "服装造型": ["深色长风衣"],
+                "道具世界观": ["旧信封"],
+            }
+        )
+        base_settings = {"提示词语言": "纯中文", "模型来源": "API接口", "seed": 23}
+        original = video_prompt_skill.build_video_prompt(selected, [], base_settings)
+        first = original.split("\n\n", 1)[0] + "她准备转身追查线索。"
+        unrelated = "\n\n".join(
+            (
+                first,
+                "分镜二（触发）：镜头突然切换到海边咖啡馆，一名陌生男子因为听见杯子破裂而回头。环境光落在桌面，事件由此触发。",
+                "分镜三（行动）：镜头跟随陌生男子走向门口，他随即拿起雨伞。背景声音继续变化，这次行动带来新的结果。",
+                "分镜四（升级）：镜头推近咖啡馆后门，陌生男子与店员发生争执。现场灯光不断闪烁，冲突因此升级。",
+                "分镜五（收束）：镜头停在海边街道，陌生男子最终登上一辆汽车。环境恢复安静，这个结果完成故事收束。",
+            )
+        )
+        self.assertTrue(video_prompt_skill.is_natural_video_prompt(unrelated, language="纯中文"))
+
+        class DriftingModel:
+            calls = 0
+
+            def create_chat_completion(self, messages=None, **_kwargs):
+                self.calls += 1
+                return {"choices": [{"message": {"content": unrelated}}]}
+
+        model = DriftingModel()
+        settings = {
+            **base_settings,
+            "模型任务": "视频提示词",
+            "视频提示词模型系统提示": video_prompt_skill.VIDEO_PROMPT_MODEL_SYSTEM_TEMPLATE,
+            "视频提示词必保留锚点": video_prompt_skill.video_prompt_required_anchors(
+                selected, [], base_settings
+            ),
+            "视频提示词锚点角色": video_prompt_skill.video_prompt_anchor_roles(
+                selected, [], base_settings
+            ),
+        }
+        result = model_refiner.maybe_model_refine_video(
+            model,
+            original,
+            settings,
+            chat_completion=lambda active_model, messages, params: active_model.create_chat_completion(
+                messages=messages,
+                **params,
+            ),
+            clean_think_text=lambda value: value,
+            validator=video_prompt_skill.is_natural_video_prompt,
+        )
+
+        self.assertEqual(result, original)
+        self.assertEqual(model.calls, 2)
+        self.assertEqual(settings["模型活动回退数量"], 1)
+        self.assertRegex(settings["模型回退说明"], r"无解释引入新主体|无解释切换主场景")
+
     def test_video_prompt_skill_does_not_import_station_story_into_dungeon(self) -> None:
         selected = OrderedDict(
             {
@@ -28432,6 +28805,67 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertEqual(model_settings["模型调用采纳次数"], 1)
         self.assertEqual(model_settings.get("模型活动回退数量", 0), 0)
         self.assertEqual(model.calls, 1)
+        self.assertTrue(
+            any(
+                "智能落镜：分镜2（触发）" in note
+                for note in model_settings.get("推理纠偏说明", [])
+            )
+        )
+
+    def test_video_model_refiner_reports_reversed_unnumbered_increment_to_retry(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["成年女性侦探"],
+                "场景背景": ["雨夜旧车站"],
+                "动作姿态": ["转身追查线索"],
+                "服装造型": ["深色长风衣"],
+                "道具世界观": ["旧信封"],
+            }
+        )
+        base_settings = {"提示词语言": "纯中文", "模型来源": "本地模型", "seed": 23}
+        original = video_prompt_skill.build_video_prompt(selected, [], base_settings)
+        reversed_increment = (
+            "她随即转身追向站台出口，旧信封被握在手中。\n\n"
+            "她忽然听见身后的金属碰撞声，才意识到触发事件来自原地。"
+        )
+
+        class ReversedIncrementModel:
+            def __init__(self):
+                self.prompts: list[str] = []
+
+            def invoke(self, prompt):
+                self.prompts.append(str(prompt))
+                return reversed_increment
+
+        model = ReversedIncrementModel()
+        settings = {
+            **base_settings,
+            "模型任务": "视频提示词",
+            "视频提示词模型系统提示": video_prompt_skill.VIDEO_PROMPT_MODEL_SYSTEM_TEMPLATE,
+            "视频提示词必保留锚点": video_prompt_skill.video_prompt_required_anchors(
+                selected, [], base_settings
+            ),
+            "视频提示词锚点角色": video_prompt_skill.video_prompt_anchor_roles(
+                selected, [], base_settings
+            ),
+        }
+        result = model_refiner.maybe_model_refine_video(
+            model,
+            original,
+            settings,
+            chat_completion=lambda active_model, messages, params: active_model.create_chat_completion(
+                messages=messages,
+                **params,
+            ),
+            clean_think_text=lambda value: value,
+            validator=video_prompt_skill.is_natural_video_prompt,
+        )
+
+        self.assertEqual(result, original)
+        self.assertEqual(len(model.prompts), 2)
+        self.assertIn("行动→触发", model.prompts[1])
+        self.assertIn("行动→触发", settings["模型回退说明"])
+        self.assertEqual(settings["模型活动回退数量"], 1)
 
     def test_qwen35_local_video_refiner_uses_compact_incremental_contract(self) -> None:
         selected = OrderedDict(
@@ -28498,6 +28932,7 @@ class TestStagePromptModules(unittest.TestCase):
         sent = "\n".join(str(message.get("content", "")) for message in model.messages)
         self.assertIn("视频提示词后置导演", sent)
         self.assertIn("Qwen3.5 本地增量润色器", sent)
+        self.assertIn("能够确定目标镜头时", sent)
         self.assertIn("女冒险者、地下城遗迹、坐姿慵懒、皮革护甲、火炬", sent)
         self.assertNotIn("完整的中文说明", sent)
         self.assertEqual(model.params["max_tokens"], 640)
@@ -28549,7 +28984,7 @@ class TestStagePromptModules(unittest.TestCase):
         payload = json.loads(result[3])
         self.assertEqual(payload["video_prompt"], video_prompt)
         self.assertEqual(payload["video_prompt_skill_status"], "已生成")
-        self.assertEqual(payload["video_prompt_skill_version"], "video-prompt-skill-v4")
+        self.assertEqual(payload["video_prompt_skill_version"], "video-prompt-skill-v8")
         self.assertEqual(payload["video_prompt_model_status"], "未调用（仅Skill）")
         self.assertEqual(payload["video_prompt_model_source"], "仅Skill")
         self.assertGreaterEqual(payload["video_prompt_required_anchor_count"], 1)

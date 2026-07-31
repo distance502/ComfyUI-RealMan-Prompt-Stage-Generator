@@ -49,6 +49,51 @@ VISUAL_LAYOUT_SINGLE_NON_PERSON = "single_non_person"
 VISUAL_LAYOUT_MULTI_SUBJECT = "multi_subject"
 VISUAL_LAYOUT_MULTI_VIEW = "multi_view"
 
+_STORYBOARD_CHINESE_DIGITS = {
+    "零": 0,
+    "一": 1,
+    "二": 2,
+    "两": 2,
+    "三": 3,
+    "四": 4,
+    "五": 5,
+    "六": 6,
+    "七": 7,
+    "八": 8,
+    "九": 9,
+}
+_STORYBOARD_CHINESE_UNITS = {"十": 10, "百": 100}
+
+
+def storyboard_number_token(token: Any) -> int | None:
+    """Parse Arabic or Chinese storyboard numbers without accepting zero."""
+
+    value = str(token or "").strip()
+    if not value:
+        return None
+    if value.isdigit():
+        number = int(value)
+        return number if number > 0 else None
+    if not any(char in _STORYBOARD_CHINESE_UNITS for char in value):
+        digits = [_STORYBOARD_CHINESE_DIGITS.get(char) for char in value]
+        if any(digit is None for digit in digits):
+            return None
+        number = int("".join(str(digit) for digit in digits))
+        return number if number > 0 else None
+    total = 0
+    digit = 0
+    for char in value:
+        if char in _STORYBOARD_CHINESE_DIGITS:
+            digit = _STORYBOARD_CHINESE_DIGITS[char]
+            continue
+        unit = _STORYBOARD_CHINESE_UNITS.get(char)
+        if unit is None:
+            return None
+        total += (digit or 1) * unit
+        digit = 0
+    number = total + digit
+    return number if number > 0 else None
+
 _MULTI_VIEW_CONTAINER_MARKERS = (
     "角色设定图",
     "角色三视图",
