@@ -550,7 +550,7 @@ const MODEL_API_PROVIDER_BUTTONS = [
 	{ value: "OpenAI", label: "OpenAI", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini", keyRef: "env:OPENAI_API_KEY" },
 	{ value: "OpenRouter", label: "Router", baseUrl: "https://openrouter.ai/api/v1", model: "openai/gpt-4o-mini", keyRef: "env:OPENROUTER_API_KEY" },
 	{ value: "DeepSeek", label: "DeepSeek", baseUrl: "https://api.deepseek.com", model: "deepseek-v4-flash", keyRef: "env:DEEPSEEK_API_KEY" },
-	{ value: "通义千问DashScope", label: "通义", baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", model: "qwen-plus", keyRef: "env:DASHSCOPE_API_KEY" },
+	{ value: "通义千问DashScope", label: "通义", baseUrl: "https://dashscope.aliyuncs.com/api/v1", model: "qwen3.7-max", keyRef: "env:DASHSCOPE_API_KEY", hint: "DashScope 原生 Generation：支持自由填写通义文本或视觉模型名，Qwen3 系列自动启用思考。" },
 	{ value: "Kimi", label: "Kimi", baseUrl: "https://api.moonshot.cn/v1", model: "moonshot-v1-8k", keyRef: "env:MOONSHOT_API_KEY" },
 	{ value: "SiliconFlow", label: "硅基", baseUrl: "https://api.siliconflow.cn/v1", model: "", keyRef: "env:SILICONFLOW_API_KEY" },
 	{ value: "火山方舟", label: "方舟", baseUrl: "https://ark.cn-beijing.volces.com/api/v3", model: "", keyRef: "env:ARK_API_KEY" },
