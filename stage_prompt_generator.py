@@ -13,6 +13,7 @@ import threading
 import time
 import weakref
 import unicodedata
+import urllib.error
 import urllib.parse
 import urllib.request
 from collections import OrderedDict
@@ -829,7 +830,7 @@ API服务商预设 = {
     "Gemini OpenAI兼容": {"kind": "openai", "base_url": "https://generativelanguage.googleapis.com/v1beta/openai", "env": ["GEMINI_API_KEY", "GOOGLE_API_KEY", "QWEN_TE_API_KEY"], "model": "gemini-2.5-flash"},
     "Claude Anthropic": {"kind": "anthropic", "base_url": "https://api.anthropic.com/v1/messages", "env": ["ANTHROPIC_API_KEY", "CLAUDE_API_KEY", "QWEN_TE_API_KEY"], "model": "claude-haiku-4-5"},
     "Gemini 原生": {"kind": "gemini", "base_url": "https://generativelanguage.googleapis.com/v1beta", "env": ["GEMINI_API_KEY", "GOOGLE_API_KEY", "QWEN_TE_API_KEY"], "model": "gemini-2.5-flash"},
-    "Ollama本地": {"kind": "openai", "base_url": "http://127.0.0.1:11434/v1", "env": [], "model": "qwen2.5"},
+    "Ollama本地": {"kind": "ollama", "base_url": "http://127.0.0.1:11434/api/chat", "env": [], "model": "qwen2.5"},
     "LM Studio本地": {"kind": "openai", "base_url": "http://127.0.0.1:1234/v1", "env": [], "model": ""},
     "自定义": {"kind": "openai", "base_url": "", "env": ["QWEN_TE_API_KEY"], "model": ""},
 }
@@ -1160,7 +1161,12 @@ def _normalize_api_base_url(base_url: Any, *, provider: str, kind: str) -> str:
         raise RuntimeError("API地址必须填写 Base URL，不得包含查询参数或片段。")
     if kind == "openai":
         trimmed = base.rstrip("/")
-        if trimmed.endswith("/chat/completions"):
+        endpoint_path = str(parsed_base.path or "").rstrip("/").casefold()
+        if (
+            endpoint_path.endswith("/chat/completions")
+            or endpoint_path.endswith("/responses")
+            or endpoint_path.endswith("/api/chat")
+        ):
             normalized = trimmed
         else:
             normalized = f"{trimmed}/chat/completions"
@@ -1171,7 +1177,23 @@ def _normalize_api_base_url(base_url: Any, *, provider: str, kind: str) -> str:
         return _validate_api_http_url(normalized)
     if kind == "gemini":
         return _validate_api_http_url(base.rstrip("/"))
+    if kind == "ollama":
+        trimmed = base.rstrip("/")
+        normalized = trimmed if str(parsed_base.path or "").rstrip("/").casefold().endswith("/api/chat") else f"{trimmed}/api/chat"
+        return _validate_api_http_url(normalized)
     return _validate_api_http_url(base)
+
+
+def _resolve_api_endpoint_kind(kind: str, url: str) -> str:
+    normalized_kind = str(kind or "").strip()
+    if normalized_kind == "ollama":
+        return "ollama"
+    if normalized_kind != "openai":
+        return normalized_kind
+    path = str(urllib.parse.urlsplit(str(url or "")).path or "").rstrip("/").casefold()
+    if path.endswith("/api/chat"):
+        return "ollama"
+    return "openai_responses" if path.endswith("/responses") else "openai"
 
 
 def _normalize_api_config_base_url(base_url: Any) -> str:
@@ -1315,6 +1337,18 @@ def _gemini_parts(content: Any) -> list[dict[str, Any]]:
 
 _API_RESPONSE_MAX_BYTES = 16 * 1024 * 1024
 _HTTP_READ_CHUNK_BYTES = 64 * 1024
+_API_HTTP_USER_AGENT = "ComfyUI-QwenTE/1.0"
+
+
+class _ModelAPIHTTPError(RuntimeError):
+    def __init__(self, status: int, reason: str, detail: str = "", *, retry_after: float = 0.0):
+        self.status = max(0, int(status or 0))
+        self.code = self.status
+        self.reason = str(reason or "").strip()
+        self.detail = str(detail or "").strip()
+        self.retry_after = max(0.0, float(retry_after or 0.0))
+        status_text = f"HTTP {self.status} {self.reason}".strip()
+        super().__init__(f"模型 API 请求失败：{status_text}{f'；{self.detail}' if self.detail else ''}")
 
 
 class _NoSecretRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -1378,19 +1412,259 @@ def _read_http_response_limited(response: Any, *, max_bytes: int, timeout: float
     return b"".join(chunks)
 
 
+def _http_response_charset(response: Any) -> str:
+    headers = getattr(response, "headers", None)
+    get_content_charset = getattr(headers, "get_content_charset", None)
+    if callable(get_content_charset):
+        try:
+            return str(get_content_charset() or "utf-8")
+        except Exception:
+            pass
+    try:
+        content_type = str(headers.get("Content-Type", "") or "")
+    except Exception:
+        content_type = ""
+    match = re.search(r"(?i)(?:^|;)\s*charset\s*=\s*[\"']?([^;\s\"']+)", content_type)
+    return str(match.group(1) if match else "utf-8")
+
+
+def _api_error_detail(payload: Any) -> str:
+    if isinstance(payload, dict):
+        error = payload.get("error")
+        candidates = [error, payload.get("message"), payload.get("detail"), payload.get("msg"), payload.get("title")]
+        for candidate in candidates:
+            if isinstance(candidate, dict):
+                nested = _api_error_detail(candidate)
+                if nested:
+                    return nested
+            elif isinstance(candidate, (list, tuple)):
+                parts = [_api_error_detail(item) for item in candidate[:3]]
+                joined = "; ".join(part for part in parts if part)
+                if joined:
+                    return joined
+            elif candidate is not None and str(candidate).strip():
+                return str(candidate).strip()
+        for key in ("code", "type"):
+            if payload.get(key) is not None and str(payload.get(key)).strip():
+                return str(payload.get(key)).strip()
+        return ""
+    if isinstance(payload, (list, tuple)):
+        parts = [_api_error_detail(item) for item in payload[:3]]
+        return "; ".join(part for part in parts if part)
+    return str(payload or "").strip()
+
+
+def _decode_api_json(raw: bytes, *, charset: str, label: str) -> dict[str, Any]:
+    try:
+        text = raw.decode(charset or "utf-8", errors="replace")
+    except LookupError:
+        text = raw.decode("utf-8", errors="replace")
+    text = text.lstrip("\ufeff").strip()
+    if not text:
+        raise RuntimeError(f"{label}返回了空响应。")
+    try:
+        parsed = json.loads(text)
+    except (json.JSONDecodeError, ValueError) as exc:
+        excerpt = re.sub(r"\s+", " ", text).strip()
+        if len(excerpt) > 320:
+            excerpt = f"{excerpt[:317]}..."
+        raise RuntimeError(f"{label}返回的不是有效 JSON：{excerpt or '<空响应>'}") from exc
+    if not isinstance(parsed, dict):
+        raise RuntimeError(f"{label}返回的 JSON 顶层必须是对象，实际为 {type(parsed).__name__}。")
+    return parsed
+
+
 def _http_post_json(url: str, payload: dict[str, Any], headers: dict[str, str], timeout: float) -> dict[str, Any]:
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    request = urllib.request.Request(url, data=data, headers=headers, method="POST")
-    with _API_HTTP_OPENER.open(request, timeout=timeout) as response:
-        raw = _read_http_response_limited(
-            response,
-            max_bytes=_API_RESPONSE_MAX_BYTES,
-            timeout=timeout,
-            label="模型 API",
-        )
-        charset = response.headers.get_content_charset() or "utf-8"
-    parsed = json.loads(raw.decode(charset, errors="replace"))
-    return parsed if isinstance(parsed, dict) else {}
+    request_headers = dict(headers or {})
+    folded_header_names = {str(name).casefold() for name in request_headers}
+    if "accept" not in folded_header_names:
+        request_headers["Accept"] = "application/json"
+    if "user-agent" not in folded_header_names:
+        request_headers["User-Agent"] = _API_HTTP_USER_AGENT
+    request = urllib.request.Request(url, data=data, headers=request_headers, method="POST")
+    try:
+        with _API_HTTP_OPENER.open(request, timeout=timeout) as response:
+            raw = _read_http_response_limited(
+                response,
+                max_bytes=_API_RESPONSE_MAX_BYTES,
+                timeout=timeout,
+                label="模型 API",
+            )
+            charset = _http_response_charset(response)
+    except urllib.error.HTTPError as exc:
+        retry_after = 0.0
+        try:
+            retry_after = min(5.0, max(0.0, float(exc.headers.get("Retry-After", 0) or 0)))
+        except (TypeError, ValueError, AttributeError):
+            retry_after = 0.0
+        try:
+            raw = _read_http_response_limited(
+                exc,
+                max_bytes=_API_RESPONSE_MAX_BYTES,
+                timeout=timeout,
+                label="模型 API 错误",
+            )
+            charset = _http_response_charset(exc)
+            try:
+                text = raw.decode(charset, errors="replace")
+            except LookupError:
+                text = raw.decode("utf-8", errors="replace")
+            text = text.lstrip("\ufeff").strip()
+            try:
+                detail = _api_error_detail(json.loads(text))
+            except (json.JSONDecodeError, ValueError):
+                detail = re.sub(r"\s+", " ", text).strip()
+        except Exception as read_error:
+            detail = f"错误响应读取失败：{read_error}"
+        finally:
+            try:
+                exc.close()
+            except Exception:
+                pass
+        detail = re.sub(r"\s+", " ", str(detail or "")).strip()
+        if len(detail) > 600:
+            detail = f"{detail[:597]}..."
+        reason = re.sub(r"\s+", " ", str(getattr(exc, "reason", "") or "")).strip()
+        raise _ModelAPIHTTPError(
+            int(getattr(exc, "code", 0) or 0),
+            reason,
+            detail,
+            retry_after=retry_after,
+        ) from exc
+    return _decode_api_json(raw, charset=charset, label="模型 API")
+
+
+def _openai_responses_content(content: Any) -> Any:
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return str(content or "")
+    parts: list[dict[str, Any]] = []
+    for item in content:
+        if not isinstance(item, dict):
+            continue
+        part_type = str(item.get("type") or "").strip().casefold()
+        if part_type in {"text", "input_text", "output_text"}:
+            parts.append({"type": "input_text", "text": str(item.get("text") or "")})
+        elif part_type in {"image_url", "input_image"}:
+            image_value = item.get("image_url")
+            image_url = str(image_value.get("url") or "") if isinstance(image_value, dict) else str(image_value or "")
+            if image_url:
+                image_part: dict[str, Any] = {"type": "input_image", "image_url": image_url}
+                detail = item.get("detail") or (image_value.get("detail") if isinstance(image_value, dict) else None)
+                if detail:
+                    image_part["detail"] = str(detail)
+                parts.append(image_part)
+    return parts or str(content or "")
+
+
+def _openai_responses_input(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    converted: list[dict[str, Any]] = []
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        role = str(message.get("role") or "user").strip().casefold()
+        if role not in {"system", "developer", "user", "assistant"}:
+            role = "user"
+        converted.append({"role": role, "content": _openai_responses_content(message.get("content", ""))})
+    return converted
+
+
+def _ollama_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    converted: list[dict[str, Any]] = []
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        role = str(message.get("role") or "user").strip().casefold()
+        if role not in {"system", "user", "assistant"}:
+            role = "user"
+        content = message.get("content", "")
+        text_parts: list[str] = []
+        images: list[str] = []
+        if isinstance(content, str):
+            text_parts.append(content)
+        elif isinstance(content, list):
+            for item in content:
+                if not isinstance(item, dict):
+                    continue
+                part_type = str(item.get("type") or "").strip().casefold()
+                if part_type in {"text", "input_text", "output_text"}:
+                    text_parts.append(str(item.get("text") or ""))
+                elif part_type in {"image_url", "input_image"}:
+                    image_value = item.get("image_url")
+                    image_url = str(image_value.get("url") or "") if isinstance(image_value, dict) else str(image_value or "")
+                    if image_url:
+                        images.append(image_url.split(",", 1)[1] if image_url.startswith("data:") and "," in image_url else image_url)
+        else:
+            text_parts.append(str(content or ""))
+        converted_message: dict[str, Any] = {
+            "role": role,
+            "content": "\n".join(part.strip() for part in text_parts if part.strip()),
+        }
+        if images:
+            converted_message["images"] = images
+        converted.append(converted_message)
+    return converted
+
+
+_API_PARAMETER_COMPATIBILITY_MARKERS = (
+    "unsupported parameter",
+    "parameter is not supported",
+    "not support parameter",
+    "unknown parameter",
+    "unrecognized parameter",
+    "unexpected parameter",
+    "extra inputs are not permitted",
+    "extra_forbidden",
+    "invalid parameter",
+    "不支持参数",
+    "参数不支持",
+    "未知参数",
+    "无效参数",
+)
+_API_OPTIONAL_PARAMETER_NAMES = (
+    "seed",
+    "frequency_penalty",
+    "presence_penalty",
+    "temperature",
+    "top_p",
+    "stop",
+    "thinking",
+    "max_tokens",
+    "max_completion_tokens",
+)
+
+
+def _post_openai_json_with_compatibility_retry(
+    url: str,
+    payload: dict[str, Any],
+    headers: dict[str, str],
+    timeout: float,
+    *,
+    responses_api: bool = False,
+) -> dict[str, Any]:
+    try:
+        return _http_post_json(url, payload, headers, timeout)
+    except _ModelAPIHTTPError as exc:
+        error_text = f"{exc.reason} {exc.detail}".casefold()
+        if exc.status not in {400, 422} or not any(
+            marker in error_text for marker in _API_PARAMETER_COMPATIBILITY_MARKERS
+        ) or not any(name in error_text for name in _API_OPTIONAL_PARAMETER_NAMES):
+            raise
+        compatible_payload = dict(payload)
+        for key in ("frequency_penalty", "presence_penalty", "seed", "stop", "thinking"):
+            compatible_payload.pop(key, None)
+        if "temperature" in error_text or "top_p" in error_text:
+            compatible_payload.pop("temperature", None)
+            compatible_payload.pop("top_p", None)
+        if not responses_api and "max_tokens" in error_text and "max_tokens" in compatible_payload:
+            compatible_payload["max_completion_tokens"] = compatible_payload.pop("max_tokens")
+        elif not responses_api and "max_completion_tokens" in error_text and "max_completion_tokens" in compatible_payload:
+            compatible_payload["max_tokens"] = compatible_payload.pop("max_completion_tokens")
+        if compatible_payload == payload:
+            raise
+        return _http_post_json(url, compatible_payload, headers, timeout)
 
 
 class _TEAPIChatModel:
@@ -1419,6 +1693,41 @@ class _TEAPIChatModel:
 
         headers = {"Content-Type": "application/json", **dict(self.config.get("extra_headers") or {})}
         api_key = str(self.config.get("api_key") or "").strip()
+
+        if kind == "ollama":
+            if api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
+            options: dict[str, Any] = {
+                "num_predict": max_tokens,
+                "temperature": temperature,
+                "top_p": top_p,
+                "repeat_penalty": _safe_float(kwargs.get("repeat_penalty", 1.08), 1.08, 0.0, 2.0),
+            }
+            if top_k > 0:
+                options["top_k"] = top_k
+            if seed > 0:
+                options["seed"] = seed
+            if stop_sequences:
+                options["stop"] = stop_sequences
+            response = _http_post_json(
+                str(self.config.get("url")),
+                {
+                    "model": model,
+                    "messages": _ollama_messages(messages),
+                    "stream": False,
+                    "options": options,
+                },
+                headers,
+                timeout,
+            )
+            if response.get("error"):
+                _extract_model_response_text_impl(response)
+            message = response.get("message") if isinstance(response.get("message"), dict) else {}
+            text = str(message.get("content") or response.get("response") or "").strip()
+            if not text:
+                done_reason = str(response.get("done_reason") or "empty_content")
+                raise RuntimeError(f"Ollama API 未返回文本：done_reason={done_reason}")
+            return {"choices": [{"message": {"content": text}}], "raw": response}
 
         if kind == "anthropic":
             if api_key:
@@ -1497,13 +1806,33 @@ class _TEAPIChatModel:
 
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
-        openai_reasoning_model = provider == "OpenAI" and bool(re.match(r"(?i)^(?:o[134](?:-|$)|gpt-5(?:-|$))", model))
+        openai_reasoning_model = (
+            provider == "OpenAI" or kind == "openai_responses"
+        ) and bool(re.match(r"(?i)^(?:o[134](?:-|$)|gpt-5(?:-|$))", model))
         request_messages = [
             {**message, "role": "developer" if openai_reasoning_model and str(message.get("role") or "") == "system" else message.get("role")}
             if isinstance(message, dict)
             else message
             for message in messages
         ]
+        if kind == "openai_responses":
+            payload = {
+                "model": model,
+                "input": _openai_responses_input(request_messages),
+                "stream": False,
+                "max_output_tokens": max_tokens,
+            }
+            if not openai_reasoning_model:
+                payload["temperature"] = temperature
+                payload["top_p"] = top_p
+            return _post_openai_json_with_compatibility_retry(
+                str(self.config.get("url")),
+                payload,
+                headers,
+                timeout,
+                responses_api=True,
+            )
+
         payload = {
             "model": model,
             "messages": request_messages,
@@ -1523,7 +1852,12 @@ class _TEAPIChatModel:
                 payload["stop"] = stop_sequences
         if provider == "DeepSeek" and model.startswith("deepseek-v4"):
             payload["thinking"] = {"type": "disabled"}
-        response = _http_post_json(str(self.config.get("url")), payload, headers, timeout)
+        response = _post_openai_json_with_compatibility_retry(
+            str(self.config.get("url")),
+            payload,
+            headers,
+            timeout,
+        )
         return response
 
 
@@ -1534,6 +1868,7 @@ def _解析API模型配置(kwargs: dict[str, Any]) -> dict[str, Any]:
     model = str(kwargs.get("API模型", "") or "").strip() or str(preset.get("model") or "").strip()
     configured_base_url = str(kwargs.get("API地址", "") or "").strip() or str(preset.get("base_url") or "").strip()
     url = _normalize_api_base_url(kwargs.get("API地址", ""), provider=provider, kind=kind)
+    kind = _resolve_api_endpoint_kind(kind, url)
     kwargs["API服务商有效"] = provider
     kwargs["API地址有效"] = _normalize_api_config_base_url(configured_base_url)
     kwargs["API模型有效"] = model
