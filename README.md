@@ -95,11 +95,13 @@
 
 内置 GGUF 从 `ComfyUI/models/LLM/` 读取，支持 Qwen3-VL、Qwen3.5-VL、Gemma4、Llama、Mistral、DeepSeek 和通用 GGUF。节点优先使用模型自带聊天模板；模板缺失或无效时，会按模型家族选择兼容格式并有界重试，避免 `Invalid chat handler` 直接中断生成。
 
-API 支持 OpenAI-compatible 接口以及 Claude、Gemini 原生适配。推荐把密钥写入环境变量，并在节点中填写：
+API 支持 OpenAI-compatible 接口以及 DashScope、Claude、Gemini 原生适配。通义选择 `通义千问DashScope` 后默认使用 `https://dashscope.aliyuncs.com/api/v1` 和 `qwen3.7-max`；也可自由填写其他通义文本或视觉对话模型名。节点会自动选择 Generation 或 MultiModalConversation 端点，Qwen3/QwQ/QVQ 自动启用思考并只采用最终正文。推荐把密钥写入环境变量，并在节点中填写：
 
 ```text
 env:QWEN_TE_API_KEY
 ```
+
+通义也可使用 `env:DASHSCOPE_API_KEY`。旧工作流填写的 `/compatible-mode/v1` 会继续按 OpenAI-compatible 协议调用，并自动补全 `/chat/completions`。
 
 明文密钥会被 ComfyUI 工作流保存，公开分享前必须清空。
 

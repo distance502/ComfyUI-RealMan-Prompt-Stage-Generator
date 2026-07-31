@@ -817,7 +817,7 @@ API服务商预设 = {
     "OpenAI": {"kind": "openai", "base_url": "https://api.openai.com/v1", "env": ["OPENAI_API_KEY", "QWEN_TE_API_KEY"], "model": "gpt-4o-mini"},
     "OpenRouter": {"kind": "openai", "base_url": "https://openrouter.ai/api/v1", "env": ["OPENROUTER_API_KEY", "QWEN_TE_API_KEY"], "model": "openai/gpt-4o-mini"},
     "DeepSeek": {"kind": "openai", "base_url": "https://api.deepseek.com", "env": ["DEEPSEEK_API_KEY", "QWEN_TE_API_KEY"], "model": "deepseek-v4-flash"},
-    "通义千问DashScope": {"kind": "openai", "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "env": ["DASHSCOPE_API_KEY", "QWEN_TE_API_KEY"], "model": "qwen-plus"},
+    "通义千问DashScope": {"kind": "dashscope", "base_url": "https://dashscope.aliyuncs.com/api/v1", "env": ["DASHSCOPE_API_KEY", "QWEN_TE_API_KEY"], "model": "qwen3.7-max"},
     "Kimi": {"kind": "openai", "base_url": "https://api.moonshot.cn/v1", "env": ["MOONSHOT_API_KEY", "KIMI_API_KEY", "QWEN_TE_API_KEY"], "model": "moonshot-v1-8k"},
     "SiliconFlow": {"kind": "openai", "base_url": "https://api.siliconflow.cn/v1", "env": ["SILICONFLOW_API_KEY", "QWEN_TE_API_KEY"], "model": ""},
     "火山方舟": {"kind": "openai", "base_url": "https://ark.cn-beijing.volces.com/api/v3", "env": ["ARK_API_KEY", "VOLCENGINE_API_KEY", "QWEN_TE_API_KEY"], "model": ""},
@@ -1177,6 +1177,19 @@ def _normalize_api_base_url(base_url: Any, *, provider: str, kind: str) -> str:
         return _validate_api_http_url(normalized)
     if kind == "gemini":
         return _validate_api_http_url(base.rstrip("/"))
+    if kind == "dashscope":
+        trimmed = base.rstrip("/")
+        endpoint_path = str(parsed_base.path or "").rstrip("/").casefold()
+        if "/compatible-mode/" in endpoint_path:
+            normalized = trimmed if endpoint_path.endswith("/chat/completions") else f"{trimmed}/chat/completions"
+        elif endpoint_path.endswith((
+            "/services/aigc/text-generation/generation",
+            "/services/aigc/multimodal-generation/generation",
+        )):
+            normalized = trimmed
+        else:
+            normalized = f"{trimmed}/services/aigc/text-generation/generation"
+        return _validate_api_http_url(normalized)
     if kind == "ollama":
         trimmed = base.rstrip("/")
         normalized = trimmed if str(parsed_base.path or "").rstrip("/").casefold().endswith("/api/chat") else f"{trimmed}/api/chat"
@@ -1186,11 +1199,13 @@ def _normalize_api_base_url(base_url: Any, *, provider: str, kind: str) -> str:
 
 def _resolve_api_endpoint_kind(kind: str, url: str) -> str:
     normalized_kind = str(kind or "").strip()
+    path = str(urllib.parse.urlsplit(str(url or "")).path or "").rstrip("/").casefold()
+    if normalized_kind == "dashscope":
+        return "openai" if path.endswith("/chat/completions") else "dashscope"
     if normalized_kind == "ollama":
         return "ollama"
     if normalized_kind != "openai":
         return normalized_kind
-    path = str(urllib.parse.urlsplit(str(url or "")).path or "").rstrip("/").casefold()
     if path.endswith("/api/chat"):
         return "ollama"
     return "openai_responses" if path.endswith("/responses") else "openai"
@@ -1608,6 +1623,114 @@ def _ollama_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return converted
 
 
+def _dashscope_uses_multimodal_endpoint(model: str, messages: list[dict[str, Any]]) -> bool:
+    model_name = str(model or "").strip().casefold()
+    if (
+        re.search(r"(?:^|[/_.-])qwen(?:\d+(?:\.\d+)?)?-vl(?:[/_.-]|$)", model_name)
+        or re.search(r"(?:^|[/_.-])qvq(?:[/_.-]|$)", model_name)
+        or "omni" in model_name
+    ):
+        return True
+    for message in messages:
+        content = message.get("content") if isinstance(message, dict) else None
+        if isinstance(content, list) and any(
+            isinstance(item, dict)
+            and (
+                str(item.get("type") or "").strip().casefold()
+                in {"image", "image_url", "input_image", "video", "video_url", "audio", "audio_url"}
+                or any(key in item for key in ("image", "image_url", "video", "video_url", "audio", "audio_url"))
+            )
+            for item in content
+        ):
+            return True
+    return False
+
+
+def _dashscope_request_url(url: str, *, multimodal: bool) -> str:
+    parsed = urllib.parse.urlsplit(str(url or ""))
+    path = str(parsed.path or "").rstrip("/")
+    target_segment = "multimodal-generation" if multimodal else "text-generation"
+    if "/services/aigc/text-generation/generation" in path:
+        path = path.replace("/services/aigc/text-generation/generation", f"/services/aigc/{target_segment}/generation")
+    elif "/services/aigc/multimodal-generation/generation" in path:
+        path = path.replace("/services/aigc/multimodal-generation/generation", f"/services/aigc/{target_segment}/generation")
+    else:
+        path = f"{path}/services/aigc/{target_segment}/generation"
+    return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, path, "", ""))
+
+
+def _dashscope_messages(messages: list[dict[str, Any]], *, multimodal: bool) -> list[dict[str, Any]]:
+    converted: list[dict[str, Any]] = []
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        role = str(message.get("role") or "user").strip().casefold()
+        if role not in {"system", "user", "assistant"}:
+            role = "user"
+        content = message.get("content", "")
+        if not multimodal:
+            if isinstance(content, str):
+                text = content
+            elif isinstance(content, list):
+                text = "\n".join(
+                    str(item.get("text") or "").strip()
+                    for item in content
+                    if isinstance(item, dict)
+                    and str(item.get("type") or "").strip().casefold() in {"text", "input_text", "output_text"}
+                    and str(item.get("text") or "").strip()
+                )
+            else:
+                text = str(content or "")
+            converted.append({"role": role, "content": text})
+            continue
+
+        parts: list[dict[str, str]] = []
+        if isinstance(content, str):
+            if content.strip():
+                parts.append({"text": content})
+        elif isinstance(content, list):
+            for item in content:
+                if not isinstance(item, dict):
+                    continue
+                part_type = str(item.get("type") or "").strip().casefold()
+                if (part_type in {"text", "input_text", "output_text"} or (not part_type and "text" in item)) and str(item.get("text") or "").strip():
+                    parts.append({"text": str(item.get("text") or "")})
+                elif part_type in {"image_url", "input_image"}:
+                    image_value = item.get("image_url")
+                    image_url = str(image_value.get("url") or "") if isinstance(image_value, dict) else str(image_value or "")
+                    if image_url:
+                        parts.append({"image": image_url})
+                else:
+                    for media_type in ("image", "video", "audio"):
+                        raw_value = item.get(media_type) or item.get(f"{media_type}_url")
+                        media_value = str(raw_value.get("url") or "") if isinstance(raw_value, dict) else str(raw_value or "")
+                        if media_value:
+                            parts.append({media_type: media_value})
+                            break
+        converted.append({"role": role, "content": parts})
+    return converted
+
+
+def _dashscope_enable_thinking(model: str) -> bool:
+    normalized = str(model or "").strip().casefold()
+    return bool(re.search(r"(?:^|[/_.-])(?:qwen3|qwq|qvq)(?:[0-9/_.-]|$)", normalized))
+
+
+def _dashscope_response_text(response: dict[str, Any]) -> str:
+    if response.get("code") and not response.get("output"):
+        raise RuntimeError(f"DashScope API 返回错误：{response.get('message') or response.get('code')}")
+    output = response.get("output") if isinstance(response.get("output"), dict) else {}
+    choices = output.get("choices") if isinstance(output.get("choices"), list) else []
+    if choices:
+        text = _extract_model_response_text_impl({"choices": choices}).strip()
+        if text:
+            return text
+    for candidate in (output.get("text"), response.get("text")):
+        if str(candidate or "").strip():
+            return str(candidate).strip()
+    return ""
+
+
 _API_PARAMETER_COMPATIBILITY_MARKERS = (
     "unsupported parameter",
     "parameter is not supported",
@@ -1631,6 +1754,9 @@ _API_OPTIONAL_PARAMETER_NAMES = (
     "top_p",
     "stop",
     "thinking",
+    "enable_thinking",
+    "top_k",
+    "repetition_penalty",
     "max_tokens",
     "max_completion_tokens",
 )
@@ -1667,6 +1793,40 @@ def _post_openai_json_with_compatibility_retry(
         return _http_post_json(url, compatible_payload, headers, timeout)
 
 
+def _post_dashscope_json_with_compatibility_retry(
+    url: str,
+    payload: dict[str, Any],
+    headers: dict[str, str],
+    timeout: float,
+) -> dict[str, Any]:
+    try:
+        return _http_post_json(url, payload, headers, timeout)
+    except _ModelAPIHTTPError as exc:
+        error_text = f"{exc.reason} {exc.detail}".casefold()
+        if exc.status not in {400, 422} or not any(
+            name in error_text for name in _API_OPTIONAL_PARAMETER_NAMES
+        ):
+            raise
+        compatible_payload = dict(payload)
+        parameters = dict(compatible_payload.get("parameters") or {})
+        for key in (
+            "enable_thinking",
+            "seed",
+            "top_k",
+            "repetition_penalty",
+            "stop",
+            "temperature",
+            "top_p",
+        ):
+            parameters.pop(key, None)
+        if "max_tokens" in error_text:
+            parameters.pop("max_tokens", None)
+        compatible_payload["parameters"] = parameters
+        if compatible_payload == payload:
+            raise
+        return _http_post_json(url, compatible_payload, headers, timeout)
+
+
 class _TEAPIChatModel:
     def __init__(self, config: dict[str, Any]):
         self.config = dict(config)
@@ -1693,6 +1853,47 @@ class _TEAPIChatModel:
 
         headers = {"Content-Type": "application/json", **dict(self.config.get("extra_headers") or {})}
         api_key = str(self.config.get("api_key") or "").strip()
+
+        if kind == "dashscope":
+            if api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
+            headers.setdefault("X-DashScope-SSE", "disable")
+            multimodal = _dashscope_uses_multimodal_endpoint(model, messages)
+            parameters: dict[str, Any] = {
+                "result_format": "message",
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                "top_p": top_p,
+                "repetition_penalty": _safe_float(kwargs.get("repeat_penalty", 1.08), 1.08, 0.0, 2.0),
+            }
+            if _dashscope_enable_thinking(model):
+                parameters["enable_thinking"] = True
+            if top_k > 0:
+                parameters["top_k"] = top_k
+            if seed > 0:
+                parameters["seed"] = seed
+            if stop_sequences:
+                parameters["stop"] = stop_sequences
+            request_url = _dashscope_request_url(str(self.config.get("url")), multimodal=multimodal)
+            response = _post_dashscope_json_with_compatibility_retry(
+                request_url,
+                {
+                    "model": model,
+                    "input": {"messages": _dashscope_messages(messages, multimodal=multimodal)},
+                    "parameters": parameters,
+                },
+                headers,
+                timeout,
+            )
+            text = _dashscope_response_text(response)
+            if not text:
+                finish_reason = "empty_content"
+                output = response.get("output") if isinstance(response.get("output"), dict) else {}
+                choices = output.get("choices") if isinstance(output.get("choices"), list) else []
+                if choices and isinstance(choices[0], dict):
+                    finish_reason = str(choices[0].get("finish_reason") or finish_reason)
+                raise RuntimeError(f"DashScope API 未返回文本：finish_reason={finish_reason}")
+            return {"choices": [{"message": {"content": text}}], "raw": response}
 
         if kind == "ollama":
             if api_key:

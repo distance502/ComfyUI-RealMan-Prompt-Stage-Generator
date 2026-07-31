@@ -19699,6 +19699,8 @@ class TestStagePromptModules(unittest.TestCase):
                         return {"candidates": [{"content": {"parts": [{"text": "provider ok"}]}}]}
                     if config["kind"] == "ollama":
                         return {"message": {"role": "assistant", "content": "provider ok"}, "done": True}
+                    if config["kind"] == "dashscope":
+                        return {"output": {"choices": [{"message": {"role": "assistant", "content": "provider ok"}}]}}
                     return {"choices": [{"message": {"content": "provider ok"}}]}
 
                 with mock.patch.object(module, "_http_post_json", side_effect=fake_http):
@@ -19719,6 +19721,193 @@ class TestStagePromptModules(unittest.TestCase):
                     self.assertEqual(captured["headers"]["x-goog-api-key"], "provider-test-key")
                 elif config["api_key"]:
                     self.assertEqual(captured["headers"]["Authorization"], "Bearer provider-test-key")
+
+    def test_dashscope_native_generation_calls_qwen37_max_and_ignores_reasoning(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        captured: dict[str, Any] = {}
+
+        def fake_http(url, payload, headers, timeout):
+            captured.update(url=url, payload=payload, headers=dict(headers), timeout=timeout)
+            return {
+                "request_id": "request-1",
+                "output": {
+                    "choices": [
+                        {
+                            "finish_reason": "stop",
+                            "message": {
+                                "role": "assistant",
+                                "reasoning_content": "private chain of thought",
+                                "content": "通义原生提示词",
+                            },
+                        }
+                    ]
+                },
+            }
+
+        config = module._解析API模型配置(
+            {
+                "API服务商": "通义千问DashScope",
+                "API地址": "https://dashscope.aliyuncs.com/api/v1/",
+                "API密钥": "dashscope-test-key",
+                "API模型": "qwen3.7-max",
+                "API超时秒": 45,
+            }
+        )
+        with mock.patch.object(module, "_http_post_json", side_effect=fake_http):
+            response = module._TEAPIChatModel(config).create_chat_completion(
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant."},
+                    {"role": "user", "content": "你是谁？"},
+                ],
+                max_tokens=512,
+                temperature=0.55,
+                top_p=0.88,
+                top_k=23,
+                repeat_penalty=1.05,
+                seed=99,
+                stop=["END"],
+            )
+
+        self.assertEqual(config["kind"], "dashscope")
+        self.assertEqual(
+            captured["url"],
+            "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation",
+        )
+        self.assertEqual(captured["headers"]["Authorization"], "Bearer dashscope-test-key")
+        self.assertEqual(captured["headers"]["X-DashScope-SSE"], "disable")
+        self.assertEqual(captured["payload"]["model"], "qwen3.7-max")
+        self.assertEqual(captured["payload"]["input"]["messages"][1]["content"], "你是谁？")
+        parameters = captured["payload"]["parameters"]
+        self.assertEqual(parameters["result_format"], "message")
+        self.assertIs(parameters["enable_thinking"], True)
+        self.assertEqual(parameters["max_tokens"], 512)
+        self.assertEqual(parameters["top_k"], 23)
+        self.assertEqual(parameters["seed"], 99)
+        self.assertEqual(parameters["stop"], ["END"])
+        self.assertEqual(response["choices"][0]["message"]["content"], "通义原生提示词")
+        self.assertNotIn("private chain of thought", module._extract_chat_text(response))
+
+    def test_dashscope_routes_visual_models_and_converts_multimodal_content(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        calls: list[dict[str, Any]] = []
+
+        def fake_http(url, payload, headers, timeout):
+            calls.append({"url": url, "payload": payload, "headers": dict(headers), "timeout": timeout})
+            return {
+                "output": {
+                    "choices": [
+                        {
+                            "finish_reason": "stop",
+                            "message": {"role": "assistant", "content": [{"text": "视觉反推结果"}]},
+                        }
+                    ]
+                }
+            }
+
+        model = module._TEAPIChatModel(
+            {
+                "provider": "通义千问DashScope",
+                "kind": "dashscope",
+                "url": "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation",
+                "api_key": "dashscope-test-key",
+                "model": "qwen2.5-vl-72b-instruct",
+                "timeout": 30,
+            }
+        )
+        with mock.patch.object(module, "_http_post_json", side_effect=fake_http):
+            response = model.create_chat_completion(
+                messages=[
+                    {"role": "system", "content": "只返回画面描述。"},
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}},
+                            {"type": "text", "text": "描述这张图"},
+                        ],
+                    },
+                ],
+                max_tokens=300,
+            )
+
+        self.assertEqual(
+            calls[0]["url"],
+            "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation",
+        )
+        messages = calls[0]["payload"]["input"]["messages"]
+        self.assertEqual(messages[0]["content"], [{"text": "只返回画面描述。"}])
+        self.assertEqual(
+            messages[1]["content"],
+            [{"image": "data:image/png;base64,AAAA"}, {"text": "描述这张图"}],
+        )
+        self.assertEqual(response["choices"][0]["message"]["content"], "视觉反推结果")
+        self.assertTrue(module._dashscope_uses_multimodal_endpoint("qwen3.5-vl-plus", []))
+        self.assertTrue(module._dashscope_uses_multimodal_endpoint("qvq-max", []))
+        self.assertFalse(module._dashscope_uses_multimodal_endpoint("qwen3.7-max", []))
+
+    def test_dashscope_compatible_mode_remains_openai_compatible(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        config = module._解析API模型配置(
+            {
+                "API服务商": "通义千问DashScope",
+                "API地址": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "API密钥": "dashscope-test-key",
+                "API模型": "qwen-plus",
+            }
+        )
+
+        self.assertEqual(config["kind"], "openai")
+        self.assertEqual(
+            config["url"],
+            "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+        )
+
+    def test_dashscope_retries_without_unsupported_optional_parameters(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        calls: list[dict[str, Any]] = []
+
+        def fake_http(_url, payload, _headers, _timeout):
+            calls.append(deepcopy(payload))
+            if len(calls) == 1:
+                raise module._ModelAPIHTTPError(
+                    400,
+                    "Bad Request",
+                    "enable_thinking is not supported by this model",
+                )
+            return {"output": {"choices": [{"message": {"content": "降级参数后成功"}}]}}
+
+        model = module._TEAPIChatModel(
+            {
+                "provider": "通义千问DashScope",
+                "kind": "dashscope",
+                "url": "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation",
+                "api_key": "dashscope-test-key",
+                "model": "qwen3.7-max",
+                "timeout": 30,
+            }
+        )
+        with mock.patch.object(module, "_http_post_json", side_effect=fake_http):
+            response = model.create_chat_completion(
+                messages=[{"role": "user", "content": "hello"}],
+                max_tokens=128,
+                top_k=40,
+                seed=7,
+                stop=["END"],
+            )
+
+        self.assertEqual(len(calls), 2)
+        self.assertIs(calls[0]["parameters"]["enable_thinking"], True)
+        for parameter in (
+            "enable_thinking",
+            "top_k",
+            "seed",
+            "stop",
+            "repetition_penalty",
+            "temperature",
+            "top_p",
+        ):
+            self.assertNotIn(parameter, calls[1]["parameters"])
+        self.assertEqual(calls[1]["parameters"]["result_format"], "message")
+        self.assertEqual(response["choices"][0]["message"]["content"], "降级参数后成功")
 
     def test_native_provider_blocked_responses_surface_reason(self) -> None:
         module = load_stage_prompt_generator_for_integration_test()
