@@ -227,6 +227,7 @@ from .stage_prompt.video_prompt_skill import (
     VIDEO_PROMPT_SKILL_VERSION as _VIDEO_PROMPT_SKILL_VERSION,
     build_video_prompt as _build_video_prompt_impl,
     is_natural_video_prompt as _is_natural_video_prompt_impl,
+    video_prompt_anchor_roles as _video_prompt_anchor_roles_impl,
     video_prompt_required_anchors as _video_prompt_required_anchors_impl,
 )
 
@@ -5604,6 +5605,11 @@ def _run_stage_impl(
     video_model_fallback_before = max(0, int(settings.get("模型活动回退数量", 0) or 0))
     video_model_skip_before = max(0, int(settings.get("模型智能跳过次数", 0) or 0))
     settings["视频提示词必保留锚点"] = _video_prompt_required_anchors_impl(
+        selected,
+        custom_tags,
+        settings,
+    )
+    settings["视频提示词锚点角色"] = _video_prompt_anchor_roles_impl(
         selected,
         custom_tags,
         settings,
