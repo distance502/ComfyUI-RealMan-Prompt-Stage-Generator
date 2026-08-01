@@ -28504,6 +28504,34 @@ class TestStagePromptModules(unittest.TestCase):
             ),
         )
 
+        abrupt_new_prop = original.replace(
+            "关键道具发生位移或状态改变",
+            "旧信封旁边的一把手枪凭空出现在她手中",
+            1,
+        )
+        self.assertIn(
+            "新道具“手枪”无解释出现",
+            model_refiner._video_story_continuity_violation(
+                abrupt_new_prop,
+                roles,
+                language="纯中文",
+            ),
+        )
+
+        causal_reveal = original.replace(
+            "关键道具发生位移或状态改变",
+            "她拆开旧信封，夹层里露出一枚钥匙，关键道具状态随动作改变",
+            1,
+        )
+        self.assertEqual(
+            model_refiner._video_story_continuity_violation(
+                causal_reveal,
+                roles,
+                language="纯中文",
+            ),
+            "",
+        )
+
         unexplained_location = original.replace(
             "镜头改变景别观察行动造成的连锁结果",
             "镜头切换到海边咖啡馆，她继续观察行动造成的结果",
@@ -28518,6 +28546,62 @@ class TestStagePromptModules(unittest.TestCase):
             ),
         )
 
+        disguised_location = original.replace(
+            "镜头改变景别观察行动造成的连锁结果",
+            "镜头切换到海边咖啡馆的手部特写，她继续观察行动造成的结果",
+            1,
+        )
+        self.assertIn(
+            "无解释切换主场景",
+            model_refiner._video_story_continuity_violation(
+                disguised_location,
+                roles,
+                language="纯中文",
+            ),
+        )
+
+        disguised_interior = original.replace(
+            "镜头改变景别观察行动造成的连锁结果",
+            "镜头切换到海边咖啡馆内部，她继续观察行动造成的结果",
+            1,
+        )
+        self.assertIn(
+            "无解释切换主场景",
+            model_refiner._video_story_continuity_violation(
+                disguised_interior,
+                roles,
+                language="纯中文",
+            ),
+        )
+
+        narrative_camouflage = original.replace(
+            "镜头改变景别观察行动造成的连锁结果",
+            "镜头连续承接上一镜，随后切换到海边咖啡馆的手部特写，她继续观察行动造成的结果",
+            1,
+        )
+        self.assertIn(
+            "无解释切换主场景",
+            model_refiner._video_story_continuity_violation(
+                narrative_camouflage,
+                roles,
+                language="纯中文",
+            ),
+        )
+
+        visible_path_change = original.replace(
+            "镜头改变景别观察行动造成的连锁结果",
+            "镜头沿着她穿过连廊的移动轨迹切换到相邻咖啡馆入口，继续观察行动造成的结果",
+            1,
+        )
+        self.assertEqual(
+            model_refiner._video_story_continuity_violation(
+                visible_path_change,
+                roles,
+                language="纯中文",
+            ),
+            "",
+        )
+
         new_subject = original.replace(
             "镜头改变景别观察行动造成的连锁结果",
             "镜头转向另一名陌生男子观察行动造成的结果",
@@ -28530,6 +28614,70 @@ class TestStagePromptModules(unittest.TestCase):
                 roles,
                 language="纯中文",
             ),
+        )
+
+        anchored_new_subject = original.replace(
+            "镜头改变景别观察行动造成的连锁结果",
+            "成年女性侦探仍握着旧信封，镜头却转向另一名陌生男子观察行动造成的结果",
+            1,
+        )
+        anchored_subject_reason = model_refiner._video_story_continuity_violation(
+            anchored_new_subject,
+            roles,
+            language="纯中文",
+        )
+        self.assertIn("无解释引入新主体", anchored_subject_reason)
+        self.assertIn("另一名陌生男子", anchored_subject_reason)
+
+        identity_drift = original.replace(
+            "镜头改变景别观察行动造成的连锁结果",
+            "成年女性侦探仍在雨夜旧车站，旧信封还在手中，她突然变成一个男孩，继续观察行动造成的结果",
+            1,
+        )
+        identity_reason = model_refiner._video_story_continuity_violation(
+            identity_drift,
+            roles,
+            language="纯中文",
+        )
+        self.assertIn("主体身份无解释改变", identity_reason)
+        self.assertIn("男孩", identity_reason)
+
+        transform_roles = {**roles, "action": ["变身为石像"]}
+        intentional_transform = original.replace(
+            "镜头改变景别观察行动造成的连锁结果",
+            "成年女性侦探仍在雨夜旧车站，旧信封还在手中，她突然变成石像，动作结果保持可见",
+            1,
+        )
+        self.assertEqual(
+            model_refiner._video_story_continuity_violation(
+                intentional_transform,
+                transform_roles,
+                language="纯中文",
+            ),
+            "",
+        )
+
+        mismatched_transform = original.replace(
+            "镜头改变景别观察行动造成的连锁结果",
+            "成年女性侦探仍在雨夜旧车站，旧信封还在手中，她突然变成一个男孩，动作结果保持可见",
+            1,
+        )
+        mismatch_reason = model_refiner._video_story_continuity_violation(
+            mismatched_transform,
+            transform_roles,
+            language="纯中文",
+        )
+        self.assertIn("身份变化目标“男孩”", mismatch_reason)
+        self.assertIn("动作锚点“石像”不一致", mismatch_reason)
+
+        generic_transform_roles = {**roles, "action": ["变身"]}
+        self.assertEqual(
+            model_refiner._video_story_continuity_violation(
+                mismatched_transform,
+                generic_transform_roles,
+                language="纯中文",
+            ),
+            "",
         )
 
     def test_video_story_continuity_tracks_outfit_and_allows_causal_changes(self) -> None:
@@ -28574,13 +28722,143 @@ class TestStagePromptModules(unittest.TestCase):
             ),
         )
 
+        unrelated_transition = paragraphs.copy()
+        unrelated_transition[3] += "服装凭空变成白色礼服，身后的木门同时被撕裂。"
+        self.assertIn(
+            "服装无解释改变",
+            model_refiner._video_story_continuity_violation(
+                "\n\n".join(unrelated_transition),
+                roles,
+                language="纯中文",
+            ),
+        )
+
         causal_change = paragraphs.copy()
-        causal_change[3] += "深色长风衣被撕裂，露出内层护具，动作因果保持清楚。"
+        causal_change[3] += "冲击突然撕裂深色长风衣，使它变成破损状态，动作因果保持清楚。"
         self.assertEqual(
             model_refiner._video_story_continuity_violation(
                 "\n\n".join(causal_change),
                 roles,
                 language="纯中文",
+            ),
+            "",
+        )
+
+    def test_video_story_continuity_distinguishes_english_reframe_from_location_switch(self) -> None:
+        paragraphs = [
+            "Shot 1 (setup): A woman in a dark trench coat stands in the old station beside an envelope.",
+            "Shot 2 (trigger): The woman hears a signal in the station and grips the envelope.",
+            "Shot 3 (action): She follows the clue through the station while carrying the envelope.",
+            "Shot 4 (escalation): The camera cuts to a close-up of her hand in the station as the envelope shakes.",
+            "Shot 5 (resolution): The woman remains in the station with the envelope as the consequence settles.",
+        ]
+        roles = {
+            "subject": ["woman"],
+            "scene": ["station"],
+            "outfit": ["dark trench coat"],
+            "prop": ["envelope"],
+        }
+        self.assertEqual(
+            model_refiner._video_story_continuity_section_violation(
+                "\n\n".join(paragraphs),
+                roles,
+                english=True,
+            ),
+            "",
+        )
+
+        paragraphs[3] = (
+            "Shot 4 (escalation): The woman remains in the station with the envelope when she "
+            "suddenly turns into a different man without any prior cause."
+        )
+        identity_reason = model_refiner._video_story_continuity_section_violation(
+            "\n\n".join(paragraphs),
+            roles,
+            english=True,
+        )
+        self.assertIn("Shot 4", identity_reason)
+        self.assertIn("主体身份无解释改变为“man”", identity_reason)
+
+        targeted_roles = {**roles, "action": ["morph into a statue"]}
+        target_mismatch_reason = model_refiner._video_story_continuity_section_violation(
+            "\n\n".join(paragraphs),
+            targeted_roles,
+            english=True,
+        )
+        self.assertIn("Shot 4", target_mismatch_reason)
+        self.assertIn("身份变化目标“man”", target_mismatch_reason)
+        self.assertIn("动作锚点“statue”不一致", target_mismatch_reason)
+
+        paragraphs[3] = (
+            "Shot 4 (escalation): The woman remains in the station with the envelope when she "
+            "suddenly turns into a statue and the visible result drives the action forward."
+        )
+        self.assertEqual(
+            model_refiner._video_story_continuity_section_violation(
+                "\n\n".join(paragraphs),
+                targeted_roles,
+                english=True,
+            ),
+            "",
+        )
+
+        paragraphs[3] = (
+            "Shot 4 (escalation): The camera cuts to a close-up of her hand inside a beach cafe "
+            "as the envelope shakes."
+        )
+        reason = model_refiner._video_story_continuity_section_violation(
+            "\n\n".join(paragraphs),
+            roles,
+            english=True,
+        )
+        self.assertIn("Shot 4", reason)
+        self.assertIn("无解释切换主场景", reason)
+
+        paragraphs[3] = (
+            "Shot 4 (escalation): The camera continues the previous shot and cuts to a close-up "
+            "of her hand inside a beach cafe as the envelope shakes."
+        )
+        weak_reason = model_refiner._video_story_continuity_section_violation(
+            "\n\n".join(paragraphs),
+            roles,
+            english=True,
+        )
+        self.assertIn("Shot 4", weak_reason)
+        self.assertIn("无解释切换主场景", weak_reason)
+
+        paragraphs[3] = (
+            "Shot 4 (escalation): The woman remains in the station with the envelope when a new gun "
+            "suddenly appears in her hand."
+        )
+        prop_reason = model_refiner._video_story_continuity_section_violation(
+            "\n\n".join(paragraphs),
+            roles,
+            english=True,
+        )
+        self.assertIn("Shot 4", prop_reason)
+        self.assertIn("新道具“gun”无解释出现", prop_reason)
+
+        paragraphs[3] = (
+            "Shot 4 (escalation): The woman remains in the station with the envelope while another "
+            "guard enters the frame."
+        )
+        subject_reason = model_refiner._video_story_continuity_section_violation(
+            "\n\n".join(paragraphs),
+            roles,
+            english=True,
+        )
+        self.assertIn("Shot 4", subject_reason)
+        self.assertIn("新主体“another guard”", subject_reason)
+
+        paragraphs[3] = (
+            "Shot 4 (escalation): The woman remains in the station with the envelope, without "
+            "introducing another guard or changing the established action."
+        )
+        self.assertEqual(
+            model_refiner._video_story_continuity_section_violation(
+                "\n\n".join(paragraphs),
+                roles,
+                english=True,
             ),
             "",
         )
