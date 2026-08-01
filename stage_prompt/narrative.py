@@ -63,6 +63,14 @@ _STORYBOARD_CHINESE_DIGITS = {
     "九": 9,
 }
 _STORYBOARD_CHINESE_UNITS = {"十": 10, "百": 100}
+STORYBOARD_PHASE_ORDER = ("setup", "trigger", "action", "escalation", "resolution")
+_STORYBOARD_PHASE_ALIASES = {
+    "setup": ("建立", "开场", "起始", "序幕", "setup", "opening", "establishing"),
+    "trigger": ("触发", "事件", "诱因", "转折", "trigger", "inciting event", "turning point"),
+    "action": ("行动", "回应", "推进", "反应", "action", "response", "development"),
+    "escalation": ("升级", "加剧", "高潮", "危机", "escalation", "rising action", "climax"),
+    "resolution": ("收束", "结尾", "结果", "余韵", "定格", "resolution", "ending", "aftermath"),
+}
 
 
 def storyboard_number_token(token: Any) -> int | None:
@@ -93,6 +101,47 @@ def storyboard_number_token(token: Any) -> int | None:
         digit = 0
     number = total + digit
     return number if number > 0 else None
+
+
+def storyboard_phase_token(token: Any) -> str | None:
+    """Normalize a Chinese or English storyboard phase label when it is explicit."""
+
+    value = re.sub(r"[\s_\-/]+", " ", str(token or "").strip().casefold())
+    value = value.strip(" ，,。；;：:()（）[]【】")
+    if not value:
+        return None
+    for phase in STORYBOARD_PHASE_ORDER:
+        aliases = _STORYBOARD_PHASE_ALIASES[phase]
+        if value in {alias.casefold() for alias in aliases}:
+            return phase
+    for phase in STORYBOARD_PHASE_ORDER:
+        for alias in _STORYBOARD_PHASE_ALIASES[phase]:
+            lowered_alias = alias.casefold()
+            if lowered_alias.isascii():
+                if re.search(rf"\b{re.escape(lowered_alias)}\b", value):
+                    return phase
+            elif lowered_alias in value:
+                return phase
+    return None
+
+
+def storyboard_phases_are_ordered(
+    phases: Sequence[str | None],
+    *,
+    require_endpoints_when_complete: bool = True,
+) -> bool:
+    """Validate recognized phase labels while leaving custom labels open."""
+
+    ranks = {phase: index for index, phase in enumerate(STORYBOARD_PHASE_ORDER)}
+    recognized = [phase for phase in phases if phase in ranks]
+    if not recognized:
+        return True
+    recognized_ranks = [ranks[phase] for phase in recognized]
+    if recognized_ranks != sorted(recognized_ranks):
+        return False
+    if require_endpoints_when_complete and len(recognized) == len(phases):
+        return recognized[0] == "setup" and recognized[-1] == "resolution"
+    return True
 
 _MULTI_VIEW_CONTAINER_MARKERS = (
     "角色设定图",
