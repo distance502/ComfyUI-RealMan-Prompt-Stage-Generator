@@ -17,6 +17,7 @@ try:
         prompt_preserves_visual_layout,
         resolve_visual_layout_mode,
         storyboard_number_token,
+        storyboard_phase_token,
         visual_layout_contract,
     )
     from .intelligence import (
@@ -30,6 +31,7 @@ except Exception:  # pragma: no cover - exercised by direct import tests
         prompt_preserves_visual_layout,
         resolve_visual_layout_mode,
         storyboard_number_token,
+        storyboard_phase_token,
         visual_layout_contract,
     )
     from stage_prompt_intelligence_test import (  # type: ignore
@@ -939,7 +941,7 @@ def _repair_common_video_fragment_errors(text: str) -> str:
 _VIDEO_STORYBOARD_LABEL_PATTERN = re.compile(
     r"^(?:(?:分镜|镜头)\s*(?P<zh_index>[零一二两三四五六七八九十百0-9]+)|"
     r"(?:shot|scene)\s*(?P<en_index>\d+))"
-    r"(?:\s*[（(][^）)]+[）)])?\s*[:：]\s*",
+    r"(?:\s*[（(](?P<title>[^）)]+)[）)])?\s*[:：]\s*",
     flags=re.IGNORECASE,
 )
 _VIDEO_SUBJECT_TRACE_ZH = re.compile(
@@ -947,6 +949,20 @@ _VIDEO_SUBJECT_TRACE_ZH = re.compile(
 )
 _VIDEO_SUBJECT_TRACE_EN = re.compile(
     r"\b(?:she|he|they|it|her|his|their|subject|character|figure|silhouette|gaze|hand|footstep|movement|posture|attention|reaction|emotion|action|choice)\b",
+    flags=re.IGNORECASE,
+)
+_VIDEO_OUTFIT_UNCAUSED_CHANGE_ZH = re.compile(
+    r"(?:突然|凭空|无故|无缘无故|莫名(?:其妙)?).{0,20}(?:换成|变成|改穿|换装)"
+)
+_VIDEO_OUTFIT_UNCAUSED_CHANGE_EN = re.compile(
+    r"\b(?:suddenly|inexplicably|without explanation|for no reason).{0,42}\b(?:changes? into|turns? into|switches? to|wears? a different)\b",
+    flags=re.IGNORECASE,
+)
+_VIDEO_OUTFIT_EXPLICIT_TRANSITION_ZH = re.compile(
+    r"(?:脱下|换上|穿回|披上|撕裂|破损|沾湿|浸透|脱落|披在)"
+)
+_VIDEO_OUTFIT_EXPLICIT_TRANSITION_EN = re.compile(
+    r"\b(?:takes? off|puts? on|puts? back on|throws? on|rips?|tears?|gets? wet|soaks?|falls? away)\b",
     flags=re.IGNORECASE,
 )
 _VIDEO_SCENE_TRACE_ZH = re.compile(
@@ -1058,6 +1074,11 @@ def _video_storyboard_paragraph_number(paragraph: str) -> int | None:
     return storyboard_number_token(match.group("zh_index") or match.group("en_index"))
 
 
+def _video_storyboard_paragraph_phase(paragraph: str) -> str | None:
+    match = _VIDEO_STORYBOARD_LABEL_PATTERN.match(str(paragraph or "").strip())
+    return storyboard_phase_token(match.group("title")) if match else None
+
+
 def _video_storyboard_paragraphs(text: str) -> list[str]:
     source = str(text or "").strip().replace("\r\n", "\n").replace("\r", "\n")
     if not source:
@@ -1163,9 +1184,15 @@ def _video_story_continuity_section_violation(
 
     subject_anchors = anchor_roles.get("subject", [])
     scene_anchors = anchor_roles.get("scene", [])
+    outfit_anchors = anchor_roles.get("outfit", [])
     prop_anchors = anchor_roles.get("prop", [])
     first = paragraphs[0]
-    for role_name, anchors in (("主体", subject_anchors), ("场景", scene_anchors), ("道具", prop_anchors)):
+    for role_name, anchors in (
+        ("主体", subject_anchors),
+        ("场景", scene_anchors),
+        ("服装", outfit_anchors),
+        ("道具", prop_anchors),
+    ):
         applicable = [anchor for anchor in anchors if anchor.casefold() in str(text).casefold()]
         if applicable and not _video_paragraph_has_anchor(first, applicable):
             shot_name = "Shot 1" if english else "分镜一"
@@ -1179,6 +1206,8 @@ def _video_story_continuity_section_violation(
     scene_context = _VIDEO_SCENE_TRANSITION_CONTEXT_EN if english else _VIDEO_SCENE_TRANSITION_CONTEXT_ZH
     prop_transition = _VIDEO_PROP_TRANSITION_EN if english else _VIDEO_PROP_TRANSITION_ZH
     abrupt_prop_change = _VIDEO_ABRUPT_PROP_CHANGE_EN if english else _VIDEO_ABRUPT_PROP_CHANGE_ZH
+    outfit_change = _VIDEO_OUTFIT_UNCAUSED_CHANGE_EN if english else _VIDEO_OUTFIT_UNCAUSED_CHANGE_ZH
+    outfit_transition = _VIDEO_OUTFIT_EXPLICIT_TRANSITION_EN if english else _VIDEO_OUTFIT_EXPLICIT_TRANSITION_ZH
 
     for index, paragraph in enumerate(paragraphs[1:], start=2):
         shot_name = f"Shot {index}" if english else f"分镜{index}"
@@ -1196,6 +1225,8 @@ def _video_story_continuity_section_violation(
                 return f"视频模型候选在{shot_name}无解释切换主场景。"
         if abrupt_prop_change.search(paragraph):
             return f"视频模型候选在{shot_name}让关键道具无解释消失。"
+        if outfit_change.search(paragraph) and not outfit_transition.search(paragraph):
+            return f"视频模型候选在{shot_name}让服装无解释改变。"
 
         missing_roles: list[str] = []
         if subject_anchors and not (
@@ -1306,18 +1337,24 @@ def _blend_video_draft_with_storyboard(
     if len(re.findall(r"[。！？.!?]", candidate)) < 1:
         return reject("视频模型增量缺少完整自然语言句子。")
 
-    additions: list[tuple[int | None, str]] = []
+    additions: list[tuple[int | None, str | None, str]] = []
     for paragraph in candidate_paragraphs:
         body = _VIDEO_STORYBOARD_LABEL_PATTERN.sub("", paragraph).strip()
         if body:
-            additions.append((_video_storyboard_paragraph_number(paragraph), body))
+            additions.append(
+                (
+                    _video_storyboard_paragraph_number(paragraph),
+                    _video_storyboard_paragraph_phase(paragraph),
+                    body,
+                )
+            )
     if not additions:
         return reject("视频模型增量清洗后没有可融合正文。")
 
     merged = list(original_paragraphs)
     placements: list[dict[str, Any]] = []
     blend_mode = ""
-    explicit_numbers = [number for number, _addition in additions if number is not None]
+    explicit_numbers = [number for number, _phase, _addition in additions if number is not None]
     if explicit_numbers:
         if (
             len(explicit_numbers) != len(additions)
@@ -1330,21 +1367,31 @@ def _blend_video_draft_with_storyboard(
             )
         ):
             return reject("视频模型增量的明确分镜编号重复、倒序、越界，或与无编号段混用。")
+        phase_mismatches = [
+            (int(number or 1), phase)
+            for number, phase, _addition in additions
+            if phase
+            and _video_increment_target(phase, len(merged)) != int(number or 1) - 1
+        ]
+        if phase_mismatches:
+            shot, phase = phase_mismatches[0]
+            phase_label = _VIDEO_INCREMENT_PHASE_LABELS.get(str(phase), str(phase))
+            return reject(f"视频模型增量把{phase_label}阶段标为分镜{shot}，与故事阶段位置不一致。")
         blend_mode = "explicit"
-        for number, addition in additions:
+        for number, phase, addition in additions:
             target = int(number or 1) - 1
             if _normalize_for_compare(addition) not in _normalize_for_compare(merged[target]):
                 merged[target] = f"{merged[target].rstrip()} {addition}"
-                placements.append({"shot": target + 1, "phase": None, "source": "explicit"})
+                placements.append({"shot": target + 1, "phase": phase, "source": "explicit"})
     elif len(candidate_paragraphs) >= 3:
         blend_mode = "ordered"
-        for index, (_number, addition) in enumerate(additions):
+        for index, (_number, phase, addition) in enumerate(additions):
             target = min(index, len(merged) - 1)
             if _normalize_for_compare(addition) not in _normalize_for_compare(merged[target]):
                 merged[target] = f"{merged[target].rstrip()} {addition}"
-                placements.append({"shot": target + 1, "phase": None, "source": "ordered"})
+                placements.append({"shot": target + 1, "phase": phase, "source": "ordered"})
     else:
-        addition_texts = [text for _number, text in additions]
+        addition_texts = [text for _number, _phase, text in additions]
         phases = [_video_increment_phase(text) for text in addition_texts]
         targets = _video_increment_targets(addition_texts, len(merged))
         if targets is None:
@@ -4599,7 +4646,7 @@ def maybe_model_refine_video(
             last_blend_reason
             and any(
                 marker in last_blend_reason
-                for marker in ("阶段顺序", "明确分镜编号", "融合后")
+                for marker in ("阶段顺序", "阶段位置", "明确分镜编号", "融合后")
             )
         )
 
