@@ -923,6 +923,41 @@ def _anchor(anchors: Mapping[str, Any], key: str, fallback: str = "") -> str:
     return _clean(anchors.get(key)) or fallback
 
 
+def subject_support_narrative_anchor(scene_graph: Any, *, english: bool = False) -> str:
+    if not isinstance(scene_graph, Mapping):
+        return ""
+    constraint = scene_graph.get("subject_support_state_constraint")
+    if not isinstance(constraint, Mapping):
+        constraint = {}
+    contact_plan = scene_graph.get("subject_support_contact_plan")
+    if not isinstance(contact_plan, Mapping):
+        contact_plan = {}
+    required = _clean(constraint.get("required_value"))
+    negated = {_clean(value) for value in constraint.get("negated_values", []) if _clean(value)}
+    if not required and len(negated) == 1:
+        required = "suspended" if "supported" in negated else "supported"
+    if not required and contact_plan:
+        required = "supported"
+    if required == "supported":
+        planned_anchor = _clean(contact_plan.get("anchor_en" if english else "anchor_zh"))
+        if planned_anchor:
+            return planned_anchor
+        if english:
+            return (
+                "The subject's actual load-bearing point transfers weight directly into the one support surface "
+                "already established by the scene, with a grounded center of mass and a consistent contact shadow"
+            )
+        return "主体通过当前动作的实际承重点把重量直接传到场景已经确定的唯一承托面，重心投影与接触阴影保持一致"
+    if required == "suspended":
+        if english:
+            return (
+                "The subject's complete silhouette keeps a visible gap from every support surface, while "
+                "the pose, clothing, and shadow all follow the same airborne or buoyant force"
+            )
+        return "主体完整轮廓与所有支撑面保持清楚离地间隙，姿态、衣摆和投影共同服从同一腾空或浮力方向"
+    return ""
+
+
 def _fit_chinese_narrative_sections(
     sections: list[str],
     replacements: list[tuple[str, str]],
@@ -956,6 +991,7 @@ def _render_chinese(
     custom = _anchor(anchors, "custom")
     residual = _anchor(anchors, "residual")
     quality = _anchor(anchors, "quality", "高细节、清晰对焦与稳定结构")
+    support = _anchor(anchors, "support")
     layout_clause = visual_layout_contract(layout_mode, english=False)
 
     style_clause = f"，以{style}作为统一媒介语言" if style else ""
@@ -982,7 +1018,7 @@ def _render_chinese(
         f"{'主体结构与外观' if non_person else '人物造型'}围绕{outfit}展开，动作发生时，"
         f"{motion_details}都顺着{action}产生细微变化；"
         f"{'结构朝向与功能部件' if non_person else '视线、肩颈、手部与身体重心'}共同指向当前事件，"
-        "使姿态自然传达犹豫、判断和下一步意图。"
+        f"使姿态自然传达犹豫、判断和下一步意图{'；' + support if support else ''}。"
     )
     space_sentence = (
         f"空间叙事遵循“{_anchor(plan, 'spatial_zh')}”的路径：前景提供可触摸的尺度和线索，"
@@ -1044,7 +1080,8 @@ def _render_chinese(
     )
     compact_subject_sentence = (
         f"{'主体结构与外观' if non_person else '人物造型'}以{outfit}为核心，{motion_details}随{action}产生可信变化；"
-        f"{'结构朝向与功能部件' if non_person else '视线、肩颈、手部与身体重心'}共同指向当前事件与下一步意图。"
+        f"{'结构朝向与功能部件' if non_person else '视线、肩颈、手部与身体重心'}共同指向当前事件与下一步意图"
+        f"{'；' + support if support else ''}。"
     )
     compact_story_sentence = (
         f"{_anchor(plan, 'opening_zh')}，{_anchor(plan, 'motive_zh')}；{_anchor(plan, 'trigger_zh')}，"
@@ -1113,6 +1150,7 @@ def _render_english(
     custom = _anchor(anchors, "custom")
     residual = _anchor(anchors, "residual")
     quality = _anchor(anchors, "quality", "high detail, clean focus, and stable structure")
+    support = _anchor(anchors, "support")
     layout_clause = visual_layout_contract(layout_mode, english=True)
 
     style_clause = f", unified by {style}" if style else ""
@@ -1144,6 +1182,7 @@ def _render_english(
     subject_sentence = (
         f"The {design_subject} {design_verb} around {outfit}. During the movement, {motion_details} react to {action}. "
         f"{'Structural direction and functional components' if non_person else 'Gaze, shoulders, hands, and body weight'} point toward the event, carrying hesitation, judgment, and intended movement with natural continuity."
+        f"{' ' + support + '.' if support else ''}"
     )
     space_sentence = (
         f"Spatial storytelling follows this path: {_anchor(plan, 'spatial_en')}. Foreground information provides scale and a tangible clue, the middle ground carries the action, and the background retains the cause or consequence. "
