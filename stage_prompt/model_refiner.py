@@ -163,7 +163,7 @@ _SUBJECT_ORIENTATION_VALUE_MODEL_GUIDANCE = {
 }
 _SUBJECT_POSE_VALUE_MODEL_GUIDANCE = {
     "standing": "双脚稳定承重，双腿自然伸展，髋部与躯干保持连续直立关系",
-    "sitting": "髋部由既有座面或台阶稳定承托，双膝自然弯曲，躯干重心服从当前支撑面",
+    "sitting": "髋部只由 Skill 底稿已经确定的承托面稳定承托；底稿未给出具体坐具时直接使用当前地表，双膝自然弯曲，躯干重心服从该承托面",
     "kneeling": "单膝或双膝与既有地面形成明确承重点，髋部和双脚服从同一跪姿重心",
     "lying": "躯干沿既有水平表面获得连续支撑，肩背、髋部与四肢服从同一躺卧重心",
     "crouching": "髋部重心明显降低，双膝深度弯曲，双脚保持稳定承重",
@@ -270,7 +270,7 @@ _FOREGROUND_OCCLUSION_VALUE_MODEL_GUIDANCE = {
     "foreground_frame": "全画面仅由场景中已有前景元素覆盖主体次要边缘，面部、双手与动作支点保持可见，前景、主体与背景的遮挡顺序保持稳定一致",
 }
 _SUBJECT_SUPPORT_STATE_VALUE_MODEL_GUIDANCE = {
-    "supported": "全画面主体重量通过双脚、膝部、髋部或躯干传递到场景中已有支撑面，承重点出现受压、形变或接触阴影反馈，身体重心投影落在支撑范围内",
+    "supported": "全画面只使用当前姿态的实际承重点与 Skill 底稿已经确定的唯一承托面，承重点保留受压或接触阴影反馈，身体重心投影落在该承托范围内",
     "suspended": "全画面主体整体轮廓与地面、座面或支撑面保持可见离地间隙，身体姿态、发丝衣摆与周围颗粒共同响应同一上升、飞行或浮力状态，投影与接触线索不形成虚假承重接触",
 }
 _GAZE_TARGET_VALUE_MODEL_GUIDANCE = {
@@ -958,6 +958,11 @@ _VIDEO_OUTFIT_UNCAUSED_CHANGE_EN = re.compile(
     r"\b(?:suddenly|inexplicably|without explanation|for no reason).{0,42}\b(?:changes? into|turns? into|switches? to|wears? a different)\b",
     flags=re.IGNORECASE,
 )
+_VIDEO_OUTFIT_HARD_UNCAUSED_ZH = re.compile(r"(?:凭空|无故|无缘无故|莫名(?:其妙)?)")
+_VIDEO_OUTFIT_HARD_UNCAUSED_EN = re.compile(
+    r"\b(?:inexplicably|without explanation|for no reason)\b",
+    flags=re.IGNORECASE,
+)
 _VIDEO_OUTFIT_EXPLICIT_TRANSITION_ZH = re.compile(
     r"(?:脱下|换上|穿回|披上|撕裂|破损|沾湿|浸透|脱落|披在)"
 )
@@ -980,11 +985,79 @@ _VIDEO_PROP_TRACE_EN = re.compile(
     flags=re.IGNORECASE,
 )
 _VIDEO_NEW_SUBJECT_ZH = re.compile(
-    r"(?:另一名|另一个|新(?:的)?|陌生(?:的)?|无关(?:的)?)\s*(?:男人|男子|女人|女性|人物|角色|冒险者|侦探|士兵|守卫|机器人|生物|主体)"
+    r"(?:(?:另一名|另一个|新(?:的)?|陌生(?:的)?|无关(?:的)?)\s*){1,2}"
+    r"(?:男人|男子|女人|女性|人物|角色|冒险者|侦探|士兵|守卫|机器人|生物|主体)"
 )
 _VIDEO_NEW_SUBJECT_EN = re.compile(
-    r"\b(?:another|a new|an unrelated|a strange|a different)\s+(?:man|woman|person|character|adventurer|detective|soldier|guard|robot|creature|subject)\b",
+    r"\b(?:a|an)?\s*(?:(?:another|new|unrelated|strange|different)\s+){1,2}"
+    r"(?:man|woman|person|character|adventurer|detective|soldier|guard|robot|creature|subject)\b",
     flags=re.IGNORECASE,
+)
+_VIDEO_NEW_SUBJECT_NEGATION_ZH = re.compile(
+    r"(?:不再|不会|不应|不要|不得|禁止|避免|没有|并未|未曾).{0,8}(?:引入|出现|加入|增加)?\s*$"
+)
+_VIDEO_NEW_SUBJECT_NEGATION_EN = re.compile(
+    r"(?:without\s+(?:introducing|adding)|(?:does?|do|will)\s+not\s+(?:introduce|add)|"
+    r"never\s+(?:introduces?|adds?)|no)\s*$",
+    flags=re.IGNORECASE,
+)
+_VIDEO_SUBJECT_IDENTITY_CHANGE_ZH = re.compile(
+    r"(?:她|他|其|主体|人物|角色|这个人物|该角色).{0,12}"
+    r"(?:突然|凭空|无故|无缘无故|莫名(?:其妙)?).{0,16}"
+    r"(?:变成|变为|化作|成为)(?:了)?(?:一名|一个|一位)?\s*"
+    r"(?P<identity>男人|男子|男性|女人|女性|男孩|女孩|少年|少女|老人|儿童|婴儿|陌生人|"
+    r"机器人|机械体|怪物|生物|动物|石像|雕像|另一个人|另一个角色)"
+)
+_VIDEO_SUBJECT_IDENTITY_CHANGE_EN = re.compile(
+    r"\b(?:she|he|the subject|the character|the woman|the man).{0,16}"
+    r"(?:suddenly|inexplicably|without explanation|for no reason).{0,24}"
+    r"(?:becomes?|turns? into|changes? into)\s+(?:a|an)?\s*"
+    r"(?:different|new|young|old)?\s*(?P<identity>man|woman|boy|girl|child|elder|stranger|"
+    r"robot|machine|monster|creature|animal|statue|another person|another character)\b",
+    flags=re.IGNORECASE,
+)
+_VIDEO_TRANSFORMATION_INTENT_ZH = re.compile(r"(?:变身|变形|化身|形态转换|身份变化|变成|化作)")
+_VIDEO_TRANSFORMATION_INTENT_EN = re.compile(
+    r"\b(?:transform(?:s|ed|ing|ation)?|shape-?shift(?:s|ed|ing)?|morph(?:s|ed|ing)?|"
+    r"turn(?:s|ed|ing)? into|chang(?:e|es|ed|ing) form)\b",
+    flags=re.IGNORECASE,
+)
+_VIDEO_TRANSFORMATION_TARGET_ZH = re.compile(
+    r"(?:变身|变形|化身|形态转换|身份变化|变成|化作)(?:为|成|成为|至)?(?:了)?"
+    r"(?:一名|一个|一位)?\s*(?P<identity>男人|男子|男性|女人|女性|男孩|女孩|少年|少女|"
+    r"老人|儿童|婴儿|陌生人|机器人|机械体|怪物|生物|动物|石像|雕像|狼|狐狸|猫|鸟|龙)"
+)
+_VIDEO_TRANSFORMATION_TARGET_EN = re.compile(
+    r"\b(?:transform(?:s|ed|ing)?|shape-?shift(?:s|ed|ing)?|morph(?:s|ed|ing)?|"
+    r"turn(?:s|ed|ing)? into|chang(?:e|es|ed|ing) form(?: into| to)?)"
+    r"(?:\s+(?:into|as|to))?\s+(?:a|an)?\s*(?:different|new|young|old)?\s*"
+    r"(?P<identity>man|woman|boy|girl|child|elder|stranger|robot|machine|monster|creature|"
+    r"animal|statue|sculpture|wolf|fox|cat|bird|dragon)\b",
+    flags=re.IGNORECASE,
+)
+_VIDEO_TRANSFORMATION_NEGATION_ZH = re.compile(r"(?:不|不要|避免|禁止|不会|不能|不得).{0,6}$")
+_VIDEO_TRANSFORMATION_NEGATION_EN = re.compile(
+    r"\b(?:do not|don't|does not|doesn't|without|avoid|avoids|prevent|prevents|never)\s*$",
+    flags=re.IGNORECASE,
+)
+_VIDEO_IDENTITY_FAMILIES = (
+    frozenset(("男人", "男子", "男性", "man")),
+    frozenset(("女人", "女性", "woman")),
+    frozenset(("男孩", "少年", "boy")),
+    frozenset(("女孩", "少女", "girl")),
+    frozenset(("老人", "elder")),
+    frozenset(("儿童", "婴儿", "child")),
+    frozenset(("陌生人", "stranger")),
+    frozenset(("机器人", "机械体", "robot", "machine")),
+    frozenset(("怪物", "monster")),
+    frozenset(("生物", "creature")),
+    frozenset(("动物", "animal")),
+    frozenset(("石像", "雕像", "statue", "sculpture")),
+    frozenset(("狼", "wolf")),
+    frozenset(("狐狸", "fox")),
+    frozenset(("猫", "cat")),
+    frozenset(("鸟", "bird")),
+    frozenset(("龙", "dragon")),
 )
 _VIDEO_SCENE_SWITCH_ZH = re.compile(
     r"(?:镜头|画面|故事|场景)?\s*(?:突然|随即|随后)?\s*(?:切换|转场|跳转|来到)(?:至|到|为|成)?"
@@ -994,10 +1067,29 @@ _VIDEO_SCENE_SWITCH_EN = re.compile(
     flags=re.IGNORECASE,
 )
 _VIDEO_SCENE_TRANSITION_CONTEXT_ZH = re.compile(
-    r"(?:同一|原有|原来|该处|此处|这里|相邻|内部|沿着|穿过|跟随|连续|承接|特写|近景|中景|全景|景别|视角|机位|视线|手部|脸部|细节|焦点)"
+    r"(?:同一|原有|原来|该处|此处|这里|相邻|沿着|穿过|跟随)"
 )
 _VIDEO_SCENE_TRANSITION_CONTEXT_EN = re.compile(
-    r"\b(?:same|original|adjacent|inside|within|along|through|follows?|continuous|continuing|close-up|wide shot|medium shot|angle|viewpoint|gaze|hand|face|detail|focus)\b",
+    r"\b(?:same|original|adjacent|along|through|follows?)\b",
+    flags=re.IGNORECASE,
+)
+_VIDEO_SCENE_WEAK_CONTINUITY_ZH = re.compile(r"(?:连续|承接|接续|延续上一镜)")
+_VIDEO_SCENE_WEAK_CONTINUITY_EN = re.compile(
+    r"\b(?:continuous|continuing|continues?|picks? up from the previous shot)\b",
+    flags=re.IGNORECASE,
+)
+_VIDEO_SCENE_REFRAME_CONTEXT_ZH = re.compile(
+    r"(?:内部|特写|近景|中景|全景|景别|视角|机位|视线|手部|脸部|细节|焦点)"
+)
+_VIDEO_SCENE_REFRAME_CONTEXT_EN = re.compile(
+    r"\b(?:inside|within|close-up|wide shot|medium shot|angle|viewpoint|gaze|hand|face|detail|focus)\b",
+    flags=re.IGNORECASE,
+)
+_VIDEO_SCENE_LOCATION_MARKER_ZH = re.compile(
+    r"(?:海边|海滩|咖啡馆|餐厅|酒吧|商场|广场|街道|巷道|车站|机场|港口|码头|森林|树林|沙漠|山谷|城堡|宫殿|地下城|遗迹|工厂|仓库|办公室|卧室|浴室|厨房|房间|庭院|屋顶|学校|医院|实验室|太空站|月球|火星)"
+)
+_VIDEO_SCENE_LOCATION_MARKER_EN = re.compile(
+    r"\b(?:beach|cafe|restaurant|bar|mall|plaza|street|alley|station|airport|harbor|port|forest|desert|valley|castle|palace|dungeon|ruins?|factory|warehouse|office|bedroom|bathroom|kitchen|room|courtyard|rooftop|school|hospital|laboratory|space station|moon|mars)\b",
     flags=re.IGNORECASE,
 )
 _VIDEO_PROP_TRANSITION_ZH = re.compile(
@@ -1012,6 +1104,29 @@ _VIDEO_ABRUPT_PROP_CHANGE_ZH = re.compile(
 )
 _VIDEO_ABRUPT_PROP_CHANGE_EN = re.compile(
     r"\b(?:(?:suddenly|inexplicably|without explanation).{0,40}(?:disappears?|vanishes?)|(?:disappears?|vanishes?).{0,24}(?:suddenly|inexplicably))\b",
+    flags=re.IGNORECASE,
+)
+_VIDEO_PROP_OBJECT_ZH = (
+    r"(?:道具|物品|物件|武器|钥匙|信封|火炬|手枪|枪支|长剑|短剑|佩剑|刀具|相机|手机|屏幕|"
+    r"车辆|汽车|书本|卷轴|药瓶|箱子|盒子|面具|雨伞|手电筒)"
+)
+_VIDEO_PROP_OBJECT_EN = (
+    r"(?:prop|object|item|weapon|key|envelope|torch|gun|pistol|sword|knife|camera|phone|screen|"
+    r"vehicle|car|book|scroll|bottle|box|mask|umbrella|flashlight)"
+)
+_VIDEO_ABRUPT_PROP_APPEAR_ZH = re.compile(
+    rf"(?:(?P<item_before>{_VIDEO_PROP_OBJECT_ZH})(?:竟|却|又|便|也)?"
+    rf"(?:突然|凭空|无故|莫名(?:其妙)?).{{0,8}}(?:出现|冒出|多出|落入(?:她|他|其)?手中)"
+    rf"|(?:突然|凭空|无故|莫名(?:其妙)?).{{0,8}}(?:出现|冒出|多出)(?:了)?"
+    rf"(?:一把|一枚|一个|一件|一台|一辆)?(?P<item_after>{_VIDEO_PROP_OBJECT_ZH}))"
+)
+_VIDEO_ABRUPT_PROP_APPEAR_EN = re.compile(
+    rf"\b(?:(?P<item_before>{_VIDEO_PROP_OBJECT_EN})\s+"
+    rf"(?:suddenly|inexplicably|from nowhere|without explanation).{{0,16}}"
+    rf"(?:appears?|materializes?|shows? up)"
+    rf"|(?:suddenly|inexplicably|from nowhere|without explanation).{{0,10}}"
+    rf"(?:a|an)?\s*(?:new|extra|another|strange)?\s*(?P<item_after>{_VIDEO_PROP_OBJECT_EN})"
+    rf".{{0,12}}(?:appears?|materializes?|shows? up))\b",
     flags=re.IGNORECASE,
 )
 _VIDEO_INCREMENT_PHASE_PATTERNS = (
@@ -1172,6 +1287,47 @@ def _video_paragraph_has_anchor(paragraph: str, anchors: list[str]) -> bool:
     return any(anchor.casefold() in lowered for anchor in anchors)
 
 
+def _video_identity_family(value: str) -> frozenset[str]:
+    normalized = str(value or "").strip().casefold()
+    return next(
+        (family for family in _VIDEO_IDENTITY_FAMILIES if normalized in family),
+        frozenset((normalized,)),
+    )
+
+
+def _video_transformation_permission(
+    action_anchors: list[str],
+    changed_identity: str,
+    *,
+    english: bool,
+) -> tuple[bool, bool, list[str]]:
+    intent_pattern = _VIDEO_TRANSFORMATION_INTENT_EN if english else _VIDEO_TRANSFORMATION_INTENT_ZH
+    target_pattern = _VIDEO_TRANSFORMATION_TARGET_EN if english else _VIDEO_TRANSFORMATION_TARGET_ZH
+    negation_pattern = _VIDEO_TRANSFORMATION_NEGATION_EN if english else _VIDEO_TRANSFORMATION_NEGATION_ZH
+    expected_targets: list[str] = []
+    has_intent = False
+    allows_unspecified_target = False
+    for anchor in action_anchors:
+        intent_matches = [
+            match
+            for match in intent_pattern.finditer(anchor)
+            if not negation_pattern.search(anchor[max(0, match.start() - 16) : match.start()])
+        ]
+        if not intent_matches:
+            continue
+        has_intent = True
+        targets = [match.group("identity").strip() for match in target_pattern.finditer(anchor)]
+        if targets:
+            expected_targets.extend(target for target in targets if target not in expected_targets)
+        else:
+            allows_unspecified_target = True
+    changed_family = _video_identity_family(changed_identity)
+    target_matches = any(
+        bool(changed_family & _video_identity_family(target)) for target in expected_targets
+    )
+    return has_intent, allows_unspecified_target or target_matches, expected_targets
+
+
 def _video_story_continuity_section_violation(
     text: str,
     anchor_roles: dict[str, list[str]],
@@ -1184,6 +1340,7 @@ def _video_story_continuity_section_violation(
 
     subject_anchors = anchor_roles.get("subject", [])
     scene_anchors = anchor_roles.get("scene", [])
+    action_anchors = anchor_roles.get("action", [])
     outfit_anchors = anchor_roles.get("outfit", [])
     prop_anchors = anchor_roles.get("prop", [])
     first = paragraphs[0]
@@ -1202,31 +1359,110 @@ def _video_story_continuity_section_violation(
     scene_trace = _VIDEO_SCENE_TRACE_EN if english else _VIDEO_SCENE_TRACE_ZH
     prop_trace = _VIDEO_PROP_TRACE_EN if english else _VIDEO_PROP_TRACE_ZH
     new_subject = _VIDEO_NEW_SUBJECT_EN if english else _VIDEO_NEW_SUBJECT_ZH
+    new_subject_negation = _VIDEO_NEW_SUBJECT_NEGATION_EN if english else _VIDEO_NEW_SUBJECT_NEGATION_ZH
+    subject_identity_change = (
+        _VIDEO_SUBJECT_IDENTITY_CHANGE_EN if english else _VIDEO_SUBJECT_IDENTITY_CHANGE_ZH
+    )
     scene_switch = _VIDEO_SCENE_SWITCH_EN if english else _VIDEO_SCENE_SWITCH_ZH
     scene_context = _VIDEO_SCENE_TRANSITION_CONTEXT_EN if english else _VIDEO_SCENE_TRANSITION_CONTEXT_ZH
+    scene_weak_context = _VIDEO_SCENE_WEAK_CONTINUITY_EN if english else _VIDEO_SCENE_WEAK_CONTINUITY_ZH
+    scene_reframe = _VIDEO_SCENE_REFRAME_CONTEXT_EN if english else _VIDEO_SCENE_REFRAME_CONTEXT_ZH
+    scene_location = _VIDEO_SCENE_LOCATION_MARKER_EN if english else _VIDEO_SCENE_LOCATION_MARKER_ZH
     prop_transition = _VIDEO_PROP_TRANSITION_EN if english else _VIDEO_PROP_TRANSITION_ZH
     abrupt_prop_change = _VIDEO_ABRUPT_PROP_CHANGE_EN if english else _VIDEO_ABRUPT_PROP_CHANGE_ZH
+    abrupt_prop_appear = _VIDEO_ABRUPT_PROP_APPEAR_EN if english else _VIDEO_ABRUPT_PROP_APPEAR_ZH
     outfit_change = _VIDEO_OUTFIT_UNCAUSED_CHANGE_EN if english else _VIDEO_OUTFIT_UNCAUSED_CHANGE_ZH
+    outfit_hard_change = _VIDEO_OUTFIT_HARD_UNCAUSED_EN if english else _VIDEO_OUTFIT_HARD_UNCAUSED_ZH
     outfit_transition = _VIDEO_OUTFIT_EXPLICIT_TRANSITION_EN if english else _VIDEO_OUTFIT_EXPLICIT_TRANSITION_ZH
 
     for index, paragraph in enumerate(paragraphs[1:], start=2):
         shot_name = f"Shot {index}" if english else f"分镜{index}"
-        if new_subject.search(paragraph) and not _video_paragraph_has_anchor(paragraph, subject_anchors):
-            return f"视频模型候选在{shot_name}无解释引入新主体。"
+        identity_change_match = subject_identity_change.search(paragraph)
+        allows_transformation = False
+        if identity_change_match:
+            changed_identity = identity_change_match.group("identity").strip()
+            has_transformation_intent, allows_transformation, expected_targets = (
+                _video_transformation_permission(
+                    action_anchors,
+                    changed_identity,
+                    english=english,
+                )
+            )
+            if not allows_transformation:
+                if has_transformation_intent and expected_targets:
+                    expected_text = "、".join(expected_targets)
+                    return (
+                        f"视频模型候选在{shot_name}的主体身份变化目标“{changed_identity}”"
+                        f"与动作锚点“{expected_text}”不一致。"
+                    )
+                return f"视频模型候选在{shot_name}让主体身份无解释改变为“{changed_identity}”。"
+        new_subject_match = next(
+            (
+                match
+                for match in new_subject.finditer(paragraph)
+                if not new_subject_negation.search(
+                    paragraph[max(0, match.start() - 28) : match.start()]
+                )
+                and not (
+                    identity_change_match
+                    and identity_change_match.start() <= match.start()
+                    and match.end() <= identity_change_match.end()
+                )
+            ),
+            None,
+        )
+        if new_subject_match is not None:
+            introduced_subject = new_subject_match.group(0).strip()
+            return f"视频模型候选在{shot_name}无解释引入新主体“{introduced_subject}”。"
         scene_switch_match = scene_switch.search(paragraph)
         if scene_switch_match:
             transition_window = paragraph[
                 max(0, scene_switch_match.start() - 18) : scene_switch_match.end() + 24
             ]
+            switch_target = paragraph[scene_switch_match.end() : scene_switch_match.end() + 48]
+            scene_anchor_text = " ".join(scene_anchors).casefold()
+            foreign_locations = [
+                match.group(0)
+                for match in scene_location.finditer(switch_target)
+                if match.group(0).casefold() not in scene_anchor_text
+            ]
             if not (
                 _video_paragraph_has_anchor(transition_window, scene_anchors)
                 or scene_context.search(transition_window)
+                or (
+                    (scene_reframe.search(transition_window) or scene_weak_context.search(transition_window))
+                    and not foreign_locations
+                )
             ):
                 return f"视频模型候选在{shot_name}无解释切换主场景。"
         if abrupt_prop_change.search(paragraph):
             return f"视频模型候选在{shot_name}让关键道具无解释消失。"
-        if outfit_change.search(paragraph) and not outfit_transition.search(paragraph):
-            return f"视频模型候选在{shot_name}让服装无解释改变。"
+        abrupt_prop_appear_match = abrupt_prop_appear.search(paragraph)
+        if abrupt_prop_appear_match:
+            introduced_item = str(
+                abrupt_prop_appear_match.group("item_before")
+                or abrupt_prop_appear_match.group("item_after")
+                or ""
+            ).casefold()
+            known_prop = any(
+                introduced_item in anchor.casefold() or anchor.casefold() in introduced_item
+                for anchor in prop_anchors
+            )
+            if introduced_item and not known_prop:
+                return f"视频模型候选在{shot_name}让新道具“{introduced_item}”无解释出现。"
+        outfit_change_match = outfit_change.search(paragraph)
+        if outfit_change_match:
+            change_clause = outfit_change_match.group(0)
+            is_allowed_identity_change = bool(
+                identity_change_match
+                and allows_transformation
+                and outfit_change_match.start() < identity_change_match.end()
+                and identity_change_match.start() < outfit_change_match.end()
+            )
+            if not is_allowed_identity_change and (
+                outfit_hard_change.search(change_clause) or not outfit_transition.search(change_clause)
+            ):
+                return f"视频模型候选在{shot_name}让服装无解释改变。"
 
         missing_roles: list[str] = []
         if subject_anchors and not (
@@ -2135,6 +2371,14 @@ def _creative_family_hits(text: str, families: dict[str, tuple[str, ...]]) -> di
     return hits
 
 
+def _candidate_output_kind(settings: dict[str, Any]) -> str:
+    return (
+        "video"
+        if str(settings.get("模型任务", "") or "").strip() == "视频提示词"
+        else "image"
+    )
+
+
 def _creative_spine_violation(original_prompt: str, candidate_prompt: str, settings: dict[str, Any]) -> str:
     contract = settings.get("全局创作主线合同")
     if not isinstance(contract, dict):
@@ -2142,6 +2386,7 @@ def _creative_spine_violation(original_prompt: str, candidate_prompt: str, setti
             original_prompt,
             candidate_prompt,
             settings.get("智能场景关系图"),
+            output_kind=_candidate_output_kind(settings),
         )
     groups = contract.get("groups")
     if not isinstance(groups, dict):
@@ -2190,6 +2435,7 @@ def _creative_spine_violation(original_prompt: str, candidate_prompt: str, setti
         original_prompt,
         candidate_prompt,
         settings.get("智能场景关系图"),
+        output_kind=_candidate_output_kind(settings),
     )
     if world_reason:
         return world_reason
@@ -2649,12 +2895,26 @@ def _subject_pose_context_for_model(scene_graph: Any) -> str:
         pose_text = "主体姿态不得采用" + "、".join(negated_labels)
     else:
         return ""
-    guidance = _SUBJECT_POSE_VALUE_MODEL_GUIDANCE.get(required_value, "")
+    contact_plan = dict(scene_graph.get("subject_support_contact_plan", {}) or {})
+    planned_pose = str(contact_plan.get("pose_value", "") or "").strip()
+    planned_guidance = str(contact_plan.get("anchor_zh", "") or "").strip()
+    contact_visibility = str(contact_plan.get("contact_visibility", "") or "").strip()
+    guidance = (
+        planned_guidance
+        if planned_guidance and planned_pose == required_value
+        else _SUBJECT_POSE_VALUE_MODEL_GUIDANCE.get(required_value, "")
+    )
     guidance_text = f"；{guidance}" if guidance else ""
+    framing_rule = (
+        "近景或半身模式不得为展示脚部、膝部或承托面而扩大景别。"
+        if contact_visibility == "off_frame"
+        else ""
+    )
     return (
         "智能主体姿态：" + pose_text + guidance_text
         + "。图片和每段视频分镜持续保持该身体承重、关节弯曲与既有支撑面关系；"
         "未由 Skill 底稿给出的支撑物或姿态状态不作补充。"
+        + framing_rule
     )
 
 
@@ -3325,15 +3585,99 @@ def _subject_support_state_context_for_model(scene_graph: Any) -> str:
         support_text = "主体支撑状态不得采用" + "、".join(negated_labels)
     else:
         return ""
-    guidance = _SUBJECT_SUPPORT_STATE_VALUE_MODEL_GUIDANCE.get(required_value, "")
+    contact_plan = dict(scene_graph.get("subject_support_contact_plan", {}) or {})
+    planned_guidance = str(contact_plan.get("anchor_zh", "") or "").strip()
+    contact_visibility = str(contact_plan.get("contact_visibility", "") or "").strip()
+    guidance = (
+        planned_guidance
+        if required_value == "supported" and planned_guidance
+        else _SUBJECT_SUPPORT_STATE_VALUE_MODEL_GUIDANCE.get(required_value, "")
+    )
     guidance_text = f"；{guidance}" if guidance else ""
+    support_source_rule = (
+        "承托关系只能使用 Skill 底稿已经确定的接触面，不得自行新增其他承托物。"
+        if required_value == "supported"
+        else "未由 Skill 底稿给出的吊索、飞行器或法术支撑不得自行补入。"
+    )
+    continuity_rule = (
+        "图片和每段视频分镜保持画内骨盆、脊柱和肩线的承重连续性与统一重力方向，"
+        "不得为展示画外承重点而扩大景别；"
+        if contact_visibility == "off_frame"
+        else "图片和每段视频分镜持续保持该承重点、离地间隙、重心投影与接触阴影关系；"
+    )
     return (
         "智能主体支撑状态：" + support_text + guidance_text
-        + "。图片和每段视频分镜持续保持该承重点、离地间隙、重心投影与接触阴影关系；"
-        "未由 Skill 底稿给出的椅子、台阶、平台、吊索、飞行器或法术支撑不得自行补入。"
-        "明确的起跳、落地、坐下、跪地、游泳、水下悬停、飞行转场与辅助视图保持开放；"
+        + "。" + continuity_rule
+        + support_source_rule
+        + "明确的起跳、落地、坐下、跪地、游泳、水下悬停、飞行转场与辅助视图保持开放；"
         "站坐跪躺姿态、动作内容、运动呈现、机位、景别和场景地表按独立事实处理。"
     )
+
+
+def _subject_support_output_mode_context(
+    scene_graph: Any,
+    *,
+    output_kind: str,
+) -> str:
+    if not isinstance(scene_graph, dict):
+        return ""
+    contact_plan = dict(scene_graph.get("subject_support_contact_plan", {}) or {})
+    if not contact_plan:
+        return ""
+    surface = str(contact_plan.get("surface_zh", "") or "").strip() or "当前承托面"
+    contact_point = str(contact_plan.get("contact_point_zh", "") or "").strip() or "当前承重点"
+    subject_coverage = str(contact_plan.get("subject_coverage", "") or "").strip()
+    member_pose_plans = [
+        item
+        for item in contact_plan.get("member_pose_plans", [])
+        if isinstance(item, dict)
+    ]
+    member_relations = "；".join(
+        str(item.get("anchor_zh", "") or "").strip()
+        for item in member_pose_plans
+        if str(item.get("anchor_zh", "") or "").strip()
+    )
+    coverage_clause = (
+        "画面中的每位可见人物都必须分别建立自己的承重点、重心投影和接触反馈，不能只让其中一人着地；"
+        if subject_coverage
+        in {
+            "all_visible_subjects",
+            "all_visible_subjects_by_pose",
+            "all_visible_subjects_by_member",
+        }
+        else ""
+    )
+    normalized_kind = str(output_kind or "").strip().casefold()
+    if normalized_kind == "image":
+        if member_relations:
+            return (
+                f"图片逐人承托合同：单张图片只呈现一个决定性瞬间；固定逐人姿态关系为：{member_relations}；"
+                + coverage_clause
+                + "各人的姿态、承重点与承托面必须一一对应，不能互换；接触点可服从已有景别留在画外，"
+                "不得为展示承重点而扩大取景，也不得借用分镜编号或时序词切换承托面。"
+            )
+        return (
+            f"图片承托合同：单张图片只呈现一个决定性瞬间，保持“{contact_point}由{surface}承托”的唯一关系；"
+            + coverage_clause
+            + "不得借用分镜编号、然后、随后或转而等时序词切换到另一承托面，也不得同时画出接触前后两个姿态。"
+        )
+    if normalized_kind == "video":
+        if member_relations:
+            return (
+                f"视频逐人承托转场合同：首镜固定逐人姿态关系为：{member_relations}；"
+                + coverage_clause
+                + "每段分镜分别维持各人的当前承重点，不能交换人物与承托面；若某人后续改变承托面，"
+                "必须在编号分镜中明确写出该人物的起身、坐下、跪下、躺下、迈上或同等实际承重变化，"
+                "并连续交代旧接触解除、重心移动和新接触建立；单独的时序连接词不构成有效转场。"
+            )
+        return (
+            f"视频承托转场合同：首镜从“{contact_point}由{surface}承托”开始，每段分镜都保持可读的当前承重点；"
+            + coverage_clause
+            + "若后续改用场景中已有的另一承托面，必须在编号分镜中明确写出起身、坐下、跪下、躺下、迈上、"
+            "走上或同等实际承重变化动作，并连续交代旧接触解除、身体重心移动和新接触建立；"
+            "单独出现然后、随后、接着或转而不构成有效转场。"
+        )
+    return ""
 
 
 def _gaze_target_context_for_model(scene_graph: Any) -> str:
@@ -3364,7 +3708,11 @@ def _gaze_target_context_for_model(scene_graph: Any) -> str:
     )
 
 
-def _compact_environment_context_for_model(scene_graph: Any) -> str:
+def _compact_environment_context_for_model(
+    scene_graph: Any,
+    *,
+    output_kind: str = "shared",
+) -> str:
     return "\n".join(
         part
         for part in (
@@ -3397,6 +3745,7 @@ def _compact_environment_context_for_model(scene_graph: Any) -> str:
             _spatial_axis_continuity_context_for_model(scene_graph),
             _foreground_occlusion_context_for_model(scene_graph),
             _subject_support_state_context_for_model(scene_graph),
+            _subject_support_output_mode_context(scene_graph, output_kind=output_kind),
             _gaze_target_context_for_model(scene_graph),
         )
         if part
@@ -3654,6 +4003,16 @@ def _skill_context_for_model(settings: dict[str, Any]) -> str:
             support_context = _subject_support_state_context_for_model(scene_graph)
             if support_context:
                 extra_lines.append(support_context)
+        support_mode_context = _subject_support_output_mode_context(
+            scene_graph,
+            output_kind=(
+                "video"
+                if str(settings.get("模型任务", "") or "").strip() == "视频提示词"
+                else "image"
+            ),
+        )
+        if support_mode_context:
+            extra_lines.append(support_mode_context)
         gaze_target_constraint = dict(scene_graph.get("gaze_target_constraint", {}) or {})
         if gaze_target_constraint:
             gaze_context = _gaze_target_context_for_model(scene_graph)
@@ -3817,8 +4176,14 @@ def _compose_model_user_prompt(prompt: str, settings: dict[str, Any]) -> str:
             "其他已经正确的主体、服装、动作、场景、道具、光影和剧情不得改写。"
             "不得复述任务、解释规则或输出思考过程。\n"
         )
+    output_kind = (
+        "video"
+        if str(settings.get("模型任务", "") or "").strip() == "视频提示词"
+        else "image"
+    )
     environment_context = _compact_environment_context_for_model(
-        settings.get("智能场景关系图")
+        settings.get("智能场景关系图"),
+        output_kind=output_kind,
     )
     environment_line = (
         f"{environment_context}\n" if environment_context else ""
@@ -4611,6 +4976,7 @@ def maybe_model_refine_video(
         original,
         candidate,
         video_settings.get("智能场景关系图"),
+        output_kind="video",
     )
     candidate_structure_valid = bool(validator(candidate, language=language))
     continuity_reason = (
@@ -4664,6 +5030,7 @@ def maybe_model_refine_video(
             original,
             blended_prompt,
             video_settings.get("智能场景关系图"),
+            output_kind="video",
         )
         blended_structure_valid = bool(validator(blended_prompt, language=language))
         blended_continuity_reason = (
@@ -4728,6 +5095,7 @@ def maybe_model_refine_video(
                 original,
                 repaired_candidate,
                 video_settings.get("智能场景关系图"),
+                output_kind="video",
             )
             repaired_structure_valid = bool(validator(repaired_candidate, language=language))
             repaired_continuity_reason = (

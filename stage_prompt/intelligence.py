@@ -9,7 +9,7 @@ import re
 from typing import Any, Iterable
 
 
-INTELLIGENCE_PROFILE_VERSION = "qwen-te-intelligence-v90"
+INTELLIGENCE_PROFILE_VERSION = "qwen-te-intelligence-v101"
 
 _GROUP_LIMITS = {
     "主体": 6,
@@ -396,8 +396,10 @@ SUBJECT_CARDINALITY_MARKERS: dict[str, tuple[str, ...]] = {
         "two people", "two women", "two men",
     ),
     "group": (
-        "多人", "群像", "团队", "队伍", "小队", "冒险队", "人群", "众人",
+        "多人", "三人", "三位人物", "三名人物", "四人", "四位人物", "四名人物",
+        "群像", "团队", "队伍", "小队", "冒险队", "人群", "众人",
         "背景人物", "路人", "旁观者", "每位人物", "每人",
+        "three people", "three-person", "trio", "four people", "four-person", "quartet",
         "group portrait", "ensemble cast", "team", "crowd", "background person", "bystander", "passerby",
     ),
     "none": (
@@ -510,11 +512,26 @@ _OPEN_ORIENTATION_LAYOUT_RE = re.compile(
     flags=re.IGNORECASE,
 )
 SUBJECT_POSE_MARKERS: dict[str, tuple[str, ...]] = {
-    "standing": ("站姿", "站立", "直立", "standing pose", "standing upright", "standing"),
-    "sitting": ("坐姿", "坐着", "落座", "seated pose", "seated", "sitting"),
-    "kneeling": ("跪姿", "单膝跪地", "跪地", "kneeling pose", "kneeling"),
-    "lying": ("躺姿", "躺卧", "平躺", "仰卧", "俯卧", "lying pose", "lying down"),
-    "crouching": ("蹲姿", "蹲伏", "下蹲", "crouching pose", "crouching", "squatting"),
+    "standing": (
+        "站姿", "站立", "直立", "站在", "站于",
+        "standing pose", "standing upright", "standing", "stands on", "stands by",
+    ),
+    "sitting": (
+        "坐姿", "坐着", "落座", "坐在", "坐于",
+        "seated pose", "seated", "sitting", "sits on", "sits in",
+    ),
+    "kneeling": (
+        "跪姿", "单膝跪地", "跪地", "跪在", "跪于",
+        "kneeling pose", "kneeling", "kneels on",
+    ),
+    "lying": (
+        "躺姿", "躺卧", "平躺", "仰卧", "俯卧", "躺在", "躺于", "卧在",
+        "lying pose", "lying down", "lies on", "lies in",
+    ),
+    "crouching": (
+        "蹲姿", "蹲伏", "下蹲", "蹲在", "蹲于",
+        "crouching pose", "crouching", "squatting", "squats on",
+    ),
 }
 _SUBJECT_POSE_LABELS = {
     "standing": "站姿",
@@ -562,7 +579,7 @@ SUBJECT_POSE_FEEDBACK_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
 }
 SHOT_SCALE_MARKERS: dict[str, tuple[str, ...]] = {
     "closeup": (
-        "大特写", "面部特写", "眼部特写", "特写镜头", "头肩像", "头像特写", "特写",
+        "大特写", "面部特写", "眼部特写", "特写镜头", "头肩像", "头像特写", "近景", "特写",
         "extreme close-up", "close-up", "close up", "headshot",
     ),
     "medium": (
@@ -1811,15 +1828,244 @@ SUBJECT_SUPPORT_STATE_MARKERS: dict[str, tuple[str, ...]] = {
         "主体腾空", "人物腾空", "角色腾空", "跳跃腾空",
         "主体离地", "人物离地", "角色离地", "整体离地",
         "主体浮空", "人物浮空", "角色浮空", "漂浮在空中",
+        "她腾空", "他腾空", "她悬浮", "他悬浮", "身体腾空",
+        "双脚离地", "脚部离地", "悬浮于空中", "悬浮在空中", "悬停在空中", "腾空而起",
+        "其中一人悬浮", "其中一位悬浮", "另一人悬浮", "另一位悬浮",
+        "只有一人着地", "仅一人着地", "只有一位着地", "仅一位着地",
         "subject suspended", "character suspended", "subject airborne",
         "character airborne", "subject off the ground", "character off the ground",
         "levitating subject", "levitating character", "floating in midair",
+        "body airborne", "both feet off the ground", "her feet off the ground",
+        "his feet off the ground", "hovers in midair", "levitates in midair",
+        "floats above the ground", "only one person is grounded", "only one character is grounded",
+        "only one subject is grounded",
     ),
 }
 _SUBJECT_SUPPORT_STATE_LABELS = {
     "supported": "稳定承重/接触支撑面",
     "suspended": "整体离地/悬浮腾空",
 }
+SUBJECT_SUPPORT_SURFACE_MARKERS: dict[str, tuple[str, ...]] = {
+    "ground": ("当前地表", "地面", "地表", "地板", "floor", "ground", "ground surface"),
+    "sofa": ("沙发", "sofa", "couch"),
+    "bed": ("床", "床面", "床沿", "床边", "bed", "bed edge", "edge of the bed", "mattress"),
+    "bench": ("长凳", "bench"),
+    "stool": ("凳子", "矮凳", "stool"),
+    "throne": ("王座", "throne"),
+    "chair": ("椅子", "座椅", "椅面", "chair", "chair seat"),
+    "step": ("台阶", "石阶", "阶梯", "step", "stair"),
+    "ledge": ("石沿", "窗沿", "边沿", "ledge"),
+    "platform": ("平台", "石台", "高台", "platform", "stone dais", "dais"),
+    "mat": ("榻榻米", "地垫", "软垫", "mat", "tatami"),
+}
+_SUBJECT_SUPPORT_SURFACE_LABELS = {
+    "ground": "当前地表",
+    "sofa": "沙发",
+    "bed": "床面/床沿",
+    "bench": "长凳",
+    "stool": "凳面",
+    "throne": "王座",
+    "chair": "椅面",
+    "step": "台阶",
+    "ledge": "边沿",
+    "platform": "平台",
+    "mat": "垫面",
+}
+_SITTING_SUPPORT_SURFACES: tuple[tuple[str, str, str], ...] = (
+    ("sofa", "已有沙发座面", "the existing sofa seat"),
+    ("bed", "已有床沿", "the existing bed edge"),
+    ("bench", "已有长凳座面", "the existing bench seat"),
+    ("stool", "已有凳面", "the existing stool seat"),
+    ("throne", "已有王座座面", "the existing throne seat"),
+    ("chair", "已有椅面", "the existing chair seat"),
+    ("step", "已有台阶表面", "the existing step surface"),
+    ("ledge", "已有边沿表面", "the existing ledge"),
+    ("platform", "已有平台表面", "the existing platform surface"),
+)
+_LYING_SUPPORT_SURFACES: tuple[tuple[str, str, str], ...] = (
+    ("bed", "已有床面", "the existing bed surface"),
+    ("sofa", "已有沙发表面", "the existing sofa surface"),
+    ("mat", "已有垫面", "the existing mat surface"),
+    ("platform", "已有平台表面", "the existing platform surface"),
+)
+_GENERAL_SUPPORT_SURFACES: dict[str, tuple[str, str]] = {
+    "ground": ("当前地表", "the current ground surface"),
+    "sofa": ("已有沙发表面", "the existing sofa surface"),
+    "bed": ("已有床面", "the existing bed surface"),
+    "bench": ("已有长凳表面", "the existing bench surface"),
+    "stool": ("已有凳面", "the existing stool surface"),
+    "throne": ("已有王座表面", "the existing throne surface"),
+    "chair": ("已有椅面", "the existing chair seat"),
+    "step": ("已有台阶表面", "the existing step surface"),
+    "ledge": ("已有边沿表面", "the existing ledge"),
+    "platform": ("已有平台表面", "the existing platform surface"),
+    "mat": ("已有垫面", "the existing mat surface"),
+}
+_SUBJECT_SUPPORT_SURFACE_RELATION_ZH = re.compile(
+    r"(?=(?:主体|人物|角色|一人|其中一人|另一人|另一个人|第一人(?!称)|第二人|第三人|第四人|"
+    r"第一位人物|第二位人物|第三位人物|第四位人物|另一位人物|"
+    r"她|他|冒险者|侦探|旅人|战士|法师|骑士|游侠|弓箭手|盗贼|刺客|祭司|摄影师|学者|模特|"
+    r"女性|男性|女孩|男孩|少女|青年|老人|"
+    r"双脚|脚底|脚掌|承重脚|膝部|膝盖|单膝|双膝|髋部|臀部|躯干|肩背|身体)"
+    r"[^。！？.!?\n]{0,42}(?:坐在|坐上|落座于|躺在|躺上|卧在|跪在|跪上|站在|站上|蹲在|"
+    r"踩在|踩上|踩住|踏在|踏上|压在|压住|落在|倚坐于|靠坐在|由|被)"
+    r"(?P<surface_gap>[^。！？.!?\n]{0,24})$)",
+    flags=re.IGNORECASE,
+)
+_SUBJECT_SUPPORT_SURFACE_GAP_REJECT_RE = re.compile(
+    r"(?:脚下|身旁|重心|阴影|轮廓|视线|镜头|画面|身体|双腿|躯干|接触反馈|承重反馈|"
+    r"beneath|beside|background|center of mass|shadow|silhouette|camera|frame)",
+    flags=re.IGNORECASE,
+)
+_SUBJECT_SUPPORT_SURFACE_REVERSE_RELATION_ZH = re.compile(
+    r"^\s*(?:上|表面|座面|边缘)?[^。！？.!?\n]{0,24}(?:承托|支撑|托住|承受[^。！？.!?\n]{0,8}(?:重量|重心))",
+    flags=re.IGNORECASE,
+)
+_SUBJECT_SUPPORT_SURFACE_RELATION_EN = re.compile(
+    r"\b(?:subject|character|person|she|he|woman|man|girl|boy|adventurer|detective|traveler|warrior|mage|wizard|"
+    r"knight|ranger|archer|rogue|assassin|priest|photographer|scholar|model|"
+    r"body|feet?|soles?|load-bearing foot|knees?|hips?|pelvis|torso|back)\b"
+    r"[^.!?\n]{0,56}\b(?:sit(?:s|ting)?|seat(?:s|ed)?|lie(?:s|lying)?|lay|kneel(?:s|ing)?|stand(?:s|ing)?|"
+    r"crouch(?:es|ing)?|rest(?:s|ing)?|press(?:es|ing)?|plant(?:s|ed|ing)?|step(?:s|ping)?|supported)\b"
+    r"[^.!?\n]{0,20}\b(?:on|onto|into|against|by|across)\s+(?:(?:a|an|the)\s+)?"
+    r"(?:(?:current|existing|same|new|extra|another|wooden|stone|wet|dry)\s+){0,3}$",
+    flags=re.IGNORECASE,
+)
+_SUBJECT_SUPPORT_SURFACE_REVERSE_RELATION_EN = re.compile(
+    r"^\s*(?:surface|seat|edge)?[^.!?\n]{0,24}\b(?:supports?|bears?\s+(?:the\s+)?(?:subject|character|body|weight)|"
+    r"holds?\s+(?:the\s+)?(?:subject|character|body))\b",
+    flags=re.IGNORECASE,
+)
+_SUBJECT_SUPPORT_SURFACE_ADJACENCY_RE = re.compile(
+    r"^(?:旁|旁边|附近|后方|前方|左侧|右侧|beside\b|near\b|next\s+to\b|behind\b|in\s+front\s+of\b)",
+    flags=re.IGNORECASE,
+)
+_SUBJECT_SUPPORT_SURFACE_NONCONTACT_CONTEXT_RE = re.compile(
+    r"(?:远景|远处|背景|房间(?:的)?另一侧|画面(?:的)?另一侧|只在|仅在|"
+    r"人物(?:的)?身旁|主体(?:的)?身旁|人物(?:的)?旁边|主体(?:的)?旁边|"
+    r"\b(?:distant|far) background\b|\bin the background\b|\bacross the room\b|"
+    r"\bon the other side\b|\bbeside (?:the )?(?:subject|character|person)\b|"
+    r"\bnext to (?:the )?(?:subject|character|person)\b)",
+    flags=re.IGNORECASE,
+)
+_SUBJECT_SUPPORT_TRANSITION_RE = re.compile(
+    r"(?:起身|站起|站上|走上|踏上|迈上|登上|爬上|坐下|落座|坐上|跪下|跪上|躺下|躺上|卧倒|"
+    r"抬脚离开|双脚离开|膝部离开|髋部离开|躯干离开|重心转移到|"
+    r"\b(?:rises?|stands?\s+up|steps?\s+onto|walks?\s+onto|climbs?\s+onto|sits?\s+down|"
+    r"kneels?\s+down|lies?\s+down|lifts? (?:a |one |both )?(?:foot|feet|knee|knees|hips?|torso)\s+from|"
+    r"transfers? (?:the )?(?:body )?weight (?:onto|to))\b)",
+    flags=re.IGNORECASE,
+)
+_STORYBOARD_SUPPORT_CONTEXT_RE = re.compile(
+    r"(?:分镜|镜头)\s*(?:[0-9一二三四五六七八九十]+)|\b(?:shot|scene)\s*(?:#?\d+|one|two|three|four|five)\b",
+    flags=re.IGNORECASE,
+)
+_RUNTIME_RANDOM_AIRBORNE_ACTION_RE = re.compile(
+    r"(?:跳跃|跳起|跃起|飞跃|腾空|离地|升空|飞行|飞翔|悬停|悬浮|浮空|空中漂浮|坠落|下落|"
+    r"\b(?:jump(?:s|ed|ing)?|leap(?:s|ed|ing)?|fly|flies|flying|flight|hover(?:s|ed|ing)?|"
+    r"levitat(?:e|es|ed|ing|ion)|airborne|off the ground|in midair|fall(?:s|ing)?|descending)\b)",
+    flags=re.IGNORECASE,
+)
+
+_SUBJECT_MEMBER_REFERENCE_PATTERNS: tuple[
+    tuple[str, str, str, re.Pattern[str]], ...
+] = (
+    (
+        "fourth",
+        "第四位人物",
+        "the fourth person",
+        re.compile(
+            r"(?:第四人|第4人|第四位(?:人物|角色|主体)?|第4位(?:人物|角色|主体)?|第四名(?:人物|角色|主体)?|"
+            r"\b(?:the )?fourth\s+(?:person|character|subject)\b)",
+            flags=re.IGNORECASE,
+        ),
+    ),
+    (
+        "third",
+        "第三位人物",
+        "the third person",
+        re.compile(
+            r"(?:第三人|第3人|第三位(?:人物|角色|主体)?|第3位(?:人物|角色|主体)?|第三名(?:人物|角色|主体)?|"
+            r"\b(?:the )?third\s+(?:person|character|subject)\b)",
+            flags=re.IGNORECASE,
+        ),
+    ),
+    (
+        "second",
+        "另一位人物",
+        "the other person",
+        re.compile(
+            r"(?:另一人|另一个人|另一位(?:人物|角色|主体)?|第二人|第二位(?:人物|角色|主体)?|第二名(?:人物|角色|主体)?|"
+            r"\b(?:the other|the second)\s+(?:person|character|subject)\b)",
+            flags=re.IGNORECASE,
+        ),
+    ),
+    (
+        "first",
+        "第一位人物",
+        "the first person",
+        re.compile(
+            r"(?:(?<!另)(?<!第)(?:其中)?一人|第一人(?!称)|第一位(?:人物|角色|主体)?|第一名(?:人物|角色|主体)?|"
+            r"\b(?:one of the two|one|the first)\s+(?:person|character|subject)\b)",
+            flags=re.IGNORECASE,
+        ),
+    ),
+)
+_SUBJECT_EXACT_MEMBER_COUNT_PATTERNS: dict[int, re.Pattern[str]] = {
+    3: re.compile(
+        r"(?:三人|三位(?:人物|角色|主体)|三名(?:人物|角色|主体)|"
+        r"\b(?:three(?:-|\s+)(?:person|character|member)|three people|trio)\b)",
+        flags=re.IGNORECASE,
+    ),
+    4: re.compile(
+        r"(?:四人|四位(?:人物|角色|主体)|四名(?:人物|角色|主体)|"
+        r"\b(?:four(?:-|\s+)(?:person|character|member)|four people|quartet)\b)",
+        flags=re.IGNORECASE,
+    ),
+}
+_SUBJECT_ROLE_REFERENCE_MARKERS: dict[str, tuple[str, str, tuple[str, ...]]] = {
+    "warrior": ("战士", "warrior", ("女战士", "男战士", "幻想女战士", "战士", "warrior")),
+    "mage": (
+        "法师",
+        "mage",
+        ("女魔法师", "男魔法师", "女法师", "男法师", "宫廷魔法师", "魔法师", "法师", "mage", "wizard"),
+    ),
+    "knight": ("骑士", "knight", ("女骑士", "男骑士", "龙骑士", "圣骑士", "骑士", "knight")),
+    "ranger": ("游侠", "ranger", ("精灵游侠", "游侠", "ranger")),
+    "archer": ("弓箭手", "archer", ("女弓箭手", "男弓箭手", "弓箭手", "archer")),
+    "rogue": ("盗贼", "rogue", ("女盗贼", "男盗贼", "盗贼", "rogue")),
+    "assassin": ("刺客", "assassin", ("女刺客", "男刺客", "刺客", "assassin")),
+    "priest": ("祭司", "priest", ("女祭司", "男祭司", "祭司", "priest")),
+    "detective": ("侦探", "detective", ("女侦探", "男侦探", "侦探", "detective")),
+    "adventurer": ("冒险者", "adventurer", ("女冒险者", "男冒险者", "冒险者", "adventurer")),
+    "traveler": ("旅人", "traveler", ("女旅人", "男旅人", "旅人", "traveler")),
+    "photographer": ("摄影师", "photographer", ("女摄影师", "男摄影师", "摄影师", "photographer")),
+    "scholar": ("学者", "scholar", ("女学者", "男学者", "学者", "scholar")),
+}
+_RUNTIME_RANDOM_AIRBORNE_CUSTOM_TAG_RE = re.compile(
+    r"^(?:跳跃|跳起|跃起|飞跃|腾空|离地|升空|飞行|飞翔|悬停|悬浮待机|人物悬浮|人物腾空|"
+    r"主体悬浮|主体腾空|整体离地|漂浮在空中|"
+    r"jump(?:s|ed|ing)?|leap(?:s|ed|ing)?|fly|flying|flight|hover(?:s|ed|ing)?|"
+    r"levitat(?:e|es|ed|ing|ion)|airborne|off the ground|floating in midair)$",
+    flags=re.IGNORECASE,
+)
+_RUNTIME_RANDOM_SUBJECT_AIRBORNE_CONTEXT_RE = re.compile(
+    r"(?:(?:人物|角色|主体|她|他|身体|全身|双脚|冒险者|战士)[^。！？.!?\n]{0,16}"
+    r"(?:跳跃|跳起|跃起|飞跃|腾空|离地|升空|飞行|飞翔|悬停|悬浮|浮空|漂浮在空中)|"
+    r"(?:跳跃|跳起|跃起|飞跃|腾空|离地|升空|飞行|飞翔|悬停|悬浮|浮空)[^。！？.!?\n]{0,12}"
+    r"(?:人物|角色|主体|女性|男人|冒险者|战士)|"
+    r"\b(?:the )?(?:subject|character|woman|man|adventurer|warrior|she|he)\b[^.!?\n]{0,20}"
+    r"\b(?:jumps?|leaps?|flies|flying|hovers?|levitates?|airborne|off the ground|in midair)\b|"
+    r"\b(?:jumping|leaping|flying|hovering|levitating|airborne)\b[^.!?\n]{0,16}"
+    r"\b(?:subject|character|woman|man|adventurer|warrior)\b)",
+    flags=re.IGNORECASE,
+)
+_RUNTIME_RANDOM_BUOYANT_CONTEXT_RE = re.compile(
+    r"(?:水下|水中|海底|深海|潜水|游泳|中性浮力|失重|零重力|无重力|"
+    r"\b(?:underwater|submerged|undersea|deep sea|div(?:e|es|ing)|swim(?:s|ming)?|"
+    r"neutral buoyancy|weightless|zero gravity|microgravity)\b)",
+    flags=re.IGNORECASE,
+)
 SUBJECT_SUPPORT_STATE_FEEDBACK_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
     "supported": (
         re.compile(
@@ -4828,6 +5074,771 @@ def _resolve_subject_support_state_constraint(
     return constraint
 
 
+def detect_subject_support_surface(text: Any) -> dict[str, list[str]]:
+    source = _clean(text)
+    folded = source.casefold()
+    hits: dict[str, list[str]] = {}
+    for surface_value, markers in SUBJECT_SUPPORT_SURFACE_MARKERS.items():
+        evidence: list[str] = []
+        for marker in markers:
+            for match in _marker_matches(source, marker):
+                if _marker_match_is_negated(folded, match.start()):
+                    continue
+                before_start = max(0, match.start() - 96)
+                after_end = min(len(source), match.end() + 64)
+                before = folded[before_start : match.start()]
+                after = folded[match.end() : after_end]
+                if _SUBJECT_SUPPORT_SURFACE_ADJACENCY_RE.search(after.lstrip()):
+                    continue
+                zh_relation = next(
+                    (
+                        relation
+                        for relation in _SUBJECT_SUPPORT_SURFACE_RELATION_ZH.finditer(before)
+                        if not _SUBJECT_SUPPORT_SURFACE_GAP_REJECT_RE.search(
+                            relation.group("surface_gap")
+                        )
+                        and not any(
+                            _marker_present(relation.group("surface_gap"), competing_marker)
+                            for competing_value, competing_markers in SUBJECT_SUPPORT_SURFACE_MARKERS.items()
+                            if competing_value != surface_value
+                            for competing_marker in competing_markers
+                        )
+                    ),
+                    None,
+                )
+                related = bool(
+                    zh_relation
+                    or _SUBJECT_SUPPORT_SURFACE_REVERSE_RELATION_ZH.search(after)
+                    or _SUBJECT_SUPPORT_SURFACE_RELATION_EN.search(before)
+                    or _SUBJECT_SUPPORT_SURFACE_REVERSE_RELATION_EN.search(after)
+                )
+                if not related:
+                    continue
+                fragment = _clean(source[before_start:after_end])
+                if fragment and fragment not in evidence:
+                    evidence.append(fragment)
+        if evidence:
+            hits[surface_value] = evidence
+    return hits
+
+
+def _support_surface_is_contact_candidate(source: str, markers: Iterable[str]) -> bool:
+    folded = _clean(source).casefold()
+    for marker in markers:
+        for match in _marker_matches(folded, marker):
+            if _marker_match_is_negated(folded, match.start()):
+                continue
+            window = folded[max(0, match.start() - 36) : min(len(folded), match.end() + 36)]
+            if _SUBJECT_SUPPORT_SURFACE_NONCONTACT_CONTEXT_RE.search(window):
+                continue
+            return True
+    return False
+
+
+def _detect_subject_member_reference(text: Any) -> dict[str, str]:
+    source = _clean(text)
+    folded = source.casefold()
+    for member_value, label_zh, label_en, pattern in _SUBJECT_MEMBER_REFERENCE_PATTERNS:
+        match = pattern.search(source)
+        if not match or _marker_match_is_negated(folded, match.start()):
+            continue
+        return {
+            "member_value": member_value,
+            "member_label_zh": label_zh,
+            "member_label_en": label_en,
+            "member_evidence": _clean(match.group(0)),
+        }
+    role_hits: list[tuple[str, str, str, str]] = []
+    for role_value, (label_zh, label_en, markers) in _SUBJECT_ROLE_REFERENCE_MARKERS.items():
+        evidence = ""
+        for marker in markers:
+            match = next(
+                (
+                    item
+                    for item in _marker_matches(source, marker)
+                    if not _marker_match_is_negated(folded, item.start())
+                ),
+                None,
+            )
+            if match:
+                evidence = _clean(match.group(0))
+                break
+        if evidence:
+            role_hits.append((role_value, label_zh, label_en, evidence))
+    if len(role_hits) == 1:
+        role_value, label_zh, label_en, evidence = role_hits[0]
+        return {
+            "member_value": f"role:{role_value}",
+            "member_label_zh": evidence if not evidence.isascii() else label_zh,
+            "member_label_en": label_en,
+            "member_evidence": evidence,
+        }
+    return {}
+
+
+def _expected_subject_member_values(
+    cardinality_text: Any,
+    subject_cardinality: Any,
+) -> tuple[str, ...]:
+    cardinality = _clean(subject_cardinality)
+    if cardinality == "pair":
+        return ("first", "second")
+    if cardinality != "group":
+        return ()
+    source = _clean(cardinality_text)
+    for count, pattern in _SUBJECT_EXACT_MEMBER_COUNT_PATTERNS.items():
+        if not pattern.search(source):
+            continue
+        return ("first", "second", "third", "fourth")[:count]
+    return ()
+
+
+def _build_subject_support_contact_plan(
+    nodes: Any,
+    custom_context: Iterable[Any],
+    natural_context: Any,
+    pose_constraint: Any,
+    shot_scale_constraint: Any,
+    support_constraint: Any,
+    *,
+    subject_type: Any = "",
+) -> dict[str, Any]:
+    if _clean(subject_type) == "非人物主体":
+        return {}
+    groups = nodes if isinstance(nodes, dict) else {}
+    pose = ""
+    pose_source = ""
+    if isinstance(pose_constraint, dict):
+        pose = _clean(pose_constraint.get("required_value"))
+        if pose:
+            pose_source = _clean(pose_constraint.get("source")) or "pose_constraint"
+
+    action_values = _unique(groups.get("动作姿态", []), 24)
+    if not pose:
+        detected_pose = detect_subject_pose("，".join(action_values))
+        if len(detected_pose) == 1:
+            pose = next(iter(detected_pose))
+            pose_source = "action_anchor"
+
+    required_support = ""
+    if isinstance(support_constraint, dict):
+        required_support = _clean(support_constraint.get("required_value"))
+        negated = {
+            _clean(value)
+            for value in support_constraint.get("negated_values", [])
+            if _clean(value)
+        }
+        if not required_support and negated == {"suspended"}:
+            required_support = "supported"
+    if required_support == "suspended":
+        return {}
+    if not pose and required_support != "supported":
+        return {}
+
+    shot_scale_value = ""
+    if isinstance(shot_scale_constraint, dict):
+        shot_scale_value = _clean(shot_scale_constraint.get("required_value"))
+    contact_visibility = (
+        "off_frame"
+        if shot_scale_value in {"closeup", "medium"}
+        else "visible"
+        if shot_scale_value in {"full_body", "wide"}
+        else "adaptive"
+    )
+    custom_values = _unique(custom_context, 24)
+
+    cardinality_text = "，".join(
+        _unique(
+            [
+                *groups.get("主体", []),
+                _clean(natural_context),
+                *custom_values,
+            ],
+            32,
+        )
+    )
+    cardinality_hits = detect_subject_cardinality(cardinality_text)
+    subject_cardinality = next(iter(cardinality_hits)) if len(cardinality_hits) == 1 else ""
+    explicit_mixed_airborne = bool(
+        subject_cardinality in {"pair", "group"}
+        and (
+            _RUNTIME_RANDOM_AIRBORNE_ACTION_RE.search("，".join(action_values))
+            or _RUNTIME_RANDOM_SUBJECT_AIRBORNE_CONTEXT_RE.search(_clean(natural_context))
+        )
+    )
+    mixed_pose_hits = detect_subject_pose(
+        "，".join(_unique([*action_values, _clean(natural_context)], 32))
+    )
+    mixed_grounded_pose_values = (
+        list(mixed_pose_hits)
+        if subject_cardinality in {"pair", "group"}
+        and len(mixed_pose_hits) > 1
+        and not explicit_mixed_airborne
+        else []
+    )
+    subject_coverage = (
+        "grounded_members_only"
+        if explicit_mixed_airborne
+        else "all_visible_subjects"
+        if subject_cardinality in {"pair", "group"}
+        else "primary_subject"
+    )
+
+    prop_values = _unique(groups.get("道具世界观", []), 24)
+    scene_values = _unique(groups.get("场景背景", []), 24)
+    source_values = _unique(
+        [
+            _clean(natural_context),
+            *action_values,
+            *prop_values,
+            *scene_values,
+            *custom_values,
+        ],
+        48,
+    )
+
+    explicit_surface_value = ""
+    explicit_surface_evidence = ""
+    for source in source_values:
+        detected_surfaces = detect_subject_support_surface(source)
+        if len(detected_surfaces) != 1:
+            continue
+        explicit_surface_value = next(iter(detected_surfaces))
+        explicit_surface_evidence = detected_surfaces[explicit_surface_value][0]
+        break
+
+    surface_zh = "当前地表"
+    surface_en = "the current ground surface"
+    surface_value = "ground"
+    surface_source = "scene_ground"
+    surface_evidence = ""
+    available_surface_values = ["ground"]
+    available_surface_evidence: dict[str, list[str]] = {"ground": ["场景基础地表"]}
+    for source in source_values:
+        for candidate_value, markers in SUBJECT_SUPPORT_SURFACE_MARKERS.items():
+            if candidate_value == "ground":
+                continue
+            if not any(_marker_present(source, marker) for marker in markers):
+                continue
+            if candidate_value not in available_surface_values:
+                available_surface_values.append(candidate_value)
+            evidence = available_surface_evidence.setdefault(candidate_value, [])
+            if source not in evidence:
+                evidence.append(source)
+    surface_options = (
+        _SITTING_SUPPORT_SURFACES
+        if pose == "sitting"
+        else _LYING_SUPPORT_SURFACES
+        if pose == "lying"
+        else ()
+    )
+    surface_prompt_names = {
+        value: (label_zh, label_en)
+        for value, label_zh, label_en in surface_options
+    }
+    if explicit_surface_value:
+        surface_value = explicit_surface_value
+        surface_zh, surface_en = surface_prompt_names.get(
+            surface_value,
+            _GENERAL_SUPPORT_SURFACES.get(
+                surface_value,
+                (_SUBJECT_SUPPORT_SURFACE_LABELS.get(surface_value, surface_value), surface_value),
+            ),
+        )
+        surface_source = "explicit_relation"
+        surface_evidence = explicit_surface_evidence
+    else:
+        fallback_tiers = (action_values, custom_values, prop_values)
+        for tier_values in fallback_tiers:
+            tier_candidates: dict[str, str] = {}
+            for source in tier_values:
+                for candidate_value, _candidate_zh, _candidate_en in surface_options:
+                    markers = SUBJECT_SUPPORT_SURFACE_MARKERS[candidate_value]
+                    if _support_surface_is_contact_candidate(source, markers):
+                        tier_candidates.setdefault(candidate_value, source)
+            if len(tier_candidates) > 1:
+                break
+            if len(tier_candidates) == 1:
+                surface_value, surface_evidence = next(iter(tier_candidates.items()))
+                surface_zh, surface_en = surface_prompt_names[surface_value]
+                surface_source = "existing_anchor"
+                break
+
+    if pose == "sitting":
+        contact_point_zh = "髋部"
+        contact_point_en = "hips"
+        anchor_zh = (
+            f"主体髋部由{surface_zh}直接承托，双膝自然弯曲，身体重心落在该承托范围内，接触阴影紧贴受力位置"
+        )
+        anchor_en = (
+            f"The subject's hips rest directly on {surface_en}; the knees bend naturally, the center of mass "
+            "stays within that support area, and the contact shadow remains attached to the load-bearing point"
+        )
+    elif pose == "kneeling":
+        contact_point_zh = "膝部"
+        contact_point_en = "knee or knees"
+        anchor_zh = f"主体以单膝或双膝直接压住{surface_zh}形成承重点，重心落在跪姿支撑范围内，膝下接触阴影清楚"
+        anchor_en = (
+            f"The subject's knee or knees press directly into {surface_en} as the load-bearing point; "
+            "the center of mass stays within the kneeling support area and the contact shadow remains clear beneath the knees"
+        )
+    elif pose == "lying":
+        contact_point_zh = "躯干"
+        contact_point_en = "torso"
+        anchor_zh = (
+            f"主体躯干沿{surface_zh}连续受托，肩背与髋部服从同一躺卧重心，接触阴影沿身体受力面自然展开"
+        )
+        anchor_en = (
+            f"The subject's torso is continuously supported by {surface_en}; the shoulders, back, and hips share "
+            "one lying center of mass, with the contact shadow spreading naturally along the load-bearing side of the body"
+        )
+    elif pose == "crouching":
+        contact_point_zh = "双脚"
+        contact_point_en = "both feet"
+        anchor_zh = f"主体双脚直接踩住{surface_zh}承重，膝部弯曲而脚底保持接触，降低后的重心仍落在双脚支撑范围内"
+        anchor_en = (
+            f"Both feet press directly into {surface_en} while bearing the subject's weight; the knees bend, "
+            "the soles retain contact, and the lowered center of mass stays within the feet's support area"
+        )
+    elif pose == "standing":
+        contact_point_zh = "双脚"
+        contact_point_en = "both feet"
+        anchor_zh = f"主体双脚直接踩住{surface_zh}承重，双腿与躯干维持连续直立关系，重心投影和接触阴影都落在脚下"
+        anchor_en = (
+            f"Both feet press directly into {surface_en} while bearing the subject's weight; the legs and torso "
+            "remain continuously upright, and both the projected center of mass and contact shadow fall beneath the feet"
+        )
+    else:
+        pose = "grounded_action"
+        pose_source = pose_source or "support_default"
+        contact_point_zh = "当前承重脚"
+        contact_point_en = "current load-bearing foot"
+        anchor_zh = f"主体当前承重脚直接踩住{surface_zh}，动作重心落在脚下支撑范围内，脚底受压反馈与接触阴影保持一致"
+        anchor_en = (
+            f"The subject's current load-bearing foot presses directly into {surface_en}; the action's center of "
+            "mass stays within that footprint, with matching sole compression and contact shadow"
+        )
+
+    if contact_visibility == "off_frame":
+        anchor_zh = (
+            "既定近景或半身取景只通过画内骨盆、脊柱和肩线表现稳定承重，画外身体延续同一重力方向，"
+            "镜头保持当前景别，不为展示承重点而扩大取景"
+        )
+        anchor_en = (
+            "Within the established close or medium framing, the visible pelvis, spine, and shoulder line convey stable "
+            "weight-bearing while the off-frame body continues along the same gravity direction; the camera retains its "
+            "current shot scale instead of widening to reveal the contact point"
+        )
+    elif contact_visibility == "adaptive":
+        anchor_zh = (
+            f"主体沿当前姿态保持连续承重，重心通过身体关节链传向{surface_zh}，接触位置服从既定取景，"
+            "身体与投影共享同一重力方向"
+        )
+        anchor_en = (
+            f"The subject maintains continuous weight-bearing through the current pose, transferring the center of mass "
+            f"through the body's joint chain toward {surface_en}; the contact point follows the established framing, and "
+            "the body and shadow share one gravity direction"
+        )
+
+    pose_contact_points = {
+        "standing": ("双脚", "both feet"),
+        "sitting": ("髋部", "hips"),
+        "kneeling": ("膝部", "knee or knees"),
+        "lying": ("躯干", "torso"),
+        "crouching": ("双脚", "both feet"),
+    }
+    pose_labels = {
+        "standing": ("站姿人物", "standing person"),
+        "sitting": ("坐姿人物", "seated person"),
+        "kneeling": ("跪姿人物", "kneeling person"),
+        "lying": ("躺姿人物", "lying person"),
+        "crouching": ("蹲姿人物", "crouching person"),
+    }
+    relation_fragments = [
+        fragment.strip()
+        for source in [*action_values, _clean(natural_context), *custom_values]
+        for fragment in re.split(r"[，,；;。！？.!?\n]+", source)
+        if fragment.strip()
+    ]
+
+    def member_surface_labels(pose_value: str, value: str) -> tuple[str, str]:
+        options = (
+            _SITTING_SUPPORT_SURFACES
+            if pose_value == "sitting"
+            else _LYING_SUPPORT_SURFACES
+            if pose_value == "lying"
+            else ()
+        )
+        prompt_names = {
+            option_value: (label_zh, label_en)
+            for option_value, label_zh, label_en in options
+        }
+        return prompt_names.get(
+            value,
+            _GENERAL_SUPPORT_SURFACES.get(
+                value,
+                (_SUBJECT_SUPPORT_SURFACE_LABELS.get(value, value), value),
+            ),
+        )
+
+    def resolve_member_surface(pose_value: str) -> tuple[str, str, str, str]:
+        options = (
+            _SITTING_SUPPORT_SURFACES
+            if pose_value == "sitting"
+            else _LYING_SUPPORT_SURFACES
+            if pose_value == "lying"
+            else ()
+        )
+        for fragment in relation_fragments:
+            if pose_value not in detect_subject_pose(fragment):
+                continue
+            fragment_surfaces = detect_subject_support_surface(fragment)
+            if len(fragment_surfaces) != 1:
+                continue
+            value = next(iter(fragment_surfaces))
+            label_zh, label_en = member_surface_labels(pose_value, value)
+            return value, label_zh, label_en, fragment_surfaces[value][0]
+        for tier_values in (action_values, custom_values, prop_values):
+            for value, label_zh, label_en in options:
+                markers = SUBJECT_SUPPORT_SURFACE_MARKERS[value]
+                evidence = next(
+                    (
+                        source
+                        for source in tier_values
+                        if _support_surface_is_contact_candidate(source, markers)
+                    ),
+                    "",
+                )
+                if evidence:
+                    return value, label_zh, label_en, evidence
+        return "ground", "当前地表", "the current ground surface", ""
+
+    explicit_member_assignments: dict[str, dict[str, str]] = {}
+    expected_member_values = _expected_subject_member_values(
+        cardinality_text,
+        subject_cardinality,
+    )
+    if expected_member_values and not explicit_mixed_airborne:
+        for fragment in relation_fragments:
+            member_reference = _detect_subject_member_reference(fragment)
+            fragment_poses = detect_subject_pose(fragment)
+            fragment_surfaces = detect_subject_support_surface(fragment)
+            if (
+                not member_reference
+                or len(fragment_poses) != 1
+                or len(fragment_surfaces) != 1
+            ):
+                continue
+            member_value = member_reference["member_value"]
+            explicit_member_assignments.setdefault(
+                member_value,
+                {
+                    **member_reference,
+                    "pose_value": next(iter(fragment_poses)),
+                    "surface_value": next(iter(fragment_surfaces)),
+                    "surface_evidence": fragment,
+                },
+            )
+    ordinal_assignment_values = (
+        expected_member_values
+        if set(explicit_member_assignments) == set(expected_member_values)
+        else ()
+    )
+    role_assignment_values = tuple(
+        value for value in explicit_member_assignments if value.startswith("role:")
+    )
+    complete_role_assignment_values = (
+        role_assignment_values
+        if len(role_assignment_values) == len(expected_member_values)
+        and len(explicit_member_assignments) == len(expected_member_values)
+        else ()
+    )
+    planned_member_values = ordinal_assignment_values or complete_role_assignment_values
+    use_member_assignments = bool(
+        planned_member_values
+        and len(
+            {item["pose_value"] for item in explicit_member_assignments.values()}
+        ) == 1
+        and len(
+            {item["surface_value"] for item in explicit_member_assignments.values()}
+        ) > 1
+    )
+
+    member_pose_plans: list[dict[str, Any]] = []
+    plan_specs: list[dict[str, str]] = []
+    if use_member_assignments:
+        plan_specs = [explicit_member_assignments[value] for value in planned_member_values]
+    elif mixed_grounded_pose_values:
+        plan_specs = [{"pose_value": value} for value in mixed_grounded_pose_values]
+
+    for spec in plan_specs:
+        member_pose = spec["pose_value"]
+        if use_member_assignments:
+            member_surface = spec["surface_value"]
+            member_surface_zh, member_surface_en = member_surface_labels(
+                member_pose,
+                member_surface,
+            )
+            member_evidence = spec["surface_evidence"]
+            member_label_zh = spec["member_label_zh"]
+            member_label_en = spec["member_label_en"]
+        else:
+            member_surface, member_surface_zh, member_surface_en, member_evidence = (
+                resolve_member_surface(member_pose)
+            )
+            member_label_zh, member_label_en = pose_labels[member_pose]
+        member_contact_zh, member_contact_en = pose_contact_points[member_pose]
+        if member_pose in {"standing", "crouching"}:
+            member_anchor_zh = f"{member_label_zh}以双脚踩住{member_surface_zh}承重"
+            member_anchor_en = f"{member_label_en} bears weight through both feet on {member_surface_en}"
+        elif member_pose == "sitting":
+            member_anchor_zh = f"{member_label_zh}以髋部由{member_surface_zh}直接承托"
+            member_anchor_en = f"{member_label_en} is supported through the hips on {member_surface_en}"
+        elif member_pose == "kneeling":
+            member_anchor_zh = f"{member_label_zh}以单膝或双膝压住{member_surface_zh}承重"
+            member_anchor_en = f"{member_label_en} bears weight through one or both knees on {member_surface_en}"
+        else:
+            member_anchor_zh = f"{member_label_zh}以躯干沿{member_surface_zh}连续受托"
+            member_anchor_en = f"{member_label_en} receives continuous torso support from {member_surface_en}"
+        member_pose_plans.append(
+            {
+                "member_value": spec.get("member_value", ""),
+                "member_label_zh": spec.get("member_label_zh", ""),
+                "member_label_en": spec.get("member_label_en", ""),
+                "member_evidence": spec.get("member_evidence", ""),
+                "pose_value": member_pose,
+                "pose_label_zh": member_label_zh,
+                "pose_label_en": member_label_en,
+                "contact_point_zh": member_contact_zh,
+                "contact_point_en": member_contact_en,
+                "surface_value": member_surface,
+                "surface_zh": member_surface_zh,
+                "surface_en": member_surface_en,
+                "surface_evidence": member_evidence,
+                "anchor_zh": member_anchor_zh,
+                "anchor_en": member_anchor_en,
+            }
+        )
+
+    if member_pose_plans:
+        pose = (
+            "member_specific_grounded_poses"
+            if use_member_assignments
+            else "mixed_grounded_poses"
+        )
+        pose_source = (
+            "multi_subject_member_relations"
+            if use_member_assignments
+            else "multi_subject_action_anchors"
+        )
+        subject_coverage = (
+            "all_visible_subjects_by_member"
+            if use_member_assignments
+            else "all_visible_subjects_by_pose"
+        )
+        contact_point_zh = "按各自人物与姿态分配的承重点"
+        contact_point_en = "member- and pose-specific load-bearing points"
+        surface_value = ""
+        surface_zh = "各自人物与姿态对应的既定承托面"
+        surface_en = "the established support surface assigned to each person and pose"
+        surface_source = "per_member_anchors" if use_member_assignments else "per_pose_anchors"
+        surface_evidence = "；".join(
+            item["surface_evidence"]
+            for item in member_pose_plans
+            if item["surface_evidence"]
+        )
+        pose_summary_zh = "；".join(item["anchor_zh"] for item in member_pose_plans)
+        pose_summary_en = "; ".join(item["anchor_en"] for item in member_pose_plans)
+        binding_rule_zh = (
+            "不能交换人物与承托面"
+            if use_member_assignments
+            else "不能把一种姿态的承重点套给另一人"
+        )
+        binding_rule_en = (
+            "people and support surfaces cannot be swapped"
+            if use_member_assignments
+            else "one pose's contact point is never assigned to another person"
+        )
+        if contact_visibility == "off_frame":
+            anchor_zh = (
+                f"画面中的每位人物分别保持既定承重关系：{pose_summary_zh}；近景或半身只通过各自画内骨盆、"
+                f"脊柱和肩线表达重量，画外身体延续对应重力方向，{binding_rule_zh}，"
+                "不为展示任何人的画外承重点而扩大景别"
+            )
+            anchor_en = (
+                f"Each visible person preserves the assigned support relation: {pose_summary_en}; close or medium framing "
+                f"uses each visible pelvis, spine, and shoulder line, {binding_rule_en}, and never widens to reveal off-frame contacts"
+            )
+        elif contact_visibility == "adaptive":
+            anchor_zh = (
+                f"画面中的每位人物分别承重：{pose_summary_zh}；各自接触位置服从既定取景，{binding_rule_zh}"
+            )
+            anchor_en = (
+                f"Each visible person bears weight independently: {pose_summary_en}; contact visibility follows the established framing, "
+                f"and {binding_rule_en}"
+            )
+        else:
+            anchor_zh = (
+                f"画面中的每位人物分别建立承重关系：{pose_summary_zh}；每个人都有独立重心投影与接触反馈，"
+                f"{binding_rule_zh}"
+            )
+            anchor_en = (
+                f"Each visible person establishes an independent support relation: {pose_summary_en}; each keeps a separate center of mass "
+                f"and contact response, and {binding_rule_en}"
+            )
+
+    if subject_coverage == "all_visible_subjects":
+        anchor_zh = (
+            f"画面中的每位人物分别遵循以下承重关系：{anchor_zh}；"
+            "每个人都有独立且落在自身支撑范围内的重心投影与接触反馈，不能只让其中一人着地，"
+            "也不能用另一人的身体代替地面或承托物"
+        )
+        anchor_en = (
+            f"Every visible person independently follows this load-bearing relation: {anchor_en}; "
+            "each person keeps a separate projected center of mass and contact response within that person's own support area, "
+            "so grounding only one person or using another body as the support surface is not allowed"
+        )
+
+    return {
+        "pose_value": pose,
+        "pose_source": pose_source,
+        "shot_scale_value": shot_scale_value,
+        "contact_visibility": contact_visibility,
+        "subject_cardinality": subject_cardinality,
+        "subject_coverage": subject_coverage,
+        "member_pose_plans": member_pose_plans,
+        "contact_point_zh": contact_point_zh,
+        "contact_point_en": contact_point_en,
+        "surface_value": surface_value,
+        "surface_zh": surface_zh,
+        "surface_en": surface_en,
+        "surface_source": surface_source,
+        "surface_evidence": surface_evidence,
+        "available_surface_values": available_surface_values,
+        "available_surface_evidence": available_surface_evidence,
+        "anchor_zh": anchor_zh,
+        "anchor_en": anchor_en,
+        "allow_new_support_object": False,
+    }
+
+
+def _subject_support_relations(
+    contact_plan: Any,
+    subject_values: Iterable[Any],
+) -> list[dict[str, Any]]:
+    if not isinstance(contact_plan, dict) or not contact_plan:
+        return []
+    sources = _unique(subject_values, 8) or ["主主体"]
+    member_pose_plans = [
+        item
+        for item in contact_plan.get("member_pose_plans", [])
+        if isinstance(item, dict)
+    ]
+    if member_pose_plans:
+        return [
+            {
+                "source": sources,
+                "relation": "load_bearing_contact",
+                "target": [_clean(item.get("surface_zh")) or "当前地表"],
+                "contact_point": [_clean(item.get("contact_point_zh")) or "当前承重点"],
+                "pose": [_clean(item.get("pose_label_zh")) or _clean(item.get("pose_value"))],
+                "member": [_clean(item.get("member_label_zh"))]
+                if _clean(item.get("member_label_zh"))
+                else [],
+                "coverage": "individual_member"
+                if _clean(item.get("member_value"))
+                else "pose_group",
+                "source_evidence": _clean(item.get("surface_evidence")),
+            }
+            for item in member_pose_plans
+        ]
+    return [
+        {
+            "source": sources,
+            "relation": "load_bearing_contact",
+            "target": [_clean(contact_plan.get("surface_zh")) or "当前地表"],
+            "contact_point": [_clean(contact_plan.get("contact_point_zh")) or "当前承重点"],
+            "coverage": contact_plan.get("subject_coverage", "primary_subject"),
+            "source_evidence": _clean(contact_plan.get("surface_evidence")),
+        }
+    ]
+
+
+def _apply_runtime_random_subject_support_default(
+    scene_graph: dict[str, Any],
+    selected: OrderedDict[str, list[str]] | dict[str, list[str]],
+    custom_tags: Iterable[Any],
+    settings: dict[str, Any],
+    *,
+    context_text: str,
+    task_intent: dict[str, Any],
+) -> dict[str, Any]:
+    if not bool(settings.get("运行时随机标签", False)):
+        return scene_graph
+    if _clean(task_intent.get("subject_type")) != "人物角色":
+        return scene_graph
+    if _clean(task_intent.get("task_type")) == "image_reverse_description":
+        return scene_graph
+    if scene_graph.get("subject_support_state_constraint"):
+        return scene_graph
+
+    action_text = "，".join(_unique(selected.get("动作姿态", []), 24))
+    custom_values = _unique(custom_tags, 24)
+    buoyant_text = "，".join(
+        _unique(
+            [
+                *selected.get("动作姿态", []),
+                *selected.get("场景背景", []),
+                *selected.get("画面风格", []),
+                context_text,
+            ],
+            40,
+        )
+    )
+    if (
+        _RUNTIME_RANDOM_AIRBORNE_ACTION_RE.search(action_text)
+        or any(_RUNTIME_RANDOM_AIRBORNE_CUSTOM_TAG_RE.fullmatch(value) for value in custom_values)
+        or _RUNTIME_RANDOM_SUBJECT_AIRBORNE_CONTEXT_RE.search(context_text)
+        or _RUNTIME_RANDOM_BUOYANT_CONTEXT_RE.search(buoyant_text)
+    ):
+        return scene_graph
+
+    resolved = dict(scene_graph)
+    support_constraint = {
+        "axis_label": "主体支撑状态",
+        "required_value": "supported",
+        "required_label": _SUBJECT_SUPPORT_STATE_LABELS["supported"],
+        "positive_values": ["supported"],
+        "negated_values": [],
+        "negated_labels": [],
+        "positive_evidence": {"supported": ["运行时随机人物默认可信承重"]},
+        "negated_evidence": {},
+        "source": "runtime_random_default",
+    }
+    resolved["subject_support_state_constraint"] = support_constraint
+    contact_plan = _build_subject_support_contact_plan(
+        resolved.get("nodes", {}),
+        resolved.get("custom_context", []),
+        context_text,
+        resolved.get("context_subject_pose_constraint", {}),
+        resolved.get("context_shot_scale_constraint", {}),
+        support_constraint,
+        subject_type=task_intent.get("subject_type", ""),
+    )
+    if contact_plan:
+        resolved["subject_support_contact_plan"] = contact_plan
+        relations = list(resolved.get("relations", []) or [])
+        if not any(item.get("relation") == "load_bearing_contact" for item in relations):
+            relations.extend(
+                _subject_support_relations(
+                    contact_plan,
+                    resolved.get("nodes", {}).get("主体", []),
+                )
+            )
+        resolved["relations"] = relations
+    return resolved
+
+
 def detect_gaze_target(text: Any) -> dict[str, list[str]]:
     return _detect_exclusive_visual_axis(
         text,
@@ -5716,6 +6727,22 @@ def build_scene_relationship_graph(
         natural_context,
         subject_support_state_values,
     )
+    subject_support_contact_plan = _build_subject_support_contact_plan(
+        groups,
+        custom,
+        natural_context,
+        context_subject_pose_constraint,
+        context_shot_scale_constraint,
+        subject_support_state_constraint,
+        subject_type=subject_type,
+    )
+    if subject_support_contact_plan:
+        relations.extend(
+            _subject_support_relations(
+                subject_support_contact_plan,
+                subject,
+            )
+        )
     context_gaze_target = detect_gaze_target(natural_context)
     negated_context_gaze_target = detect_negated_gaze_target(natural_context)
     gaze_target_values = [
@@ -7165,6 +8192,7 @@ def build_scene_relationship_graph(
         "natural_context_subject_support_state": context_subject_support_state,
         "negated_context_subject_support_state": negated_context_subject_support_state,
         "subject_support_state_constraint": subject_support_state_constraint,
+        "subject_support_contact_plan": subject_support_contact_plan,
         "natural_context_gaze_target": context_gaze_target,
         "negated_context_gaze_target": negated_context_gaze_target,
         "gaze_target_constraint": gaze_target_constraint,
@@ -7654,6 +8682,7 @@ def classify_repair_reason(reason: Any) -> dict[str, str]:
         ("screen_direction", ("横向屏幕方向",), "只修正从左向右与从右向左的主体指向、前导空间和运动轨迹关系，不改变主体身份、动作内容、景别、机位、画幅滚转或剧情顺序；明确越轴或转身时才改变方向。"),
         ("spatial_axis_continuity", ("空间轴线连续性",), "只修正180度动作轴线、摄影机半空间和角色左右位置的连续关系，不改变主体身份、视线、横向运动、景别、机位、构图落点或剧情顺序；只有明确的连续越轴路径才允许换边。"),
         ("foreground_occlusion", ("前景遮挡关系",), "只修正主体无遮挡与受控前景框景之间的遮挡层级，不改变服装覆盖、景深、雾气、景别、机位、主体身份、动作或剧情顺序；框景只能使用 Skill 底稿已有前景元素。"),
+        ("subject_support_surface", ("主体支撑面",), "只把主体承重点恢复到关系图指定的已有地表或承托物；删除模型凭空增加的椅子、台阶、平台等承托物，不改变人物身份、服装、动作、机位、场景或剧情顺序。单张图片始终只保留当前承托面；视频只有在编号分镜明确写出起身、坐下、跪下、躺下、迈上或走上等实际承重变化动作时，才可改用场景中已经存在的另一承托面，单独出现“然后、随后”不算转场。"),
         ("subject_support_state", ("主体支撑状态",), "只修正主体稳定承重接触与整体离地悬浮之间的支撑关系，不改变站坐跪躺姿态、动作内容、运动模糊、机位、场景或剧情顺序；承托面必须来自 Skill 底稿已有场景或道具。"),
         ("gaze_target", ("视线目标",), "只修正直视镜头与离开镜头、锁定场景目标之间的双眼视线关系，不改变面部朝向、主体姿态、屏幕方向、景别、机位或剧情顺序。"),
         ("atmospheric_medium", ("大气介质", "能见度"), "只修正当前空气介质的能见度、轮廓衰减、散射与颗粒密度，使其回到关系图已固定状态，不改变光质、色温、天气、景深、主体、场景或剧情顺序。"),
@@ -7694,11 +8723,20 @@ def build_intelligence_profile(
         if _clean(task_intent.get("task_type")) == "non_person_visual_story"
         else _clean(task_intent.get("subject_type"))
     )
+    custom_values = list(custom_tags)
     scene_graph = build_scene_relationship_graph(
         selected,
-        custom_tags,
+        custom_values,
         context_text=context_text,
         subject_type=graph_subject_type,
+    )
+    scene_graph = _apply_runtime_random_subject_support_default(
+        scene_graph,
+        selected,
+        custom_values,
+        settings,
+        context_text=context_text,
+        task_intent=task_intent,
     )
     model_strategy = resolve_model_strategy(settings, task_intent, scene_graph)
     return {
@@ -7710,7 +8748,13 @@ def build_intelligence_profile(
     }
 
 
-def candidate_world_violation(original: str, candidate: str, scene_graph: Any) -> str:
+def candidate_world_violation(
+    original: str,
+    candidate: str,
+    scene_graph: Any,
+    *,
+    output_kind: str = "auto",
+) -> str:
     if not isinstance(scene_graph, dict):
         return ""
     forbidden = set(str(item) for item in scene_graph.get("forbidden_world_families", []) if str(item))
@@ -8614,6 +9658,144 @@ def candidate_world_violation(original: str, candidate: str, scene_graph: Any) -
                     f"模型响应越过主体支撑状态约束：要求“{expected}”，"
                     f"却新增了相反的承重点、离地间隙、重心或接触阴影反馈“{evidence[0]}”。"
                 )
+    subject_support_contact_plan = dict(
+        scene_graph.get("subject_support_contact_plan", {}) or {}
+    )
+    if subject_support_contact_plan:
+        planned_surface = _clean(subject_support_contact_plan.get("surface_value"))
+        member_pose_plans = [
+            item
+            for item in subject_support_contact_plan.get("member_pose_plans", [])
+            if isinstance(item, dict)
+        ]
+        planned_surface_values = {
+            _clean(item.get("surface_value"))
+            for item in member_pose_plans
+            if _clean(item.get("surface_value"))
+        }
+        planned_surface_label = (
+            _clean(subject_support_contact_plan.get("surface_zh"))
+            or _SUBJECT_SUPPORT_SURFACE_LABELS.get(planned_surface, planned_surface)
+            or "当前承托面"
+        )
+        if planned_surface_values:
+            planned_surface_label = "、".join(
+                _SUBJECT_SUPPORT_SURFACE_LABELS.get(value, value)
+                for value in sorted(planned_surface_values)
+            )
+        planned_contact_point = (
+            _clean(subject_support_contact_plan.get("contact_point_zh")) or "当前承重点"
+        )
+        available_surfaces = {
+            _clean(value)
+            for value in subject_support_contact_plan.get("available_surface_values", [])
+            if _clean(value)
+        }
+        if planned_surface:
+            available_surfaces.add(planned_surface)
+        available_surfaces.update(planned_surface_values)
+        available_surfaces.add("ground")
+        original_surfaces = set(detect_subject_support_surface(original))
+        candidate_surfaces = detect_subject_support_surface(candidate)
+        normalized_output_kind = _clean(output_kind).casefold()
+        storyboard_context = bool(_STORYBOARD_SUPPORT_CONTEXT_RE.search(_clean(candidate)))
+        allow_video_transition = (
+            normalized_output_kind == "video"
+            or (normalized_output_kind == "auto" and storyboard_context)
+        )
+        for surface_value, evidence in candidate_surfaces.items():
+            if surface_value in original_surfaces:
+                continue
+            surface_label = _SUBJECT_SUPPORT_SURFACE_LABELS.get(
+                surface_value,
+                surface_value,
+            )
+            if surface_value not in available_surfaces:
+                return (
+                    f"模型响应越过主体支撑面约束：Skill 底稿未提供“{surface_label}”承托物，"
+                    f"却新增了承托关系“{evidence[0]}”。"
+                )
+            if surface_value in planned_surface_values:
+                continue
+            if (planned_surface_values or planned_surface) and surface_value != planned_surface:
+                has_planned_transition = allow_video_transition and storyboard_context and any(
+                    _SUBJECT_SUPPORT_TRANSITION_RE.search(fragment)
+                    for fragment in evidence
+                )
+                if has_planned_transition:
+                    continue
+                return (
+                    f"模型响应越过主体支撑面约束：当前画面要求“{planned_contact_point}”"
+                    f"由“{planned_surface_label}”承托，却改成了“{surface_label}”关系“{evidence[0]}”。"
+                )
+        member_surface_by_member = {
+            _clean(item.get("member_value")): _clean(item.get("surface_value"))
+            for item in member_pose_plans
+            if _clean(item.get("member_value")) and _clean(item.get("surface_value"))
+        }
+        member_labels = {
+            _clean(item.get("member_value")): _clean(item.get("member_label_zh"))
+            for item in member_pose_plans
+            if _clean(item.get("member_value"))
+        }
+        surfaces_by_pose: dict[str, set[str]] = {}
+        for item in member_pose_plans:
+            item_pose = _clean(item.get("pose_value"))
+            item_surface = _clean(item.get("surface_value"))
+            if item_pose and item_surface:
+                surfaces_by_pose.setdefault(item_pose, set()).add(item_surface)
+        member_surface_by_pose = {
+            pose_value: next(iter(surface_values))
+            for pose_value, surface_values in surfaces_by_pose.items()
+            if len(surface_values) == 1
+        }
+        if member_surface_by_member or member_surface_by_pose:
+            candidate_fragments = [
+                fragment.strip()
+                for fragment in re.split(r"[，,；;。！？.!?\n]+", _clean(candidate))
+                if fragment.strip()
+            ]
+            for fragment in candidate_fragments:
+                fragment_poses = detect_subject_pose(fragment)
+                fragment_surfaces = detect_subject_support_surface(fragment)
+                if len(fragment_surfaces) != 1:
+                    continue
+                fragment_surface = next(iter(fragment_surfaces))
+                member_reference = _detect_subject_member_reference(fragment)
+                member_value = _clean(member_reference.get("member_value"))
+                expected_surface = member_surface_by_member.get(member_value, "")
+                binding_label = member_labels.get(member_value, "")
+                fragment_pose = next(iter(fragment_poses)) if len(fragment_poses) == 1 else ""
+                if not expected_surface and fragment_pose:
+                    expected_surface = member_surface_by_pose.get(fragment_pose, "")
+                    binding_label = {
+                        "standing": "站姿人物",
+                        "sitting": "坐姿人物",
+                        "kneeling": "跪姿人物",
+                        "lying": "躺姿人物",
+                        "crouching": "蹲姿人物",
+                    }.get(fragment_pose, fragment_pose)
+                if not expected_surface or fragment_surface == expected_surface:
+                    continue
+                has_planned_transition = (
+                    allow_video_transition
+                    and storyboard_context
+                    and bool(_SUBJECT_SUPPORT_TRANSITION_RE.search(fragment))
+                )
+                if has_planned_transition:
+                    continue
+                expected_label = _SUBJECT_SUPPORT_SURFACE_LABELS.get(
+                    expected_surface,
+                    expected_surface,
+                )
+                actual_label = _SUBJECT_SUPPORT_SURFACE_LABELS.get(
+                    fragment_surface,
+                    fragment_surface,
+                )
+                return (
+                    f"模型响应越过主体支撑面约束：{binding_label}应由“{expected_label}”承托，"
+                    f"却改成了“{actual_label}”关系“{fragment}”。"
+                )
     gaze_target_constraint = dict(scene_graph.get("gaze_target_constraint", {}) or {})
     if gaze_target_constraint:
         required = _clean(gaze_target_constraint.get("required_value"))
@@ -8835,6 +10017,7 @@ __all__ = [
     "FOREGROUND_OCCLUSION_MARKERS",
     "SUBJECT_SUPPORT_STATE_FEEDBACK_PATTERNS",
     "SUBJECT_SUPPORT_STATE_MARKERS",
+    "SUBJECT_SUPPORT_SURFACE_MARKERS",
     "GAZE_TARGET_FEEDBACK_PATTERNS",
     "GAZE_TARGET_MARKERS",
     "ATMOSPHERIC_MEDIUM_MARKERS",
@@ -8861,6 +10044,7 @@ __all__ = [
     "detect_foreground_occlusion_feedback",
     "detect_subject_support_state",
     "detect_subject_support_state_feedback",
+    "detect_subject_support_surface",
     "detect_gaze_target",
     "detect_gaze_target_feedback",
     "detect_camera_stability",

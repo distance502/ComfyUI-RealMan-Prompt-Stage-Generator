@@ -750,7 +750,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
             )
 
         payload = json.loads(result[3])
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v101")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 2)
         self.assertEqual(payload["scene_coherence_status"], "coherent")
         self.assertEqual(payload["model_intelligence_skip_count"], 0)
@@ -1034,7 +1034,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
             )
 
         payload = json.loads(result[3])
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v101")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 2)
         self.assertEqual(payload["scene_relationship_graph"]["primary_world_family"], "natural_wilderness")
         self.assertEqual(payload["scene_coherence_status"], "coherent")
@@ -1126,7 +1126,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
             )
 
         payload = json.loads(result[3])
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v101")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(payload["scene_relationship_graph"]["primary_world_family"], "natural_wilderness")
         self.assertEqual(payload["scene_coherence_status"], "coherent")
@@ -1232,7 +1232,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
             )
 
         payload = json.loads(result[3])
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v101")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(payload["scene_coherence_status"], "coherent")
         self.assertNotIn("操作控制台", payload["selected_tags_flat"])
@@ -1322,7 +1322,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v101")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["primary_world_family"], "urban_space")
         self.assertEqual(graph["context_primary_world_source"], "natural_context_override")
@@ -1650,7 +1650,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
             )
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v101")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["scene_attribute_constraints"]["wind"]["required_value"], "calm")
         self.assertNotIn("狂风卷动衣摆", payload["selected_tags_flat"])
@@ -1760,7 +1760,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
             )
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v101")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(
             graph["scene_attribute_constraints"]["ambient_temperature"]["required_value"],
@@ -1881,7 +1881,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
             )
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v101")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(
             graph["scene_attribute_constraints"]["ground_surface"]["required_value"],
@@ -1995,7 +1995,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
             )
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v101")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(
             graph["scene_attribute_constraints"]["spatial_enclosure"]["required_value"],
@@ -2121,7 +2121,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
             )
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v101")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(
             graph["scene_attribute_constraints"]["dominant_light_source"]["required_value"],
@@ -2876,7 +2876,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v101")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["context_scene_attribute_constraints"]["time_of_day"]["required_value"], "day")
         self.assertEqual(graph["context_scene_attribute_constraints"]["precipitation"]["required_value"], "clear")
@@ -3006,7 +3006,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v101")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["context_subject_cardinality_constraint"]["required_value"], "single")
         self.assertEqual(payload["scene_coherence_status"], "coherent")
@@ -3311,7 +3311,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v101")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["context_subject_orientation_constraint"]["required_value"], "back")
         self.assertEqual(payload["scene_coherence_status"], "coherent")
@@ -3573,10 +3573,18 @@ class TestStagePromptIntelligence(unittest.TestCase):
         )
         for request in requests:
             self.assertIn("主体姿态固定为坐姿", request)
-            self.assertIn("髋部由既有座面或台阶稳定承托", request)
+            self.assertIn("主体髋部由当前地表直接承托", request)
             self.assertIn("未由 Skill 底稿给出的支撑物或姿态状态不作补充", request)
             self.assertEqual(request.count("智能主体姿态："), 1)
-            for forbidden in ("主体姿态固定为站姿", "主体姿态固定为跪姿", "主体姿态固定为躺姿", "主体姿态固定为蹲姿"):
+            for forbidden in (
+                "主体姿态固定为站姿",
+                "主体姿态固定为跪姿",
+                "主体姿态固定为躺姿",
+                "主体姿态固定为蹲姿",
+                "椅子",
+                "台阶",
+                "平台",
+            ):
                 self.assertNotIn(forbidden, request)
 
         open_graph = intelligence.build_scene_relationship_graph(
@@ -3851,7 +3859,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
                 "智能场景关系图": graph,
             },
         )
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v101")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["context_subject_pose_constraint"]["required_value"], "standing")
         self.assertNotIn("坐姿慵懒", payload["selected_tags_flat"])
@@ -4164,7 +4172,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
                 "智能场景关系图": graph,
             },
         )
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v101")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["context_camera_angle_constraint"]["required_value"], "low_angle")
         self.assertNotIn("高角度俯拍", payload["selected_tags_flat"])
@@ -4255,7 +4263,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
                 "智能场景关系图": graph,
             },
         )
-        self.assertEqual(profile["version"], "qwen-te-intelligence-v90")
+        self.assertEqual(profile["version"], "qwen-te-intelligence-v101")
         self.assertEqual(graph["context_subject_presence_constraint"]["required_value"], "non_person")
         self.assertIn("主体存在性约束", violation)
         self.assertIn("成年女性", violation)
@@ -4305,7 +4313,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v101")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["context_subject_presence_constraint"]["required_value"], "none")
         self.assertNotIn("成年女性模特", payload["selected_tags_flat"])
@@ -4616,7 +4624,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v101")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["context_light_temperature_constraint"]["required_value"], "cool")
         self.assertNotIn("烛火暖光", payload["selected_tags_flat"])
@@ -4921,7 +4929,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v101")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["color_rendering_constraint"]["required_value"], "monochrome")
         self.assertNotIn("彩色霓虹光", payload["selected_tags_flat"])
@@ -5234,7 +5242,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v101")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["depth_of_field_constraint"]["required_value"], "deep")
         self.assertNotIn("浅景深", payload["selected_tags_flat"])
@@ -5540,7 +5548,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v101")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["lighting_quality_constraint"]["required_value"], "hard")
         self.assertNotIn("柔光", payload["selected_tags_flat"])
@@ -5852,7 +5860,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v101")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["motion_rendering_constraint"]["required_value"], "frozen")
         self.assertNotIn("运动模糊", payload["selected_tags_flat"])
@@ -6155,7 +6163,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v101")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["camera_stability_constraint"]["required_value"], "stable")
         self.assertNotIn("手持镜头", payload["selected_tags_flat"])
@@ -6458,7 +6466,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v101")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["focal_perspective_constraint"]["required_value"], "wide")
         self.assertNotIn("200mm长焦压缩", payload["selected_tags_flat"])
@@ -6767,7 +6775,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v101")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["key_light_direction_constraint"]["required_value"], "side")
         self.assertNotIn("顶光烟雾", payload["selected_tags_flat"])
@@ -7071,7 +7079,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v101")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["exposure_key_constraint"]["required_value"], "high_key")
         self.assertNotIn("低键光", payload["selected_tags_flat"])
@@ -7373,7 +7381,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v101")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["contrast_level_constraint"]["required_value"], "high")
         self.assertNotIn("低反差画面", payload["selected_tags_flat"])
@@ -7675,7 +7683,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v101")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["saturation_level_constraint"]["required_value"], "high")
         self.assertNotIn("低饱和", payload["selected_tags_flat"])
@@ -7989,7 +7997,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v101")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["image_grain_constraint"]["required_value"], "grainy")
         self.assertNotIn("纯净数字成像", payload["selected_tags_flat"])
@@ -8314,7 +8322,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v101")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["image_sharpness_constraint"]["required_value"], "sharp")
         self.assertNotIn("柔焦", payload["selected_tags_flat"])
@@ -8638,7 +8646,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v101")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 2)
         self.assertEqual(graph["detail_density_constraint"]["required_value"], "low")
         self.assertNotIn("高细节", payload["selected_tags_flat"])
@@ -8996,7 +9004,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v101")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["visual_medium_constraint"]["required_value"], "drawn_2d")
         self.assertNotIn("3D渲染", payload["selected_tags_flat"])
@@ -9515,7 +9523,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v101")
         self.assertEqual(
             graph["projection_geometry_constraint"]["required_value"],
             "orthographic",
@@ -10989,6 +10997,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
                     "主体": ["成年女性冒险者"],
                     "动作姿态": ["双脚稳定着地"],
                     "场景背景": ["地下城遗迹"],
+                    "构图视角": ["全景全身"],
                 }
             )
         )
@@ -11040,16 +11049,35 @@ class TestStagePromptIntelligence(unittest.TestCase):
         )
         for request in requests:
             self.assertIn("主体支撑状态固定为稳定承重/接触支撑面", request)
-            self.assertIn("主体重量通过双脚、膝部、髋部或躯干传递", request)
-            self.assertIn("椅子、台阶、平台、吊索、飞行器或法术支撑", request)
+            self.assertIn("主体当前承重脚直接踩住当前地表", request)
+            self.assertIn("不得自行新增其他承托物", request)
             self.assertIn("起跳、落地、坐下、跪地、游泳、水下悬停", request)
             self.assertEqual(request.count("智能主体支撑状态："), 1)
             for forbidden in (
                 "主体支撑状态固定为整体离地/悬浮腾空",
                 "整体轮廓与地面、座面或支撑面保持可见离地间隙",
                 "不形成虚假承重接触",
+                "椅子",
+                "台阶",
+                "平台",
             ):
                 self.assertNotIn(forbidden, request)
+
+        image_request = model_refiner._compose_model_user_prompt(
+            "Skill 图像底稿。",
+            local_settings,
+        )
+        video_request = model_refiner._compose_model_user_prompt(
+            "Skill 视频底稿。",
+            {**local_settings, "模型任务": "视频提示词"},
+        )
+        self.assertIn("图片承托合同：单张图片只呈现一个决定性瞬间", image_request)
+        self.assertIn("不得借用分镜编号、然后、随后或转而等时序词切换", image_request)
+        self.assertNotIn("视频承托转场合同", image_request)
+        self.assertIn("视频承托转场合同：首镜从", video_request)
+        self.assertIn("旧接触解除、身体重心移动和新接触建立", video_request)
+        self.assertIn("单独出现然后、随后、接着或转而不构成有效转场", video_request)
+        self.assertNotIn("图片承托合同", video_request)
 
         open_graph = intelligence.build_scene_relationship_graph(
             OrderedDict({"主体": ["成年女性冒险者"], "动作姿态": ["站姿放松"]})
@@ -11058,6 +11086,1442 @@ class TestStagePromptIntelligence(unittest.TestCase):
             model_refiner._subject_support_state_context_for_model(open_graph),
             "",
         )
+
+    def test_runtime_random_person_defaults_to_grounded_support_without_blocking_airborne_intent(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["成年女性冒险者"],
+                "动作姿态": ["站姿放松"],
+                "场景背景": ["浮空城"],
+                "道具世界观": ["浮空水晶"],
+                "画面风格": ["奇幻概念设计"],
+            }
+        )
+        settings = {
+            "运行时随机标签": True,
+            "主体类型": "人物角色",
+            "智能文本输入": "",
+            "额外要求": "浮空城上方有浮空水晶与漂浮颗粒",
+        }
+        profile = intelligence.build_intelligence_profile(selected, ["漂浮花瓣"], settings)
+        constraint = profile["scene_graph"]["subject_support_state_constraint"]
+        self.assertEqual(constraint["required_value"], "supported")
+        self.assertEqual(constraint["source"], "runtime_random_default")
+        self.assertEqual(
+            constraint["positive_evidence"]["supported"],
+            ["运行时随机人物默认可信承重"],
+        )
+        self.assertEqual(
+            sum(
+                item.get("relation") == "load_bearing_contact"
+                for item in profile["scene_graph"]["relations"]
+            ),
+            1,
+        )
+
+        for action, scene in (
+            ("跳跃", "地下城遗迹"),
+            ("飞行穿过云层", "天空堡垒"),
+            ("中性悬停", "水下沉船"),
+        ):
+            with self.subTest(action=action):
+                airborne = intelligence.build_intelligence_profile(
+                    OrderedDict(
+                        {
+                            "主体": ["成年女性冒险者"],
+                            "动作姿态": [action],
+                            "场景背景": [scene],
+                        }
+                    ),
+                    [],
+                    settings,
+                )
+                self.assertEqual(
+                    airborne["scene_graph"]["subject_support_state_constraint"],
+                    {},
+                )
+
+        explicit_suspension = intelligence.build_intelligence_profile(
+            OrderedDict(
+                {
+                    "主体": ["成年女性冒险者"],
+                    "动作姿态": ["人物悬浮"],
+                    "场景背景": ["地下城遗迹"],
+                }
+            ),
+            [],
+            settings,
+        )["scene_graph"]["subject_support_state_constraint"]
+        self.assertEqual(explicit_suspension["required_value"], "suspended")
+        self.assertEqual(explicit_suspension["source"], "selected_state")
+
+        non_random = intelligence.build_intelligence_profile(
+            selected,
+            [],
+            {**settings, "运行时随机标签": False},
+        )
+        self.assertEqual(non_random["scene_graph"]["subject_support_state_constraint"], {})
+
+    def test_subject_support_contact_plan_selects_one_existing_surface_for_each_pose(self) -> None:
+        cases = (
+            (
+                "standing",
+                OrderedDict(
+                    {
+                        "主体": ["成年女性冒险者"],
+                        "动作姿态": ["站姿放松"],
+                        "场景背景": ["地下城遗迹"],
+                        "构图视角": ["全景全身"],
+                    }
+                ),
+                "双脚",
+                "当前地表",
+                "scene_ground",
+            ),
+            (
+                "sitting_on_sofa",
+                OrderedDict(
+                    {
+                        "主体": ["成年女性冒险者"],
+                        "动作姿态": ["坐姿慵懒"],
+                        "场景背景": ["地下城遗迹"],
+                        "道具世界观": ["沙发"],
+                        "构图视角": ["全景全身"],
+                    }
+                ),
+                "髋部",
+                "已有沙发座面",
+                "existing_anchor",
+            ),
+            (
+                "sitting_without_furniture",
+                OrderedDict(
+                    {
+                        "主体": ["成年女性冒险者"],
+                        "动作姿态": ["坐姿慵懒"],
+                        "场景背景": ["地下城遗迹"],
+                        "构图视角": ["全景全身"],
+                    }
+                ),
+                "髋部",
+                "当前地表",
+                "scene_ground",
+            ),
+            (
+                "kneeling",
+                OrderedDict(
+                    {
+                        "主体": ["成年女性冒险者"],
+                        "动作姿态": ["单膝跪地"],
+                        "场景背景": ["地下城遗迹"],
+                        "构图视角": ["全景全身"],
+                    }
+                ),
+                "膝部",
+                "当前地表",
+                "scene_ground",
+            ),
+            (
+                "lying_on_bed",
+                OrderedDict(
+                    {
+                        "主体": ["成年女性冒险者"],
+                        "动作姿态": ["躺姿"],
+                        "场景背景": ["卧室"],
+                        "道具世界观": ["双人床"],
+                        "构图视角": ["全景全身"],
+                    }
+                ),
+                "躯干",
+                "已有床面",
+                "existing_anchor",
+            ),
+        )
+        for name, selected, contact_point, surface, surface_source in cases:
+            with self.subTest(case=name):
+                graph = intelligence.build_scene_relationship_graph(selected)
+                plan = graph["subject_support_contact_plan"]
+                self.assertEqual(plan["contact_point_zh"], contact_point)
+                self.assertEqual(plan["surface_zh"], surface)
+                self.assertEqual(plan["surface_source"], surface_source)
+                self.assertEqual(plan["contact_visibility"], "visible")
+                self.assertIn(plan["surface_value"], plan["available_surface_values"])
+                self.assertFalse(plan["allow_new_support_object"])
+                chinese_anchor = narrative.subject_support_narrative_anchor(graph)
+                self.assertTrue(
+                    contact_point in chinese_anchor
+                    or (contact_point == "膝部" and "单膝或双膝" in chinese_anchor)
+                )
+                self.assertIn(
+                    plan["contact_point_en"].casefold(),
+                    narrative.subject_support_narrative_anchor(graph, english=True).casefold(),
+                )
+                relation = [
+                    item for item in graph["relations"]
+                    if item.get("relation") == "load_bearing_contact"
+                ]
+                self.assertEqual(relation[0]["target"], [surface])
+                self.assertEqual(relation[0]["contact_point"], [contact_point])
+
+        standing_graph = intelligence.build_scene_relationship_graph(cases[0][1])
+        standing_texts = (
+            narrative.subject_support_narrative_anchor(standing_graph),
+            narrative.subject_support_narrative_anchor(standing_graph, english=True),
+            model_refiner._subject_pose_context_for_model(standing_graph),
+        )
+        for text in standing_texts:
+            for forbidden in ("座面", "椅子", "台阶", "平台", "chair", "seat", "step", "platform"):
+                self.assertNotIn(forbidden, text)
+
+        no_furniture_graph = intelligence.build_scene_relationship_graph(cases[2][1])
+        no_furniture_texts = (
+            narrative.subject_support_narrative_anchor(no_furniture_graph),
+            narrative.subject_support_narrative_anchor(no_furniture_graph, english=True),
+            model_refiner._subject_pose_context_for_model(no_furniture_graph),
+        )
+        for text in no_furniture_texts:
+            for forbidden in ("椅子", "台阶", "平台", "沙发", "chair", "seat", "step", "platform", "sofa"):
+                self.assertNotIn(forbidden, text)
+
+        negated_furniture_graph = intelligence.build_scene_relationship_graph(
+            cases[2][1],
+            context_text="人物保持坐姿，场景里不要椅子、沙发或平台。",
+        )
+        self.assertEqual(
+            negated_furniture_graph["subject_support_contact_plan"]["surface_zh"],
+            "当前地表",
+        )
+        non_person_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["四足探索机器人"],
+                    "动作姿态": ["站姿放松"],
+                    "场景背景": ["地下城遗迹"],
+                }
+            ),
+            subject_type="非人物主体",
+        )
+        self.assertEqual(non_person_graph["subject_support_contact_plan"], {})
+        self.assertEqual(narrative.subject_support_narrative_anchor(non_person_graph), "")
+
+    def test_subject_support_contact_visibility_adapts_to_shot_scale_without_forcing_full_body(self) -> None:
+        base = {
+            "主体": ["成年女性冒险者"],
+            "动作姿态": ["站姿放松"],
+            "场景背景": ["地下城遗迹"],
+        }
+        for shot_scale in ("面部特写", "中景半身"):
+            with self.subTest(shot_scale=shot_scale):
+                graph = intelligence.build_scene_relationship_graph(
+                    OrderedDict({**base, "构图视角": [shot_scale]})
+                )
+                plan = graph["subject_support_contact_plan"]
+                chinese_anchor = narrative.subject_support_narrative_anchor(graph)
+                english_anchor = narrative.subject_support_narrative_anchor(graph, english=True)
+                pose_context = model_refiner._subject_pose_context_for_model(graph)
+                self.assertEqual(plan["contact_visibility"], "off_frame")
+                self.assertIn("画内骨盆、脊柱和肩线", chinese_anchor)
+                self.assertIn("镜头保持当前景别", chinese_anchor)
+                self.assertIn("visible pelvis, spine, and shoulder line", english_anchor)
+                self.assertIn("不得为展示脚部、膝部或承托面而扩大景别", pose_context)
+                for forbidden in ("双脚", "脚下", "接触阴影", "Both feet", "contact shadow"):
+                    self.assertNotIn(forbidden, chinese_anchor + english_anchor)
+
+        full_body_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict({**base, "构图视角": ["全景全身"]})
+        )
+        full_body_plan = full_body_graph["subject_support_contact_plan"]
+        self.assertEqual(full_body_plan["contact_visibility"], "visible")
+        self.assertIn("主体双脚直接踩住当前地表", narrative.subject_support_narrative_anchor(full_body_graph))
+
+        adaptive_graph = intelligence.build_scene_relationship_graph(OrderedDict(base))
+        adaptive_plan = adaptive_graph["subject_support_contact_plan"]
+        adaptive_anchor = narrative.subject_support_narrative_anchor(adaptive_graph)
+        self.assertEqual(adaptive_plan["contact_visibility"], "adaptive")
+        self.assertIn("身体关节链", adaptive_anchor)
+        self.assertIn("接触位置服从既定取景", adaptive_anchor)
+        self.assertNotIn("双脚", adaptive_anchor)
+        self.assertNotIn("接触阴影", adaptive_anchor)
+
+        closeup_sofa_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["成年女性冒险者"],
+                    "动作姿态": ["坐姿慵懒"],
+                    "场景背景": ["地下城遗迹"],
+                    "道具世界观": ["沙发"],
+                    "构图视角": ["面部特写"],
+                }
+            )
+        )
+        closeup_sofa_plan = closeup_sofa_graph["subject_support_contact_plan"]
+        self.assertEqual(closeup_sofa_plan["surface_value"], "sofa")
+        self.assertEqual(closeup_sofa_plan["contact_visibility"], "off_frame")
+        self.assertNotIn("沙发座面", narrative.subject_support_narrative_anchor(closeup_sofa_graph))
+
+    def test_subject_support_explicit_relation_overrides_unrelated_background_furniture(self) -> None:
+        chinese_relations = intelligence.detect_subject_support_surface(
+            "人物坐在地面上，沙发只在远景墙边。"
+        )
+        self.assertEqual(set(chinese_relations), {"ground"})
+        self.assertEqual(
+            set(intelligence.detect_subject_support_surface("人物双脚站在石质平台上。")),
+            {"platform"},
+        )
+        self.assertEqual(
+            intelligence.detect_subject_support_surface("人物站在椅子旁观察墙面。"),
+            {},
+        )
+        english_relations = intelligence.detect_subject_support_surface(
+            "She sits on the floor while a sofa remains in the distant background."
+        )
+        self.assertEqual(set(english_relations), {"ground"})
+        self.assertEqual(
+            set(
+                intelligence.detect_subject_support_surface(
+                    "She stands with both feet on the existing stone platform."
+                )
+            ),
+            {"platform"},
+        )
+        self.assertEqual(
+            intelligence.detect_subject_support_surface("She stands beside a chair."),
+            {},
+        )
+
+        standing_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["成年女性冒险者"],
+                    "动作姿态": ["站姿放松"],
+                    "场景背景": ["地下城遗迹"],
+                    "道具世界观": ["石质平台"],
+                    "构图视角": ["全景全身"],
+                }
+            ),
+            context_text="人物双脚站在石质平台上。",
+        )
+        standing_plan = standing_graph["subject_support_contact_plan"]
+        standing_anchor = narrative.subject_support_narrative_anchor(standing_graph)
+        self.assertEqual(standing_plan["surface_value"], "platform")
+        self.assertEqual(standing_plan["surface_source"], "explicit_relation")
+        self.assertIn("主体双脚直接踩住已有平台表面承重", standing_anchor)
+        self.assertEqual(
+            intelligence.candidate_world_violation(
+                standing_anchor,
+                standing_anchor + "她的双脚仍踩在已有平台表面承重。",
+                standing_graph,
+            ),
+            "",
+        )
+        self.assertIn(
+            "主体支撑面约束",
+            intelligence.candidate_world_violation(
+                standing_anchor,
+                standing_anchor + "她的双脚转而踩在当前地面上承重。",
+                standing_graph,
+            ),
+        )
+
+        sitting_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["成年女性冒险者"],
+                    "动作姿态": ["坐姿慵懒"],
+                    "场景背景": ["沙发只在远景墙边"],
+                    "构图视角": ["全景全身"],
+                }
+            ),
+            context_text="人物坐在地面上，沙发只在远景。",
+        )
+        sitting_plan = sitting_graph["subject_support_contact_plan"]
+        self.assertEqual(sitting_plan["surface_value"], "ground")
+        self.assertEqual(sitting_plan["surface_source"], "explicit_relation")
+        self.assertIn(
+            "主体髋部由当前地表直接承托",
+            narrative.subject_support_narrative_anchor(sitting_graph),
+        )
+
+        lying_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["成年女性冒险者"],
+                    "动作姿态": ["躺姿"],
+                    "场景背景": ["床在房间另一侧"],
+                    "构图视角": ["全景全身"],
+                }
+            ),
+            context_text="人物躺在地面上。",
+        )
+        lying_plan = lying_graph["subject_support_contact_plan"]
+        self.assertEqual(lying_plan["surface_value"], "ground")
+        self.assertEqual(lying_plan["surface_source"], "explicit_relation")
+        self.assertIn(
+            "主体躯干沿当前地表连续受托",
+            narrative.subject_support_narrative_anchor(lying_graph),
+        )
+
+        distant_sofa_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["成年女性冒险者"],
+                    "动作姿态": ["坐姿慵懒"],
+                    "场景背景": ["沙发只在远景墙边"],
+                    "构图视角": ["全景全身"],
+                }
+            )
+        )
+        distant_sofa_plan = distant_sofa_graph["subject_support_contact_plan"]
+        self.assertEqual(distant_sofa_plan["surface_value"], "ground")
+        self.assertEqual(distant_sofa_plan["surface_source"], "scene_ground")
+        self.assertIn("sofa", distant_sofa_plan["available_surface_values"])
+
+        remote_bed_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["成年女性冒险者"],
+                    "动作姿态": ["躺姿"],
+                    "场景背景": ["床在房间另一侧"],
+                    "构图视角": ["全景全身"],
+                }
+            )
+        )
+        remote_bed_plan = remote_bed_graph["subject_support_contact_plan"]
+        self.assertEqual(remote_bed_plan["surface_value"], "ground")
+        self.assertEqual(remote_bed_plan["surface_source"], "scene_ground")
+        self.assertIn("bed", remote_bed_plan["available_surface_values"])
+
+        ambiguous_props_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["成年女性冒险者"],
+                    "动作姿态": ["坐姿慵懒"],
+                    "道具世界观": ["沙发", "床"],
+                    "构图视角": ["全景全身"],
+                }
+            )
+        )
+        ambiguous_props_plan = ambiguous_props_graph["subject_support_contact_plan"]
+        self.assertEqual(ambiguous_props_plan["surface_value"], "ground")
+        self.assertEqual(ambiguous_props_plan["surface_source"], "scene_ground")
+        self.assertEqual(
+            ambiguous_props_plan["available_surface_values"],
+            ["ground", "sofa", "bed"],
+        )
+
+        action_anchor_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["成年女性冒险者"],
+                    "动作姿态": ["沙发坐姿"],
+                    "道具世界观": ["床"],
+                    "构图视角": ["全景全身"],
+                }
+            )
+        )
+        action_anchor_plan = action_anchor_graph["subject_support_contact_plan"]
+        self.assertEqual(action_anchor_plan["surface_value"], "sofa")
+        self.assertEqual(action_anchor_plan["surface_source"], "existing_anchor")
+        self.assertEqual(action_anchor_plan["surface_evidence"], "沙发坐姿")
+
+    def test_subject_support_surface_guard_rejects_only_unplanned_load_bearing_relations(self) -> None:
+        standing_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["成年女性冒险者"],
+                    "动作姿态": ["站姿放松"],
+                    "场景背景": ["地下城遗迹"],
+                    "道具世界观": ["石质平台"],
+                    "构图视角": ["全景全身"],
+                }
+            )
+        )
+        plan = standing_graph["subject_support_contact_plan"]
+        self.assertEqual(plan["surface_value"], "ground")
+        self.assertEqual(plan["available_surface_values"], ["ground", "platform"])
+        original = narrative.subject_support_narrative_anchor(standing_graph)
+
+        self.assertEqual(
+            intelligence.detect_subject_support_surface(
+                "主体双脚踩住当前地表承重，重心投影落在脚下。"
+            ),
+            {
+                "ground": ["主体双脚踩住当前地表承重，重心投影落在脚下。"],
+            },
+        )
+        for unrelated in (
+            "一把旧椅子摆在远景石墙旁。",
+            "她站在椅子旁观察墙上的刻痕。",
+            "不要让她双脚踩在椅子上。",
+            "An old chair remains in the distant background.",
+            "She stands beside a chair and studies the wall.",
+            "Do not plant her feet on a chair.",
+        ):
+            with self.subTest(unrelated=unrelated):
+                self.assertEqual(
+                    intelligence.detect_subject_support_surface(unrelated),
+                    {},
+                )
+                self.assertEqual(
+                    intelligence.candidate_world_violation(original, original + unrelated, standing_graph),
+                    "",
+                )
+
+        unanchored_candidates = (
+            "她的双脚踩在一把凭空出现的椅子上，身体仍保持直立。",
+            "Both feet are planted on a new chair while the body remains upright.",
+        )
+        for candidate in unanchored_candidates:
+            with self.subTest(unanchored=candidate):
+                violation = intelligence.candidate_world_violation(
+                    original,
+                    original + candidate,
+                    standing_graph,
+                )
+                self.assertIn("主体支撑面约束", violation)
+                self.assertIn("未提供“椅面”承托物", violation)
+                repair = intelligence.classify_repair_reason(violation)
+                self.assertEqual(repair["kind"], "subject_support_surface")
+                self.assertIn("删除模型凭空增加", repair["instruction"])
+
+        image_surface_swap = intelligence.candidate_world_violation(
+            original,
+            original + "她的双脚转而踩在已有石质平台上。",
+            standing_graph,
+        )
+        self.assertIn("主体支撑面约束", image_surface_swap)
+        self.assertIn("当前画面要求", image_surface_swap)
+
+        unplanned_video_swap = intelligence.candidate_world_violation(
+            original,
+            original + "分镜二：她的双脚踩在已有石质平台上，镜头保持全景。",
+            standing_graph,
+        )
+        self.assertIn("主体支撑面约束", unplanned_video_swap)
+        generic_connector_video_swap = intelligence.candidate_world_violation(
+            original,
+            original + "分镜二：随后火炬熄灭，她的双脚踩在已有石质平台上。",
+            standing_graph,
+            output_kind="video",
+        )
+        self.assertIn("主体支撑面约束", generic_connector_video_swap)
+        unnumbered_video_swap = intelligence.candidate_world_violation(
+            original,
+            original + "随后她起身，双脚踏上已有石质平台。",
+            standing_graph,
+            output_kind="video",
+        )
+        self.assertIn("主体支撑面约束", unnumbered_video_swap)
+
+        planned_transition_text = (
+            "分镜二：随后她起身，双脚踏上已有石质平台，镜头跟随重心上移。"
+        )
+        planned_video_swap = intelligence.candidate_world_violation(
+            original,
+            original + planned_transition_text,
+            standing_graph,
+            output_kind="video",
+        )
+        self.assertEqual(planned_video_swap, "")
+        image_disguised_as_storyboard = intelligence.candidate_world_violation(
+            original,
+            original + planned_transition_text,
+            standing_graph,
+            output_kind="image",
+        )
+        self.assertIn("主体支撑面约束", image_disguised_as_storyboard)
+
+        sitting_graph = intelligence.build_scene_relationship_graph(
+            OrderedDict(
+                {
+                    "主体": ["成年女性冒险者"],
+                    "动作姿态": ["坐姿慵懒"],
+                    "场景背景": ["地下城遗迹"],
+                    "道具世界观": ["沙发"],
+                }
+            )
+        )
+        sitting_original = narrative.subject_support_narrative_anchor(sitting_graph)
+        self.assertIn(
+            "主体支撑面约束",
+            intelligence.candidate_world_violation(
+                sitting_original,
+                sitting_original + "她的髋部转而落在当前地面上，接触阴影随之下移。",
+                sitting_graph,
+            ),
+        )
+        self.assertEqual(
+            intelligence.candidate_world_violation(
+                sitting_original,
+                sitting_original + "她的髋部仍由已有沙发座面承托。",
+                sitting_graph,
+            ),
+            "",
+        )
+
+    def test_multi_subject_support_covers_each_person_without_blocking_explicit_mixed_states(self) -> None:
+        settings = {
+            "运行时随机标签": True,
+            "主体类型": "人物角色",
+            "智能文本输入": "",
+            "额外要求": "",
+            "提示词语言": "纯中文",
+            "模型来源": "本地模型",
+            "模型调用基础来源": "本地模型",
+            "内置模型系列": "Qwen3.5-VL",
+            "内置主模型": "Qwen3.5-4B-Q4_K_M.gguf",
+            "智能模型策略": {"mode": "incremental_blend"},
+        }
+        pair_selected = OrderedDict(
+            {
+                "主体": ["双人冒险者"],
+                "动作姿态": ["站姿放松"],
+                "场景背景": ["地下城遗迹"],
+                "构图视角": ["全景全身"],
+            }
+        )
+        pair_graph = intelligence.build_intelligence_profile(
+            pair_selected,
+            [],
+            settings,
+        )["scene_graph"]
+        pair_plan = pair_graph["subject_support_contact_plan"]
+        pair_anchor_zh = narrative.subject_support_narrative_anchor(pair_graph)
+        pair_anchor_en = narrative.subject_support_narrative_anchor(pair_graph, english=True)
+        self.assertEqual(pair_plan["subject_cardinality"], "pair")
+        self.assertEqual(pair_plan["subject_coverage"], "all_visible_subjects")
+        self.assertIn("画面中的每位人物分别遵循", pair_anchor_zh)
+        self.assertIn("每个人都有独立", pair_anchor_zh)
+        self.assertIn("不能只让其中一人着地", pair_anchor_zh)
+        self.assertIn("Every visible person independently follows", pair_anchor_en)
+        support_relations = [
+            item
+            for item in pair_graph["relations"]
+            if item.get("relation") == "load_bearing_contact"
+        ]
+        self.assertEqual(support_relations[0]["coverage"], "all_visible_subjects")
+
+        partial_support_candidates = (
+            "两人中一人双脚稳定着地，另一人悬浮在空中。",
+            "双人画面里只有一人着地，另一人的接触关系缺失。",
+            "Of the two characters, one keeps both feet planted while the other hovers in midair.",
+            "Only one person is grounded while the other lacks a support contact.",
+        )
+        for candidate in partial_support_candidates:
+            with self.subTest(candidate=candidate):
+                violation = intelligence.candidate_world_violation(
+                    pair_anchor_zh,
+                    pair_anchor_zh + "。" + candidate,
+                    pair_graph,
+                    output_kind="image",
+                )
+                self.assertIn("主体支撑状态约束", violation)
+
+        image_request = model_refiner._compose_model_user_prompt(
+            "双人 Skill 图片底稿。",
+            {**settings, "智能场景关系图": pair_graph},
+        )
+        video_request = model_refiner._compose_model_user_prompt(
+            "双人 Skill 视频底稿。",
+            {
+                **settings,
+                "智能场景关系图": pair_graph,
+                "模型任务": "视频提示词",
+            },
+        )
+        for request in (image_request, video_request):
+            self.assertIn("每位可见人物都必须分别建立自己的承重点", request)
+            self.assertIn("不能只让其中一人着地", request)
+
+        group_graph = intelligence.build_intelligence_profile(
+            OrderedDict(
+                {
+                    "主体": ["冒险小队"],
+                    "动作姿态": ["站姿放松"],
+                    "场景背景": ["地下城遗迹"],
+                    "构图视角": ["全景全身"],
+                }
+            ),
+            [],
+            settings,
+        )["scene_graph"]
+        self.assertEqual(
+            group_graph["subject_support_contact_plan"]["subject_cardinality"],
+            "group",
+        )
+        self.assertEqual(
+            group_graph["subject_support_contact_plan"]["subject_coverage"],
+            "all_visible_subjects",
+        )
+
+        mixed_graph = intelligence.build_intelligence_profile(
+            OrderedDict(
+                {
+                    "主体": ["双人冒险者"],
+                    "动作姿态": ["一人站立，另一人飞行"],
+                    "场景背景": ["地下城遗迹"],
+                    "构图视角": ["全景全身"],
+                }
+            ),
+            [],
+            settings,
+        )["scene_graph"]
+        mixed_plan = mixed_graph["subject_support_contact_plan"]
+        self.assertEqual(mixed_graph["subject_support_state_constraint"], {})
+        self.assertEqual(mixed_plan["subject_coverage"], "grounded_members_only")
+        self.assertNotIn(
+            "画面中的每位人物分别遵循",
+            narrative.subject_support_narrative_anchor(mixed_graph),
+        )
+
+    def test_multi_subject_support_assigns_pose_specific_contacts_and_surfaces(self) -> None:
+        def build_pair_graph(
+            action: str,
+            *,
+            props: list[str] | None = None,
+            shot_scale: str = "全景全身",
+        ) -> dict[str, Any]:
+            selected = OrderedDict(
+                {
+                    "主体": ["双人冒险者"],
+                    "动作姿态": [action],
+                    "场景背景": ["地下城遗迹"],
+                    "道具世界观": list(props or []),
+                    "构图视角": [shot_scale],
+                }
+            )
+            return intelligence.build_intelligence_profile(
+                selected,
+                [],
+                {
+                    "运行时随机标签": True,
+                    "主体类型": "人物角色",
+                    "智能文本输入": "",
+                    "额外要求": "",
+                },
+            )["scene_graph"]
+
+        standing_sitting_graph = build_pair_graph("一人站立，另一人坐姿")
+        standing_sitting_plan = standing_sitting_graph["subject_support_contact_plan"]
+        standing_sitting_members = {
+            item["pose_value"]: item
+            for item in standing_sitting_plan["member_pose_plans"]
+        }
+        self.assertEqual(
+            standing_sitting_plan["subject_coverage"],
+            "all_visible_subjects_by_pose",
+        )
+        self.assertEqual(
+            {
+                pose: (item["contact_point_zh"], item["surface_value"])
+                for pose, item in standing_sitting_members.items()
+            },
+            {
+                "standing": ("双脚", "ground"),
+                "sitting": ("髋部", "ground"),
+            },
+        )
+        standing_sitting_relations = [
+            item
+            for item in standing_sitting_graph["relations"]
+            if item.get("relation") == "load_bearing_contact"
+        ]
+        self.assertEqual(len(standing_sitting_relations), 2)
+        self.assertEqual(
+            {
+                (item["pose"][0], item["contact_point"][0], item["target"][0])
+                for item in standing_sitting_relations
+            },
+            {
+                ("站姿人物", "双脚", "当前地表"),
+                ("坐姿人物", "髋部", "当前地表"),
+            },
+        )
+
+        standing_kneeling_graph = build_pair_graph("一人站立，另一人跪姿")
+        self.assertEqual(
+            {
+                item["pose_value"]: (item["contact_point_zh"], item["surface_value"])
+                for item in standing_kneeling_graph["subject_support_contact_plan"][
+                    "member_pose_plans"
+                ]
+            },
+            {
+                "standing": ("双脚", "ground"),
+                "kneeling": ("膝部", "ground"),
+            },
+        )
+
+        sitting_lying_graph = build_pair_graph(
+            "一人坐在沙发上，另一人躺在床上",
+            props=["沙发", "床"],
+        )
+        self.assertEqual(
+            set(intelligence.detect_subject_pose("一人坐在沙发上，另一人躺在床上")),
+            {"sitting", "lying"},
+        )
+        sitting_lying_plan = sitting_lying_graph["subject_support_contact_plan"]
+        self.assertEqual(
+            {
+                item["pose_value"]: (item["contact_point_zh"], item["surface_value"])
+                for item in sitting_lying_plan["member_pose_plans"]
+            },
+            {
+                "sitting": ("髋部", "sofa"),
+                "lying": ("躯干", "bed"),
+            },
+        )
+        self.assertEqual(
+            {
+                (item["pose"][0], item["contact_point"][0], item["target"][0])
+                for item in sitting_lying_graph["relations"]
+                if item.get("relation") == "load_bearing_contact"
+            },
+            {
+                ("坐姿人物", "髋部", "已有沙发座面"),
+                ("躺姿人物", "躯干", "已有床面"),
+            },
+        )
+
+        model_settings = {
+            "智能场景关系图": standing_sitting_graph,
+            "提示词语言": "纯中文",
+        }
+        image_request = model_refiner._compose_model_user_prompt(
+            "双人 Skill 图片底稿。",
+            model_settings,
+        )
+        video_request = model_refiner._compose_model_user_prompt(
+            "双人 Skill 视频底稿。",
+            {**model_settings, "模型任务": "视频提示词"},
+        )
+        for request in (image_request, video_request):
+            self.assertIn("站姿人物以双脚踩住当前地表承重", request)
+            self.assertIn("坐姿人物以髋部由当前地表直接承托", request)
+        self.assertIn("图片逐人承托合同", image_request)
+        self.assertIn("姿态、承重点与承托面必须一一对应", image_request)
+        self.assertIn("视频逐人承托转场合同", video_request)
+        self.assertIn("不能交换人物与承托面", video_request)
+
+        close_graph = build_pair_graph(
+            "一人站立，另一人坐姿",
+            shot_scale="近景",
+        )
+        close_plan = close_graph["subject_support_contact_plan"]
+        self.assertEqual(close_plan["contact_visibility"], "off_frame")
+        self.assertIn("不为展示任何人的画外承重点而扩大景别", close_plan["anchor_zh"])
+        close_request = model_refiner._compose_model_user_prompt(
+            "双人近景 Skill 图片底稿。",
+            {"智能场景关系图": close_graph, "提示词语言": "纯中文"},
+        )
+        self.assertIn("接触点可服从已有景别留在画外", close_request)
+        self.assertIn("不得为展示承重点而扩大取景", close_request)
+
+        original = "双人 Skill 底稿。"
+        valid_candidate = (
+            "坐姿人物的髋部由沙发座面直接承托，"
+            "躺姿人物的躯干沿床面连续受托。"
+        )
+        self.assertEqual(
+            intelligence.candidate_world_violation(
+                original,
+                valid_candidate,
+                sitting_lying_graph,
+                output_kind="image",
+            ),
+            "",
+        )
+        swapped_candidate = (
+            "坐姿人物的髋部由床面直接承托，"
+            "躺姿人物的躯干沿沙发座面连续受托。"
+        )
+        swapped_violation = intelligence.candidate_world_violation(
+            original,
+            swapped_candidate,
+            sitting_lying_graph,
+            output_kind="image",
+        )
+        self.assertIn("主体支撑面约束", swapped_violation)
+        self.assertIn("坐姿人物应由“沙发”承托", swapped_violation)
+        unplanned_violation = intelligence.candidate_world_violation(
+            original,
+            "坐姿人物的髋部由椅面直接承托，躺姿人物的躯干沿床面连续受托。",
+            sitting_lying_graph,
+            output_kind="image",
+        )
+        self.assertIn("主体支撑面约束", unplanned_violation)
+        self.assertIn("未提供“椅面”承托物", unplanned_violation)
+
+        mixed_airborne_graph = build_pair_graph("一人站立，另一人飞行")
+        self.assertEqual(
+            mixed_airborne_graph["subject_support_contact_plan"]["subject_coverage"],
+            "grounded_members_only",
+        )
+        self.assertEqual(
+            mixed_airborne_graph["subject_support_contact_plan"]["member_pose_plans"],
+            [],
+        )
+
+    def test_same_pose_pair_support_binds_each_person_to_their_explicit_surface(self) -> None:
+        def build_pair_graph(action: str, props: list[str]) -> dict[str, Any]:
+            selected = OrderedDict(
+                {
+                    "主体": ["双人冒险者"],
+                    "动作姿态": [action],
+                    "场景背景": ["地下城遗迹"],
+                    "道具世界观": props,
+                    "构图视角": ["全景全身"],
+                }
+            )
+            return intelligence.build_intelligence_profile(
+                selected,
+                [],
+                {
+                    "运行时随机标签": True,
+                    "主体类型": "人物角色",
+                    "智能文本输入": "",
+                    "额外要求": "",
+                },
+            )["scene_graph"]
+
+        seated_graph = build_pair_graph(
+            "一人坐在沙发上，另一人坐在椅子上",
+            ["沙发", "椅子"],
+        )
+        seated_plan = seated_graph["subject_support_contact_plan"]
+        self.assertEqual(seated_plan["pose_value"], "member_specific_grounded_poses")
+        self.assertEqual(
+            seated_plan["subject_coverage"],
+            "all_visible_subjects_by_member",
+        )
+        self.assertEqual(seated_plan["surface_source"], "per_member_anchors")
+        self.assertEqual(
+            {
+                item["member_value"]: (
+                    item["member_label_zh"],
+                    item["pose_value"],
+                    item["contact_point_zh"],
+                    item["surface_value"],
+                )
+                for item in seated_plan["member_pose_plans"]
+            },
+            {
+                "first": ("第一位人物", "sitting", "髋部", "sofa"),
+                "second": ("另一位人物", "sitting", "髋部", "chair"),
+            },
+        )
+        self.assertIn("不能交换人物与承托面", seated_plan["anchor_zh"])
+        seated_relations = [
+            item
+            for item in seated_graph["relations"]
+            if item.get("relation") == "load_bearing_contact"
+        ]
+        self.assertEqual(len(seated_relations), 2)
+        self.assertEqual(
+            {
+                (item["member"][0], item["target"][0], item["coverage"])
+                for item in seated_relations
+            },
+            {
+                ("第一位人物", "已有沙发座面", "individual_member"),
+                ("另一位人物", "已有椅面", "individual_member"),
+            },
+        )
+
+        standing_graph = build_pair_graph(
+            "第一人站在石台上，第二人站在地面上",
+            ["石台"],
+        )
+        self.assertEqual(
+            {
+                item["member_value"]: (
+                    item["contact_point_zh"],
+                    item["surface_value"],
+                )
+                for item in standing_graph["subject_support_contact_plan"][
+                    "member_pose_plans"
+                ]
+            },
+            {
+                "first": ("双脚", "platform"),
+                "second": ("双脚", "ground"),
+            },
+        )
+
+        english_graph = build_pair_graph(
+            "one person sits on a sofa, the other person sits on a chair",
+            ["sofa", "chair"],
+        )
+        self.assertEqual(
+            {
+                item["member_value"]: item["surface_value"]
+                for item in english_graph["subject_support_contact_plan"][
+                    "member_pose_plans"
+                ]
+            },
+            {"first": "sofa", "second": "chair"},
+        )
+
+        model_settings = {
+            "智能场景关系图": seated_graph,
+            "提示词语言": "纯中文",
+        }
+        image_request = model_refiner._compose_model_user_prompt(
+            "双人同姿态 Skill 图片底稿。",
+            model_settings,
+        )
+        video_request = model_refiner._compose_model_user_prompt(
+            "双人同姿态 Skill 视频底稿。",
+            {**model_settings, "模型任务": "视频提示词"},
+        )
+        for request in (image_request, video_request):
+            self.assertIn("第一位人物以髋部由已有沙发座面直接承托", request)
+            self.assertIn("另一位人物以髋部由已有椅面直接承托", request)
+            self.assertIn("不能交换人物与承托面", request)
+
+        original = "双人同姿态 Skill 底稿。"
+        self.assertEqual(
+            intelligence.candidate_world_violation(
+                original,
+                "第一位人物坐在沙发上，另一位人物坐在椅子上。",
+                seated_graph,
+                output_kind="image",
+            ),
+            "",
+        )
+        swapped_violation = intelligence.candidate_world_violation(
+            original,
+            "第一位人物坐在椅子上，另一位人物坐在沙发上。",
+            seated_graph,
+            output_kind="image",
+        )
+        self.assertIn("主体支撑面约束", swapped_violation)
+        self.assertIn("第一位人物应由“沙发”承托", swapped_violation)
+        missing_surface_violation = intelligence.candidate_world_violation(
+            original,
+            "第一位人物坐在床上，另一位人物坐在椅子上。",
+            seated_graph,
+            output_kind="image",
+        )
+        self.assertIn("未提供“床面/床沿”承托物", missing_surface_violation)
+        self.assertEqual(
+            intelligence.candidate_world_violation(
+                original,
+                "分镜二：第一位人物起身后坐在椅子上，重心从沙发移向椅面。",
+                seated_graph,
+                output_kind="video",
+            ),
+            "",
+        )
+
+        shared_surface_graph = build_pair_graph(
+            "一人坐在沙发上，另一人也坐在沙发上",
+            ["沙发"],
+        )
+        shared_surface_plan = shared_surface_graph["subject_support_contact_plan"]
+        self.assertEqual(shared_surface_plan["subject_coverage"], "all_visible_subjects")
+        self.assertEqual(shared_surface_plan["surface_value"], "sofa")
+        self.assertEqual(shared_surface_plan["member_pose_plans"], [])
+
+    def test_same_pose_group_support_requires_complete_numbered_member_bindings(self) -> None:
+        def build_group_graph(subject: str, action: str, props: list[str]) -> dict[str, Any]:
+            selected = OrderedDict(
+                {
+                    "主体": [subject],
+                    "动作姿态": [action],
+                    "场景背景": ["地下城遗迹"],
+                    "道具世界观": props,
+                    "构图视角": ["全景全身"],
+                }
+            )
+            return intelligence.build_intelligence_profile(
+                selected,
+                [],
+                {
+                    "运行时随机标签": True,
+                    "主体类型": "人物角色",
+                    "智能文本输入": "",
+                    "额外要求": "",
+                },
+            )["scene_graph"]
+
+        trio_graph = build_group_graph(
+            "三人冒险小队",
+            "第一人坐在沙发上，第二人坐在椅子上，第三人坐在台阶上",
+            ["沙发", "椅子", "台阶"],
+        )
+        trio_plan = trio_graph["subject_support_contact_plan"]
+        self.assertEqual(trio_plan["subject_cardinality"], "group")
+        self.assertEqual(
+            trio_plan["subject_coverage"],
+            "all_visible_subjects_by_member",
+        )
+        self.assertEqual(
+            {
+                item["member_value"]: (
+                    item["member_label_zh"],
+                    item["pose_value"],
+                    item["surface_value"],
+                )
+                for item in trio_plan["member_pose_plans"]
+            },
+            {
+                "first": ("第一位人物", "sitting", "sofa"),
+                "second": ("另一位人物", "sitting", "chair"),
+                "third": ("第三位人物", "sitting", "step"),
+            },
+        )
+        trio_relations = [
+            item
+            for item in trio_graph["relations"]
+            if item.get("relation") == "load_bearing_contact"
+        ]
+        self.assertEqual(len(trio_relations), 3)
+        self.assertEqual(
+            {item["member"][0] for item in trio_relations},
+            {"第一位人物", "另一位人物", "第三位人物"},
+        )
+
+        model_settings = {
+            "智能场景关系图": trio_graph,
+            "提示词语言": "纯中文",
+        }
+        image_request = model_refiner._compose_model_user_prompt(
+            "三人 Skill 图片底稿。",
+            model_settings,
+        )
+        video_request = model_refiner._compose_model_user_prompt(
+            "三人 Skill 视频底稿。",
+            {**model_settings, "模型任务": "视频提示词"},
+        )
+        for request in (image_request, video_request):
+            self.assertIn("第一位人物以髋部由已有沙发座面直接承托", request)
+            self.assertIn("另一位人物以髋部由已有椅面直接承托", request)
+            self.assertIn("第三位人物以髋部由已有台阶表面直接承托", request)
+            self.assertIn("不能交换人物与承托面", request)
+
+        original = "三人同姿态 Skill 底稿。"
+        valid_candidate = (
+            "第一位人物坐在沙发上，第二位人物坐在椅子上，"
+            "第三位人物坐在台阶上。"
+        )
+        self.assertEqual(
+            intelligence.candidate_world_violation(
+                original,
+                valid_candidate,
+                trio_graph,
+                output_kind="image",
+            ),
+            "",
+        )
+        swapped_violation = intelligence.candidate_world_violation(
+            original,
+            "第一位人物坐在沙发上，第二位人物坐在台阶上，第三位人物坐在椅子上。",
+            trio_graph,
+            output_kind="image",
+        )
+        self.assertIn("主体支撑面约束", swapped_violation)
+        self.assertIn("另一位人物应由“椅面”承托", swapped_violation)
+        self.assertEqual(
+            intelligence.candidate_world_violation(
+                original,
+                "分镜二：第三位人物起身后坐在椅子上，重心从台阶移向椅面。",
+                trio_graph,
+                output_kind="video",
+            ),
+            "",
+        )
+
+        english_trio_graph = build_group_graph(
+            "three-person team",
+            "one person sits on a sofa, the second person sits on a chair, the third person sits on a step",
+            ["sofa", "chair", "step"],
+        )
+        self.assertEqual(
+            {
+                item["member_value"]: item["surface_value"]
+                for item in english_trio_graph["subject_support_contact_plan"][
+                    "member_pose_plans"
+                ]
+            },
+            {"first": "sofa", "second": "chair", "third": "step"},
+        )
+
+        quartet_graph = build_group_graph(
+            "四人小队",
+            "第一人站在石台上，第二人站在地面上，第三人站在台阶上，第四人站在平台上",
+            ["石台", "台阶", "平台"],
+        )
+        self.assertEqual(
+            [
+                item["member_value"]
+                for item in quartet_graph["subject_support_contact_plan"][
+                    "member_pose_plans"
+                ]
+            ],
+            ["first", "second", "third", "fourth"],
+        )
+
+        incomplete_graph = build_group_graph(
+            "三人冒险小队",
+            "第一人坐在沙发上，第二人坐在椅子上",
+            ["沙发", "椅子"],
+        )
+        incomplete_plan = incomplete_graph["subject_support_contact_plan"]
+        self.assertEqual(incomplete_plan["subject_coverage"], "all_visible_subjects")
+        self.assertEqual(incomplete_plan["member_pose_plans"], [])
+
+        unspecified_count_graph = build_group_graph(
+            "冒险小队",
+            "第一人坐在沙发上，第二人坐在椅子上，第三人坐在台阶上",
+            ["沙发", "椅子", "台阶"],
+        )
+        unspecified_plan = unspecified_count_graph["subject_support_contact_plan"]
+        self.assertEqual(unspecified_plan["subject_coverage"], "all_visible_subjects")
+        self.assertEqual(unspecified_plan["member_pose_plans"], [])
+
+    def test_named_role_support_binds_distinct_characters_without_guessing_duplicates(self) -> None:
+        def build_role_graph(subject: str, action: str, props: list[str]) -> dict[str, Any]:
+            selected = OrderedDict(
+                {
+                    "主体": [subject],
+                    "动作姿态": [action],
+                    "场景背景": ["地下城遗迹"],
+                    "道具世界观": props,
+                    "构图视角": ["全景全身"],
+                }
+            )
+            return intelligence.build_intelligence_profile(
+                selected,
+                [],
+                {
+                    "运行时随机标签": True,
+                    "主体类型": "人物角色",
+                    "智能文本输入": "",
+                    "额外要求": "",
+                },
+            )["scene_graph"]
+
+        pair_graph = build_role_graph(
+            "双人冒险者",
+            "女战士坐在沙发上，男法师坐在椅子上",
+            ["沙发", "椅子"],
+        )
+        pair_plan = pair_graph["subject_support_contact_plan"]
+        self.assertEqual(
+            pair_plan["subject_coverage"],
+            "all_visible_subjects_by_member",
+        )
+        self.assertEqual(
+            {
+                item["member_value"]: (
+                    item["member_label_zh"],
+                    item["pose_value"],
+                    item["surface_value"],
+                )
+                for item in pair_plan["member_pose_plans"]
+            },
+            {
+                "role:warrior": ("女战士", "sitting", "sofa"),
+                "role:mage": ("男法师", "sitting", "chair"),
+            },
+        )
+        self.assertEqual(
+            {
+                (item["member"][0], item["target"][0])
+                for item in pair_graph["relations"]
+                if item.get("relation") == "load_bearing_contact"
+            },
+            {
+                ("女战士", "已有沙发座面"),
+                ("男法师", "已有椅面"),
+            },
+        )
+
+        model_settings = {
+            "智能场景关系图": pair_graph,
+            "提示词语言": "纯中文",
+        }
+        image_request = model_refiner._compose_model_user_prompt(
+            "具名双人 Skill 图片底稿。",
+            model_settings,
+        )
+        video_request = model_refiner._compose_model_user_prompt(
+            "具名双人 Skill 视频底稿。",
+            {**model_settings, "模型任务": "视频提示词"},
+        )
+        for request in (image_request, video_request):
+            self.assertIn("女战士以髋部由已有沙发座面直接承托", request)
+            self.assertIn("男法师以髋部由已有椅面直接承托", request)
+            self.assertIn("不能交换人物与承托面", request)
+
+        original = "具名双人 Skill 底稿。"
+        self.assertEqual(
+            intelligence.candidate_world_violation(
+                original,
+                "女战士坐在沙发上，男法师坐在椅子上。",
+                pair_graph,
+                output_kind="image",
+            ),
+            "",
+        )
+        swapped_violation = intelligence.candidate_world_violation(
+            original,
+            "女战士坐在椅子上，男法师坐在沙发上。",
+            pair_graph,
+            output_kind="image",
+        )
+        self.assertIn("主体支撑面约束", swapped_violation)
+        self.assertIn("女战士应由“沙发”承托", swapped_violation)
+        self.assertEqual(
+            intelligence.candidate_world_violation(
+                original,
+                "分镜二：女战士起身后坐在椅子上，重心从沙发移向椅面。",
+                pair_graph,
+                output_kind="video",
+            ),
+            "",
+        )
+
+        english_graph = build_role_graph(
+            "two people",
+            "the warrior sits on a sofa, the mage sits on a chair",
+            ["sofa", "chair"],
+        )
+        self.assertEqual(
+            {
+                item["member_value"]: item["surface_value"]
+                for item in english_graph["subject_support_contact_plan"][
+                    "member_pose_plans"
+                ]
+            },
+            {"role:warrior": "sofa", "role:mage": "chair"},
+        )
+
+        trio_graph = build_role_graph(
+            "三人小队",
+            "战士坐在沙发上，法师坐在椅子上，祭司坐在台阶上",
+            ["沙发", "椅子", "台阶"],
+        )
+        self.assertEqual(
+            {
+                item["member_value"]: item["surface_value"]
+                for item in trio_graph["subject_support_contact_plan"][
+                    "member_pose_plans"
+                ]
+            },
+            {
+                "role:warrior": "sofa",
+                "role:mage": "chair",
+                "role:priest": "step",
+            },
+        )
+
+        duplicate_role_graph = build_role_graph(
+            "双人冒险者",
+            "女战士坐在沙发上，男战士坐在椅子上",
+            ["沙发", "椅子"],
+        )
+        duplicate_plan = duplicate_role_graph["subject_support_contact_plan"]
+        self.assertEqual(duplicate_plan["subject_coverage"], "all_visible_subjects")
+        self.assertEqual(duplicate_plan["member_pose_plans"], [])
+
+    def test_runtime_random_grounded_support_reaches_skill_image_and_tag_block_prompts(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["成年女性冒险者"],
+                "画面风格": ["奇幻概念设计"],
+                "动作姿态": ["站姿放松"],
+                "场景背景": ["浮空城"],
+                "道具世界观": ["浮空水晶"],
+                "构图视角": ["全景全身"],
+            }
+        )
+        base_settings = {
+            "运行时随机标签": True,
+            "运行时随机模式": "全随机",
+            "运行时随机强度": "中",
+            "随机主题池": "自动",
+            "主体类型": "人物角色",
+            "模板风格": "CG感",
+            "案例输出结构": "案例长段版",
+            "标签反推模式": "自动平衡",
+            "提示词语言": "纯中文",
+            "详细度": "标准",
+            "生成数量": 1,
+            "seed": 73,
+            "智能文本输入": "",
+            "额外要求": "",
+        }
+        graph = intelligence.build_intelligence_profile(selected, [], base_settings)["scene_graph"]
+        prompt_settings = {**base_settings, "智能场景关系图": graph}
+        skill_prompt = prompt_builder.build_prompt_list(
+            selected,
+            [],
+            prompt_settings,
+            uniq=uniq,
+            infer_template_style=lambda _tags, explicit: explicit,
+            infer_subject_type=lambda _tags, explicit: explicit,
+            infer_output_structure=lambda _subject, explicit: explicit,
+        )[0]
+        self.assertIn("主体双脚直接踩住当前地表承重", skill_prompt)
+        self.assertIn("重心投影和接触阴影都落在脚下", skill_prompt)
+        for forbidden in ("座面", "椅子", "台阶", "平台"):
+            self.assertNotIn(forbidden, skill_prompt)
+        violation = intelligence.candidate_world_violation(
+            skill_prompt,
+            skill_prompt + "她忽然腾空而起，双脚离开原有支撑面。",
+            graph,
+        )
+        self.assertIn("主体支撑状态约束", violation)
+        self.assertIn("腾空而起", violation)
+
+        payload = tag_block_composer.parse_tag_block_payload(
+            json.dumps(
+                {
+                    "enabled": True,
+                    "blocks": [
+                        {"type": "tag_group", "group": group, "label": group, "tags": values}
+                        for group, values in selected.items()
+                    ],
+                },
+                ensure_ascii=False,
+            )
+        )
+        block_prompt = tag_block_composer.build_tag_block_prompt_list(
+            payload,
+            selected,
+            [],
+            prompt_settings,
+            style_track="奇幻概念设计",
+            subject_type="人物角色",
+        )[0]
+        self.assertIn("主体双脚直接踩住当前地表承重", block_prompt)
+        for forbidden in ("座面", "椅子", "台阶", "平台"):
+            self.assertNotIn(forbidden, block_prompt)
+
+        english_settings = {**prompt_settings, "提示词语言": "纯英文"}
+        english_skill_prompt = prompt_builder.build_prompt_list(
+            selected,
+            [],
+            english_settings,
+            uniq=uniq,
+            infer_template_style=lambda _tags, explicit: explicit,
+            infer_subject_type=lambda _tags, explicit: explicit,
+            infer_output_structure=lambda _subject, explicit: explicit,
+        )[0]
+        english_block_prompt = tag_block_composer.build_tag_block_prompt_list(
+            payload,
+            selected,
+            [],
+            english_settings,
+            style_track="fantasy concept design",
+            subject_type="人物角色",
+        )[0]
+        for english_prompt in (english_skill_prompt, english_block_prompt):
+            self.assertIn("Both feet press directly into the current ground surface", english_prompt)
+            for forbidden in ("chair", "seat", "step", "platform"):
+                self.assertNotIn(forbidden, english_prompt.casefold())
 
     def test_atmospheric_medium_context_removes_only_conflicting_soft_anchors(self) -> None:
         selected = OrderedDict(
@@ -11323,7 +12787,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
 
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v101")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(
             graph["atmospheric_medium_constraint"]["required_value"],
@@ -11577,7 +13041,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
             )
         payload = json.loads(result[3])
         graph = payload["scene_relationship_graph"]
-        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v90")
+        self.assertEqual(payload["intelligence_profile"]["version"], "qwen-te-intelligence-v101")
         self.assertEqual(payload["random_conflict_repair"]["removed_count"], 1)
         self.assertEqual(graph["season_constraint"]["required_value"], "winter")
         self.assertNotIn("盛夏浓荫", payload["selected_tags_flat"])
@@ -28504,6 +29968,34 @@ class TestStagePromptModules(unittest.TestCase):
             ),
         )
 
+        abrupt_new_prop = original.replace(
+            "关键道具发生位移或状态改变",
+            "旧信封旁边的一把手枪凭空出现在她手中",
+            1,
+        )
+        self.assertIn(
+            "新道具“手枪”无解释出现",
+            model_refiner._video_story_continuity_violation(
+                abrupt_new_prop,
+                roles,
+                language="纯中文",
+            ),
+        )
+
+        causal_reveal = original.replace(
+            "关键道具发生位移或状态改变",
+            "她拆开旧信封，夹层里露出一枚钥匙，关键道具状态随动作改变",
+            1,
+        )
+        self.assertEqual(
+            model_refiner._video_story_continuity_violation(
+                causal_reveal,
+                roles,
+                language="纯中文",
+            ),
+            "",
+        )
+
         unexplained_location = original.replace(
             "镜头改变景别观察行动造成的连锁结果",
             "镜头切换到海边咖啡馆，她继续观察行动造成的结果",
@@ -28518,6 +30010,62 @@ class TestStagePromptModules(unittest.TestCase):
             ),
         )
 
+        disguised_location = original.replace(
+            "镜头改变景别观察行动造成的连锁结果",
+            "镜头切换到海边咖啡馆的手部特写，她继续观察行动造成的结果",
+            1,
+        )
+        self.assertIn(
+            "无解释切换主场景",
+            model_refiner._video_story_continuity_violation(
+                disguised_location,
+                roles,
+                language="纯中文",
+            ),
+        )
+
+        disguised_interior = original.replace(
+            "镜头改变景别观察行动造成的连锁结果",
+            "镜头切换到海边咖啡馆内部，她继续观察行动造成的结果",
+            1,
+        )
+        self.assertIn(
+            "无解释切换主场景",
+            model_refiner._video_story_continuity_violation(
+                disguised_interior,
+                roles,
+                language="纯中文",
+            ),
+        )
+
+        narrative_camouflage = original.replace(
+            "镜头改变景别观察行动造成的连锁结果",
+            "镜头连续承接上一镜，随后切换到海边咖啡馆的手部特写，她继续观察行动造成的结果",
+            1,
+        )
+        self.assertIn(
+            "无解释切换主场景",
+            model_refiner._video_story_continuity_violation(
+                narrative_camouflage,
+                roles,
+                language="纯中文",
+            ),
+        )
+
+        visible_path_change = original.replace(
+            "镜头改变景别观察行动造成的连锁结果",
+            "镜头沿着她穿过连廊的移动轨迹切换到相邻咖啡馆入口，继续观察行动造成的结果",
+            1,
+        )
+        self.assertEqual(
+            model_refiner._video_story_continuity_violation(
+                visible_path_change,
+                roles,
+                language="纯中文",
+            ),
+            "",
+        )
+
         new_subject = original.replace(
             "镜头改变景别观察行动造成的连锁结果",
             "镜头转向另一名陌生男子观察行动造成的结果",
@@ -28530,6 +30078,70 @@ class TestStagePromptModules(unittest.TestCase):
                 roles,
                 language="纯中文",
             ),
+        )
+
+        anchored_new_subject = original.replace(
+            "镜头改变景别观察行动造成的连锁结果",
+            "成年女性侦探仍握着旧信封，镜头却转向另一名陌生男子观察行动造成的结果",
+            1,
+        )
+        anchored_subject_reason = model_refiner._video_story_continuity_violation(
+            anchored_new_subject,
+            roles,
+            language="纯中文",
+        )
+        self.assertIn("无解释引入新主体", anchored_subject_reason)
+        self.assertIn("另一名陌生男子", anchored_subject_reason)
+
+        identity_drift = original.replace(
+            "镜头改变景别观察行动造成的连锁结果",
+            "成年女性侦探仍在雨夜旧车站，旧信封还在手中，她突然变成一个男孩，继续观察行动造成的结果",
+            1,
+        )
+        identity_reason = model_refiner._video_story_continuity_violation(
+            identity_drift,
+            roles,
+            language="纯中文",
+        )
+        self.assertIn("主体身份无解释改变", identity_reason)
+        self.assertIn("男孩", identity_reason)
+
+        transform_roles = {**roles, "action": ["变身为石像"]}
+        intentional_transform = original.replace(
+            "镜头改变景别观察行动造成的连锁结果",
+            "成年女性侦探仍在雨夜旧车站，旧信封还在手中，她突然变成石像，动作结果保持可见",
+            1,
+        )
+        self.assertEqual(
+            model_refiner._video_story_continuity_violation(
+                intentional_transform,
+                transform_roles,
+                language="纯中文",
+            ),
+            "",
+        )
+
+        mismatched_transform = original.replace(
+            "镜头改变景别观察行动造成的连锁结果",
+            "成年女性侦探仍在雨夜旧车站，旧信封还在手中，她突然变成一个男孩，动作结果保持可见",
+            1,
+        )
+        mismatch_reason = model_refiner._video_story_continuity_violation(
+            mismatched_transform,
+            transform_roles,
+            language="纯中文",
+        )
+        self.assertIn("身份变化目标“男孩”", mismatch_reason)
+        self.assertIn("动作锚点“石像”不一致", mismatch_reason)
+
+        generic_transform_roles = {**roles, "action": ["变身"]}
+        self.assertEqual(
+            model_refiner._video_story_continuity_violation(
+                mismatched_transform,
+                generic_transform_roles,
+                language="纯中文",
+            ),
+            "",
         )
 
     def test_video_story_continuity_tracks_outfit_and_allows_causal_changes(self) -> None:
@@ -28574,13 +30186,143 @@ class TestStagePromptModules(unittest.TestCase):
             ),
         )
 
+        unrelated_transition = paragraphs.copy()
+        unrelated_transition[3] += "服装凭空变成白色礼服，身后的木门同时被撕裂。"
+        self.assertIn(
+            "服装无解释改变",
+            model_refiner._video_story_continuity_violation(
+                "\n\n".join(unrelated_transition),
+                roles,
+                language="纯中文",
+            ),
+        )
+
         causal_change = paragraphs.copy()
-        causal_change[3] += "深色长风衣被撕裂，露出内层护具，动作因果保持清楚。"
+        causal_change[3] += "冲击突然撕裂深色长风衣，使它变成破损状态，动作因果保持清楚。"
         self.assertEqual(
             model_refiner._video_story_continuity_violation(
                 "\n\n".join(causal_change),
                 roles,
                 language="纯中文",
+            ),
+            "",
+        )
+
+    def test_video_story_continuity_distinguishes_english_reframe_from_location_switch(self) -> None:
+        paragraphs = [
+            "Shot 1 (setup): A woman in a dark trench coat stands in the old station beside an envelope.",
+            "Shot 2 (trigger): The woman hears a signal in the station and grips the envelope.",
+            "Shot 3 (action): She follows the clue through the station while carrying the envelope.",
+            "Shot 4 (escalation): The camera cuts to a close-up of her hand in the station as the envelope shakes.",
+            "Shot 5 (resolution): The woman remains in the station with the envelope as the consequence settles.",
+        ]
+        roles = {
+            "subject": ["woman"],
+            "scene": ["station"],
+            "outfit": ["dark trench coat"],
+            "prop": ["envelope"],
+        }
+        self.assertEqual(
+            model_refiner._video_story_continuity_section_violation(
+                "\n\n".join(paragraphs),
+                roles,
+                english=True,
+            ),
+            "",
+        )
+
+        paragraphs[3] = (
+            "Shot 4 (escalation): The woman remains in the station with the envelope when she "
+            "suddenly turns into a different man without any prior cause."
+        )
+        identity_reason = model_refiner._video_story_continuity_section_violation(
+            "\n\n".join(paragraphs),
+            roles,
+            english=True,
+        )
+        self.assertIn("Shot 4", identity_reason)
+        self.assertIn("主体身份无解释改变为“man”", identity_reason)
+
+        targeted_roles = {**roles, "action": ["morph into a statue"]}
+        target_mismatch_reason = model_refiner._video_story_continuity_section_violation(
+            "\n\n".join(paragraphs),
+            targeted_roles,
+            english=True,
+        )
+        self.assertIn("Shot 4", target_mismatch_reason)
+        self.assertIn("身份变化目标“man”", target_mismatch_reason)
+        self.assertIn("动作锚点“statue”不一致", target_mismatch_reason)
+
+        paragraphs[3] = (
+            "Shot 4 (escalation): The woman remains in the station with the envelope when she "
+            "suddenly turns into a statue and the visible result drives the action forward."
+        )
+        self.assertEqual(
+            model_refiner._video_story_continuity_section_violation(
+                "\n\n".join(paragraphs),
+                targeted_roles,
+                english=True,
+            ),
+            "",
+        )
+
+        paragraphs[3] = (
+            "Shot 4 (escalation): The camera cuts to a close-up of her hand inside a beach cafe "
+            "as the envelope shakes."
+        )
+        reason = model_refiner._video_story_continuity_section_violation(
+            "\n\n".join(paragraphs),
+            roles,
+            english=True,
+        )
+        self.assertIn("Shot 4", reason)
+        self.assertIn("无解释切换主场景", reason)
+
+        paragraphs[3] = (
+            "Shot 4 (escalation): The camera continues the previous shot and cuts to a close-up "
+            "of her hand inside a beach cafe as the envelope shakes."
+        )
+        weak_reason = model_refiner._video_story_continuity_section_violation(
+            "\n\n".join(paragraphs),
+            roles,
+            english=True,
+        )
+        self.assertIn("Shot 4", weak_reason)
+        self.assertIn("无解释切换主场景", weak_reason)
+
+        paragraphs[3] = (
+            "Shot 4 (escalation): The woman remains in the station with the envelope when a new gun "
+            "suddenly appears in her hand."
+        )
+        prop_reason = model_refiner._video_story_continuity_section_violation(
+            "\n\n".join(paragraphs),
+            roles,
+            english=True,
+        )
+        self.assertIn("Shot 4", prop_reason)
+        self.assertIn("新道具“gun”无解释出现", prop_reason)
+
+        paragraphs[3] = (
+            "Shot 4 (escalation): The woman remains in the station with the envelope while another "
+            "guard enters the frame."
+        )
+        subject_reason = model_refiner._video_story_continuity_section_violation(
+            "\n\n".join(paragraphs),
+            roles,
+            english=True,
+        )
+        self.assertIn("Shot 4", subject_reason)
+        self.assertIn("新主体“another guard”", subject_reason)
+
+        paragraphs[3] = (
+            "Shot 4 (escalation): The woman remains in the station with the envelope, without "
+            "introducing another guard or changing the established action."
+        )
+        self.assertEqual(
+            model_refiner._video_story_continuity_section_violation(
+                "\n\n".join(paragraphs),
+                roles,
+                english=True,
             ),
             "",
         )

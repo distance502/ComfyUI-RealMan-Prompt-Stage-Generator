@@ -17,6 +17,7 @@ try:
         build_narrative_plan,
         render_narrative_prompt,
         resolve_visual_layout_mode,
+        subject_support_narrative_anchor,
         summarize_narrative_plan,
     )
 except Exception:  # pragma: no cover - exercised by direct import tests
@@ -24,6 +25,7 @@ except Exception:  # pragma: no cover - exercised by direct import tests
         build_narrative_plan,
         render_narrative_prompt,
         resolve_visual_layout_mode,
+        subject_support_narrative_anchor,
         summarize_narrative_plan,
     )
 
@@ -4557,6 +4559,7 @@ def _build_concise_chinese_prompt(
         "custom": custom,
         "residual": residual,
         "quality": quality,
+        "support": subject_support_narrative_anchor(settings.get("智能场景关系图")),
         "style_track": context.get("style_track", ""),
         "layout_mode": layout_mode,
     }
@@ -4667,6 +4670,10 @@ def _build_concise_english_prompt(
         "custom": custom,
         "residual": residual,
         "quality": quality,
+        "support": subject_support_narrative_anchor(
+            settings.get("智能场景关系图"),
+            english=True,
+        ),
         "style_track": context.get("style_track", ""),
         "layout_mode": layout_mode,
     }

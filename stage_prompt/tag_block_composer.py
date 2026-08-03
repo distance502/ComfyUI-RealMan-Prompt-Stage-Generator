@@ -11,6 +11,7 @@ try:
         build_narrative_plan,
         render_narrative_prompt,
         resolve_visual_layout_mode,
+        subject_support_narrative_anchor,
         summarize_narrative_plan,
     )
 except Exception:  # pragma: no cover - direct file loading in focused tests
@@ -18,6 +19,7 @@ except Exception:  # pragma: no cover - direct file loading in focused tests
         build_narrative_plan,
         render_narrative_prompt,
         resolve_visual_layout_mode,
+        subject_support_narrative_anchor,
         summarize_narrative_plan,
     )
 
@@ -658,6 +660,7 @@ def _build_tag_block_prompt_zh(blocks: list[dict[str, Any]], settings: dict[str,
         "custom": "、".join(value for value in (inserted_text, custom_text) if value),
         "residual": "；".join([*ordered_clauses, variation_sentence] if variation_sentence else ordered_clauses),
         "quality": quality_text,
+        "support": subject_support_narrative_anchor(settings.get("智能场景关系图")),
         "style_track": style_track,
         "layout_mode": layout_mode,
     }
@@ -766,6 +769,10 @@ def _build_tag_block_prompt_en(blocks: list[dict[str, Any]], settings: dict[str,
         "custom": "; ".join(value for value in (inserted_text, custom_text) if value),
         "residual": "; ".join([*ordered_clauses, variation_sentence] if variation_sentence else ordered_clauses),
         "quality": quality_text,
+        "support": subject_support_narrative_anchor(
+            settings.get("智能场景关系图"),
+            english=True,
+        ),
         "style_track": style_track,
         "layout_mode": layout_mode,
     }
