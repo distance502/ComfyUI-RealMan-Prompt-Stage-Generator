@@ -5881,6 +5881,124 @@ test("buildNsfwWorkspaceMappedState maps explicit anatomy terms as opt-in NSFW t
 	assert.equal(preset.custom_tags.includes("双人亲密互动"), true);
 });
 
+test("buildNsfwWorkspaceMappedState folds penetration fragments into one adult action contract", async () => {
+	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	const node = { properties: {}, widgets: [] };
+	const library = { slot_config: [], tag_library: {} };
+	const mapped = exports.buildNsfwWorkspaceMappedState(node, library, {
+		selector_character: "成年情侣",
+		selector_action: "女上位姿态",
+		anatomy_terms: "阴茎、阴道",
+		explicit_terms: "性交、插入",
+		negative_preset: "标准负面提示词",
+	});
+	const contracts = mapped.custom_tags.filter((tag) => tag.startsWith("女上位阴道插入:"));
+	assert.equal(contracts.length, 1);
+	assert.equal(contracts[0].includes("成年男性的阴茎插入成年女性阴道"), true);
+	assert.equal(contracts[0].includes("双方均为成年人且自愿"), true);
+	for (const looseTerm of ["阴茎", "阴道", "性交", "插入"]) {
+		assert.equal(mapped.custom_tags.includes(looseTerm), false);
+	}
+
+	const direct = exports.buildNsfwWorkspaceMappedState(node, library, {
+		action: "男人的阴茎插入女人的阴道",
+		negative_preset: "标准负面提示词",
+	});
+	assert.equal(direct.custom_tags.some((tag) => tag.startsWith("正面阴道插入:")), true);
+	assert.equal(direct.custom_tags.includes("男人的阴茎插入女人的阴道"), false);
+});
+
+test("buildNsfwWorkspaceMappedState keeps richer explicit actions as atomic contracts", async () => {
+	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	const node = { properties: {}, widgets: [] };
+	const library = { slot_config: [], tag_library: {} };
+	const contracts = [
+		"女性对男性口部刺激: 一名成年女性以口部刺激一名成年男性的阴茎; 双方均为成年人且自愿, 头部朝向、口部接触点、跪坐支撑与双人身体间距保持清楚",
+		"成年女性自慰: 一名成年女性以自己的手指刺激自己的外阴与阴蒂; 成年主体自主自愿, 双手归属、指尖接触点、腿部位置与完整身体轮廓保持清楚",
+		"双人相互手部刺激: 两名成年伴侣分别以手部刺激对方的私密部位; 双方均为成年人且自愿, 每只手的归属、两处接触点、双人轮廓与四肢路径保持清楚",
+	];
+	for (const contract of contracts) {
+		const mapped = exports.buildNsfwWorkspaceMappedState(node, library, {
+			selector_action: contract,
+			anatomy_terms: "阴茎、阴道、外阴、阴蒂、肛门",
+			explicit_terms: "肛交、口交、自慰、性交、插入",
+			negative_preset: "标准负面提示词",
+		});
+		assert.equal(mapped.custom_tags.includes(contract), true);
+		assert.equal(mapped.custom_tags.filter((tag) => tag === contract).length, 1);
+		for (const looseTerm of ["肛交", "口交", "自慰", "性交", "插入"]) {
+			assert.equal(mapped.custom_tags.includes(looseTerm), false);
+		}
+	}
+});
+
+test("buildNsfwWorkspaceMappedState resolves richer legacy actions to one main contract", async () => {
+	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	const node = { properties: {}, widgets: [] };
+	const library = { slot_config: [], tag_library: {} };
+	const cases = [
+		[{ selector_character: "成年情侣", selector_action: "侧卧双人互动", anatomy_terms: "阴茎、肛门", explicit_terms: "肛交" }, "侧卧肛门插入:"],
+		[{ selector_character: "成年情侣", anatomy_terms: "阴茎", explicit_terms: "口交" }, "女性对男性口部刺激:"],
+		[{ selector_character: "成熟夫妇", anatomy_terms: "外阴、阴蒂", explicit_terms: "口交" }, "男性对女性口部刺激:"],
+		[{ selector_character: "成年女性", anatomy_terms: "外阴、阴蒂", explicit_terms: "自慰" }, "成年女性自慰:"],
+		[{ selector_character: "成年男性", anatomy_terms: "阴茎", explicit_terms: "自慰" }, "成年男性自慰:"],
+		[{ selector_character: "男女配对", anatomy_terms: "阴茎、阴道", explicit_terms: "口交、性交" }, "女性对男性口部刺激:"],
+		[{ selector_character: "双成年女性", anatomy_terms: "外阴、阴蒂", explicit_terms: "口交" }, "双成年女性单向口部刺激:"],
+		[{ selector_character: "双成年女性", explicit_terms: "相互口部刺激" }, "双成年女性相互口部刺激:"],
+		[{ selector_character: "双成年男性", anatomy_terms: "阴茎", explicit_terms: "口交" }, "双成年男性单向口部刺激:"],
+		[{ selector_character: "双成年男性", explicit_terms: "相互口部刺激" }, "双成年男性相互口部刺激:"],
+		[{ selector_character: "双成年女性", explicit_terms: "外阴手部刺激" }, "双成年女性单向手部刺激:"],
+		[{ selector_character: "双成年男性", explicit_terms: "相互手部刺激" }, "双成年男性相互手部刺激:"],
+		[{ selector_character: "成年女性", explicit_terms: "成人道具刺激外阴" }, "成年女性成人道具外阴刺激:"],
+		[{ selector_character: "成年女性", explicit_terms: "成人道具阴道插入" }, "成年女性成人道具阴道插入:"],
+		[{ selector_character: "成年男性", anatomy_terms: "阴茎", explicit_terms: "成人道具刺激阴茎" }, "成年男性成人道具刺激:"],
+		[{ selector_character: "男女配对", anatomy_terms: "外阴、阴蒂", explicit_terms: "伴侣辅助成人道具" }, "伴侣辅助成人道具刺激女性:"],
+	];
+	for (const [workspace, expectedPrefix] of cases) {
+		const mapped = exports.buildNsfwWorkspaceMappedState(node, library, {
+			...workspace,
+			negative_preset: "标准负面提示词",
+		});
+		const contracts = mapped.custom_tags.filter((tag) => tag.startsWith(expectedPrefix));
+		assert.equal(contracts.length, 1);
+		assert.equal(contracts[0].includes("自愿"), true);
+		for (const looseTerm of ["肛交", "口交", "自慰", "性交", "插入"]) {
+			assert.equal(mapped.custom_tags.includes(looseTerm), false);
+		}
+	}
+});
+
+test("buildNsfwWorkspaceMappedState does not infer a two-person contract without a pair role", async () => {
+	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	const mapped = exports.buildNsfwWorkspaceMappedState(
+		{ properties: {}, widgets: [] },
+		{ slot_config: [], tag_library: {} },
+		{
+			selector_character: "成年女性",
+			anatomy_terms: "阴茎、阴道",
+			explicit_terms: "性交、插入",
+			negative_preset: "标准负面提示词",
+		},
+	);
+	assert.equal(mapped.custom_tags.some((tag) => tag.includes("阴道插入:")), false);
+	for (const looseTerm of ["阴茎", "阴道", "性交", "插入"]) {
+		assert.equal(mapped.custom_tags.includes(looseTerm), true);
+	}
+
+	const ambiguousPair = exports.buildNsfwWorkspaceMappedState(
+		{ properties: {}, widgets: [] },
+		{ slot_config: [], tag_library: {} },
+		{
+			selector_character: "双女性",
+			anatomy_terms: "外阴、阴蒂",
+			explicit_terms: "口交",
+			negative_preset: "标准负面提示词",
+		},
+	);
+	assert.equal(ambiguousPair.custom_tags.some((tag) => tag.includes("双成年女性")), false);
+	assert.equal(ambiguousPair.custom_tags.includes("口交"), true);
+});
+
 test("buildNsfwWorkspaceMappedState includes embedded prompt selector fields globally", async () => {
 	const exports = await loadUiExports("http://127.0.0.1:8188/");
 	const node = { properties: {}, widgets: [] };

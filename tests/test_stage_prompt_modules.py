@@ -22686,6 +22686,10 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertIn("explicit_terms", catalog["options"])
         for required in ("性交", "插入", "自慰", "潮吹"):
             self.assertIn(required, catalog["options"]["explicit_terms"])
+        for required in ("阴茎口部刺激", "外阴口部刺激", "相互口部刺激", "阴茎手部刺激", "外阴手部刺激", "相互手部刺激"):
+            self.assertIn(required, catalog["options"]["explicit_terms"])
+        for required in ("成人道具刺激外阴", "成人道具刺激阴茎", "成人道具阴道插入", "成人道具肛门插入", "伴侣辅助成人道具"):
+            self.assertIn(required, catalog["options"]["explicit_terms"])
         self.assertIn("adult_action_style", catalog["options"])
         for required in ("单人私密姿态", "脱衣动作", "弯腰姿态", "跨坐互动", "口部亲密互动", "车内亲密氛围", "主从感跪姿互动", "多人亲密氛围"):
             self.assertTrue(any(required in option for option in catalog["options"]["adult_action_style"]))
@@ -22693,8 +22697,18 @@ class TestStagePromptModules(unittest.TestCase):
             self.assertIn(required_field, catalog["defaults"])
             self.assertIn(required_field, catalog["options"])
         self.assertIn("女仆", catalog["options"]["selector_character"])
+        self.assertIn("双成年女性", catalog["options"]["selector_character"])
+        self.assertIn("双成年男性", catalog["options"]["selector_character"])
         self.assertIn("内衣", catalog["options"]["selector_outfit"])
         self.assertIn("接吻", catalog["options"]["selector_action"])
+        for orientation in ("正面阴道插入", "后方阴道插入", "女上位阴道插入", "侧卧阴道插入"):
+            self.assertTrue(any(option.startswith(f"{orientation}:") for option in catalog["options"]["selector_action"]))
+            self.assertTrue(any(option.startswith(f"{orientation}:") for option in catalog["options"]["action"]))
+            self.assertTrue(any(option.startswith(f"{orientation}:") for option in catalog["options"]["adult_action_style"]))
+        for action_family in ("肛门插入", "口部刺激", "手部刺激", "自慰"):
+            self.assertTrue(any(action_family in option for option in catalog["options"]["selector_action"]))
+            self.assertTrue(any(action_family in option for option in catalog["options"]["action"]))
+            self.assertTrue(any(action_family in option for option in catalog["options"]["adult_action_style"]))
         self.assertIn("温泉", catalog["options"]["selector_scene"])
         self.assertIn("诱惑视线", catalog["options"]["selector_expression"])
         self.assertIn("成人道具", catalog["options"]["selector_prop"])
@@ -24772,6 +24786,164 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertEqual(list(nsfw_mapper._iter_selector_terms("adult woman")), ["adult woman"])
         self.assertEqual(list(nsfw_mapper._iter_selector_terms("mature adult man")), ["mature adult man"])
         self.assertEqual(list(nsfw_mapper._iter_selector_terms("猫女 catgirl")), ["猫女"])
+
+    def test_nsfw_mapper_folds_vaginal_penetration_fragments_into_one_action_contract(self) -> None:
+        workspace = {
+            "selector_character": "成年情侣",
+            "selector_action": "女上位姿态",
+            "anatomy_terms": "阴茎、阴道",
+            "explicit_terms": "性交、插入",
+        }
+        result = nsfw_mapper.map_nsfw_workspace_to_stage_state(
+            workspace,
+            tag_group_index={"成年情侣": "主体", "女上位姿态": "动作姿态"},
+            group_slot_limits={"主体": 2, "动作姿态": 2},
+        )
+        contracts = [tag for tag in result["custom_tags"] if tag.startswith("女上位阴道插入:")]
+        self.assertEqual(len(contracts), 1)
+        self.assertIn("成年男性的阴茎插入成年女性阴道", contracts[0])
+        self.assertIn("双方均为成年人且自愿", contracts[0])
+        for loose_term in ("阴茎", "阴道", "性交", "插入"):
+            self.assertNotIn(loose_term, result["custom_tags"])
+        self.assertIn("女上位姿态", result["selected"]["动作姿态"])
+
+    def test_nsfw_mapper_preserves_complete_manual_action_contract_as_one_term(self) -> None:
+        contract = nsfw_presets.NSFW_EXPLICIT_ACTION_CONTRACTS[1]
+        result = nsfw_mapper.map_nsfw_workspace_to_stage_state(
+            {"selector_action": contract, "anatomy_terms": "阴茎、阴道", "explicit_terms": "插入"},
+            tag_group_index={},
+            group_slot_limits={},
+        )
+        self.assertIn(contract, result["custom_tags"])
+        self.assertEqual(sum("阴道插入:" in tag for tag in result["custom_tags"]), 1)
+        for loose_term in ("阴茎", "阴道", "插入"):
+            self.assertNotIn(loose_term, result["custom_tags"])
+
+    def test_nsfw_mapper_preserves_every_explicit_action_contract_as_one_term(self) -> None:
+        for contract in nsfw_presets.NSFW_EXPLICIT_ACTION_CONTRACTS:
+            with self.subTest(contract=contract.split(":", 1)[0]):
+                result = nsfw_mapper.map_nsfw_workspace_to_stage_state(
+                    {
+                        "selector_action": contract,
+                        "anatomy_terms": "阴茎、阴道、外阴、阴蒂、肛门",
+                        "explicit_terms": "肛交、口交、自慰、性交、插入",
+                    },
+                    tag_group_index={},
+                    group_slot_limits={},
+                )
+                self.assertIn(contract, result["custom_tags"])
+                self.assertEqual(sum(tag == contract for tag in result["custom_tags"]), 1)
+                for loose_term in ("肛交", "口交", "自慰", "性交", "插入"):
+                    self.assertNotIn(loose_term, result["custom_tags"])
+
+    def test_nsfw_mapper_resolves_richer_legacy_action_contracts(self) -> None:
+        cases = (
+            (
+                {"selector_character": "成年情侣", "selector_action": "侧卧双人互动", "anatomy_terms": "阴茎、肛门", "explicit_terms": "肛交"},
+                "侧卧肛门插入:",
+            ),
+            (
+                {"selector_character": "成年情侣", "anatomy_terms": "阴茎", "explicit_terms": "口交"},
+                "女性对男性口部刺激:",
+            ),
+            (
+                {"selector_character": "成熟夫妇", "anatomy_terms": "外阴、阴蒂", "explicit_terms": "口交"},
+                "男性对女性口部刺激:",
+            ),
+            (
+                {"selector_character": "成年女性", "anatomy_terms": "外阴、阴蒂", "explicit_terms": "自慰"},
+                "成年女性自慰:",
+            ),
+            (
+                {"selector_character": "成年男性", "anatomy_terms": "阴茎", "explicit_terms": "自慰"},
+                "成年男性自慰:",
+            ),
+            (
+                {"selector_character": "男女配对", "anatomy_terms": "阴茎、阴道", "explicit_terms": "口交、性交"},
+                "女性对男性口部刺激:",
+            ),
+            (
+                {"selector_character": "双成年女性", "anatomy_terms": "外阴、阴蒂", "explicit_terms": "口交"},
+                "双成年女性单向口部刺激:",
+            ),
+            (
+                {"selector_character": "双成年女性", "explicit_terms": "相互口部刺激"},
+                "双成年女性相互口部刺激:",
+            ),
+            (
+                {"selector_character": "双成年男性", "anatomy_terms": "阴茎", "explicit_terms": "口交"},
+                "双成年男性单向口部刺激:",
+            ),
+            (
+                {"selector_character": "双成年男性", "explicit_terms": "相互口部刺激"},
+                "双成年男性相互口部刺激:",
+            ),
+            (
+                {"selector_character": "双成年女性", "explicit_terms": "外阴手部刺激"},
+                "双成年女性单向手部刺激:",
+            ),
+            (
+                {"selector_character": "双成年男性", "explicit_terms": "相互手部刺激"},
+                "双成年男性相互手部刺激:",
+            ),
+            (
+                {"selector_character": "成年女性", "explicit_terms": "成人道具刺激外阴"},
+                "成年女性成人道具外阴刺激:",
+            ),
+            (
+                {"selector_character": "成年女性", "explicit_terms": "成人道具阴道插入"},
+                "成年女性成人道具阴道插入:",
+            ),
+            (
+                {"selector_character": "成年男性", "anatomy_terms": "阴茎", "explicit_terms": "成人道具刺激阴茎"},
+                "成年男性成人道具刺激:",
+            ),
+            (
+                {"selector_character": "男女配对", "anatomy_terms": "外阴、阴蒂", "explicit_terms": "伴侣辅助成人道具"},
+                "伴侣辅助成人道具刺激女性:",
+            ),
+        )
+        for workspace, expected_prefix in cases:
+            with self.subTest(expected_prefix=expected_prefix):
+                result = nsfw_mapper.map_nsfw_workspace_to_stage_state(
+                    workspace,
+                    tag_group_index={},
+                    group_slot_limits={},
+                )
+                contracts = [tag for tag in result["custom_tags"] if tag.startswith(expected_prefix)]
+                self.assertEqual(len(contracts), 1)
+                self.assertIn("自愿", contracts[0])
+                for loose_term in ("肛交", "口交", "自慰", "性交", "插入"):
+                    self.assertNotIn(loose_term, result["custom_tags"])
+
+    def test_nsfw_mapper_normalizes_direct_colloquial_relation_to_adult_contract(self) -> None:
+        result = nsfw_mapper.map_nsfw_workspace_to_stage_state(
+            {"action": "男人的阴茎插入女人的阴道"},
+            tag_group_index={},
+            group_slot_limits={},
+        )
+        contract = next(tag for tag in result["custom_tags"] if tag.startswith("正面阴道插入:"))
+        self.assertIn("一名成年男性", contract)
+        self.assertIn("一名成年女性", contract)
+        self.assertNotIn("男人的阴茎插入女人的阴道", result["custom_tags"])
+
+    def test_nsfw_mapper_does_not_infer_two_person_contract_without_pair_role(self) -> None:
+        result = nsfw_mapper.map_nsfw_workspace_to_stage_state(
+            {"selector_character": "成年女性", "anatomy_terms": "阴茎、阴道", "explicit_terms": "性交、插入"},
+            tag_group_index={},
+            group_slot_limits={},
+        )
+        self.assertFalse(any("阴道插入:" in tag for tag in result["custom_tags"]))
+        for loose_term in ("阴茎", "阴道", "性交", "插入"):
+            self.assertIn(loose_term, result["custom_tags"])
+
+        ambiguous_pair = nsfw_mapper.map_nsfw_workspace_to_stage_state(
+            {"selector_character": "双女性", "anatomy_terms": "外阴、阴蒂", "explicit_terms": "口交"},
+            tag_group_index={},
+            group_slot_limits={},
+        )
+        self.assertFalse(any("双成年女性" in tag for tag in ambiguous_pair["custom_tags"]))
+        self.assertIn("口交", ambiguous_pair["custom_tags"])
 
     def test_nsfw_negative_preset_prefers_custom_when_selected(self) -> None:
         workspace = {
