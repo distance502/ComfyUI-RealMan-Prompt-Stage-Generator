@@ -181,20 +181,50 @@ const NSFW_NEGATIVE_PRESETS = {
 	"高质量负面提示词": "worst quality, low quality, blurry, bad anatomy",
 	"自定义负面提示词": "",
 };
+const NSFW_EXPLICIT_ACTION_CONTRACTS = [
+	"正面阴道插入: 一名成年男性面对一名成年女性, 以阴茎插入成年女性阴道; 双方均为成年人且自愿, 面对面骨盆接触点、四肢支撑与身体朝向保持清楚",
+	"后方阴道插入: 一名成年男性从后方以阴茎插入一名成年女性阴道; 双方均为成年人且自愿, 前后站位、骨盆接触点、腰背支撑与四肢位置保持清楚",
+	"女上位阴道插入: 一名成年女性跨坐在一名成年男性上方, 由成年男性的阴茎插入成年女性阴道; 双方均为成年人且自愿, 骨盆接触点、跨坐承重、四肢位置与身体朝向保持清楚",
+	"侧卧阴道插入: 一名成年男性与一名成年女性保持侧卧, 由成年男性以阴茎插入成年女性阴道; 双方均为成年人且自愿, 侧卧朝向、骨盆接触点、腿部交叠与身体轮廓保持清楚",
+	"后方肛门插入: 一名成年男性从后方以阴茎插入一名成年女性肛门; 双方均为成年人且自愿, 前后站位、骨盆接触点、腰背支撑与四肢位置保持清楚",
+	"侧卧肛门插入: 一名成年男性与一名成年女性保持侧卧, 由成年男性以阴茎插入成年女性肛门; 双方均为成年人且自愿, 侧卧朝向、骨盆接触点、腿部交叠与身体轮廓保持清楚",
+	"女性对男性口部刺激: 一名成年女性以口部刺激一名成年男性的阴茎; 双方均为成年人且自愿, 头部朝向、口部接触点、跪坐支撑与双人身体间距保持清楚",
+	"男性对女性口部刺激: 一名成年男性以口部和舌部刺激一名成年女性的外阴与阴蒂; 双方均为成年人且自愿, 面部朝向、口部接触点、女性腿部位置与双人轮廓保持清楚",
+	"双向口部刺激: 两名成年伴侣以相反身体朝向同时进行口部刺激; 双方均为成年人且自愿, 两处口部接触关系、头脚方向、躯干间距与四肢支撑保持清楚",
+	"女性对男性手部刺激: 一名成年女性以手掌和手指刺激一名成年男性的阴茎; 双方均为成年人且自愿, 手部归属、接触点、手臂路径与双人身体边界保持清楚",
+	"男性对女性手部刺激: 一名成年男性以手指刺激一名成年女性的外阴与阴蒂; 双方均为成年人且自愿, 手部归属、指尖接触点、腿部位置与双人身体边界保持清楚",
+	"成年女性自慰: 一名成年女性以自己的手指刺激自己的外阴与阴蒂; 成年主体自主自愿, 双手归属、指尖接触点、腿部位置与完整身体轮廓保持清楚",
+	"成年男性自慰: 一名成年男性以自己的手掌刺激自己的阴茎; 成年主体自主自愿, 双手归属、手掌接触点、手臂路径与完整身体轮廓保持清楚",
+	"双人相互手部刺激: 两名成年伴侣分别以手部刺激对方的私密部位; 双方均为成年人且自愿, 每只手的归属、两处接触点、双人轮廓与四肢路径保持清楚",
+	"双成年女性单向口部刺激: 一名成年女性以口部和舌部刺激另一名成年女性的外阴与阴蒂; 双方均为成年人且自愿, 主客体身份、口部接触点、腿部位置与双人轮廓保持清楚",
+	"双成年女性相互口部刺激: 两名成年女性以相反身体朝向同时刺激对方的外阴与阴蒂; 双方均为成年人且自愿, 两处口部接触点、头脚方向与四肢支撑保持清楚",
+	"双成年女性单向手部刺激: 一名成年女性以手指刺激另一名成年女性的外阴与阴蒂; 双方均为成年人且自愿, 手部归属、指尖接触点、腿部位置与双人身体边界保持清楚",
+	"双成年女性相互手部刺激: 两名成年女性分别以手指刺激对方的外阴与阴蒂; 双方均为成年人且自愿, 每只手的归属、两处接触点、双人轮廓与四肢路径保持清楚",
+	"双成年男性单向口部刺激: 一名成年男性以口部刺激另一名成年男性的阴茎; 双方均为成年人且自愿, 主客体身份、口部接触点、跪坐支撑与双人身体间距保持清楚",
+	"双成年男性相互口部刺激: 两名成年男性以相反身体朝向同时刺激对方的阴茎; 双方均为成年人且自愿, 两处口部接触点、头脚方向与四肢支撑保持清楚",
+	"双成年男性单向手部刺激: 一名成年男性以手掌和手指刺激另一名成年男性的阴茎; 双方均为成年人且自愿, 手部归属、接触点、手臂路径与双人身体边界保持清楚",
+	"双成年男性相互手部刺激: 两名成年男性分别以手部刺激对方的阴茎; 双方均为成年人且自愿, 每只手的归属、两处接触点、双人轮廓与四肢路径保持清楚",
+	"成年女性成人道具外阴刺激: 一名成年女性使用成人道具刺激自己的外阴与阴蒂; 成年主体自主自愿, 道具握持关系、接触点、腿部位置与完整身体轮廓保持清楚",
+	"成年女性成人道具阴道插入: 一名成年女性自愿使用成人道具进行阴道插入; 成年主体自主自愿, 道具方向、插入接触点、骨盆朝向与四肢支撑保持清楚",
+	"成年女性成人道具肛门插入: 一名成年女性自愿使用成人道具进行肛门插入; 成年主体自主自愿, 道具方向、接触点、骨盆朝向与四肢支撑保持清楚",
+	"成年男性成人道具刺激: 一名成年男性使用成人道具刺激自己的阴茎; 成年主体自主自愿, 道具握持关系、接触点、手臂路径与完整身体轮廓保持清楚",
+	"伴侣辅助成人道具刺激女性: 一名成年伴侣使用成人道具刺激另一名成年女性的外阴与阴蒂; 双方均为成年人且自愿, 道具持有者、接触点、女性腿部位置与双人轮廓保持清楚",
+	"伴侣辅助成人道具刺激男性: 一名成年伴侣使用成人道具刺激另一名成年男性的阴茎; 双方均为成年人且自愿, 道具持有者、接触点、男性身体支撑与双人轮廓保持清楚",
+];
 const NSFW_WORKSPACE_OPTIONS = {
-	selector_character: ["——", "单女性", "男女配对", "双女性", "多女性", "办公室女士", "女仆", "护士", "秘书", "警察", "军人", "偶像", "公主", "女王", "女神", "猫女", "兔女郎", "精灵", "魅魔", "吸血鬼", "女巫", "机器人", "仿生人", "半机械人"],
+	selector_character: ["——", "单女性", "成年女性", "成年男性", "成年情侣", "成熟夫妇", "男女配对", "双女性", "双成年女性", "双成年男性", "多女性", "办公室女士", "女仆", "护士", "秘书", "警察", "军人", "偶像", "公主", "女王", "女神", "猫女", "兔女郎", "精灵", "魅魔", "吸血鬼", "女巫", "机器人", "仿生人", "半机械人"],
 	selector_outfit: ["——", "比基尼", "内衣", "透明薄纱", "湿衣服", "破损衣服", "微型比基尼", "绳结比基尼", "丁字裤", "渔网装", "乳胶装", "皮革装", "太空服", "束缚造型", "项圈", "手铐", "眼罩", "高跟鞋"],
-	selector_action: ["——", "接吻", "法式接吻", "颈部亲吻", "亲密拥抱", "身体贴近", "手部抚摸", "腿部打开姿态", "摩擦姿态", "女上位姿态", "站姿亲密", "脱衣舞", "钢管舞", "膝上舞"],
+	selector_action: ["——", "接吻", "法式接吻", "颈部亲吻", "亲密拥抱", "身体贴近", "手部抚摸", "腿部打开姿态", "摩擦姿态", "女上位姿态", "站姿亲密", "脱衣舞", "钢管舞", "膝上舞", ...NSFW_EXPLICIT_ACTION_CONTRACTS],
 	selector_scene: ["——", "酒店套房", "情人酒店", "温泉", "淋浴场景", "浴缸场景", "车内", "办公室", "户外", "海滩", "按摩场景", "夜店", "私人泳池", "更衣室", "桑拿", "科幻舱室"],
 	selector_expression: ["——", "脸红", "害羞", "诱惑视线", "微醺情绪", "出汗", "喘息感", "湿润质感", "心形眼睛", "微张嘴唇", "伸出舌尖", "眼泪"],
 	selector_prop: ["——", "项圈", "牵引绳", "手铐", "绳索", "口塞", "眼罩", "鞭子", "成人道具", "纹身", "穿孔", "镜面道具", "玻璃反光"],
 	scene: ["——", "豪华卧室，红色丝绒床单，镜面天花板", "精品酒店套房，暖色壁灯，落地窗夜景", "卧室落地窗夜景，柔纱窗帘，城市灯火", "浴后蒸汽浴室，雾化玻璃，温暖顶光", "私人温泉，岩石池沿，月色水汽", "复古化妆间，镜前灯泡，丝绒座椅", "暗调酒吧，吧台反光，低饱和霓虹", "影棚纯色背景，柔光箱，干净地台", "城市天台，晚风栏杆，远处灯海", "雨夜车窗，皮质座椅，玻璃水痕", "赛博街区，霓虹雨夜，潮湿路面", "古典月下庭院，回廊灯笼，石阶留白"],
-	action: ["——", "男女深吻，镜前亲密拥抱，眼神交流", "倚靠窗边回眸，肩颈放松，指尖扶帘", "镜前整理妆发，视线避开镜头，姿态自然", "轻抚发丝，侧身站立，身体线条舒展", "整理肩带与衣领，表情克制，动作含蓄", "浴后擦发，水汽环绕，身体重心稳定", "扶栏远望，侧脸受光，衣摆被风带起", "端起酒杯轻靠吧台，眼神微醺，肩线清晰", "慢步转身，衣料有动态，脚步落点清楚", "托腮凝视，肘部支撑合理，眼神有情绪", "强成人氛围姿态，身体贴近，表情成熟克制", "私密姿态，动作含蓄但张力明确，镜头保持完整构图"],
+	action: ["——", "男女深吻，镜前亲密拥抱，眼神交流", "倚靠窗边回眸，肩颈放松，指尖扶帘", "镜前整理妆发，视线避开镜头，姿态自然", "轻抚发丝，侧身站立，身体线条舒展", "整理肩带与衣领，表情克制，动作含蓄", "浴后擦发，水汽环绕，身体重心稳定", "扶栏远望，侧脸受光，衣摆被风带起", "端起酒杯轻靠吧台，眼神微醺，肩线清晰", "慢步转身，衣料有动态，脚步落点清楚", "托腮凝视，肘部支撑合理，眼神有情绪", "强成人氛围姿态，身体贴近，表情成熟克制", "私密姿态，动作含蓄但张力明确，镜头保持完整构图", ...NSFW_EXPLICIT_ACTION_CONTRACTS],
 	outfit: ["——", "蕾丝内衣套装，轮廓精致，材质层次清楚", "真丝吊带裙，柔软垂坠，边缘高光细腻", "丝质睡袍，腰带松弛，袖口自然垂落", "湿身薄纱罩衫，半透明层次，水汽贴合面料", "浴巾裹身，湿发贴肩，柔光皮肤质感", "黑色缎面礼服，低调光泽，高级剪裁", "细跟高跟鞋，脚踝线条清楚，落脚稳定", "透明高跟凉鞋，反光材质，脚部完整", "Lookbook贴身套装，版型明确，商业成片感", "汉服薄纱外搭，内外层次分明，衣摆流动", "低遮挡内衣风，贴身材质，轮廓关系清楚", "镂空蕾丝内衣，遮挡结构明确，材质层次清楚", "透明黑色纱裙，半透层次，身体轮廓清楚", "短款皮质热裤，搭配项圈，造型张力明确", "紧身乳胶装，光泽贴合身体轮廓", "蕾丝饰带缠绕，装饰性覆盖，轮廓关系清楚", "渔网连体装，低遮挡结构，主体完整入镜", "半裸湿透衬衫，贴合身体线条，水汽质感明确", "情趣吊带袜，搭配高跟鞋，腿部线条完整", "透明睡袍，薄纱层次，边缘高光细腻", "装饰性饰带缠绕，覆盖关系清楚，避免局部抢镜", "情趣制服，短裙摆与敞开扣子，版型清楚", "皮质束缚装，金属铆钉装饰，结构感明确", "成熟私房造型，薄纱与蕾丝层次明确，主体完整入镜"],
 	mood: ["——", "克制诱惑，眼神清醒，情绪含蓄", "私密微醺，嘴角微扬，氛围松弛", "慵懒松弛，呼吸感明显，姿态自然", "冷艳自持，视线稳定，表情锋利", "温柔暧昧，面部柔和，情绪细腻", "自信注视，身体打开，镜头感强", "清冷疏离，低饱和情绪，动作克制", "高级性感，商业大片质感，主体完成度高", "高强度成人氛围，成熟诱惑，镜头克制不直白", "露骨感收敛表达，强调私密张力和成熟气质", "欲念张力，身体微颤，眼神迷离", "禁忌诱惑，嘴角微翘，情绪克制", "支配感，掌控姿态，人物关系清楚", "情绪迷醉，呼吸急促，表情集中", "强烈感官氛围，动作张力明确，画面不贴脸"],
 	anatomy_terms: ["——", "乳房", "乳头", "外阴", "阴道", "阴蒂", "阴唇", "阴茎", "龟头", "睾丸", "臀部", "肛门", "私密部位细节"],
-	explicit_terms: ["——", "性交", "插入", "自慰", "潮吹"],
-	adult_action_style: ["——", "单人私密姿态，动作含蓄，表情张力明确", "单人挑逗动作，身体线条舒展，镜头保持完整构图", "脱衣动作，节奏缓慢，镜头保持全身关系", "舔唇表情，视线集中，面部情绪明确", "弯腰姿态，重心稳定，身体线条可读", "手部抚摸动作，动作连续，避免局部抢镜", "身体扭动，湿身滴水，动态自然", "胸部抚摸动作，表情迷离，镜头克制", "臀部慢摇，曲线突出，姿态不变形", "倚墙伸展姿态，手臂上举，身体比例稳定", "双手高举，身体拉伸，肩颈线条清楚", "低姿爬行动作，回头视线，空间透视稳定", "侧躺私房姿态，腿部交叠，曲线自然可读", "跪姿私房构图，背部拱起，发丝自然垂落", "微张嘴唇，呼吸感明显，表情张力集中", "湿身浴室动作，水汽与泡沫作为氛围遮挡", "道具氛围点缀，保留成人张力但避免局部特写", "成人道具参与，动作关系清楚，避免局部特写", "双人亲密拥抱，肢体靠近，主体关系清楚", "双人亲密互动，动作连续，镜头克制不直白", "站姿双人互动，重心稳定，身体关系明确", "跨坐互动，腰部距离清楚，人物关系稳定", "从后拥抱，颈部贴近，情绪亲密", "口部亲密互动，镜头克制，人物关系清楚", "轻拍臀部互动，动作提示明确，镜头不贴脸", "推拉节奏互动，肢体缠绕，人物关系不混乱", "侧躺双人互动，动作柔和，空间关系稳定", "亲密低语，头发触碰，眼神对视", "浴室双人亲密氛围，泡沫与水汽包裹主体", "车内亲密氛围，狭窄空间与玻璃反光增强张力", "腿部打开姿态，手部位置清楚，构图保持全身", "主从感互动，束缚元素作为造型叙事，避免暴力表达", "主从感跪姿互动，服从姿态作为叙事，避免暴力羞辱", "多人亲密氛围，主体优先，人物关系不混乱"],
+	explicit_terms: ["——", "性交", "插入", "自慰", "潮吹", "口交", "肛交", "射精", "体液", "多人性行为", "阴茎口部刺激", "外阴口部刺激", "相互口部刺激", "阴茎手部刺激", "外阴手部刺激", "相互手部刺激", "成人道具刺激外阴", "成人道具刺激阴茎", "成人道具阴道插入", "成人道具肛门插入", "伴侣辅助成人道具"],
+	adult_action_style: ["——", "单人私密姿态，动作含蓄，表情张力明确", "单人挑逗动作，身体线条舒展，镜头保持完整构图", "脱衣动作，节奏缓慢，镜头保持全身关系", "舔唇表情，视线集中，面部情绪明确", "弯腰姿态，重心稳定，身体线条可读", "手部抚摸动作，动作连续，避免局部抢镜", "身体扭动，湿身滴水，动态自然", "胸部抚摸动作，表情迷离，镜头克制", "臀部慢摇，曲线突出，姿态不变形", "倚墙伸展姿态，手臂上举，身体比例稳定", "双手高举，身体拉伸，肩颈线条清楚", "低姿爬行动作，回头视线，空间透视稳定", "侧躺私房姿态，腿部交叠，曲线自然可读", "跪姿私房构图，背部拱起，发丝自然垂落", "微张嘴唇，呼吸感明显，表情张力集中", "湿身浴室动作，水汽与泡沫作为氛围遮挡", "道具氛围点缀，保留成人张力但避免局部特写", "成人道具参与，动作关系清楚，避免局部特写", "双人亲密拥抱，肢体靠近，主体关系清楚", "双人亲密互动，动作连续，镜头克制不直白", "站姿双人互动，重心稳定，身体关系明确", "跨坐互动，腰部距离清楚，人物关系稳定", "从后拥抱，颈部贴近，情绪亲密", "口部亲密互动，镜头克制，人物关系清楚", "轻拍臀部互动，动作提示明确，镜头不贴脸", "推拉节奏互动，肢体缠绕，人物关系不混乱", "侧躺双人互动，动作柔和，空间关系稳定", "亲密低语，头发触碰，眼神对视", "浴室双人亲密氛围，泡沫与水汽包裹主体", "车内亲密氛围，狭窄空间与玻璃反光增强张力", "腿部打开姿态，手部位置清楚，构图保持全身", "主从感互动，束缚元素作为造型叙事，避免暴力表达", "主从感跪姿互动，服从姿态作为叙事，避免暴力羞辱", "多人亲密氛围，主体优先，人物关系不混乱", ...NSFW_EXPLICIT_ACTION_CONTRACTS],
 	camera_movement: ["——", "静态封面肖像，主体稳定，背景干净", "缓慢推近面部，焦点停在眼睛和唇部妆感", "从全身到半身，先交代服装轮廓再收束表情", "拉远保留全身，脚部和衣摆完整入镜", "环绕式展示服装轮廓，保持单一主体比例", "镜前反射切换，主体与镜像关系清楚", "快速推进至局部细节，随后回到全身关系", "360度环绕，捕捉全身轮廓与服装材质", "低角度慢扫，从脚踝到腰线，节奏渐强", "柔焦跟随，锁定亲密动作关系", "动态放大后拉远，强调身体曲线与空间", "晃动镜头，营造紧张挑逗氛围", "快速变焦，强调情绪峰值"],
 	camera_angle: ["——", "眼平视角，人物关系稳定", "轻微俯拍，面部与肩线清楚", "低角度全身，腿部比例自然", "过肩镜中视角，镜像不制造多人错觉", "侧面三分之二，脸部仍可读", "背面回头，发丝和衣摆完整", "窗边侧逆光视角，轮廓光分离主体", "低角度，突出臀部与腿部线条", "高角度，俯视亲密姿态，身体关系清楚", "过肩视角，聚焦亲密互动，主体关系稳定", "平视角度，强调表情与动作连续性"],
 	light_source: ["——", "窗边自然光，柔纱漫射", "暖色台灯，局部照亮面部", "霓虹侧光，湿润反光", "红色烛光，摇曳氛围", "月光洒落，银色反光", "柔光箱，商业棚拍质感", "冷暖混合光，背景与主体分层", "粉紫霓虹光，循环闪烁", "低调私密灯光，晕染肌肤", "彩色渐变光，流动氛围", "闪烁氛围光，节奏同步"],
@@ -11018,6 +11048,189 @@ function resolveNsfwEffectiveWorkspace(workspace, catalog = {}) {
 	return effective;
 }
 
+const NSFW_ACTION_CONTRACT_FIELDS = ["selector_action", "action", "adult_action_style"];
+function nsfwWorkspaceFieldsText(workspace, fields) {
+	const values = [];
+	for (const field of fields) {
+		const rawValue = workspace?.[field];
+		for (const value of Array.isArray(rawValue) ? rawValue : [rawValue]) {
+			const text = String(value ?? "").trim();
+			if (text && text !== "——") values.push(text);
+		}
+	}
+	return values.join("，");
+}
+
+function hasExplicitVaginalRelation(value) {
+	const text = nsfwWorkspaceFieldsText({ value }, ["value"]);
+	return text.includes("阴茎") && text.includes("阴道") && ["插入", "性交"].some((marker) => text.includes(marker));
+}
+
+function hasCompleteNsfwActionContract(value) {
+	const text = nsfwWorkspaceFieldsText({ value }, ["value"]);
+	return text.includes("成年")
+		&& text.includes("自愿")
+		&& (["阴道插入", "肛门插入", "口部刺激", "手部刺激", "自慰"].some((marker) => text.includes(marker))
+			|| (text.includes("成人道具") && ["刺激", "插入"].some((marker) => text.includes(marker))));
+}
+
+function isNsfwActionContractSource(value) {
+	return hasCompleteNsfwActionContract(value) || hasExplicitVaginalRelation(value);
+}
+
+function firstPresentNsfwMarker(text, markers) {
+	const positioned = markers
+		.map((marker) => [text.indexOf(marker), marker])
+		.filter(([index]) => index >= 0)
+		.sort(([left], [right]) => left - right);
+	return positioned[0]?.[1] ?? "";
+}
+
+function resolveNsfwActionContract(workspace) {
+	for (const field of NSFW_ACTION_CONTRACT_FIELDS) {
+		const candidate = nsfwWorkspaceFieldsText(workspace, [field]);
+		if (hasCompleteNsfwActionContract(candidate)) return candidate;
+	}
+
+	const actionText = nsfwWorkspaceFieldsText(workspace, NSFW_ACTION_CONTRACT_FIELDS);
+	const anatomyText = nsfwWorkspaceFieldsText(workspace, ["anatomy_terms"]);
+	const explicitText = nsfwWorkspaceFieldsText(workspace, ["explicit_terms"]);
+	const roleText = nsfwWorkspaceFieldsText(workspace, ["selector_character", "workspace_custom_tags", "trigger_words", "custom_prefix", "custom_suffix"]);
+	const hasAdultPair = ["成年情侣", "成熟夫妇", "男女配对"].some((marker) => roleText.includes(marker))
+		|| (["成年男性", "成熟男性", "男人", "男性"].some((marker) => roleText.includes(marker))
+			&& ["成年女性", "成熟女性", "女人", "女性"].some((marker) => roleText.includes(marker)));
+	const hasAdultFemalePair = roleText.includes("双成年女性");
+	const hasAdultMalePair = roleText.includes("双成年男性");
+	const hasAnyAdultPair = hasAdultPair || hasAdultFemalePair || hasAdultMalePair;
+	const hasAdultFemale = ["成年女性", "成熟女性"].some((marker) => roleText.includes(marker));
+	const hasAdultMale = ["成年男性", "成熟男性"].some((marker) => roleText.includes(marker));
+	const directVaginal = hasExplicitVaginalRelation(actionText);
+	const directAnal = actionText.includes("阴茎")
+		&& actionText.includes("肛门")
+		&& ["插入", "肛交"].some((marker) => actionText.includes(marker));
+	const chosenExplicit = firstPresentNsfwMarker(explicitText, ["相互口部刺激", "相互手部刺激", "成人道具阴道插入", "成人道具肛门插入", "成人道具刺激外阴", "成人道具刺激阴茎", "伴侣辅助成人道具", "阴茎口部刺激", "外阴口部刺激", "阴茎手部刺激", "外阴手部刺激", "肛交", "口交", "自慰", "性交", "插入"]);
+	const toyTarget = chosenExplicit === "成人道具刺激外阴"
+		? "外阴"
+		: chosenExplicit === "成人道具刺激阴茎"
+			? "阴茎"
+		: chosenExplicit === "成人道具阴道插入"
+			? "阴道"
+			: chosenExplicit === "成人道具肛门插入"
+				? "肛门"
+				: firstPresentNsfwMarker(anatomyText, ["外阴", "阴蒂", "阴道", "肛门", "阴茎"]);
+	const directToy = actionText.includes("成人道具") && ["刺激", "插入"].some((marker) => actionText.includes(marker));
+	if (directToy || ["成人道具阴道插入", "成人道具肛门插入", "成人道具刺激外阴", "成人道具刺激阴茎", "伴侣辅助成人道具"].includes(chosenExplicit)) {
+		if (chosenExplicit === "伴侣辅助成人道具" || (directToy && hasAdultPair)) {
+			if (["外阴", "阴蒂", "阴道"].includes(toyTarget)) {
+				return "伴侣辅助成人道具刺激女性: 一名成年伴侣使用成人道具刺激另一名成年女性的外阴与阴蒂; 双方均为成年人且自愿, 道具持有者、接触点、女性腿部位置与双人轮廓保持清楚";
+			}
+			if (toyTarget === "阴茎") {
+				return "伴侣辅助成人道具刺激男性: 一名成年伴侣使用成人道具刺激另一名成年男性的阴茎; 双方均为成年人且自愿, 道具持有者、接触点、男性身体支撑与双人轮廓保持清楚";
+			}
+		}
+		if (hasAdultFemale && chosenExplicit === "成人道具肛门插入") {
+			return "成年女性成人道具肛门插入: 一名成年女性自愿使用成人道具进行肛门插入; 成年主体自主自愿, 道具方向、接触点、骨盆朝向与四肢支撑保持清楚";
+		}
+		if (hasAdultFemale && chosenExplicit === "成人道具阴道插入") {
+			return "成年女性成人道具阴道插入: 一名成年女性自愿使用成人道具进行阴道插入; 成年主体自主自愿, 道具方向、插入接触点、骨盆朝向与四肢支撑保持清楚";
+		}
+		if (hasAdultFemale && ["成人道具刺激外阴", ""].includes(chosenExplicit) && ["外阴", "阴蒂"].includes(toyTarget)) {
+			return "成年女性成人道具外阴刺激: 一名成年女性使用成人道具刺激自己的外阴与阴蒂; 成年主体自主自愿, 道具握持关系、接触点、腿部位置与完整身体轮廓保持清楚";
+		}
+		if (hasAdultMale && toyTarget === "阴茎") {
+			return "成年男性成人道具刺激: 一名成年男性使用成人道具刺激自己的阴茎; 成年主体自主自愿, 道具握持关系、接触点、手臂路径与完整身体轮廓保持清楚";
+		}
+	}
+
+	if (directAnal || (hasAdultPair && anatomyText.includes("阴茎") && anatomyText.includes("肛门") && chosenExplicit === "肛交")) {
+		if (actionText.includes("侧卧")) {
+			return "侧卧肛门插入: 一名成年男性与一名成年女性保持侧卧, 由成年男性以阴茎插入成年女性肛门; 双方均为成年人且自愿, 侧卧朝向、骨盆接触点、腿部交叠与身体轮廓保持清楚";
+		}
+		return "后方肛门插入: 一名成年男性从后方以阴茎插入一名成年女性肛门; 双方均为成年人且自愿, 前后站位、骨盆接触点、腰背支撑与四肢位置保持清楚";
+	}
+
+	if (chosenExplicit === "相互口部刺激" && hasAnyAdultPair) {
+		if (hasAdultFemalePair) {
+			return "双成年女性相互口部刺激: 两名成年女性以相反身体朝向同时刺激对方的外阴与阴蒂; 双方均为成年人且自愿, 两处口部接触点、头脚方向与四肢支撑保持清楚";
+		}
+		if (hasAdultMalePair) {
+			return "双成年男性相互口部刺激: 两名成年男性以相反身体朝向同时刺激对方的阴茎; 双方均为成年人且自愿, 两处口部接触点、头脚方向与四肢支撑保持清楚";
+		}
+		return "双向口部刺激: 两名成年伴侣以相反身体朝向同时进行口部刺激; 双方均为成年人且自愿, 两处口部接触关系、头脚方向、躯干间距与四肢支撑保持清楚";
+	}
+
+	if (["口交", "阴茎口部刺激", "外阴口部刺激"].includes(chosenExplicit)) {
+		const oralTarget = chosenExplicit === "阴茎口部刺激"
+			? "阴茎"
+			: chosenExplicit === "外阴口部刺激"
+				? "外阴"
+				: firstPresentNsfwMarker(anatomyText, ["阴茎", "外阴", "阴蒂", "阴道"]);
+		if (oralTarget === "阴茎" && (hasAdultPair || hasAdultMalePair)) {
+			if (hasAdultMalePair) {
+				return "双成年男性单向口部刺激: 一名成年男性以口部刺激另一名成年男性的阴茎; 双方均为成年人且自愿, 主客体身份、口部接触点、跪坐支撑与双人身体间距保持清楚";
+			}
+			return "女性对男性口部刺激: 一名成年女性以口部刺激一名成年男性的阴茎; 双方均为成年人且自愿, 头部朝向、口部接触点、跪坐支撑与双人身体间距保持清楚";
+		}
+		if (oralTarget && (hasAdultPair || hasAdultFemalePair)) {
+			if (hasAdultFemalePair) {
+				return "双成年女性单向口部刺激: 一名成年女性以口部和舌部刺激另一名成年女性的外阴与阴蒂; 双方均为成年人且自愿, 主客体身份、口部接触点、腿部位置与双人轮廓保持清楚";
+			}
+			return "男性对女性口部刺激: 一名成年男性以口部和舌部刺激一名成年女性的外阴与阴蒂; 双方均为成年人且自愿, 面部朝向、口部接触点、女性腿部位置与双人轮廓保持清楚";
+		}
+	}
+
+	if (chosenExplicit === "相互手部刺激" && hasAnyAdultPair) {
+		if (hasAdultFemalePair) {
+			return "双成年女性相互手部刺激: 两名成年女性分别以手指刺激对方的外阴与阴蒂; 双方均为成年人且自愿, 每只手的归属、两处接触点、双人轮廓与四肢路径保持清楚";
+		}
+		if (hasAdultMalePair) {
+			return "双成年男性相互手部刺激: 两名成年男性分别以手部刺激对方的阴茎; 双方均为成年人且自愿, 每只手的归属、两处接触点、双人轮廓与四肢路径保持清楚";
+		}
+		return "双人相互手部刺激: 两名成年伴侣分别以手部刺激对方的私密部位; 双方均为成年人且自愿, 每只手的归属、两处接触点、双人轮廓与四肢路径保持清楚";
+	}
+
+	if (chosenExplicit === "阴茎手部刺激" && (hasAdultPair || hasAdultMalePair)) {
+		if (hasAdultMalePair) {
+			return "双成年男性单向手部刺激: 一名成年男性以手掌和手指刺激另一名成年男性的阴茎; 双方均为成年人且自愿, 手部归属、接触点、手臂路径与双人身体边界保持清楚";
+		}
+		return "女性对男性手部刺激: 一名成年女性以手掌和手指刺激一名成年男性的阴茎; 双方均为成年人且自愿, 手部归属、接触点、手臂路径与双人身体边界保持清楚";
+	}
+
+	if (chosenExplicit === "外阴手部刺激" && (hasAdultPair || hasAdultFemalePair)) {
+		if (hasAdultFemalePair) {
+			return "双成年女性单向手部刺激: 一名成年女性以手指刺激另一名成年女性的外阴与阴蒂; 双方均为成年人且自愿, 手部归属、指尖接触点、腿部位置与双人身体边界保持清楚";
+		}
+		return "男性对女性手部刺激: 一名成年男性以手指刺激一名成年女性的外阴与阴蒂; 双方均为成年人且自愿, 手部归属、指尖接触点、腿部位置与双人身体边界保持清楚";
+	}
+
+	if (chosenExplicit === "自慰") {
+		if (hasAdultFemale && ["外阴", "阴蒂", "阴道"].some((marker) => anatomyText.includes(marker))) {
+			return "成年女性自慰: 一名成年女性以自己的手指刺激自己的外阴与阴蒂; 成年主体自主自愿, 双手归属、指尖接触点、腿部位置与完整身体轮廓保持清楚";
+		}
+		if (hasAdultMale && anatomyText.includes("阴茎")) {
+			return "成年男性自慰: 一名成年男性以自己的手掌刺激自己的阴茎; 成年主体自主自愿, 双手归属、手掌接触点、手臂路径与完整身体轮廓保持清楚";
+		}
+	}
+
+	const legacyVaginal = hasAdultPair
+		&& anatomyText.includes("阴茎")
+		&& anatomyText.includes("阴道")
+		&& ["插入", "性交"].includes(chosenExplicit);
+	if (directVaginal || legacyVaginal) {
+		if (actionText.includes("女上位") || actionText.includes("跨坐")) {
+			return "女上位阴道插入: 一名成年女性跨坐在一名成年男性上方, 由成年男性的阴茎插入成年女性阴道; 双方均为成年人且自愿, 骨盆接触点、跨坐承重、四肢位置与身体朝向保持清楚";
+		}
+		if (["后方", "从后", "背后"].some((marker) => actionText.includes(marker))) {
+			return "后方阴道插入: 一名成年男性从后方以阴茎插入一名成年女性阴道; 双方均为成年人且自愿, 前后站位、骨盆接触点、腰背支撑与四肢位置保持清楚";
+		}
+		if (actionText.includes("侧卧")) {
+			return "侧卧阴道插入: 一名成年男性与一名成年女性保持侧卧, 由成年男性以阴茎插入成年女性阴道; 双方均为成年人且自愿, 侧卧朝向、骨盆接触点、腿部交叠与身体轮廓保持清楚";
+		}
+		return "正面阴道插入: 一名成年男性面对一名成年女性, 以阴茎插入成年女性阴道; 双方均为成年人且自愿, 面对面骨盆接触点、四肢支撑与身体朝向保持清楚";
+	}
+	return "";
+}
+
 function mapNsfwWorkspaceToStageState(node, library, workspace, catalogOrNegativePresets) {
 	const catalog = catalogOrNegativePresets?.negativePresets
 		? catalogOrNegativePresets
@@ -11057,8 +11270,25 @@ function mapNsfwWorkspaceToStageState(node, library, workspace, catalogOrNegativ
 		? effectiveWorkspace.trigger_words.map((item) => String(item ?? "").trim()).filter(Boolean)
 		: parseCustomTags(effectiveWorkspace?.trigger_words ?? "");
 	const textFields = ["workspace_custom_tags", "selector_character", "selector_outfit", "selector_action", "selector_scene", "selector_expression", "selector_prop", "scene", "action", "outfit", "mood", "anatomy_terms", "explicit_terms", "adult_action_style", "camera_movement", "camera_angle", "light_source", "light_type", "lens_type", "focal_length", "color_tone", "visual_style", "effect", "filter", "custom_prefix", "custom_suffix"];
+	const actionContract = resolveNsfwActionContract(effectiveWorkspace);
+	let actionContractEmitted = false;
 	for (const tag of triggerWords) pushMappedTerms(tag);
-	for (const field of textFields) pushMappedTerms(effectiveWorkspace?.[field], field.startsWith("selector_"));
+	for (const field of textFields) {
+		if (actionContract && ["anatomy_terms", "explicit_terms"].includes(field)) continue;
+		if (actionContract && NSFW_ACTION_CONTRACT_FIELDS.includes(field) && isNsfwActionContractSource(effectiveWorkspace?.[field])) {
+			if (!actionContractEmitted) {
+				pushMappedTerm(actionContract);
+				actionContractEmitted = true;
+			}
+			continue;
+		}
+		pushMappedTerms(effectiveWorkspace?.[field], field.startsWith("selector_"));
+		if (actionContract && field === "action" && !actionContractEmitted) {
+			pushMappedTerm(actionContract);
+			actionContractEmitted = true;
+		}
+	}
+	if (actionContract && !actionContractEmitted) pushMappedTerm(actionContract);
 	for (const tag of catalog.qualityTags?.[effectiveWorkspace.quality_tier] ?? []) {
 		const text = String(tag ?? "").trim();
 		if (text && !customTags.includes(text)) customTags.push(text);

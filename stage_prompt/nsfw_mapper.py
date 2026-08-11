@@ -36,6 +36,29 @@ except ImportError:  # pragma: no cover - direct file loading in focused tests
 _TEXT_SPLIT_PATTERN = re.compile(r"[,\n\r\t;；，、]+")
 _ASCII_TOKEN_PATTERN = re.compile(r"\s+[A-Za-z0-9][A-Za-z0-9_\- ]*$")
 _EMPTY_SENTINEL = "——"
+_ACTION_CONTRACT_FIELDS = ("selector_action", "action", "adult_action_style")
+_ADULT_PAIR_MARKERS = ("成年情侣", "成熟夫妇", "男女配对")
+_MALE_ROLE_MARKERS = ("成年男性", "成熟男性", "男人", "男性")
+_FEMALE_ROLE_MARKERS = ("成年女性", "成熟女性", "女人", "女性")
+_PENETRATION_MARKERS = ("插入", "性交")
+_EXPLICIT_ACTION_PRIORITY = (
+    "相互口部刺激",
+    "相互手部刺激",
+    "成人道具阴道插入",
+    "成人道具肛门插入",
+    "成人道具刺激外阴",
+    "成人道具刺激阴茎",
+    "伴侣辅助成人道具",
+    "阴茎口部刺激",
+    "外阴口部刺激",
+    "阴茎手部刺激",
+    "外阴手部刺激",
+    "肛交",
+    "口交",
+    "自慰",
+    "性交",
+    "插入",
+)
 _VALUE_FIELDS = (
     "workspace_custom_tags",
     *NSFW_SELECTOR_FIELDS,
@@ -265,6 +288,259 @@ def _iter_selector_terms(value: Any) -> Iterable[str]:
         yield alias or term
 
 
+def _workspace_fields_text(workspace: dict[str, Any], fields: Iterable[str]) -> str:
+    values: list[str] = []
+    for field in fields:
+        raw_value = workspace.get(field, "")
+        raw_values = raw_value if isinstance(raw_value, (list, tuple, set)) else [raw_value]
+        for value in raw_values:
+            text = _clean_text(value, _WORKSPACE_MAX_SCALAR_CHARS)
+            if text:
+                values.append(text)
+    return "，".join(values)
+
+
+def _has_explicit_vaginal_relation(value: Any) -> bool:
+    text = _workspace_fields_text({"value": value}, ("value",))
+    return "阴茎" in text and "阴道" in text and any(marker in text for marker in _PENETRATION_MARKERS)
+
+
+def _has_complete_nsfw_action_contract(value: Any) -> bool:
+    text = _workspace_fields_text({"value": value}, ("value",))
+    return "成年" in text and "自愿" in text and (
+        any(marker in text for marker in ("阴道插入", "肛门插入", "口部刺激", "手部刺激", "自慰"))
+        or ("成人道具" in text and any(marker in text for marker in ("刺激", "插入")))
+    )
+
+
+def _is_nsfw_action_contract_source(value: Any) -> bool:
+    return _has_complete_nsfw_action_contract(value) or _has_explicit_vaginal_relation(value)
+
+
+def _first_present_marker(text: str, markers: Iterable[str]) -> str:
+    positioned = [(text.find(marker), marker) for marker in markers if marker in text]
+    return min(positioned, key=lambda item: item[0], default=(-1, ""))[1]
+
+
+def resolve_nsfw_action_contract(workspace: dict[str, Any]) -> str:
+    """Resolve explicit opt-in fragments into one adult subject-action-object sentence."""
+
+    for field in _ACTION_CONTRACT_FIELDS:
+        candidate = _workspace_fields_text(workspace, (field,))
+        if _has_complete_nsfw_action_contract(candidate):
+            return candidate
+
+    action_text = _workspace_fields_text(workspace, _ACTION_CONTRACT_FIELDS)
+    anatomy_text = _workspace_fields_text(workspace, ("anatomy_terms",))
+    explicit_text = _workspace_fields_text(workspace, ("explicit_terms",))
+    role_text = _workspace_fields_text(
+        workspace,
+        ("selector_character", "workspace_custom_tags", "trigger_words", "custom_prefix", "custom_suffix"),
+    )
+    has_adult_pair = any(marker in role_text for marker in _ADULT_PAIR_MARKERS) or (
+        any(marker in role_text for marker in _MALE_ROLE_MARKERS)
+        and any(marker in role_text for marker in _FEMALE_ROLE_MARKERS)
+    )
+    has_adult_female_pair = "双成年女性" in role_text
+    has_adult_male_pair = "双成年男性" in role_text
+    has_any_adult_pair = has_adult_pair or has_adult_female_pair or has_adult_male_pair
+    has_adult_female = any(marker in role_text for marker in ("成年女性", "成熟女性"))
+    has_adult_male = any(marker in role_text for marker in ("成年男性", "成熟男性"))
+    direct_vaginal = _has_explicit_vaginal_relation(action_text)
+    direct_anal = "阴茎" in action_text and "肛门" in action_text and any(
+        marker in action_text for marker in ("插入", "肛交")
+    )
+    chosen_explicit = _first_present_marker(explicit_text, _EXPLICIT_ACTION_PRIORITY)
+
+    toy_target = (
+        "外阴"
+        if chosen_explicit == "成人道具刺激外阴"
+        else "阴道"
+        if chosen_explicit == "成人道具阴道插入"
+        else "肛门"
+        if chosen_explicit == "成人道具肛门插入"
+        else _first_present_marker(anatomy_text, ("外阴", "阴蒂", "阴道", "肛门", "阴茎"))
+    )
+    direct_toy = "成人道具" in action_text and any(marker in action_text for marker in ("刺激", "插入"))
+    if direct_toy or chosen_explicit in {
+        "成人道具阴道插入",
+        "成人道具肛门插入",
+        "成人道具刺激外阴",
+        "成人道具刺激阴茎",
+        "伴侣辅助成人道具",
+    }:
+        if chosen_explicit == "伴侣辅助成人道具" or (direct_toy and has_adult_pair):
+            if toy_target in {"外阴", "阴蒂", "阴道"}:
+                return (
+                    "伴侣辅助成人道具刺激女性: 一名成年伴侣使用成人道具刺激另一名成年女性的外阴与阴蒂; "
+                    "双方均为成年人且自愿, 道具持有者、接触点、女性腿部位置与双人轮廓保持清楚"
+                )
+            if toy_target == "阴茎":
+                return (
+                    "伴侣辅助成人道具刺激男性: 一名成年伴侣使用成人道具刺激另一名成年男性的阴茎; "
+                    "双方均为成年人且自愿, 道具持有者、接触点、男性身体支撑与双人轮廓保持清楚"
+                )
+        if has_adult_female and chosen_explicit == "成人道具肛门插入":
+            return (
+                "成年女性成人道具肛门插入: 一名成年女性自愿使用成人道具进行肛门插入; 成年主体自主自愿, "
+                "道具方向、接触点、骨盆朝向与四肢支撑保持清楚"
+            )
+        if has_adult_female and chosen_explicit == "成人道具阴道插入":
+            return (
+                "成年女性成人道具阴道插入: 一名成年女性自愿使用成人道具进行阴道插入; 成年主体自主自愿, "
+                "道具方向、插入接触点、骨盆朝向与四肢支撑保持清楚"
+            )
+        if has_adult_female and chosen_explicit in {"成人道具刺激外阴", ""} and toy_target in {"外阴", "阴蒂"}:
+            return (
+                "成年女性成人道具外阴刺激: 一名成年女性使用成人道具刺激自己的外阴与阴蒂; 成年主体自主自愿, "
+                "道具握持关系、接触点、腿部位置与完整身体轮廓保持清楚"
+            )
+        if has_adult_male and toy_target == "阴茎":
+            return (
+                "成年男性成人道具刺激: 一名成年男性使用成人道具刺激自己的阴茎; 成年主体自主自愿, "
+                "道具握持关系、接触点、手臂路径与完整身体轮廓保持清楚"
+            )
+
+    if direct_anal or (
+        has_adult_pair
+        and "阴茎" in anatomy_text
+        and "肛门" in anatomy_text
+        and chosen_explicit == "肛交"
+    ):
+        if "侧卧" in action_text:
+            return (
+                "侧卧肛门插入: 一名成年男性与一名成年女性保持侧卧, 由成年男性以阴茎插入成年女性肛门; "
+                "双方均为成年人且自愿, 侧卧朝向、骨盆接触点、腿部交叠与身体轮廓保持清楚"
+            )
+        return (
+            "后方肛门插入: 一名成年男性从后方以阴茎插入一名成年女性肛门; 双方均为成年人且自愿, "
+            "前后站位、骨盆接触点、腰背支撑与四肢位置保持清楚"
+        )
+
+    if chosen_explicit == "相互口部刺激" and has_any_adult_pair:
+        if has_adult_female_pair:
+            return (
+                "双成年女性相互口部刺激: 两名成年女性以相反身体朝向同时刺激对方的外阴与阴蒂; "
+                "双方均为成年人且自愿, 两处口部接触点、头脚方向与四肢支撑保持清楚"
+            )
+        if has_adult_male_pair:
+            return (
+                "双成年男性相互口部刺激: 两名成年男性以相反身体朝向同时刺激对方的阴茎; "
+                "双方均为成年人且自愿, 两处口部接触点、头脚方向与四肢支撑保持清楚"
+            )
+        return (
+            "双向口部刺激: 两名成年伴侣以相反身体朝向同时进行口部刺激; 双方均为成年人且自愿, "
+            "两处口部接触关系、头脚方向、躯干间距与四肢支撑保持清楚"
+        )
+
+    if chosen_explicit in {"口交", "阴茎口部刺激", "外阴口部刺激"}:
+        oral_target = (
+            "阴茎"
+            if chosen_explicit == "阴茎口部刺激"
+            else "外阴"
+            if chosen_explicit == "外阴口部刺激"
+            else _first_present_marker(anatomy_text, ("阴茎", "外阴", "阴蒂", "阴道"))
+        )
+        if oral_target == "阴茎" and (has_adult_pair or has_adult_male_pair):
+            if has_adult_male_pair:
+                return (
+                    "双成年男性单向口部刺激: 一名成年男性以口部刺激另一名成年男性的阴茎; "
+                    "双方均为成年人且自愿, 主客体身份、口部接触点、跪坐支撑与双人身体间距保持清楚"
+                )
+            return (
+                "女性对男性口部刺激: 一名成年女性以口部刺激一名成年男性的阴茎; 双方均为成年人且自愿, "
+                "头部朝向、口部接触点、跪坐支撑与双人身体间距保持清楚"
+            )
+        if oral_target and (has_adult_pair or has_adult_female_pair):
+            if has_adult_female_pair:
+                return (
+                    "双成年女性单向口部刺激: 一名成年女性以口部和舌部刺激另一名成年女性的外阴与阴蒂; "
+                    "双方均为成年人且自愿, 主客体身份、口部接触点、腿部位置与双人轮廓保持清楚"
+                )
+            return (
+                "男性对女性口部刺激: 一名成年男性以口部和舌部刺激一名成年女性的外阴与阴蒂; "
+                "双方均为成年人且自愿, 面部朝向、口部接触点、女性腿部位置与双人轮廓保持清楚"
+            )
+
+    if chosen_explicit == "相互手部刺激" and has_any_adult_pair:
+        if has_adult_female_pair:
+            return (
+                "双成年女性相互手部刺激: 两名成年女性分别以手指刺激对方的外阴与阴蒂; "
+                "双方均为成年人且自愿, 每只手的归属、两处接触点、双人轮廓与四肢路径保持清楚"
+            )
+        if has_adult_male_pair:
+            return (
+                "双成年男性相互手部刺激: 两名成年男性分别以手部刺激对方的阴茎; "
+                "双方均为成年人且自愿, 每只手的归属、两处接触点、双人轮廓与四肢路径保持清楚"
+            )
+        return (
+            "双人相互手部刺激: 两名成年伴侣分别以手部刺激对方的私密部位; 双方均为成年人且自愿, "
+            "每只手的归属、两处接触点、双人轮廓与四肢路径保持清楚"
+        )
+
+    if chosen_explicit == "阴茎手部刺激" and (has_adult_pair or has_adult_male_pair):
+        if has_adult_male_pair:
+            return (
+                "双成年男性单向手部刺激: 一名成年男性以手掌和手指刺激另一名成年男性的阴茎; "
+                "双方均为成年人且自愿, 手部归属、接触点、手臂路径与双人身体边界保持清楚"
+            )
+        return (
+            "女性对男性手部刺激: 一名成年女性以手掌和手指刺激一名成年男性的阴茎; "
+            "双方均为成年人且自愿, 手部归属、接触点、手臂路径与双人身体边界保持清楚"
+        )
+
+    if chosen_explicit == "外阴手部刺激" and (has_adult_pair or has_adult_female_pair):
+        if has_adult_female_pair:
+            return (
+                "双成年女性单向手部刺激: 一名成年女性以手指刺激另一名成年女性的外阴与阴蒂; "
+                "双方均为成年人且自愿, 手部归属、指尖接触点、腿部位置与双人身体边界保持清楚"
+            )
+        return (
+            "男性对女性手部刺激: 一名成年男性以手指刺激一名成年女性的外阴与阴蒂; "
+            "双方均为成年人且自愿, 手部归属、指尖接触点、腿部位置与双人身体边界保持清楚"
+        )
+
+    if chosen_explicit == "自慰":
+        if has_adult_female and any(marker in anatomy_text for marker in ("外阴", "阴蒂", "阴道")):
+            return (
+                "成年女性自慰: 一名成年女性以自己的手指刺激自己的外阴与阴蒂; 成年主体自主自愿, "
+                "双手归属、指尖接触点、腿部位置与完整身体轮廓保持清楚"
+            )
+        if has_adult_male and "阴茎" in anatomy_text:
+            return (
+                "成年男性自慰: 一名成年男性以自己的手掌刺激自己的阴茎; 成年主体自主自愿, "
+                "双手归属、手掌接触点、手臂路径与完整身体轮廓保持清楚"
+            )
+
+    legacy_vaginal = (
+        has_adult_pair
+        and "阴茎" in anatomy_text
+        and "阴道" in anatomy_text
+        and chosen_explicit in _PENETRATION_MARKERS
+    )
+    if direct_vaginal or legacy_vaginal:
+        if "女上位" in action_text or "跨坐" in action_text:
+            return (
+                "女上位阴道插入: 一名成年女性跨坐在一名成年男性上方, 由成年男性的阴茎插入成年女性阴道; "
+                "双方均为成年人且自愿, 骨盆接触点、跨坐承重、四肢位置与身体朝向保持清楚"
+            )
+        if any(marker in action_text for marker in ("后方", "从后", "背后")):
+            return (
+                "后方阴道插入: 一名成年男性从后方以阴茎插入一名成年女性阴道; 双方均为成年人且自愿, "
+                "前后站位、骨盆接触点、腰背支撑与四肢位置保持清楚"
+            )
+        if "侧卧" in action_text:
+            return (
+                "侧卧阴道插入: 一名成年男性与一名成年女性保持侧卧, 由成年男性以阴茎插入成年女性阴道; "
+                "双方均为成年人且自愿, 侧卧朝向、骨盆接触点、腿部交叠与身体轮廓保持清楚"
+            )
+        return (
+            "正面阴道插入: 一名成年男性面对一名成年女性, 以阴茎插入成年女性阴道; 双方均为成年人且自愿, "
+            "面对面骨盆接触点、四肢支撑与身体朝向保持清楚"
+        )
+    return ""
+
+
 def _iter_workspace_terms(workspace: dict[str, Any]) -> Iterable[str]:
     trigger_words = workspace.get("trigger_words", [])
     if isinstance(trigger_words, (list, tuple, set)):
@@ -273,8 +549,17 @@ def _iter_workspace_terms(workspace: dict[str, Any]) -> Iterable[str]:
     else:
         yield from _iter_split_terms(trigger_words)
 
+    action_contract = resolve_nsfw_action_contract(workspace)
+    action_contract_emitted = False
     for field in _VALUE_FIELDS:
+        if action_contract and field in {"anatomy_terms", "explicit_terms"}:
+            continue
         raw_value = workspace.get(field, "")
+        if action_contract and field in _ACTION_CONTRACT_FIELDS and _is_nsfw_action_contract_source(raw_value):
+            if not action_contract_emitted:
+                yield action_contract
+                action_contract_emitted = True
+            continue
         if field in NSFW_SELECTOR_FIELDS:
             yield from _iter_selector_terms(raw_value)
         elif isinstance(raw_value, (list, tuple, set)):
@@ -282,6 +567,12 @@ def _iter_workspace_terms(workspace: dict[str, Any]) -> Iterable[str]:
                 yield from _iter_split_terms(item)
         else:
             yield from _iter_split_terms(raw_value)
+        if action_contract and field == "action" and not action_contract_emitted:
+            yield action_contract
+            action_contract_emitted = True
+
+    if action_contract and not action_contract_emitted:
+        yield action_contract
 
 
 def _canonical_seed_value(value: Any) -> str:
