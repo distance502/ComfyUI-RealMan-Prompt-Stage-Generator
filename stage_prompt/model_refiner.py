@@ -3805,6 +3805,7 @@ def _skill_context_for_model(settings: dict[str, Any]) -> str:
     if not creative_spine_context:
         creative_spine_context = summarize_global_creative_spine_contract(settings.get("全局创作主线合同"))
     dynamic_strategy = str(settings.get("Skill动态变化策略", "") or "").strip()
+    prompt_skill_context = str(settings.get("提示词Skill摘要", "") or "").strip()
     intelligence_summary = str(settings.get("智能编排摘要", "") or "").strip()
     preference_summary = str(settings.get("智能偏好摘要", "") or "").strip()
     applied_preference_summary = str(settings.get("智能偏好应用摘要", "") or "").strip()
@@ -3876,6 +3877,12 @@ def _skill_context_for_model(settings: dict[str, Any]) -> str:
         extra_lines.append(
             "本次全局创作主线：" + creative_spine_context
             + "。这是所有生成渠道共用的已解析合同；只能补全未指定细节，不得另起媒介、场景、服装或动作主线。"
+        )
+    if prompt_skill_context:
+        extra_lines.append(
+            "共享模板与用户标签 Skill：\n" + prompt_skill_context
+            + "\n这些规则同时约束图像、智能文本和视频；用户显式标签是事实锚点，模板 Skill 只决定媒介表现，"
+            "不得把 Skill 说明本身写进最终正文。"
         )
     if intelligence_summary:
         extra_lines.append(

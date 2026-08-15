@@ -13,6 +13,7 @@ PROBE_SCRIPT = NODE_DIR / "dependency_probe.py"
 PACKAGE_GROUPS: list[tuple[str, list[str], bool]] = [
     ("质检依赖", ["opencv-python", "rapidocr-onnxruntime"], False),
     ("模型依赖", ["llama-cpp-python"], False),
+    ("原始模型依赖", ["transformers", "accelerate", "safetensors"], False),
 ]
 
 

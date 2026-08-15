@@ -54,7 +54,7 @@ if not defined PYTHON_CMD (
 echo [INFO] ComfyUI root: %COMFY_ROOT%
 echo [INFO] Python: %PYTHON_CMD% %PYTHON_ARGS%
 echo.
-echo [INFO] This installs optional dependencies for quality audit and local GGUF features.
+echo [INFO] This installs optional dependencies for quality audit and local GGUF / original model features.
 echo [INFO] The main node UI can still load even if optional packages fail to install.
 echo.
 

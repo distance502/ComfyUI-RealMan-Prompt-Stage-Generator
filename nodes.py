@@ -72,6 +72,13 @@ try:
 except Exception:
     Gemma4ChatHandler = None
 
+_TRANSFORMERS_IMPORT_ERROR = None
+try:
+    import transformers as _TRANSFORMERS
+except Exception as exc:
+    _TRANSFORMERS = None
+    _TRANSFORMERS_IMPORT_ERROR = exc
+
 
 class AnyType(str):
     def __ne__(self, __value: object) -> bool:
@@ -134,7 +141,17 @@ class _ReentrantLockAdapter:
 Q8_0缓存类型 = "q8_0"
 KV缓存类型选项 = [默认KV缓存类型, Q8_0缓存类型]
 Flash注意力选项 = ["自动", "开启", "关闭"]
-TE通用模型系列选项 = ["Qwen3-VL", "Qwen3.5-VL", "Qwen3.8-VL", "Gemma4", "Llama", "Mistral", "DeepSeek", "通用GGUF"]
+TE通用模型系列选项 = [
+    "Qwen3-VL",
+    "Qwen3.5-VL",
+    "Qwen3.8-VL",
+    "Gemma4",
+    "Llama",
+    "Mistral",
+    "DeepSeek",
+    "通用模型",
+    "通用GGUF",
+]
 _CHAT_COMPLETION_SIGNATURE_CACHE: dict[type, tuple[inspect.Signature | None, bool]] = {}
 _LLAMA_INIT_PARAMS_CACHE: set[str] | None = None
 _MODEL_CALL_DEADLINE_PARAM = "_qwen_te_deadline_monotonic"
@@ -209,12 +226,114 @@ def _确保_llm目录已注册() -> None:
         return
 
 
-def _列出llm文件() -> list[str]:
+_原始模型权重扩展名 = {".safetensors", ".bin", ".pt", ".pth", ".ckpt"}
+_本地模型选项扩展名 = _原始模型权重扩展名 | {".gguf"}
+
+
+def _llm根目录() -> str:
     _确保_llm目录已注册()
+    return os.path.join(folder_paths.models_dir, "LLM")
+
+
+def _规范化模型相对路径(value: object) -> str:
+    raw = str(value or "").strip().replace("\\", "/")
+    raw = raw.lstrip("/")
+    if raw in ("", "."):
+        return ""
+    root = os.path.abspath(_llm根目录())
+    candidate = os.path.abspath(os.path.join(root, raw.replace("/", os.sep)))
     try:
-        return folder_paths.get_filename_list("LLM")
+        if os.path.commonpath((root, candidate)) != root:
+            return ""
+    except ValueError:
+        return ""
+    return os.path.relpath(candidate, root).replace("\\", "/")
+
+
+def _原始模型目录有效(model_dir: str) -> bool:
+    if not os.path.isdir(model_dir):
+        return False
+    if not os.path.isfile(os.path.join(model_dir, "config.json")):
+        return False
+    try:
+        return any(
+            os.path.splitext(name)[1].lower() in _原始模型权重扩展名
+            for name in os.listdir(model_dir)
+        )
+    except OSError:
+        return False
+
+
+def _是本地模型选项(value: object) -> bool:
+    """Return whether a selector value is a GGUF file or a Transformers model root."""
+
+    normalized = _规范化模型相对路径(value)
+    if not normalized:
+        # Focused tests often provide virtual file names without creating them.
+        return os.path.splitext(str(value or ""))[1].lower() in _本地模型选项扩展名
+    full_path = os.path.join(_llm根目录(), normalized.replace("/", os.sep))
+    if os.path.isdir(full_path):
+        return _原始模型目录有效(full_path)
+    return os.path.splitext(full_path)[1].lower() in _本地模型选项扩展名
+
+
+def _本地模型格式(value: object) -> str:
+    """Infer the backend from a selector value without opening the model."""
+
+    normalized = _规范化模型相对路径(value)
+    if not normalized:
+        normalized = str(value or "").strip().replace("\\", "/")
+    return "gguf" if os.path.splitext(normalized)[1].lower() == ".gguf" else "transformers"
+
+
+def _解析本地模型路径(value: object) -> tuple[str, str]:
+    normalized = _规范化模型相对路径(value)
+    if not normalized:
+        raise ValueError("本地模型路径为空或超出 ComfyUI/models/LLM 目录。")
+    full_path = os.path.join(_llm根目录(), normalized.replace("/", os.sep))
+    if not os.path.exists(full_path):
+        raise FileNotFoundError(f"找不到模型文件或目录：{full_path}")
+    if os.path.isdir(full_path):
+        if not _原始模型目录有效(full_path):
+            raise RuntimeError(f"原始模型目录缺少 config.json 或权重文件：{full_path}")
+        return full_path, "transformers"
+    if os.path.splitext(full_path)[1].lower() == ".gguf":
+        return full_path, "gguf"
+    if os.path.splitext(full_path)[1].lower() in _原始模型权重扩展名:
+        parent = os.path.dirname(full_path)
+        if _原始模型目录有效(parent):
+            return parent, "transformers"
+        raise RuntimeError(
+            f"原始模型权重旁边缺少完整模型目录：{parent}\n"
+            "需要同目录的 config.json、tokenizer 文件和完整权重分片。"
+        )
+    raise ValueError(f"不支持的本地模型格式：{full_path}")
+
+
+def _列出llm文件() -> list[str]:
+    llm_dir = _llm根目录()
+    values: set[str] = set()
+    try:
+        values.update(str(item).replace("\\", "/") for item in folder_paths.get_filename_list("LLM"))
     except Exception:
-        return []
+        pass
+
+    # ComfyUI's filename registry intentionally omits model directories. Scan
+    # the plugin-owned root so Hugging Face layouts with config.json become
+    # selectable while keeping the existing flat GGUF entries intact.
+    if os.path.isdir(llm_dir):
+        for root, dirs, files in os.walk(llm_dir):
+            dirs[:] = [name for name in dirs if not name.startswith(".")]
+            relative_root = os.path.relpath(root, llm_dir).replace("\\", "/")
+            if relative_root != "." and _原始模型目录有效(root):
+                values.add(relative_root)
+            for filename in files:
+                if os.path.splitext(filename)[1].lower() not in _本地模型选项扩展名:
+                    continue
+                relative = os.path.relpath(os.path.join(root, filename), llm_dir).replace("\\", "/")
+                values.add(relative)
+
+    return sorted(values, key=lambda item: (item.lower().count("/"), item.lower()))
 
 
 def _图片转base64(image_tensor) -> str:
@@ -1225,6 +1344,266 @@ def _重置llm推理状态(llm) -> None:
         pass
 
 
+def _原始模型依赖错误() -> RuntimeError:
+    detail = f"\n原始错误：{_TRANSFORMERS_IMPORT_ERROR}" if _TRANSFORMERS_IMPORT_ERROR else ""
+    return RuntimeError(
+        "当前原始模型需要 transformers、accelerate 和 safetensors。"
+        "请在 ComfyUI 使用的 Python 环境运行“自动补装依赖.bat”，或手动安装 transformers。"
+        + detail
+    )
+
+
+def _原始模型加载参数(config: dict) -> dict[str, object]:
+    custom = _解析llama自定义参数(config.get("custom_llama_params"))
+    allowed = {
+        "device_map",
+        "torch_dtype",
+        "low_cpu_mem_usage",
+        "use_safetensors",
+        "trust_remote_code",
+        "attn_implementation",
+        "offload_folder",
+        "offload_state_dict",
+        "max_memory",
+        "revision",
+        "subfolder",
+        "local_files_only",
+        "load_in_4bit",
+        "load_in_8bit",
+        "quantization_config",
+    }
+    options = {key: value for key, value in custom.items() if key in allowed}
+    if isinstance(options.get("torch_dtype"), str):
+        dtype = str(options["torch_dtype"]).strip().lower()
+        options["torch_dtype"] = {
+            "auto": "auto",
+            "float16": torch.float16,
+            "fp16": torch.float16,
+            "bfloat16": torch.bfloat16,
+            "bf16": torch.bfloat16,
+            "float32": torch.float32,
+            "fp32": torch.float32,
+        }.get(dtype, "auto")
+    options.setdefault("trust_remote_code", True)
+    if "device_map" not in options:
+        if int(config.get("n_gpu_layers", -1) or -1) == 0 or not torch.cuda.is_available():
+            options["device_map"] = None
+        else:
+            options["device_map"] = "auto"
+    if "torch_dtype" not in options and options.get("device_map") == "auto":
+        options["torch_dtype"] = "auto"
+    return options
+
+
+def _原始模型消息(messages: list[dict]) -> tuple[list[dict], list[Image.Image]]:
+    normalized: list[dict] = []
+    images: list[Image.Image] = []
+    for message in messages or []:
+        role = str(message.get("role", "user") or "user")
+        content = message.get("content", "")
+        if not isinstance(content, list):
+            normalized.append({"role": role, "content": str(content or "")})
+            continue
+        parts: list[dict] = []
+        for item in content:
+            if not isinstance(item, dict):
+                parts.append({"type": "text", "text": str(item)})
+                continue
+            item_type = str(item.get("type", "text") or "text").lower()
+            if item_type == "text":
+                parts.append({"type": "text", "text": str(item.get("text", "") or "")})
+                continue
+            if item_type not in {"image", "image_url"}:
+                parts.append({"type": "text", "text": str(item.get("text", "") or "")})
+                continue
+            image_url = item.get("image_url", item.get("image", ""))
+            if isinstance(image_url, dict):
+                image_url = image_url.get("url", "")
+            raw_url = str(image_url or "")
+            if raw_url.startswith("data:") and "," in raw_url:
+                try:
+                    image = Image.open(io.BytesIO(base64.b64decode(raw_url.split(",", 1)[1]))).convert("RGB")
+                except Exception as exc:
+                    raise ValueError(f"原始模型输入图片无法解码：{exc}") from exc
+                images.append(image)
+                parts.append({"type": "image", "image": image})
+            else:
+                parts.append({"type": "text", "text": "[图片]"})
+        normalized.append({"role": role, "content": parts})
+    return normalized, images
+
+
+class _TransformersChatAdapter:
+    """Expose a small OpenAI-compatible chat surface for Hugging Face models."""
+
+    def __init__(self, model, tokenizer, processor, model_path: str, settings: dict):
+        self.model = model
+        self.tokenizer = tokenizer
+        self.processor = processor
+        self.model_path = model_path
+        self._model_path = model_path
+        self.settings = dict(settings)
+        self._qwen_te_transformers = True
+        self.supports_images = bool(
+            processor is not None
+            and (
+                getattr(processor, "image_processor", None) is not None
+                or getattr(processor, "feature_extractor", None) is not None
+            )
+        )
+
+    @property
+    def device(self):
+        try:
+            return next(self.model.parameters()).device
+        except Exception:
+            return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    def reset(self) -> None:
+        return None
+
+    def close(self) -> None:
+        try:
+            self.model.to("cpu")
+        except Exception:
+            pass
+        self.model = None
+        self.tokenizer = None
+        self.processor = None
+        if torch.cuda.is_available():
+            try:
+                torch.cuda.empty_cache()
+            except Exception:
+                pass
+
+    def _prompt_and_inputs(self, messages, max_length: int):
+        normalized, images = _原始模型消息(messages)
+        if images and not self.supports_images:
+            raise RuntimeError("当前原始模型没有视觉处理器，无法处理图片；请使用对应的 Vision 模型目录。")
+        processor = self.processor if images else self.tokenizer
+        if processor is None:
+            raise RuntimeError("原始模型缺少 tokenizer/processor。")
+        template_messages = normalized
+        apply_template = getattr(processor, "apply_chat_template", None)
+        if not callable(apply_template):
+            apply_template = getattr(self.tokenizer, "apply_chat_template", None)
+        if callable(apply_template):
+            prompt = apply_template(template_messages, tokenize=False, add_generation_prompt=True)
+        else:
+            prompt = "\n".join(f"{item['role']}: {item['content']}" for item in normalized)
+            prompt += "\nassistant:"
+        if images:
+            encoded = processor(
+                text=[prompt],
+                images=images,
+                return_tensors="pt",
+                padding=True,
+                truncation=True,
+                max_length=max_length,
+            )
+        else:
+            encoded = self.tokenizer(
+                prompt,
+                return_tensors="pt",
+                truncation=True,
+                max_length=max_length,
+            )
+        return encoded
+
+    def create_chat_completion(self, messages, max_tokens=512, temperature=0.7, top_p=0.9, top_k=20,
+                               repeat_penalty=1.0, repetition_penalty=None, seed=None, stop=None,
+                               **_kwargs):
+        if self.model is None:
+            raise RuntimeError("原始模型已经卸载，请重新加载模型。")
+        max_tokens = max(1, min(int(max_tokens or 512), 32768))
+        context_length = max(256, int(self.settings.get("n_ctx", 8192) or 8192))
+        input_limit = max(1, context_length - max_tokens)
+        encoded = self._prompt_and_inputs(messages, input_limit)
+        model_device = self.device
+        moved = {}
+        for key, value in encoded.items():
+            moved[key] = value.to(model_device) if hasattr(value, "to") else value
+        if seed not in (None, 0):
+            torch.manual_seed(int(seed) & 0xFFFFFFFF)
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed_all(int(seed) & 0xFFFFFFFF)
+        generation = {
+            "max_new_tokens": max_tokens,
+            "do_sample": float(temperature or 0.0) > 0.0,
+            "repetition_penalty": float(repetition_penalty if repetition_penalty is not None else repeat_penalty or 1.0),
+        }
+        if generation["do_sample"]:
+            generation["temperature"] = max(0.01, float(temperature))
+            if top_p is not None and float(top_p) < 1.0:
+                generation["top_p"] = max(0.01, min(1.0, float(top_p)))
+            if top_k is not None and int(top_k) > 0:
+                generation["top_k"] = int(top_k)
+        pad_token_id = getattr(self.tokenizer, "pad_token_id", None)
+        eos_token_id = getattr(self.tokenizer, "eos_token_id", None)
+        if pad_token_id is not None:
+            generation["pad_token_id"] = pad_token_id
+        if eos_token_id is not None:
+            generation["eos_token_id"] = eos_token_id
+        with torch.inference_mode():
+            output = self.model.generate(**moved, **generation)
+        input_ids = moved.get("input_ids")
+        prompt_tokens = int(input_ids.shape[-1]) if input_ids is not None else 0
+        generated = output[:, prompt_tokens:] if prompt_tokens else output
+        text = self.tokenizer.batch_decode(generated, skip_special_tokens=True)[0].strip()
+        for marker in stop or []:
+            marker = str(marker or "")
+            if marker and marker in text:
+                text = text.split(marker, 1)[0].rstrip()
+        return {"choices": [{"message": {"role": "assistant", "content": text}, "finish_reason": "stop"}]}
+
+
+def _加载Transformers原始模型(config: dict, model_path: str, storage) -> "_QwenModel":
+    if _TRANSFORMERS is None:
+        raise _原始模型依赖错误()
+    model_root = model_path
+    if os.path.isfile(model_root):
+        model_root = os.path.dirname(model_root)
+    if not os.path.isfile(os.path.join(model_root, "config.json")):
+        raise RuntimeError(
+            f"原始模型目录缺少 config.json：{model_root}\n"
+            "请在 models/LLM 下选择包含 config.json 和权重文件的 Hugging Face 模型目录。"
+        )
+    options = _原始模型加载参数(config)
+    tokenizer_options = {
+        key: value
+        for key, value in options.items()
+        if key in {"trust_remote_code", "revision", "subfolder", "local_files_only"}
+    }
+    tokenizer_cls = getattr(_TRANSFORMERS, "AutoTokenizer", None)
+    if tokenizer_cls is None:
+        raise _原始模型依赖错误()
+    tokenizer = tokenizer_cls.from_pretrained(model_root, **tokenizer_options)
+    processor = None
+    processor_cls = getattr(_TRANSFORMERS, "AutoProcessor", None)
+    if processor_cls is not None:
+        try:
+            processor = processor_cls.from_pretrained(model_root, **tokenizer_options)
+        except Exception:
+            processor = None
+    model = None
+    errors = []
+    for class_name in ("AutoModelForImageTextToText", "AutoModelForVision2Seq", "AutoModelForCausalLM"):
+        model_cls = getattr(_TRANSFORMERS, class_name, None)
+        if model_cls is None:
+            continue
+        try:
+            model = model_cls.from_pretrained(model_root, **options)
+            break
+        except Exception as exc:
+            errors.append(f"{class_name}: {exc}")
+    if model is None:
+        detail = "；".join(errors[-3:])
+        raise RuntimeError(f"原始模型加载失败：{model_root}\n{detail}")
+    adapter = _TransformersChatAdapter(model, tokenizer, processor, model_root, config)
+    _标记llm托管元数据(adapter, config, owner_storage=storage)
+    return _QwenModel(llm=adapter, settings=dict(config), chat_handler=adapter if adapter.supports_images else None)
+
+
 @dataclass
 class _QwenModel:
     llm: object
@@ -1271,17 +1650,21 @@ class _QwenStorage:
     @classmethod
     @_锁定模型存储操作
     def load(cls, config: dict, *, force_reload: bool = False) -> _QwenModel:
-        if Llama is None:
-            raise _llama不可用错误()
-
         if not force_reload and cls.model and cls.model.settings == config:
             return cls.model
 
+        model_path, backend = _解析本地模型路径(config.get("model"))
         cls.unload()
 
-        model_path = os.path.join(folder_paths.models_dir, "LLM", config["model"])
-        if not os.path.exists(model_path):
-            raise FileNotFoundError(f"找不到模型文件：{model_path}")
+        if backend == "transformers":
+            if config.get("mmproj") not in (None, "", "无"):
+                raise RuntimeError("原始 Transformers 模型不使用 GGUF mmproj；请将“视觉投影mmproj”设为“无”。")
+            model = _加载Transformers原始模型(config, model_path, cls)
+            _更新模型存储记录(cls, model)
+            return model
+
+        if Llama is None:
+            raise _llama不可用错误()
 
         mmproj = config.get("mmproj", "无")
         mmproj_path = None
@@ -1421,17 +1804,21 @@ class _Gemma4Storage:
     @classmethod
     @_锁定模型存储操作
     def load(cls, config: dict, *, force_reload: bool = False) -> _QwenModel:
-        if Llama is None:
-            raise _llama不可用错误()
-
         if not force_reload and cls.model and cls.model.settings == config:
             return cls.model
 
+        model_path, backend = _解析本地模型路径(config.get("model"))
         cls.unload()
 
-        model_path = os.path.join(folder_paths.models_dir, "LLM", config["model"])
-        if not os.path.exists(model_path):
-            raise FileNotFoundError(f"找不到模型文件：{model_path}")
+        if backend == "transformers":
+            if config.get("mmproj") not in (None, "", "无"):
+                raise RuntimeError("原始 Transformers 模型不使用 GGUF mmproj；请将“视觉投影mmproj”设为“无”。")
+            model = _加载Transformers原始模型(config, model_path, cls)
+            _更新模型存储记录(cls, model)
+            return model
+
+        if Llama is None:
+            raise _llama不可用错误()
 
         mmproj = config.get("mmproj", "无")
         mmproj_path = None
@@ -1572,7 +1959,7 @@ class QwenTE模型加载器:
     @classmethod
     def INPUT_TYPES(s):
         all_files = _列出llm文件()
-        model_list = [f for f in all_files if "mmproj" not in f.lower() and os.path.splitext(f)[1].lower() in [".gguf", ".safetensors", ".bin", ".pth", ".pt"]]
+        model_list = [f for f in all_files if "mmproj" not in f.lower() and _是本地模型选项(f)]
         mmproj_list = ["无"] + [f for f in all_files if "mmproj" in f.lower() and os.path.splitext(f)[1].lower() in [".gguf", ".safetensors", ".bin"]]
 
         if not model_list:
@@ -1580,8 +1967,8 @@ class QwenTE模型加载器:
 
         return {
             "required": {
-                "模型系列": (TE通用模型系列选项, {"default": "Qwen3.5-VL", "tooltip": "同一加载器支持 Qwen3/Qwen3.5/Qwen3.8、Gemma、Llama、Mistral、DeepSeek 和通用 GGUF。Qwen3.8 会优先使用专用视觉 handler，缺失时回退到 GGUF 自带模板。"}),
-                "主模型": (model_list, {"tooltip": "主模型文件（建议 .gguf）放到 ComfyUI/models/LLM/"}),
+                "模型系列": (TE通用模型系列选项, {"default": "Qwen3.5-VL", "tooltip": "同一加载器自动支持 GGUF 和 Hugging Face 原始模型目录（config.json + safetensors/bin）；Qwen3.8 会优先使用专用视觉 handler，缺失时回退到模型自带模板。"}),
+                "主模型": (model_list, {"tooltip": "选择 GGUF 文件，或选择包含 config.json 与权重的原始模型目录；模型放到 ComfyUI/models/LLM/。"}),
                 "视觉投影mmproj": (mmproj_list, {"default": "无", "tooltip": "多模态需要 mmproj；纯文本可选“无”。"}),
                 "启用思考": ("BOOLEAN", {"default": False, "tooltip": "Qwen/Gemma 思考开关；通用 GGUF 纯文本模型通常可保持关闭。"}),
                 "上下文长度": ("INT", {"default": 8192, "min": 1024, "max": 327680, "step": 256, "tooltip": "对应 llama.cpp 的 n_ctx。"}),
@@ -1864,7 +2251,7 @@ class Gemma4TE模型加载器:
     @classmethod
     def INPUT_TYPES(s):
         all_files = _列出llm文件()
-        model_list = [f for f in all_files if "mmproj" not in f.lower() and os.path.splitext(f)[1].lower() in [".gguf", ".safetensors", ".bin", ".pth", ".pt"]]
+        model_list = [f for f in all_files if "mmproj" not in f.lower() and _是本地模型选项(f)]
         mmproj_list = ["无"] + [f for f in all_files if "mmproj" in f.lower() and os.path.splitext(f)[1].lower() in [".gguf", ".safetensors", ".bin"]]
 
         if not model_list:
@@ -1872,7 +2259,7 @@ class Gemma4TE模型加载器:
 
         return {
             "required": {
-                "主模型": (model_list, {"tooltip": "Gemma4 主模型文件（建议 .gguf）放到 ComfyUI/models/LLM/"}),
+                "主模型": (model_list, {"tooltip": "选择 GGUF 文件，或选择包含 config.json 与权重的原始模型目录；模型放到 ComfyUI/models/LLM/。"}),
                 "视觉投影mmproj": (mmproj_list, {"default": "无", "tooltip": "Gemma4 多模态需要 mmproj；纯文本可选“无”。"}),
                 "启用思考": ("BOOLEAN", {"default": False, "tooltip": "Gemma4 专用 enable_thinking 开关。"}),
                 "上下文长度": ("INT", {"default": 8192, "min": 1024, "max": 327680, "step": 256, "tooltip": "对应 llama.cpp 的 n_ctx。"}),

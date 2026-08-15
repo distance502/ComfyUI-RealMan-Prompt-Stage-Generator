@@ -60,7 +60,7 @@ class TestFixtureContracts(unittest.TestCase):
     def test_model_loader_supports_broader_family_contract(self) -> None:
         source = (ROOT / "nodes.py").read_text(encoding="utf-8")
         self.assertIn("TE通用模型系列选项", source)
-        for family in ("Qwen3-VL", "Qwen3.5-VL", "Qwen3.8-VL", "Gemma4", "Llama", "Mistral", "DeepSeek", "通用GGUF"):
+        for family in ("Qwen3-VL", "Qwen3.5-VL", "Qwen3.8-VL", "Gemma4", "Llama", "Mistral", "DeepSeek", "通用模型", "通用GGUF"):
             self.assertIn(f'"{family}"', source)
         self.assertIn('"模型系列": (TE通用模型系列选项', source)
         self.assertIn('elif family == "Gemma4"', source)

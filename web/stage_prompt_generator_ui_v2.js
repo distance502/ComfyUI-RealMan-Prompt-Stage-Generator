@@ -565,6 +565,7 @@ const MODEL_FAMILY_BUTTONS = [
 	{ value: "Llama", label: "Llama", hint: "通用 Llama GGUF" },
 	{ value: "Mistral", label: "Mistral", hint: "Mistral Instruct" },
 	{ value: "DeepSeek", label: "DeepSeek", hint: "DeepSeek GGUF" },
+	{ value: "通用模型", label: "原始模型", hint: "自动加载 Hugging Face config.json + safetensors/bin/pt/pth" },
 	{ value: "通用GGUF", label: "通用", hint: "自动推断格式" },
 ];
 const MODEL_CONTEXT_BUTTONS = [4096, 8192, 16384, 32768];
@@ -9648,7 +9649,6 @@ function refreshNodeActionButtons(node) {
 	const isContinuousRunning = !!runtime.running;
 
 	setPanelActionButtonState(panelButtons.tag, !isContinuousRunning, "连续测试进行中，先停止后再改标签。");
-	setPanelActionButtonState(panelButtons.onlineSearch, !isContinuousRunning, "连续测试进行中，先停止后再搜索和回填标签。");
 	setPanelActionButtonState(panelButtons.example, !isContinuousRunning, "连续测试进行中，先停止后再载入示例。");
 	setPanelActionButtonState(panelButtons.random, !isContinuousRunning, "连续测试进行中，先停止后再随机。");
 	setPanelActionButtonState(panelButtons.randomRun, !isContinuousRunning, "连续测试进行中，先停止后再随机跑。");
@@ -9674,8 +9674,6 @@ function refreshNodeActionButtons(node) {
 	if (library && node?.[PANEL_KEY]?.heroCaptionEl instanceof HTMLElement) {
 		node[PANEL_KEY].heroCaptionEl.textContent = buildHeroCaptionText(node, library);
 	}
-	const onlineSearchOverlay = document.querySelector?.('[data-qwen-modal="online-search"]');
-	if (onlineSearchOverlay?.__qwenNode === node) onlineSearchOverlay.__qwenSyncRuntimeState?.();
 }
 
 function setNodeStatusText(node, text) {
@@ -19341,7 +19339,6 @@ function enhanceStagePromptNode(node, library) {
 	const displayTitle = document.createElement("div"); displayTitle.className="qwen-te-panel__display-title"; displayTitle.textContent="终端预览"; displayTop.appendChild(displayTitle);
 	const displayMeta = document.createElement("div"); displayMeta.className="qwen-te-panel__display-meta"; displayTop.appendChild(displayMeta);
 	const displaySource = document.createElement("div"); displaySource.className="qwen-te-panel__display-source"; displaySource.textContent="等待输出"; displayMeta.appendChild(displaySource);
-	const displaySearch = document.createElement("button"); displaySearch.type="button"; displaySearch.className="qwen-te-panel__display-expand qwen-te-panel__display-search"; displaySearch.textContent="浏览器"; displaySearch.dataset.qwenHint="打开网页浏览器与标签搜索。网页只在手动打开后访问。"; displaySearch.title=displaySearch.dataset.qwenHint; displaySearch.setAttribute("aria-label","打开网页浏览器"); displaySearch.addEventListener("pointerdown", (event) => { event.stopPropagation(); }); displaySearch.addEventListener("mousedown", (event) => { event.stopPropagation(); }); displaySearch.addEventListener("click", (event) => { event.stopPropagation(); if (displaySearch.disabled) return; openOnlinePromptSearchDialog(node, node?.[PANEL_KEY]?.library ?? library); }); displayMeta.appendChild(displaySearch);
 	const displayExpand = document.createElement("button"); displayExpand.type="button"; displayExpand.className="qwen-te-panel__display-expand"; displayExpand.textContent="弹出终端"; displayExpand.addEventListener("pointerdown", (event) => { event.stopPropagation(); }); displayExpand.addEventListener("mousedown", (event) => { event.stopPropagation(); }); displayExpand.addEventListener("click", (event) => { event.stopPropagation(); openStageOutputDialog(node); }); displayMeta.appendChild(displayExpand);
 	const displayTabs = document.createElement("div"); displayTabs.className="qwen-te-panel__display-tabs"; displayCard.appendChild(displayTabs);
 	const displayBody = document.createElement("div"); displayBody.className="qwen-te-panel__display-screen is-empty"; displayBody.textContent="运行一次后，这里会展示最近的提示词、负面词或 JSON 结果。"; displayCard.appendChild(displayBody);
@@ -19365,7 +19362,7 @@ function enhanceStagePromptNode(node, library) {
 	const slotPanel = buildLazySlotPanel(library); mainWorkspace.appendChild(slotPanel);
 	const advancedPanel = buildAdvancedPanel(node); mainWorkspace.appendChild(advancedPanel);
 	const quickbar = document.createElement("div"); quickbar.className="qwen-te-panel__quickbar"; mainWorkspace.appendChild(quickbar);
-	const panelButtons = { onlineSearch: displaySearch };
+	const panelButtons = {};
 	const registerPanelButton = (key, button) => {
 		if (key) panelButtons[key] = button;
 		return button;
