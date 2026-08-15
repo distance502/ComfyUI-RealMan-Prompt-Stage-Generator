@@ -14185,6 +14185,22 @@ class TestStagePromptModules(unittest.TestCase):
         module = load_plugin_init_for_integration_test(failing_imports={"cv2", "rapidocr_onnxruntime"})
         self.assertIn("QwenTE_StagePromptGenerator", module.NODE_CLASS_MAPPINGS)
 
+    def test_plugin_does_not_register_browser_routes(self) -> None:
+        module = load_plugin_init_for_integration_test(failing_imports={"cv2", "rapidocr_onnxruntime"})
+        handlers: dict[tuple[str, str], object] = {}
+
+        class FakeRoutes:
+            def get(self, path):
+                return lambda handler: handlers.setdefault(("GET", path), handler)
+
+            def post(self, path):
+                return lambda handler: handlers.setdefault(("POST", path), handler)
+
+        prompt_server = types.SimpleNamespace(routes=FakeRoutes())
+        module._get_prompt_server_class = lambda: types.SimpleNamespace(instance=prompt_server)
+        self.assertTrue(module._register_tag_routes())
+        self.assertFalse(any("browser" in path.casefold() for _method, path in handlers))
+
     def test_frontend_prompt_library_payload_includes_backend_nsfw_catalog(self) -> None:
         module = load_plugin_init_for_integration_test(failing_imports={"cv2", "rapidocr_onnxruntime"})
         payload = module._build_frontend_prompt_library_payload()

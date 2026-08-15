@@ -81,15 +81,19 @@ try:
         KV缓存类型选项 as _内置模型KV缓存类型选项,
         TE通用模型系列选项 as _内置模型系列选项,
         _QwenStorage as _内置QwenStorage,
+        _是本地模型选项 as _是内置本地模型选项,
         _列出llm文件 as _列出内置llm文件,
         默认KV缓存类型 as _内置默认KV缓存类型,
     )
 except Exception:  # pragma: no cover - focused tests may stub .nodes
-    _内置模型系列选项 = ["Qwen3-VL", "Qwen3.5-VL", "Qwen3.8-VL", "Gemma4", "Llama", "Mistral", "DeepSeek", "通用GGUF"]
+    _内置模型系列选项 = ["Qwen3-VL", "Qwen3.5-VL", "Qwen3.8-VL", "Gemma4", "Llama", "Mistral", "DeepSeek", "通用模型", "通用GGUF"]
     _内置模型KV缓存类型选项 = ["默认(F16)", "q8_0"]
     _内置模型Flash注意力选项 = ["自动", "开启", "关闭"]
     _内置默认KV缓存类型 = "默认(F16)"
     _内置QwenStorage = None
+
+    def _是内置本地模型选项(value: object) -> bool:
+        return str(value or "").lower().endswith((".gguf", ".safetensors", ".bin", ".pth", ".pt", ".ckpt"))
 
     def _列出内置llm文件() -> list[str]:
         return []
@@ -219,7 +223,12 @@ from .stage_prompt.expanded_profiles import (
     EXPANDED_THEME_POOL_OPTIONS,
     EXPANDED_THEME_VARIANTS,
 )
-from .stage_prompt.skills import TEMPLATE_STYLE_BASE_MAP, resolve_base_template_style
+from .stage_prompt.skills import (
+    TEMPLATE_STYLE_BASE_MAP,
+    build_prompt_skill_context as _build_prompt_skill_context_impl,
+    summarize_prompt_skill_context as _summarize_prompt_skill_context_impl,
+    resolve_base_template_style,
+)
 from .stage_prompt.tag_block_composer import (
     build_tag_block_prompt_list as _build_tag_block_prompt_list_impl,
     parse_tag_block_payload as _parse_tag_block_payload_impl,
@@ -1050,7 +1059,7 @@ def _内置模型文件选项() -> tuple[list[str], list[str]]:
     model_list = [
         file
         for file in all_files
-        if "mmproj" not in file.lower() and str(file).lower().endswith((".gguf", ".safetensors", ".bin", ".pth", ".pt"))
+        if "mmproj" not in file.lower() and _是内置本地模型选项(file)
     ]
     mmproj_list = ["无"] + [
         file
@@ -5427,6 +5436,19 @@ def _run_stage_impl(
     identity = _main_identity(tags)
     adult_subpool = _adult_subpool(tags) if bool(set(tags) & 成人向标签关键词) else ""
     style_track = _style_track(template_style, tags)
+    # One shared Skill contract is created after all runtime/theme/style
+    # normalization, then consumed by image, smart-text, video and model paths.
+    prompt_skill_context = _build_prompt_skill_context_impl(
+        template_style,
+        selected,
+        custom_tags,
+        explicit_tags=explicit_input_tags,
+    )
+    settings["提示词Skill上下文"] = prompt_skill_context
+    settings["提示词Skill摘要"] = _summarize_prompt_skill_context_impl(prompt_skill_context)
+    settings["模板风格Skill"] = dict(prompt_skill_context.get("template_style", {}) or {})
+    settings["用户标签Skill"] = dict(prompt_skill_context.get("user_tags", {}) or {})
+    settings["用户标签Skill标签数"] = len(settings["用户标签Skill"].get("all_tags", []))
     recent_tracks = _update_history(cache_key, style_track)
     prompt_recent_tracks = _random_history(cache_key)
     settings["最近提示词指纹"] = _prompt_history_fingerprints(cache_key)
@@ -5799,6 +5821,8 @@ def _run_stage_impl(
     json_payload["profile_rotation_markers"] = list(profile_markers)
     json_payload["strict_prompt_dedupe_enabled"] = True
     json_payload["normalization_notes"] = list(settings.get("推理纠偏说明", []))
+    json_payload["prompt_skill_context"] = dict(settings.get("提示词Skill上下文", {}) or {})
+    json_payload["prompt_skill_summary"] = str(settings.get("提示词Skill摘要", "") or "")
     if nsfw_output is not None:
         json_payload["nsfw_workspace"] = dict(nsfw_workspace)
         json_payload["nsfw_workspace_source"] = nsfw_workspace_source

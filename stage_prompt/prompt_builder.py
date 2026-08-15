@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import re
 from collections import OrderedDict
-from typing import Any, Callable, NotRequired, TypedDict
+from typing import Any, Callable, Mapping, NotRequired, TypedDict
 
 try:  # Keep direct file loading in tests working when the package context is absent.
     from .skills import resolve_base_template_style
@@ -4502,6 +4502,14 @@ def _build_concise_chinese_prompt(
     subject = _join_limited(subject_values, limit=5) or context_identity or ("非人物主体" if non_person else "人物主体")
     style_values = _nonempty_group_values_from_fragments(selected, "画面风格", fragments)
     style = _join_coherent_values(style_values, limit=2, clusters=_STYLE_CLUSTER_PRIORITY_ZH)
+    style_skill = settings.get("模板风格Skill")
+    if isinstance(style_skill, Mapping):
+        medium = _clean_fragment(style_skill.get("medium"))
+        rendering = _clean_fragment(style_skill.get("rendering"))
+        if medium and medium not in style:
+            style = f"{style or style_skill.get('name', '统一风格')}的{medium}"
+        if rendering and rendering not in style:
+            style = f"{style}，{rendering}"
     style_bridge_hint = _build_style_bridge_hint(
         style_values,
         style_isolation_mode=_style_isolation_mode(settings),

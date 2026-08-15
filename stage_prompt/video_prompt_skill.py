@@ -364,6 +364,12 @@ def _build_chinese_video_prompt(
     props = _series(groups, "道具世界观") or "场景中的关键线索"
     lighting = _first(groups, "光影氛围") or "主光随动作轻微移动，环境反射保留空间层次"
     composition = _primary_composition(groups)
+    style_skill = settings.get("模板风格Skill")
+    if not isinstance(style_skill, Mapping):
+        style_skill = {}
+    medium = _clean(style_skill.get("medium"), limit=120)
+    rendering = _clean(style_skill.get("rendering"), limit=180)
+    video_rules = _clean(style_skill.get("video_rules"), limit=180)
     brief = _source_brief(settings)
     seed = int(settings.get("运行时随机有效种子", 0) or settings.get("seed", 0) or 0)
     anchors = {
@@ -396,7 +402,8 @@ def _build_chinese_video_prompt(
         (
             f"分镜一（建立）：镜头以{composition}建立{scene}的空间关系，{subject}{outfit_clause}位于画面中心偏前，"
             f"{props}留在视线能够回到的位置。{brief_clause}{opening}；{motive}。"
-            f"{style}决定画面的线条、色彩与材质表达，{lighting}先把主体与关键线索从背景中分离，{audio}。"
+            f"{style}决定画面的线条、色彩与材质表达；{medium or '当前媒介'}保持统一，{rendering or '材质与光线保持空间关系连续'}。"
+            f"{lighting}先把主体与关键线索从背景中分离，{audio}。"
         ),
         (
             f"分镜二（触发）：镜头从环境关系推进到{reference}的视线、手部与{props}之间，先让观众读懂线索，再发生变化。"
@@ -417,6 +424,7 @@ def _build_chinese_video_prompt(
             f"分镜五（收束）：镜头在高潮之后放慢观察，不再引入无关人物或新地点，而是回看{subject}、{props}与环境后果之间的新关系。"
             f"最后，{ending}；{reference}的视线、{props}的状态和背景光共同说明这次选择已经改变局势。"
             f"结尾保留清楚结果与开放余韵，使五段分镜组成一条完整剧情，也让下一次行动拥有自然入口。"
+            f"全程遵守{video_rules or '同一媒介、空间与主体的连续性'}。"
         ),
     )
     return _join_storyboard_paragraphs(paragraphs)

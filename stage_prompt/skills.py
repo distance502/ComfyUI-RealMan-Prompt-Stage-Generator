@@ -9,7 +9,10 @@ import re
 from typing import Any, Callable
 
 try:
-    from .expanded_profiles import EXPANDED_TEMPLATE_BASE_MAP
+    from .expanded_profiles import (
+        EXPANDED_TEMPLATE_BASE_MAP,
+        EXPANDED_TEMPLATE_STYLE_VARIANTS,
+    )
 except Exception:  # pragma: no cover - direct file loading in focused tests
     import importlib.util as _expanded_importlib_util
     from pathlib import Path as _ExpandedPath
@@ -23,6 +26,7 @@ except Exception:  # pragma: no cover - direct file loading in focused tests
     _expanded_module = _expanded_importlib_util.module_from_spec(_expanded_spec)
     _expanded_spec.loader.exec_module(_expanded_module)
     EXPANDED_TEMPLATE_BASE_MAP = _expanded_module.EXPANDED_TEMPLATE_BASE_MAP
+    EXPANDED_TEMPLATE_STYLE_VARIANTS = _expanded_module.EXPANDED_TEMPLATE_STYLE_VARIANTS
 
 
 SelectedTags = OrderedDict[str, list[str]]
@@ -101,6 +105,232 @@ _AUTO_HUMAN_SUBJECT_TAGS = {
 def resolve_base_template_style(value: Any, *, default: str = "") -> str:
     cleaned = str(value or "").strip()
     return TEMPLATE_STYLE_BASE_MAP.get(cleaned, cleaned or str(default or "").strip())
+
+
+# The defaults are visual contracts, not model-specific prompt fragments. They
+# cover the core families while expanded template profiles contribute their
+# concrete accents below, so every configured template receives a Skill.
+_TEMPLATE_STYLE_SKILL_DEFAULTS: dict[str, dict[str, Any]] = {
+    "真实感": {
+        "medium": "摄影写实媒介",
+        "rendering": "自然材质、连续光学景深、可信比例与非周期细节",
+        "composition": "像摄影机在一个连续空间里记录决定性瞬间，主体与环境保持真实尺度",
+        "motion": "动作只留下可见的惯性、接触和衣物或材质反馈",
+        "image_rules": "保持真实光学、材质和解剖关系，不加入绘画笔触或游戏渲染界面",
+        "video_rules": "使用克制的摄影机运动与现场光线变化，镜头之间保持同一空间和焦段逻辑",
+        "isolation": ("水彩晕染", "厚重墨线", "木刻刀刻", "像素块", "PBR渲染", "实时引擎界面"),
+    },
+    "插画感": {
+        "medium": "二维插画与手绘平面媒介",
+        "rendering": "线条、色块、笔触和纸面或印刷纹理组织明暗，颜色可有设计性但层次清楚",
+        "composition": "用清晰轮廓和叙事性构图集中视觉重心，避免摄影棚参数主导画面",
+        "motion": "运动通过姿态线、衣摆、粒子和连续笔触变化表达，主体轮廓保持可读",
+        "image_rules": "维持统一的二维线条与色块语言，不混入照片级皮肤、PBR高光或真实相机噪声",
+        "video_rules": "按动画分镜组织镜头，保持角色轮廓、配色和笔触在每段之间连续",
+        "isolation": ("raw photo", "照片级皮肤", "PBR渲染", "真实镜头参数", "金属实时反射"),
+    },
+    "CG感": {
+        "medium": "三维CG与概念设计媒介",
+        "rendering": "连续几何、材质法线、高光、接触阴影和空间透视服从统一三维光照",
+        "composition": "优先展示结构、尺度、功能和空间纵深，主体轮廓与关键材质清楚可读",
+        "motion": "运动遵守重量、惯性、机械或布料约束和环境遮挡，避免无因果的漂浮",
+        "image_rules": "保持三维材质和空间关系，不加入二维漫画分格、纸张笔触或摄影棚标签串",
+        "video_rules": "镜头运动沿连续三维路径完成，材质高光、阴影和遮挡随动作保持一致",
+        "isolation": ("水彩晕染", "木刻纹理", "漫画分格", "纸张白边", "扁平印刷网点"),
+    },
+    "古风": {
+        "medium": "东方古典绘画与古装电影媒介",
+        "rendering": "服饰、器物、建筑和光色遵守古典时代语汇，材质细节服务于古典气韵",
+        "composition": "以留白、轴线、回廊或庭院层次建立空间，不使用现代广告构图套话",
+        "motion": "动作体现衣袖、发饰、兵器和地面接触的重量与惯性，环境反馈保持时代一致",
+        "image_rules": "只保留当前古典世界的服装、器物和建筑，不串入现代都市、科幻界面或当代设备",
+        "video_rules": "分镜沿同一古典场景推进，光源、服饰和道具的时代逻辑在每段保持连续",
+        "isolation": ("写字楼", "手机屏幕", "电脑界面", "现代西装", "霓虹赛博", "科幻舱室"),
+    },
+    "神话感": {
+        "medium": "神话叙事与史诗幻想媒介",
+        "rendering": "神性尺度、仪式性光线、奇观材质与现实空间保持统一层级",
+        "composition": "用清晰的主体与圣境或遗迹关系表达世界观，奇观服务于当前事件而非堆叠背景",
+        "motion": "能量、风、尘、火或衣饰变化必须有共同来源，并留下可见因果反馈",
+        "image_rules": "保持一个明确神话世界，不混入现代生活物件、摄影棚话术或不相干科技元素",
+        "video_rules": "故事从处境到触发再到高潮逐步升级，神话光源和环境状态随剧情连续变化",
+        "isolation": ("现代公寓", "办公室", "手机抓拍", "商业棚拍", "赛博界面", "写实街拍"),
+    },
+}
+
+
+def _skill_clean(value: Any, *, limit: int = 160) -> str:
+    text = re.sub(r"\s+", " ", str(value or "")).strip(" ，,。；;：:|/")
+    return text[:limit].rstrip(" ，,。；;：:")
+
+
+def _skill_unique(values: Any, *, limit: int = 12) -> list[str]:
+    if isinstance(values, str):
+        values = [values]
+    if not isinstance(values, (list, tuple, set)):
+        return []
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = _skill_clean(value)
+        key = text.casefold()
+        if not text or key in seen:
+            continue
+        seen.add(key)
+        result.append(text)
+        if len(result) >= limit:
+            break
+    return result
+
+
+def build_template_style_skill(style: Any, *, selected_tags: Any = None) -> dict[str, Any]:
+    """Return a deterministic visual contract for any template style name."""
+
+    requested = _skill_clean(style) or "真实感"
+    base_style = resolve_base_template_style(requested, default="真实感")
+    defaults = dict(_TEMPLATE_STYLE_SKILL_DEFAULTS.get(base_style, _TEMPLATE_STYLE_SKILL_DEFAULTS["真实感"]))
+    accents: dict[str, list[str]] = {key: [] for key in ("画面风格", "场景背景", "光影氛围", "技术画质")}
+    variants = EXPANDED_TEMPLATE_STYLE_VARIANTS.get(requested, [])
+    if not variants and requested != base_style:
+        variants = EXPANDED_TEMPLATE_STYLE_VARIANTS.get(base_style, [])
+    for variant in variants[:4]:
+        for raw_tag, raw_group in variant.get("tags", []):
+            group = str(raw_group).strip()
+            tag = _skill_clean(raw_tag, limit=96)
+            if group in accents and tag and tag not in accents[group]:
+                accents[group].append(tag)
+    if requested not in accents["画面风格"]:
+        accents["画面风格"].insert(0, requested)
+    if base_style not in accents["画面风格"]:
+        accents["画面风格"].append(base_style)
+    selected = _skill_unique(selected_tags, limit=24)
+    return {
+        "id": f"template_style:{requested}",
+        "name": requested,
+        "base_style": base_style,
+        "medium": str(defaults["medium"]),
+        "rendering": str(defaults["rendering"]),
+        "composition": str(defaults["composition"]),
+        "motion": str(defaults["motion"]),
+        "image_rules": str(defaults["image_rules"]),
+        "video_rules": str(defaults["video_rules"]),
+        "anchors": {key: _skill_unique(value, limit=8) for key, value in accents.items()},
+        "forbidden_cross_style_terms": _skill_unique(defaults.get("isolation", ()), limit=16),
+        "selected_style_tags": selected,
+        "priority": "模板风格决定媒介、渲染和镜头语法；用户显式标签决定当前主体事实。",
+    }
+
+
+def build_template_style_skill_catalog() -> dict[str, dict[str, Any]]:
+    """Build a non-empty Skill record for every configured template option."""
+
+    return {name: build_template_style_skill(name) for name in TEMPLATE_STYLE_BASE_MAP if _skill_clean(name)}
+
+
+def build_user_selected_tag_skill(
+    selected: Any,
+    custom_tags: Any = None,
+    *,
+    explicit_tags: Any = None,
+) -> dict[str, Any]:
+    """Build a protected, grouped Skill from the user's selected tags."""
+
+    groups: dict[str, list[str]] = {}
+    if isinstance(selected, dict):
+        for raw_group, raw_values in selected.items():
+            values = _skill_unique(raw_values, limit=32)
+            if values:
+                groups[str(raw_group)] = values
+    custom = _skill_unique(custom_tags, limit=32)
+    if custom:
+        existing = {tag.casefold() for tag in groups.get("自定义补充", [])}
+        groups.setdefault("自定义补充", []).extend(tag for tag in custom if tag.casefold() not in existing)
+    all_values = [tag for values in groups.values() for tag in values]
+    explicit = _skill_unique(explicit_tags if explicit_tags is not None else all_values, limit=96)
+    explicit_keys = {tag.casefold() for tag in explicit}
+    protected = [tag for tag in all_values if tag.casefold() in explicit_keys]
+    relation_pairs = (
+        ("主体", "服装造型", "身份与服装必须属于同一角色"),
+        ("主体", "动作姿态", "动作必须由主体完成且保持单一身体"),
+        ("场景背景", "道具世界观", "道具必须存在于当前场景并参与同一事件"),
+        ("光影氛围", "构图视角", "光线方向与机位共同决定可见明暗和空间层次"),
+        ("服装造型", "技术画质", "材质细节只服务当前服装，不替换服装本身"),
+    )
+    relations = [
+        {"groups": [left, right], "rule": rule}
+        for left, right, rule in relation_pairs
+        if groups.get(left) and groups.get(right)
+    ]
+    return {
+        "id": "user_selected_tags",
+        "groups": groups,
+        "all_tags": _skill_unique(all_values, limit=128),
+        "explicit_tags": explicit,
+        "protected_tags": _skill_unique(protected, limit=128),
+        "relations": relations,
+        "priority": "用户显式标签 > 设定图/反推可见事实 > 模板风格 Skill > 主题池/运行时随机 > 模型补充。",
+        "isolation": "每个标签只在所属分组和当前场景中解释；不得把主体词当服装、道具词当场景，或把其他模板的媒介词串入正文。",
+        "image_rules": "图像提示词将这些标签合成为一个连续画面，保持主体数量、服装、场景、动作、光影和构图可追踪。",
+        "video_rules": "视频提示词首段建立全部核心标签，后续分镜通过同一主体、空间参照和可见状态变化承接，不凭空换人换景。",
+    }
+
+
+def build_prompt_skill_context(
+    style: Any,
+    selected: Any,
+    custom_tags: Any = None,
+    *,
+    explicit_tags: Any = None,
+) -> dict[str, Any]:
+    """Combine template and user-tag Skills into one shared downstream context."""
+
+    style_tags = selected.get("画面风格", []) if isinstance(selected, dict) else []
+    return {
+        "version": "prompt-skill-context-v1",
+        "template_style": build_template_style_skill(style, selected_tags=style_tags),
+        "user_tags": build_user_selected_tag_skill(selected, custom_tags, explicit_tags=explicit_tags),
+        "shared_contract": (
+            "图像、视频、智能文本和模型后置润色必须消费同一份模板风格与用户标签 Skill；"
+            "风格 Skill 只约束媒介和表现语法，用户标签 Skill 负责当前事实锚点，二者冲突时保留用户显式事实并收敛表现方式。"
+        ),
+    }
+
+
+def summarize_prompt_skill_context(context: Any) -> str:
+    """Render the shared context as compact natural-language guidance for models."""
+
+    if not isinstance(context, dict):
+        return ""
+    style = context.get("template_style") if isinstance(context.get("template_style"), dict) else {}
+    user = context.get("user_tags") if isinstance(context.get("user_tags"), dict) else {}
+    anchors = style.get("anchors") if isinstance(style.get("anchors"), dict) else {}
+    anchor_text = "；".join(
+        f"{group}：{'、'.join(_skill_unique(values, limit=5))}"
+        for group, values in anchors.items()
+        if _skill_unique(values, limit=5)
+    )
+    grouped = user.get("groups") if isinstance(user.get("groups"), dict) else {}
+    user_text = "；".join(
+        f"{group}：{'、'.join(_skill_unique(values, limit=8))}"
+        for group, values in grouped.items()
+        if _skill_unique(values, limit=8)
+    )
+    relation_text = "；".join(
+        str(item.get("rule", "")).strip()
+        for item in user.get("relations", [])
+        if isinstance(item, dict) and str(item.get("rule", "")).strip()
+    )
+    lines = [
+        f"模板风格 Skill [{style.get('name', '')}/{style.get('base_style', '')}]：媒介为{style.get('medium', '')}；{style.get('rendering', '')}",
+        f"风格锚点：{anchor_text}" if anchor_text else "",
+        f"风格图像规则：{style.get('image_rules', '')}",
+        f"风格视频规则：{style.get('video_rules', '')}",
+        f"用户标签 Skill：{user_text}" if user_text else "用户标签 Skill：当前没有显式标签",
+        f"用户标签关系：{relation_text}" if relation_text else "",
+        f"用户标签优先级：{user.get('priority', '')}",
+        f"统一隔离规则：{user.get('isolation', '')}",
+    ]
+    return "\n".join(line for line in lines if line)
 
 
 @dataclass(frozen=True)
@@ -1400,6 +1630,44 @@ def _apply_nsfw_workspace_strategy(
     notes.append(f"NSFW Skill策略：{source}，识别{intensity}，{change_text}；保留工作台自选标签，只补稳定锚点，不锁死风格。")
 
 
+def _apply_template_style_skill_context(
+    *,
+    selected: SelectedTags,
+    custom_tags: list[str],
+    settings: dict[str, Any],
+    context: dict[str, Any],
+    **_: Any,
+) -> None:
+    style = str(settings.get("模板风格", "自动") or "自动").strip()
+    if style in {"", "自动"}:
+        style = resolve_base_template_style(
+            next(iter(selected.get("画面风格", [])), "真实感"),
+            default="真实感",
+        )
+    skill = build_template_style_skill(style, selected_tags=selected.get("画面风格", []))
+    settings["模板风格Skill"] = skill
+    settings["模板风格Skill名称"] = str(skill.get("name", style))
+
+
+def _apply_user_selected_tag_skill_context(
+    *,
+    selected: SelectedTags,
+    custom_tags: list[str],
+    settings: dict[str, Any],
+    context: dict[str, Any],
+    collect_all_tags: TagListFn,
+    **_: Any,
+) -> None:
+    explicit = context.get("user_explicit_tags")
+    skill = build_user_selected_tag_skill(
+        selected,
+        custom_tags,
+        explicit_tags=explicit if explicit is not None else collect_all_tags(selected, custom_tags),
+    )
+    settings["用户标签Skill"] = skill
+    settings["用户标签Skill标签数"] = len(skill.get("all_tags", []))
+
+
 _STAGE_PROMPT_SKILLS: tuple[StagePromptSkill, ...] = (
     StagePromptSkill(
         name="prompt_noise_filter",
@@ -1496,6 +1764,18 @@ _STAGE_PROMPT_SKILLS: tuple[StagePromptSkill, ...] = (
         phase="final_normalize",
         enabled=lambda settings, context: _is_person_adult_mature(settings),
         apply=_apply_adult_mature_group_compactor,
+    ),
+    StagePromptSkill(
+        name="template_style_skill_context",
+        phase="final_normalize",
+        enabled=lambda settings, context: True,
+        apply=_apply_template_style_skill_context,
+    ),
+    StagePromptSkill(
+        name="user_selected_tag_skill_context",
+        phase="final_normalize",
+        enabled=lambda settings, context: True,
+        apply=_apply_user_selected_tag_skill_context,
     ),
 )
 

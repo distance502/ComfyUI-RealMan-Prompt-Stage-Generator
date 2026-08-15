@@ -81,23 +81,19 @@
 
 连接 `参考图片` 并启用图片反推后，视觉模型先提取可见事实，再进入同一结构。反推不会把水印、界面文字或无关背景物当成角色设定。
 
-### 本地浏览器与提示词搜索
-
-节点内置 Edge/Chrome/Chromium 浏览器入口，使用保留的暗色画面帧降低加载、切页和刷新时的闪白。浏览器不会随节点运行自动联网，只有主动打开网页或点击搜索时才发起请求。
-
-可在 `online_search_config.json` 配置自己的 HTTPS SearXNG，也可以设置 `QWEN_TE_SEARXNG_URL`。将 `public_source_fallback_enabled` 设为 `false` 可关闭 Civitai/Lexica 公共来源回退；`QWEN_TE_BROWSER_EXE` 可指定可信浏览器程序。
-
 ## 模型模式
 
 | 模式 | 适合场景 | 行为 |
 | --- | --- | --- |
 | `仅Skill` | 离线、快速、稳定 | 不需要模型或 API，直接生成图像、智能文本和视频成品 |
-| `本地模型` | 隐私优先、本机 GGUF | Skill 先生成底稿，再由外接兼容模型或内置 GGUF 增量润色 |
+| `本地模型` | 隐私优先、本机 GGUF 或原始模型 | Skill 先生成底稿，再由外接兼容模型或内置本地模型增量润色 |
 | `API接口` | 更强语言模型、云端或本机服务 | 支持云 API、Ollama、LM Studio 和兼容接口，仍受同一关系合同约束 |
 
-内置 GGUF 从 `ComfyUI/models/LLM/` 读取，支持 Qwen3-VL、Qwen3.5-VL、Qwen3.8-VL、Gemma4、Llama、Mistral、DeepSeek 和通用 GGUF。模型文件名中的 `qwen3.8` 或 `qwen38` 会自动识别为 Qwen3.8 家族。节点优先使用模型自带聊天模板；模板缺失或无效时，会按模型家族选择兼容格式并有界重试，避免 `Invalid chat handler` 直接中断生成。Qwen3.8 的专用视觉 handler 按运行时能力可选，旧版 `llama-cpp-python` 缺少该 handler 时仍可加载文本路径并回退到 GGUF 模板。
+内置本地模型从 `ComfyUI/models/LLM/` 读取，自动识别两种格式：`.gguf` 走 `llama-cpp-python`；包含 `config.json`、tokenizer 和 `.safetensors/.bin/.pt/.pth` 权重的 Hugging Face 原始模型目录走 `transformers`。两种格式都支持 Qwen3-VL、Qwen3.5-VL、Qwen3.8-VL、Gemma4、Llama、Mistral、DeepSeek 和通用模型。模型文件名中的 `qwen3.8` 或 `qwen38` 会自动识别为 Qwen3.8 家族。节点优先使用模型自带聊天模板；模板缺失或无效时，会按模型家族选择兼容格式并有界重试，避免 `Invalid chat handler` 直接中断生成。Qwen3.8 的专用视觉 handler 按运行时能力可选，旧版 `llama-cpp-python` 缺少该 handler 时仍可加载文本路径并回退到 GGUF 模板。
 
-本地加载参数可在模型面板中自定义：上下文长度、GPU 层数、KV 缓存、批处理/微批处理、推理线程、Flash Attention、KQV 卸载、mmap/mlock 和 RoPE 参数均有独立控件。`模型参数JSON` / `内置模型参数JSON` 还可传入当前 `llama-cpp-python` 支持的其他构造参数，例如 `{"n_seq_max": 2, "use_direct_io": true}`；不支持的键会自动忽略，模型路径、聊天格式和 KV 类型等核心键由节点保护。
+原始模型目录应直接放在 `ComfyUI/models/LLM/<模型目录>/`，目录至少包含 `config.json`、tokenizer 文件和权重。原始 Vision 模型由 `AutoProcessor` 处理图片；纯文本原始模型可用于提示词、剧情和视频提示词生成。安装 `transformers`、`accelerate`、`safetensors` 后，节点会根据路径自动选择后端，无需新增节点或手动切换格式。
+
+本地加载参数可在模型面板中自定义：上下文长度、GPU 层数、KV 缓存、批处理/微批处理、推理线程、Flash Attention、KQV 卸载、mmap/mlock 和 RoPE 参数均有独立控件。`模型参数JSON` / `内置模型参数JSON` 会按实际后端过滤：GGUF 可传 `llama-cpp-python` 构造参数，例如 `{"n_seq_max": 2, "use_direct_io": true}`；原始模型可传 `transformers` 加载参数，例如 `{"torch_dtype": "bfloat16", "device_map": "auto", "attn_implementation": "sdpa"}`。不支持的键会自动忽略，模型路径、聊天格式和 KV 类型等核心键由节点保护。
 
 API 支持 OpenAI-compatible 接口以及 DashScope、Claude、Gemini 原生适配。通义选择 `通义千问DashScope` 后默认使用 `https://dashscope.aliyuncs.com/api/v1` 和 `qwen3.7-max`；也可自由填写其他通义文本或视觉对话模型名。节点会自动选择 Generation 或 MultiModalConversation 端点，Qwen3/QwQ/QVQ 自动启用思考并只采用最终正文。推荐把密钥写入环境变量，并在节点中填写：
 
@@ -121,7 +117,8 @@ env:QWEN_TE_API_KEY
 
 可选依赖：
 
-- `llama-cpp-python`：节点直接加载本地 GGUF 时需要；仅 Skill 和普通 HTTP API 不需要。
+- `llama-cpp-python`：节点直接加载本地 GGUF 时需要。
+- `transformers`、`accelerate`、`safetensors`：节点直接加载 Hugging Face 原始模型时需要。
 - `opencv-python`、`rapidocr-onnxruntime`：图片质量检查和 OCR 相关能力需要。
 
 只使用 `仅Skill` 时，无需安装上述模型依赖。
@@ -182,4 +179,4 @@ python -m py_compile stage_prompt/intelligence.py stage_prompt/model_refiner.py 
 
 ## 完整说明
 
-参数、按钮、模型配置、三视图、视频分镜、浏览器、NSFW、预设、历史和排错请阅读 [使用说明书.md](使用说明书.md)。
+参数、按钮、模型配置、三视图、视频分镜、NSFW、预设、历史和排错请阅读 [使用说明书.md](使用说明书.md)。

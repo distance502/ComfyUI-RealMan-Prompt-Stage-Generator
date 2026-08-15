@@ -992,14 +992,14 @@ test("legacy widget cleanup runs onRemove instead of leaving DOM cleanup behind"
 	assert.equal(node.widgets.includes(legacyWidget), false);
 });
 
-test("retained terminal header exposes the web browser without restoring the legacy tag shortcut", async () => {
+test("terminal header no longer exposes browser controls", async () => {
 	const source = await fs.readFile(UI_PATH, "utf8");
 	assert.equal(source.includes('textContent = "联网补词"'), false);
 	assert.equal(source.includes("onlineSearchButton.onclick"), false);
-	assert.equal(source.includes('displaySearch.textContent="浏览器"'), true);
-	assert.equal(source.includes('displaySearch.setAttribute("aria-label","打开网页浏览器")'), true);
-	assert.equal(source.includes("openOnlinePromptSearchDialog(node, node?.[PANEL_KEY]?.library ?? library)"), true);
-	assert.equal(source.includes("const panelButtons = { onlineSearch: displaySearch };"), true);
+	assert.equal(source.includes('displaySearch.textContent="浏览器"'), false);
+	assert.equal(source.includes('displaySearch.setAttribute("aria-label","打开网页浏览器")'), false);
+	assert.equal(source.includes("openOnlinePromptSearchDialog(node, node?.[PANEL_KEY]?.library ?? library)"), false);
+	assert.equal(source.includes("const panelButtons = { onlineSearch: displaySearch };"), false);
 });
 
 test("online prompt search query removes low-value terms and deduplicates keywords", async () => {
@@ -1603,7 +1603,7 @@ test("online prompt search keeps modal mutations blocked during continuous runs"
 	assert.equal(source.includes("if (busyState || rejectDuringContinuousRun()) return;"), true);
 	assert.equal(source.includes("for (const batch of chunkOnlineImportTags(tagsToImport, 12))"), true);
 	assert.equal(source.includes("candidateItems = candidateItems.map((item) => ({"), true);
-	assert.equal(source.includes('document.querySelector?.(\'[data-qwen-modal="online-search"]\')'), true);
+	assert.equal(source.includes('document.querySelector?.(\'[data-qwen-modal="online-search"]\')'), false);
 });
 
 test("online prompt search locks interactive state and ignores IME commit enter", async () => {
@@ -1664,7 +1664,7 @@ test("stage panel keeps daily generation settings in hidden native widgets", asy
 test("stage model dialog exposes compact controls without taking over external loader nodes", async () => {
 	const source = await fs.readFile(UI_PATH, "utf8");
 	assert.equal(source.includes("TE MODEL DECK"), true);
-	for (const family of ["Qwen3.8-VL", "Qwen3.5-VL", "Qwen3-VL", "Gemma4", "Llama", "Mistral", "DeepSeek", "通用GGUF"]) {
+	for (const family of ["Qwen3.8-VL", "Qwen3.5-VL", "Qwen3-VL", "Gemma4", "Llama", "Mistral", "DeepSeek", "通用模型", "通用GGUF"]) {
 		assert.equal(source.includes(`value: "${family}"`), true, `${family} should be available from the model deck`);
 	}
 	assert.equal(source.includes("function openStageModelDialog(stageNode)"), true);
