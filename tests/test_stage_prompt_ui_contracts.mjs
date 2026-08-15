@@ -6024,6 +6024,34 @@ test("buildNsfwWorkspaceMappedState folds compatible result terms into the same 
 	assert.equal(malePair.custom_tags.includes("射精"), false);
 });
 
+test("buildNsfwWorkspaceMappedState exposes a structured result contract and filters every result source", async () => {
+	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	const mapped = exports.buildNsfwWorkspaceMappedState(
+		{ properties: {}, widgets: [] },
+		{ slot_config: [], tag_library: {} },
+		{
+			selector_character: "成年女性",
+			anatomy_terms: "外阴、阴蒂",
+			explicit_terms: "自慰",
+			workspace_custom_tags: ["女性刺激潮吹结果"],
+			trigger_words: ["受控体液结果"],
+			custom_prefix: "潮吹",
+			custom_suffix: "体液",
+			negative_preset: "标准负面提示词",
+		},
+	);
+	assert.equal(mapped.result_contract.enabled, true);
+	assert.equal([...mapped.result_contract.markers].join("|"), "潮吹|体液");
+	assert.equal([...mapped.result_contract.types].join("|"), "female_stimulation_squirt|controlled_fluid");
+	assert.equal([...mapped.result_contract.contact_points].join("|"), "外阴|阴蒂");
+	assert.equal(mapped.result_contract.person_count, 1);
+	assert.equal(mapped.result_contract.camera_axis.includes("镜头轴线保持不变"), true);
+	assert.equal(mapped.result_contract.end_state.includes("结果只停留在外阴、阴蒂"), true);
+	for (const looseTerm of ["女性刺激潮吹结果", "受控体液结果", "潮吹", "体液"]) {
+		assert.equal(mapped.custom_tags.includes(looseTerm), false);
+	}
+});
+
 test("buildNsfwWorkspaceMappedState leaves result terms unbound without a base action", async () => {
 	const exports = await loadUiExports("http://127.0.0.1:8188/");
 	const result = exports.buildNsfwWorkspaceMappedState(

@@ -3799,6 +3799,7 @@ def _skill_context_for_model(settings: dict[str, Any]) -> str:
     model_fallback_note = str(settings.get("模型回退说明", "") or "").strip()
     post_context = str(settings.get("模型后置素材摘要", "") or "").strip()
     nsfw_context = str(settings.get("NSFW工作台标签摘要", "") or "").strip()
+    nsfw_result_contract = settings.get("NSFW结果合同")
     tag_block_context = str(settings.get("标签块编排摘要", "") or "").strip()
     danbooru_context = str(settings.get("Danbooru通用视觉标签摘要", "") or "").strip()
     creative_spine_context = str(settings.get("全局创作主线摘要", "") or "").strip()
@@ -3866,6 +3867,23 @@ def _skill_context_for_model(settings: dict[str, Any]) -> str:
         extra_lines.append(f"当前激活素材摘要：{post_context}")
     if nsfw_context:
         extra_lines.append(f"NSFW 工作台素材：{nsfw_context}")
+    if isinstance(nsfw_result_contract, dict) and bool(nsfw_result_contract.get("enabled", False)):
+        result_text = str(nsfw_result_contract.get("text", "") or "").strip()
+        contact_points = "、".join(
+            str(item).strip()
+            for item in nsfw_result_contract.get("contact_points", [])
+            if str(item).strip()
+        )
+        person_count = max(1, int(nsfw_result_contract.get("person_count", 1) or 1))
+        camera_axis = str(nsfw_result_contract.get("camera_axis", "") or "").strip()
+        end_state = str(nsfw_result_contract.get("end_state", "") or "").strip()
+        extra_lines.append(
+            "NSFW 动作结果阶段："
+            f"{result_text}；固定接触点={contact_points or '当前既有接触点'}；"
+            f"人物数量={person_count}名；镜头轴线={camera_axis or '沿当前轴线保持不变'}；"
+            f"结束状态={end_state or '保持原有姿态与空间关系'}。"
+            "结果必须作为既有动作的因果后果写入自然语言，不得拆成独立标签，不得新增人物、地点、道具或接触关系。"
+        )
     if tag_block_context:
         extra_lines.append(f"标签块编排顺序：{tag_block_context}")
     if danbooru_context:

@@ -60,6 +60,24 @@ _EXPLICIT_ACTION_PRIORITY = (
     "插入",
 )
 _EXPLICIT_RESULT_MARKERS = ("女性刺激潮吹结果", "男性刺激射精结果", "受控体液结果", "潮吹", "射精", "体液")
+_EXPLICIT_RESULT_ALIASES = {
+    "女性刺激潮吹结果": "潮吹",
+    "男性刺激射精结果": "射精",
+    "受控体液结果": "体液",
+}
+_EXPLICIT_RESULT_TYPES = {
+    "潮吹": "female_stimulation_squirt",
+    "射精": "male_stimulation_ejaculation",
+    "体液": "controlled_fluid",
+}
+_RESULT_SOURCE_FIELDS = (
+    "explicit_terms",
+    "workspace_custom_tags",
+    "trigger_words",
+    "custom_prefix",
+    "custom_suffix",
+)
+_RESULT_CONTACT_POINTS = ("外阴", "阴蒂", "阴道", "肛门", "阴茎", "口部")
 _VALUE_FIELDS = (
     "workspace_custom_tags",
     *NSFW_SELECTOR_FIELDS,
@@ -543,31 +561,63 @@ def _resolve_nsfw_action_contract_base(workspace: dict[str, Any]) -> str:
 
 
 def _ordered_nsfw_result_markers(explicit_text: str) -> list[str]:
-    positioned: list[tuple[int, str]] = []
-    canonical_seen: set[str] = set()
-    aliases = {
-        "女性刺激潮吹结果": "潮吹",
-        "男性刺激射精结果": "射精",
-        "受控体液结果": "体液",
-    }
+    canonical_positions: dict[str, int] = {}
     for marker in _EXPLICIT_RESULT_MARKERS:
         index = explicit_text.find(marker)
         if index < 0:
             continue
-        canonical = aliases.get(marker, marker)
-        if canonical in canonical_seen:
-            continue
-        canonical_seen.add(canonical)
-        positioned.append((index, canonical))
-    positioned.sort(key=lambda item: item[0])
-    return [marker for _, marker in positioned]
+        canonical = _EXPLICIT_RESULT_ALIASES.get(marker, marker)
+        canonical_positions[canonical] = min(index, canonical_positions.get(canonical, index))
+    return [
+        marker
+        for marker, _ in sorted(canonical_positions.items(), key=lambda item: item[1])
+    ]
 
 
-def _append_nsfw_result_contract(action_contract: str, explicit_text: str) -> str:
-    if not action_contract:
-        return ""
+def _empty_nsfw_result_contract(
+    action_contract: str = "",
+    *,
+    requested_markers: Iterable[str] = (),
+) -> dict[str, Any]:
+    return {
+        "enabled": False,
+        "requested_markers": list(requested_markers),
+        "markers": [],
+        "types": [],
+        "action_contract": action_contract,
+        "contact_points": [],
+        "person_count": 0,
+        "camera_axis": "",
+        "end_state": "",
+        "continuity_clause": "",
+        "required_anchors": [],
+        "text": "",
+    }
+
+
+def _infer_nsfw_result_person_count(action_contract: str) -> int:
+    if any(
+        marker in action_contract
+        for marker in ("双方", "两名", "双成年", "双人", "另一名", "伴侣", "夫妇", "情侣", "男女配对")
+    ):
+        return 2
+    if any(marker in action_contract for marker in ("三名", "三人")):
+        return 3
+    return 1
+
+
+def _build_nsfw_result_contract(action_contract: str, explicit_text: str) -> dict[str, Any]:
+    requested_markers = _ordered_nsfw_result_markers(explicit_text)
+    if not action_contract or not requested_markers:
+        return _empty_nsfw_result_contract(
+            action_contract,
+            requested_markers=requested_markers,
+        )
+
     clauses: list[str] = []
-    for marker in _ordered_nsfw_result_markers(explicit_text):
+    markers: list[str] = []
+    result_types: list[str] = []
+    for marker in requested_markers:
         if marker == "潮吹" and any(target in action_contract for target in ("外阴", "阴蒂", "阴道")):
             clauses.append(
                 "潮吹仅作为当前女性刺激动作的结果，液体来源、方向与落点受既有接触关系约束，不新增人物或动作分支"
@@ -580,29 +630,96 @@ def _append_nsfw_result_contract(action_contract: str, explicit_text: str) -> st
             clauses.append(
                 "其他体液仅出现在当前接触区域与已存在的身体或道具表面，不扩散成新的场景元素"
             )
+        else:
+            continue
+        markers.append(marker)
+        result_types.append(_EXPLICIT_RESULT_TYPES[marker])
     if not clauses:
-        return action_contract
-    clauses.append("结果发生前后保持原有姿态、接触点、人物数量与镜头轴线，结束状态能够连续追踪")
-    return f"{action_contract}；动作结果阶段: {'; '.join(clauses)}"
+        return _empty_nsfw_result_contract(
+            action_contract,
+            requested_markers=requested_markers,
+        )
+
+    contact_points = [point for point in _RESULT_CONTACT_POINTS if point in action_contract]
+    if not contact_points:
+        contact_points = ["当前既有接触点"]
+    person_count = _infer_nsfw_result_person_count(action_contract)
+    contact_text = "、".join(contact_points)
+    camera_axis = "沿当前镜头轴线保持不变，不换轴、不跳切"
+    continuity_clause = "结果发生前后保持原有姿态、接触点、人物数量与镜头轴线，结束状态能够连续追踪"
+    end_state = (
+        f"动作结束后保持原有姿态与空间关系，结果只停留在{contact_text}，"
+        "不新增人物、地点、道具或动作分支"
+    )
+    fixed_state_clause = (
+        f"固定接触点为{contact_text}，人物数量固定为{person_count}名，{camera_axis}；{end_state}"
+    )
+    clauses.extend((continuity_clause, fixed_state_clause))
+    text = f"动作结果阶段: {'; '.join(clauses)}"
+    required_anchors = [
+        f"固定接触点为{contact_text}",
+        f"人物数量固定为{person_count}名",
+        "沿当前镜头轴线保持不变",
+        "结束状态能够连续追踪",
+    ]
+    return {
+        "enabled": True,
+        "requested_markers": requested_markers,
+        "markers": markers,
+        "types": result_types,
+        "action_contract": action_contract,
+        "contact_points": contact_points,
+        "person_count": person_count,
+        "camera_axis": camera_axis,
+        "end_state": end_state,
+        "continuity_clause": continuity_clause,
+        "required_anchors": required_anchors,
+        "text": text,
+    }
+
+
+def _append_nsfw_result_contract(action_contract: str, explicit_text: str) -> str:
+    if not action_contract:
+        return ""
+    result_contract = _build_nsfw_result_contract(action_contract, explicit_text)
+    result_text = str(result_contract.get("text") or "").strip()
+    return f"{action_contract}；{result_text}" if result_text else action_contract
+
+
+def _nsfw_result_source_text(workspace: dict[str, Any]) -> str:
+    return _workspace_fields_text(workspace, _RESULT_SOURCE_FIELDS)
+
+
+def _is_standalone_nsfw_result_term(value: Any) -> bool:
+    text = _clean_text(value)
+    return bool(text and text in {*_EXPLICIT_RESULT_MARKERS, *_EXPLICIT_RESULT_ALIASES.values()})
 
 
 def resolve_nsfw_action_contract(workspace: dict[str, Any]) -> str:
     """Resolve an adult action and fold compatible result terms into the same contract."""
 
     action_contract = _resolve_nsfw_action_contract_base(workspace)
-    explicit_text = _workspace_fields_text(workspace, ("explicit_terms",))
+    explicit_text = _nsfw_result_source_text(workspace)
     return _append_nsfw_result_contract(action_contract, explicit_text)
 
 
 def _iter_workspace_terms(workspace: dict[str, Any]) -> Iterable[str]:
+    action_contract = resolve_nsfw_action_contract(workspace)
+
+    def iter_terms(value: Any, *, selector: bool = False) -> Iterable[str]:
+        source = _iter_selector_terms(value) if selector else _iter_split_terms(value)
+        for term in source:
+            if action_contract and _is_standalone_nsfw_result_term(term):
+                continue
+            yield term
+
     trigger_words = workspace.get("trigger_words", [])
     if isinstance(trigger_words, (list, tuple, set)):
         for item in trigger_words:
-            yield from _iter_split_terms(item)
+            yield from iter_terms(item)
     else:
-        yield from _iter_split_terms(trigger_words)
+        yield from iter_terms(trigger_words)
 
-    action_contract = resolve_nsfw_action_contract(workspace)
     action_contract_emitted = False
     for field in _VALUE_FIELDS:
         if action_contract and field in {"anatomy_terms", "explicit_terms"}:
@@ -614,12 +731,12 @@ def _iter_workspace_terms(workspace: dict[str, Any]) -> Iterable[str]:
                 action_contract_emitted = True
             continue
         if field in NSFW_SELECTOR_FIELDS:
-            yield from _iter_selector_terms(raw_value)
+            yield from iter_terms(raw_value, selector=True)
         elif isinstance(raw_value, (list, tuple, set)):
             for item in raw_value:
-                yield from _iter_split_terms(item)
+                yield from iter_terms(item)
         else:
-            yield from _iter_split_terms(raw_value)
+            yield from iter_terms(raw_value)
         if action_contract and field == "action" and not action_contract_emitted:
             yield action_contract
             action_contract_emitted = True
@@ -756,6 +873,15 @@ def map_nsfw_workspace_to_stage_state(
     workspace.clear()
     workspace.update(normalized_workspace)
     effective_workspace = _resolve_effective_workspace(workspace)
+    action_contract_base = _resolve_nsfw_action_contract_base(effective_workspace)
+    result_contract = _build_nsfw_result_contract(
+        action_contract_base,
+        _nsfw_result_source_text(effective_workspace),
+    )
+    action_contract = _append_nsfw_result_contract(
+        action_contract_base,
+        _nsfw_result_source_text(effective_workspace),
+    )
     selected = OrderedDict((group_name, []) for group_name in group_slot_limits.keys())
     custom_tags: list[str] = []
     custom_tag_chars = 0
@@ -791,7 +917,10 @@ def map_nsfw_workspace_to_stage_state(
             append_custom_tag(tag)
 
     for field in ("custom_prefix", "custom_suffix"):
-        append_custom_tag(workspace.get(field, ""))
+        for term in _iter_split_terms(workspace.get(field, "")):
+            if action_contract and _is_standalone_nsfw_result_term(term):
+                continue
+            append_custom_tag(term)
 
     # Content choices define the scene; generic finish tags should never crowd
     # them out of compact prompt summaries.
@@ -803,4 +932,5 @@ def map_nsfw_workspace_to_stage_state(
         "custom_tags": custom_tags,
         "negative_prompt": resolve_nsfw_negative_prompt(workspace),
         "negative": _resolve_negative_branch(workspace),
+        "result_contract": result_contract,
     }
