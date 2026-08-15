@@ -95,9 +95,13 @@
 | `本地模型` | 隐私优先、本机 GGUF | Skill 先生成底稿，再由外接兼容模型或内置 GGUF 增量润色 |
 | `API接口` | 更强语言模型、云端或本机服务 | 支持云 API、Ollama、LM Studio 和兼容接口，仍受同一关系合同约束 |
 
-内置 GGUF 从 `ComfyUI/models/LLM/` 读取，支持 Qwen3-VL、Qwen3.5-VL、Gemma4、Llama、Mistral、DeepSeek 和通用 GGUF。节点优先使用模型自带聊天模板；模板缺失或无效时，会按模型家族选择兼容格式并有界重试，避免 `Invalid chat handler` 直接中断生成。
+内置 GGUF 从 `ComfyUI/models/LLM/` 读取，支持 Qwen3-VL、Qwen3.5-VL、Qwen3.8-VL、Gemma4、Llama、Mistral、DeepSeek 和通用 GGUF。模型文件名中的 `qwen3.8` 或 `qwen38` 会自动识别为 Qwen3.8 家族。节点优先使用模型自带聊天模板；模板缺失或无效时，会按模型家族选择兼容格式并有界重试，避免 `Invalid chat handler` 直接中断生成。Qwen3.8 的专用视觉 handler 按运行时能力可选，旧版 `llama-cpp-python` 缺少该 handler 时仍可加载文本路径并回退到 GGUF 模板。
+
+本地加载参数可在模型面板中自定义：上下文长度、GPU 层数、KV 缓存、批处理/微批处理、推理线程、Flash Attention、KQV 卸载、mmap/mlock 和 RoPE 参数均有独立控件。`模型参数JSON` / `内置模型参数JSON` 还可传入当前 `llama-cpp-python` 支持的其他构造参数，例如 `{"n_seq_max": 2, "use_direct_io": true}`；不支持的键会自动忽略，模型路径、聊天格式和 KV 类型等核心键由节点保护。
 
 API 支持 OpenAI-compatible 接口以及 DashScope、Claude、Gemini 原生适配。通义选择 `通义千问DashScope` 后默认使用 `https://dashscope.aliyuncs.com/api/v1` 和 `qwen3.7-max`；也可自由填写其他通义文本或视觉对话模型名。节点会自动选择 Generation 或 MultiModalConversation 端点，Qwen3/QwQ/QVQ 自动启用思考并只采用最终正文。推荐把密钥写入环境变量，并在节点中填写：
+
+本地 GGUF、外接本地服务和 API 都经过同一个 `model-call` Skill：统一消息结构、响应正文抽取、思考块清洗、空响应判定和通道诊断；网络瞬时错误、参数不兼容或模型候选不合格时，仍由上层重试与 Skill 成品回退处理。
 
 ```text
 env:QWEN_TE_API_KEY
@@ -166,6 +170,7 @@ env:QWEN_TE_API_KEY
 - 搜索可完全使用本地标签库，也可只连接自己的 HTTPS SearXNG。
 - NSFW 工作台只面向合法成年内容；未主动启用时不会参与普通生成。
 - NSFW 显式动作提供异性与双成年同性角色的插入、口部刺激、手部刺激、单人自慰及成人道具完整合同；旧式器官词与行为词只在成年身份、人数和器官目标足够明确时合并为单条自然语言主动作，避免散装标签串词。
+- `潮吹`、`射精`、`体液`及其结果型选项只有在基础动作合同成立且目标部位匹配时，才会附加为同一条“动作结果阶段”；结果不会新增人物、器官、场景或镜头轴线，缺少基础动作时仍保留为未绑定的普通词。
 
 ## 测试
 

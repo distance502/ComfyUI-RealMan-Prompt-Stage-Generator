@@ -350,6 +350,17 @@ def build_state_from_kwargs(
         "内置GPU层数",
         "内置KV缓存K类型",
         "内置KV缓存V类型",
+        "内置批处理大小",
+        "内置微批处理大小",
+        "内置线程数",
+        "内置批处理线程数",
+        "内置Flash注意力",
+        "内置KQV卸载",
+        "内置内存映射",
+        "内置锁定内存",
+        "内置RoPE频率基值",
+        "内置RoPE频率缩放",
+        "内置模型参数JSON",
     ):
         if name in setting_defaults:
             settings[name] = kwargs.get(name, setting_defaults.get(name))

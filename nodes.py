@@ -4,6 +4,7 @@ import ctypes
 import gc
 import inspect
 import io
+import json
 import math
 import os
 import re
@@ -52,6 +53,19 @@ try:
     from llama_cpp.llama_chat_format import Qwen35ChatHandler
 except Exception:
     Qwen35ChatHandler = None
+
+try:
+    # Newer llama.cpp builds may ship a dedicated Qwen3.8 visual handler.
+    # Keep this optional: older builds must still load the GGUF through its
+    # embedded chat template or the generic Qwen format.
+    from llama_cpp.llama_chat_format import Qwen38ChatHandler
+except Exception:
+    Qwen38ChatHandler = None
+
+try:
+    from llama_cpp.llama_chat_format import Qwen38VLChatHandler
+except Exception:
+    Qwen38VLChatHandler = None
 
 try:
     from llama_cpp.llama_chat_format import Gemma4ChatHandler
@@ -119,7 +133,8 @@ class _ReentrantLockAdapter:
 默认KV缓存类型 = "默认(F16)"
 Q8_0缓存类型 = "q8_0"
 KV缓存类型选项 = [默认KV缓存类型, Q8_0缓存类型]
-TE通用模型系列选项 = ["Qwen3-VL", "Qwen3.5-VL", "Gemma4", "Llama", "Mistral", "DeepSeek", "通用GGUF"]
+Flash注意力选项 = ["自动", "开启", "关闭"]
+TE通用模型系列选项 = ["Qwen3-VL", "Qwen3.5-VL", "Qwen3.8-VL", "Gemma4", "Llama", "Mistral", "DeepSeek", "通用GGUF"]
 _CHAT_COMPLETION_SIGNATURE_CACHE: dict[type, tuple[inspect.Signature | None, bool]] = {}
 _LLAMA_INIT_PARAMS_CACHE: set[str] | None = None
 _MODEL_CALL_DEADLINE_PARAM = "_qwen_te_deadline_monotonic"
@@ -770,9 +785,166 @@ def _llama构造参数是否可用(param_name: str) -> bool | None:
     return param_name in _LLAMA_INIT_PARAMS_CACHE
 
 
+def _规范化llama高级加载参数(config: dict) -> dict[str, object]:
+    """Normalize optional Llama constructor settings without changing legacy defaults."""
+
+    def integer(name: str, default: int, minimum: int, maximum: int) -> int:
+        try:
+            value = int(config.get(name, default))
+        except (TypeError, ValueError):
+            value = default
+        return max(minimum, min(maximum, value))
+
+    def real(name: str, default: float, minimum: float, maximum: float) -> float:
+        try:
+            value = float(config.get(name, default))
+        except (TypeError, ValueError):
+            value = default
+        if not math.isfinite(value):
+            value = default
+        return max(minimum, min(maximum, value))
+
+    flash = str(config.get("flash_attn", "自动") or "自动").strip()
+    if flash not in Flash注意力选项:
+        flash = "自动"
+    n_batch = integer("n_batch", 2048, 32, 131072)
+    n_ubatch = min(n_batch, integer("n_ubatch", 512, 32, 131072))
+    return {
+        "n_batch": n_batch,
+        "n_ubatch": n_ubatch,
+        "n_threads": integer("n_threads", 0, 0, 512),
+        "n_threads_batch": integer("n_threads_batch", 0, 0, 512),
+        "flash_attn": flash,
+        "offload_kqv": bool(config.get("offload_kqv", True)),
+        "use_mmap": bool(config.get("use_mmap", True)),
+        "use_mlock": bool(config.get("use_mlock", False)),
+        "rope_freq_base": real("rope_freq_base", 0.0, 0.0, 1_000_000.0),
+        "rope_freq_scale": real("rope_freq_scale", 0.0, 0.0, 100.0),
+    }
+
+
+def _加入llama高级加载参数(llama_kwargs: dict[str, object], config: dict) -> None:
+    """Add only constructor keywords supported by the installed llama-cpp-python."""
+
+    options = _规范化llama高级加载参数(config)
+    for name in ("n_batch", "n_ubatch", "n_threads", "n_threads_batch"):
+        value = int(options[name])
+        # Zero means "let llama.cpp decide" for thread counts.
+        if name.startswith("n_threads") and value <= 0:
+            continue
+        if _llama构造参数是否可用(name) is True:
+            llama_kwargs[name] = value
+
+    for name in ("offload_kqv", "use_mmap", "use_mlock"):
+        if _llama构造参数是否可用(name) is True:
+            llama_kwargs[name] = bool(options[name])
+
+    for name in ("rope_freq_base", "rope_freq_scale"):
+        value = float(options[name])
+        # 0.0 preserves the model's metadata/default RoPE settings.
+        if value > 0.0 and _llama构造参数是否可用(name) is True:
+            llama_kwargs[name] = value
+
+    flash_value = {"自动": -1, "关闭": 0, "开启": 1}[str(options["flash_attn"])]
+    if _llama构造参数是否可用("flash_attn_type") is True:
+        llama_kwargs["flash_attn_type"] = flash_value
+    elif _llama构造参数是否可用("flash_attn") is True:
+        llama_kwargs["flash_attn"] = flash_value == 1
+
+
+_LLAMA_CUSTOM_BLOCKED_PARAMS = {
+    "model_path",
+    "chat_handler",
+    "chat_format",
+    "tokenizer",
+    "draft_model",
+    "n_ctx",
+    "n_gpu_layers",
+    "ctx_checkpoints",
+    "type_k",
+    "type_v",
+    "verbose",
+}
+
+
+def _解析llama自定义参数(value: object) -> dict[str, object]:
+    if isinstance(value, dict):
+        parsed = dict(value)
+    elif value is None or not str(value).strip():
+        return {}
+    else:
+        try:
+            parsed = json.loads(str(value))
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise ValueError("本地模型参数JSON必须是合法 JSON 对象。") from exc
+    if not isinstance(parsed, dict):
+        raise ValueError("本地模型参数JSON必须是 JSON 对象，例如 {\"n_seq_max\": 2}。")
+    return {str(key).strip(): item for key, item in parsed.items() if str(key).strip()}
+
+
+def _加入llama自定义参数(llama_kwargs: dict[str, object], config: dict) -> None:
+    """Apply user JSON parameters that the installed Llama accepts.
+
+    The explicit node controls remain authoritative for model identity and
+    chat formatting. Unsupported keys are ignored for older llama.cpp builds
+    instead of making the whole local-model route fail.
+    """
+
+    custom = _解析llama自定义参数(config.get("custom_llama_params"))
+    for name, value in custom.items():
+        if name in _LLAMA_CUSTOM_BLOCKED_PARAMS:
+            continue
+        if _llama构造参数是否可用(name) is not True:
+            continue
+        llama_kwargs[name] = value
+
+
 def _应使用llama内置聊天模板(*, family: str | None = None, model_name: str | None = None) -> bool:
+    # Only an explicit Qwen3.x revision should prefer the embedded template.
+    # A plain Qwen3 model often has a size suffix such as ``Qwen3-8B``; a
+    # compact ``qwen3[5-9]`` search would mistake that 8B size for Qwen3.8.
+    haystack = f"{family or ''} {model_name or ''}".lower()
+    return bool(re.search(r"qwen3(?:[._]?)[5-9](?:[^0-9]|$)", haystack))
+
+
+def _是qwen38系列(*, family: str | None = None, model_name: str | None = None) -> bool:
     haystack = re.sub(r"[^a-z0-9]+", "", f"{family or ''} {model_name or ''}".lower())
-    return "qwen35" in haystack
+    return "qwen38" in haystack
+
+
+def _构造qwen38视觉处理器(mmproj_path: str, think: bool):
+    """Construct an optional Qwen3.8 handler without making it a dependency.
+
+    Handler signatures have changed across llama-cpp-python releases.  Try
+    the known names and argument variants, then return ``None`` so the caller
+    can use the GGUF embedded template when this runtime predates Qwen3.8.
+    """
+
+    handlers = [Qwen38VLChatHandler, Qwen38ChatHandler]
+    seen: set[type] = set()
+    for handler_type in handlers:
+        if handler_type is None or handler_type in seen:
+            continue
+        seen.add(handler_type)
+        attempts = (
+            {"clip_model_path": mmproj_path, "enable_thinking": think, "add_vision_id": True, "verbose": False},
+            {"clip_model_path": mmproj_path, "force_reasoning": think, "verbose": False},
+            {"clip_model_path": mmproj_path, "use_think_prompt": think, "verbose": False},
+            {"clip_model_path": mmproj_path, "verbose": False},
+            {"clip_model_path": mmproj_path},
+        )
+        for kwargs in attempts:
+            try:
+                return handler_type(**kwargs)
+            except (TypeError, ValueError):
+                continue
+            except Exception:
+                # A handler can be present but reject a newer mmproj.  Keep
+                # loading the text path and let the normal Skill fallback
+                # report image-specific incompatibility instead of failing
+                # the whole node at model-load time.
+                break
+    return None
 
 
 def _推断llama默认聊天格式(*, family: str | None = None, model_name: str | None = None) -> str | None:
@@ -1149,6 +1321,13 @@ class _QwenStorage:
                 except TypeError:
                     # 兼容少数版本的参数名差异
                     chat_handler = Qwen35ChatHandler(clip_model_path=mmproj_path, enable_thinking=think, verbose=False)
+            elif _是qwen38系列(family=family, model_name=config.get("model")):
+                # Qwen3.8 landed after many released llama-cpp-python wheels.
+                # Use its dedicated handler when available, otherwise leave
+                # handler unset so Llama can use the GGUF chat template.
+                # This keeps text prompt generation usable instead of raising
+                # an Invalid chat handler error during model loading.
+                chat_handler = _构造qwen38视觉处理器(mmproj_path, bool(think))
             elif family == "Gemma4":
                 if Gemma4ChatHandler is None:
                     raise RuntimeError(
@@ -1177,6 +1356,8 @@ class _QwenStorage:
             "n_gpu_layers": n_gpu_layers,
             "verbose": False,
         }
+        _加入llama高级加载参数(llama_kwargs, config)
+        _加入llama自定义参数(llama_kwargs, config)
         if chat_handler is not None:
             llama_kwargs["chat_handler"] = chat_handler
         elif chat_format and _llama构造参数是否可用("chat_format") is not False:
@@ -1286,6 +1467,8 @@ class _Gemma4Storage:
             "n_gpu_layers": n_gpu_layers,
             "verbose": False,
         }
+        _加入llama高级加载参数(llama_kwargs, config)
+        _加入llama自定义参数(llama_kwargs, config)
         if chat_handler is not None:
             llama_kwargs["chat_handler"] = chat_handler
         elif chat_format and _llama构造参数是否可用("chat_format") is not False:
@@ -1397,7 +1580,7 @@ class QwenTE模型加载器:
 
         return {
             "required": {
-                "模型系列": (TE通用模型系列选项, {"default": "Qwen3.5-VL", "tooltip": "同一加载器支持 Qwen / Gemma / Llama / Mistral / DeepSeek / 通用 GGUF。只有 Qwen/Gemma 系列会尝试专用视觉 mmproj handler。"}),
+                "模型系列": (TE通用模型系列选项, {"default": "Qwen3.5-VL", "tooltip": "同一加载器支持 Qwen3/Qwen3.5/Qwen3.8、Gemma、Llama、Mistral、DeepSeek 和通用 GGUF。Qwen3.8 会优先使用专用视觉 handler，缺失时回退到 GGUF 自带模板。"}),
                 "主模型": (model_list, {"tooltip": "主模型文件（建议 .gguf）放到 ComfyUI/models/LLM/"}),
                 "视觉投影mmproj": (mmproj_list, {"default": "无", "tooltip": "多模态需要 mmproj；纯文本可选“无”。"}),
                 "启用思考": ("BOOLEAN", {"default": False, "tooltip": "Qwen/Gemma 思考开关；通用 GGUF 纯文本模型通常可保持关闭。"}),
@@ -1405,6 +1588,17 @@ class QwenTE模型加载器:
                 "GPU层数": ("INT", {"default": -1, "min": -1, "max": 9999, "step": 1, "tooltip": "对应 llama.cpp 的 n_gpu_layers；-1=尽可能多上GPU；0=纯CPU。"}),
                 "KV缓存K类型": (KV缓存类型选项, {"default": 默认KV缓存类型, "tooltip": "对应 llama.cpp 的 --cache-type-k / type_k。推荐默认；q8_0-27B模型以上可能提速。"}),
                 "KV缓存V类型": (KV缓存类型选项, {"default": 默认KV缓存类型, "tooltip": "对应 llama.cpp 的 --cache-type-v / type_v。推荐默认；q8_0-27B模型以上可能提速。"}),
+                "批处理大小": ("INT", {"default": 2048, "min": 32, "max": 131072, "step": 32, "tooltip": "对应 llama.cpp 的 n_batch；显存不足时降低，长上下文可适当提高。"}),
+                "微批处理大小": ("INT", {"default": 512, "min": 32, "max": 131072, "step": 32, "tooltip": "对应 llama.cpp 的 n_ubatch；通常不大于批处理大小。"}),
+                "线程数": ("INT", {"default": 0, "min": 0, "max": 512, "step": 1, "tooltip": "对应 n_threads；0=由 llama.cpp 自动选择。"}),
+                "批处理线程数": ("INT", {"default": 0, "min": 0, "max": 512, "step": 1, "tooltip": "对应 n_threads_batch；0=跟随运行时默认。"}),
+                "Flash注意力": (Flash注意力选项, {"default": "自动", "tooltip": "自动遵循 llama.cpp；开启可能降低显存与长上下文开销，但依赖编译能力。"}),
+                "KQV卸载": ("BOOLEAN", {"default": True, "tooltip": "对应 offload_kqv；开启时将 K/Q/V 计算尽量放到 GPU。"}),
+                "内存映射": ("BOOLEAN", {"default": True, "tooltip": "对应 use_mmap；关闭后模型读取更慢且占用更多内存，通常保持开启。"}),
+                "锁定内存": ("BOOLEAN", {"default": False, "tooltip": "对应 use_mlock；防止模型页被换出，但可能导致系统内存不足。"}),
+                "RoPE频率基值": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1000000.0, "step": 1.0, "tooltip": "对应 rope_freq_base；0=使用模型元数据，通常不要改。"}),
+                "RoPE频率缩放": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 100.0, "step": 0.01, "tooltip": "对应 rope_freq_scale；0=使用模型元数据，长上下文实验时再调整。"}),
+                "模型参数JSON": ("STRING", {"default": "", "multiline": True, "tooltip": "可选 JSON，例如 {\"n_seq_max\": 2, \"use_direct_io\": true}；只应用当前 llama-cpp-python 支持的安全构造参数。"}),
             }
         }
 
@@ -1413,7 +1607,28 @@ class QwenTE模型加载器:
     FUNCTION = "load"
     CATEGORY = "Qwen TE"
 
-    def load(self, 模型系列, 主模型, 视觉投影mmproj, 启用思考, 上下文长度, GPU层数, KV缓存K类型, KV缓存V类型):
+    def load(
+        self,
+        模型系列,
+        主模型,
+        视觉投影mmproj,
+        启用思考,
+        上下文长度,
+        GPU层数,
+        KV缓存K类型,
+        KV缓存V类型,
+        批处理大小=2048,
+        微批处理大小=512,
+        线程数=0,
+        批处理线程数=0,
+        Flash注意力="自动",
+        KQV卸载=True,
+        内存映射=True,
+        锁定内存=False,
+        RoPE频率基值=0.0,
+        RoPE频率缩放=0.0,
+        模型参数JSON="",
+    ):
         if 主模型.startswith("（请把模型放到"):
             raise RuntimeError("未找到可用模型文件。请把模型放到 ComfyUI/models/LLM/ 后重启。")
 
@@ -1426,6 +1641,17 @@ class QwenTE模型加载器:
             "n_gpu_layers": int(GPU层数),
             "cache_type_k": KV缓存K类型,
             "cache_type_v": KV缓存V类型,
+            "n_batch": int(批处理大小),
+            "n_ubatch": int(微批处理大小),
+            "n_threads": int(线程数),
+            "n_threads_batch": int(批处理线程数),
+            "flash_attn": Flash注意力,
+            "offload_kqv": bool(KQV卸载),
+            "use_mmap": bool(内存映射),
+            "use_mlock": bool(锁定内存),
+            "rope_freq_base": float(RoPE频率基值),
+            "rope_freq_scale": float(RoPE频率缩放),
+            "custom_llama_params": 模型参数JSON,
         }
         model = _QwenStorage.load(config)
         return (model,)
@@ -1653,6 +1879,17 @@ class Gemma4TE模型加载器:
                 "GPU层数": ("INT", {"default": -1, "min": -1, "max": 9999, "step": 1, "tooltip": "对应 llama.cpp 的 n_gpu_layers；-1=尽可能多上GPU；0=纯CPU。"}),
                 "KV缓存K类型": (KV缓存类型选项, {"default": 默认KV缓存类型, "tooltip": "对应 llama.cpp 的 --cache-type-k / type_k。"}),
                 "KV缓存V类型": (KV缓存类型选项, {"default": 默认KV缓存类型, "tooltip": "对应 llama.cpp 的 --cache-type-v / type_v。"}),
+                "批处理大小": ("INT", {"default": 2048, "min": 32, "max": 131072, "step": 32, "tooltip": "对应 llama.cpp 的 n_batch。"}),
+                "微批处理大小": ("INT", {"default": 512, "min": 32, "max": 131072, "step": 32, "tooltip": "对应 llama.cpp 的 n_ubatch；通常不大于批处理大小。"}),
+                "线程数": ("INT", {"default": 0, "min": 0, "max": 512, "step": 1, "tooltip": "对应 n_threads；0=自动。"}),
+                "批处理线程数": ("INT", {"default": 0, "min": 0, "max": 512, "step": 1, "tooltip": "对应 n_threads_batch；0=自动。"}),
+                "Flash注意力": (Flash注意力选项, {"default": "自动", "tooltip": "自动遵循 llama.cpp；开启需要运行时支持。"}),
+                "KQV卸载": ("BOOLEAN", {"default": True, "tooltip": "对应 offload_kqv。"}),
+                "内存映射": ("BOOLEAN", {"default": True, "tooltip": "对应 use_mmap；通常保持开启。"}),
+                "锁定内存": ("BOOLEAN", {"default": False, "tooltip": "对应 use_mlock；可能增加系统内存压力。"}),
+                "RoPE频率基值": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1000000.0, "step": 1.0, "tooltip": "对应 rope_freq_base；0=模型默认。"}),
+                "RoPE频率缩放": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 100.0, "step": 0.01, "tooltip": "对应 rope_freq_scale；0=模型默认。"}),
+                "模型参数JSON": ("STRING", {"default": "", "multiline": True, "tooltip": "可选 JSON，例如 {\"n_seq_max\": 2, \"no_host\": true}；不支持或受保护的键会被忽略。"}),
             }
         }
 
@@ -1661,7 +1898,27 @@ class Gemma4TE模型加载器:
     FUNCTION = "load"
     CATEGORY = "Gemma4 TE"
 
-    def load(self, 主模型, 视觉投影mmproj, 启用思考, 上下文长度, GPU层数, KV缓存K类型, KV缓存V类型):
+    def load(
+        self,
+        主模型,
+        视觉投影mmproj,
+        启用思考,
+        上下文长度,
+        GPU层数,
+        KV缓存K类型,
+        KV缓存V类型,
+        批处理大小=2048,
+        微批处理大小=512,
+        线程数=0,
+        批处理线程数=0,
+        Flash注意力="自动",
+        KQV卸载=True,
+        内存映射=True,
+        锁定内存=False,
+        RoPE频率基值=0.0,
+        RoPE频率缩放=0.0,
+        模型参数JSON="",
+    ):
         if 主模型.startswith("（请把模型放到"):
             raise RuntimeError("未找到可用模型文件。请把模型放到 ComfyUI/models/LLM/ 后重启。")
 
@@ -1674,6 +1931,17 @@ class Gemma4TE模型加载器:
             "n_gpu_layers": int(GPU层数),
             "cache_type_k": KV缓存K类型,
             "cache_type_v": KV缓存V类型,
+            "n_batch": int(批处理大小),
+            "n_ubatch": int(微批处理大小),
+            "n_threads": int(线程数),
+            "n_threads_batch": int(批处理线程数),
+            "flash_attn": Flash注意力,
+            "offload_kqv": bool(KQV卸载),
+            "use_mmap": bool(内存映射),
+            "use_mlock": bool(锁定内存),
+            "rope_freq_base": float(RoPE频率基值),
+            "rope_freq_scale": float(RoPE频率缩放),
+            "custom_llama_params": 模型参数JSON,
         }
         model = _Gemma4Storage.load(config)
         return (model,)

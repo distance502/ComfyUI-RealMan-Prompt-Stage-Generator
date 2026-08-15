@@ -4,12 +4,28 @@
 from __future__ import annotations
 
 from collections import Counter
+import importlib.util
 import inspect
 import json
 import os
+import pathlib
 import re
 import time
 from typing import Any, Callable
+
+try:
+    from .model_call_skill import ModelCallSkill
+except Exception:  # pragma: no cover - direct module loading in focused tests
+    _MODEL_CALL_SKILL_PATH = pathlib.Path(__file__).with_name("model_call_skill.py")
+    _MODEL_CALL_SKILL_SPEC = importlib.util.spec_from_file_location(
+        "stage_prompt_model_call_skill_runtime",
+        _MODEL_CALL_SKILL_PATH,
+    )
+    if _MODEL_CALL_SKILL_SPEC is None or _MODEL_CALL_SKILL_SPEC.loader is None:
+        raise
+    _MODEL_CALL_SKILL_MODULE = importlib.util.module_from_spec(_MODEL_CALL_SKILL_SPEC)
+    _MODEL_CALL_SKILL_SPEC.loader.exec_module(_MODEL_CALL_SKILL_MODULE)
+    ModelCallSkill = _MODEL_CALL_SKILL_MODULE.ModelCallSkill
 
 try:
     from .narrative import (
@@ -574,7 +590,12 @@ def _normalize_model_source_label(value: Any) -> str:
 
 
 def _uses_qwen35_local_incremental_refinement(settings: dict[str, Any]) -> bool:
-    """Use a small, blendable task for the local Qwen3.5 prompt model."""
+    """Use the Qwen3.5/Qwen3.8-compatible local incremental task.
+
+    The helper name is retained for compatibility with existing callers and
+    persisted settings.  Qwen3.8 uses the same validated Skill-baseline blend
+    contract, while the model-specific handler remains optional in nodes.py.
+    """
 
     if str(settings.get("提示词语言", "纯中文") or "纯中文").strip() != "纯中文":
         return False
@@ -591,7 +612,22 @@ def _uses_qwen35_local_incremental_refinement(settings: dict[str, Any]) -> bool:
             for key in ("内置模型系列", "内置主模型", "模型系列", "模型名称")
         ).casefold(),
     )
-    return "qwen35" in descriptor
+    return bool(re.search(r"qwen3(?:5|6|7|8|9)", descriptor))
+
+
+def _qwen_local_incremental_label(settings: dict[str, Any]) -> str:
+    """Return the detected Qwen3 high-version label for diagnostics/prompts."""
+
+    descriptor = re.sub(
+        r"[^a-z0-9]+",
+        "",
+        " ".join(
+            str(settings.get(key, "") or "")
+            for key in ("内置模型系列", "内置主模型", "模型系列", "模型名称")
+        ).casefold(),
+    )
+    match = re.search(r"qwen3([5-9])", descriptor)
+    return f"Qwen3.{match.group(1)}" if match else "Qwen3.5"
 
 
 def _uses_incremental_refinement(settings: dict[str, Any]) -> bool:
@@ -2172,7 +2208,10 @@ def _language_instruction(settings: dict[str, Any]) -> str:
 def _resolve_system_prompt(settings: dict[str, Any]) -> str:
     if str(settings.get("模型任务", "") or "").strip() == "视频提示词":
         if _uses_qwen35_local_incremental_refinement(settings):
-            return _QWEN35_LOCAL_VIDEO_INCREMENTAL_SYSTEM
+            return _QWEN35_LOCAL_VIDEO_INCREMENTAL_SYSTEM.replace(
+                "Qwen3.5",
+                _qwen_local_incremental_label(settings),
+            )
         video_prompt = str(settings.get("视频提示词模型系统提示", "") or "").strip()
         if video_prompt:
             language = _prompt_language_mode(settings)
@@ -2195,7 +2234,7 @@ def _resolve_system_prompt(settings: dict[str, Any]) -> str:
             english=_prompt_language_mode(settings) in {"纯英文", "英文提示词+中文说明"},
         )
         return (
-            f"{_QWEN35_LOCAL_IMAGE_INCREMENTAL_SYSTEM}\n\n"
+            f"{_QWEN35_LOCAL_IMAGE_INCREMENTAL_SYSTEM.replace('Qwen3.5', _qwen_local_incremental_label(settings))}\n\n"
             f"当前画面结构硬约束：{layout_contract}\n最终只输出中文自然语言新增句子。"
         )
     base_prompt = str(settings.get("系统提示词覆盖") or _DEFAULT_IMAGE_REFINER_SYSTEM)
@@ -4506,6 +4545,10 @@ def _record_model_call_result(
         failure_count += 1
     settings["模型调用成功次数"] = success_count
     settings["模型调用失败次数"] = failure_count
+    if settings.get("模型调用Skill名称"):
+        settings["模型调用Skill状态"] = "成功" if succeeded else "失败"
+        if not succeeded:
+            settings["模型调用Skill错误"] = _safe_model_call_reason(reason, settings)
 
     adopted_increment = max(0, int(adopted_outputs if adopted_outputs is not None else (1 if changed else 0)))
     settings["模型调用采纳次数"] = max(0, int(settings.get("模型调用采纳次数", 0) or 0)) + adopted_increment
@@ -4667,51 +4710,19 @@ def _call_model_text(
     clean_think_text: Callable[[str], str],
     prompt_count: int = 1,
 ) -> str:
-    llm = _resolve_model_backend(llm)
-    system_prompt = _resolve_system_prompt(settings)
-    user_prompt = _compose_model_user_prompt(prompt, settings)
-    messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
-    combined_prompt = f"{system_prompt}\n\n{user_prompt}".strip()
-    if callable(getattr(llm, "create_chat_completion", None)):
-        response = chat_completion(
-            llm,
-            messages=messages,
-            params=_refiner_sampling_params(settings, prompt_count=prompt_count),
-        )
-        text = str(extract_text(response) or "").strip()
-        if not text:
-            raise RuntimeError("模型 API 返回空文本。")
-        return clean_think_text(text)
-    if callable(getattr(llm, "invoke", None)):
-        response = llm.invoke(combined_prompt)
-        text = str(extract_text(response) or "").strip()
-        if not text:
-            raise RuntimeError("模型返回空文本。")
-        return clean_think_text(text)
-    if callable(getattr(llm, "generate_content", None)):
-        response = llm.generate_content(combined_prompt)
-        text = str(extract_text(response) or "").strip()
-        if not text:
-            raise RuntimeError("模型返回空文本。")
-        return clean_think_text(text)
-    for method_name in ("complete", "predict", "chat"):
-        method = getattr(llm, method_name, None)
-        if not callable(method):
-            continue
-        response = _call_flexible_model_method(method, prompt=combined_prompt, messages=messages)
-        text = str(extract_text(response) or "").strip()
-        if not text:
-            raise RuntimeError(f"模型 {method_name} 返回空文本。")
-        return clean_think_text(text)
-    if callable(llm):
-        response = llm(combined_prompt)
-        text = str(extract_text(response) or "").strip()
-        if not text:
-            raise RuntimeError("可调用模型返回空文本。")
-        return clean_think_text(text)
-    raise RuntimeError(
-        "当前模型对象不支持 create_chat_completion、invoke、generate_content、complete、predict、chat 或可调用文本接口。"
+    skill = ModelCallSkill(
+        resolve_backend=_resolve_model_backend,
+        resolve_system_prompt=_resolve_system_prompt,
+        compose_user_prompt=_compose_model_user_prompt,
+        extract_text=extract_text,
+        clean_think_text=clean_think_text,
+        sampling_params=lambda current_settings, count: _refiner_sampling_params(
+            current_settings,
+            prompt_count=count,
+        ),
+        chat_completion=chat_completion,
     )
+    return skill.invoke(llm, prompt, settings, prompt_count=prompt_count)
 
 
 _TRANSIENT_MODEL_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}

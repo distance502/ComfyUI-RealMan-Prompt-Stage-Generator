@@ -223,7 +223,7 @@ const NSFW_WORKSPACE_OPTIONS = {
 	outfit: ["——", "蕾丝内衣套装，轮廓精致，材质层次清楚", "真丝吊带裙，柔软垂坠，边缘高光细腻", "丝质睡袍，腰带松弛，袖口自然垂落", "湿身薄纱罩衫，半透明层次，水汽贴合面料", "浴巾裹身，湿发贴肩，柔光皮肤质感", "黑色缎面礼服，低调光泽，高级剪裁", "细跟高跟鞋，脚踝线条清楚，落脚稳定", "透明高跟凉鞋，反光材质，脚部完整", "Lookbook贴身套装，版型明确，商业成片感", "汉服薄纱外搭，内外层次分明，衣摆流动", "低遮挡内衣风，贴身材质，轮廓关系清楚", "镂空蕾丝内衣，遮挡结构明确，材质层次清楚", "透明黑色纱裙，半透层次，身体轮廓清楚", "短款皮质热裤，搭配项圈，造型张力明确", "紧身乳胶装，光泽贴合身体轮廓", "蕾丝饰带缠绕，装饰性覆盖，轮廓关系清楚", "渔网连体装，低遮挡结构，主体完整入镜", "半裸湿透衬衫，贴合身体线条，水汽质感明确", "情趣吊带袜，搭配高跟鞋，腿部线条完整", "透明睡袍，薄纱层次，边缘高光细腻", "装饰性饰带缠绕，覆盖关系清楚，避免局部抢镜", "情趣制服，短裙摆与敞开扣子，版型清楚", "皮质束缚装，金属铆钉装饰，结构感明确", "成熟私房造型，薄纱与蕾丝层次明确，主体完整入镜"],
 	mood: ["——", "克制诱惑，眼神清醒，情绪含蓄", "私密微醺，嘴角微扬，氛围松弛", "慵懒松弛，呼吸感明显，姿态自然", "冷艳自持，视线稳定，表情锋利", "温柔暧昧，面部柔和，情绪细腻", "自信注视，身体打开，镜头感强", "清冷疏离，低饱和情绪，动作克制", "高级性感，商业大片质感，主体完成度高", "高强度成人氛围，成熟诱惑，镜头克制不直白", "露骨感收敛表达，强调私密张力和成熟气质", "欲念张力，身体微颤，眼神迷离", "禁忌诱惑，嘴角微翘，情绪克制", "支配感，掌控姿态，人物关系清楚", "情绪迷醉，呼吸急促，表情集中", "强烈感官氛围，动作张力明确，画面不贴脸"],
 	anatomy_terms: ["——", "乳房", "乳头", "外阴", "阴道", "阴蒂", "阴唇", "阴茎", "龟头", "睾丸", "臀部", "肛门", "私密部位细节"],
-	explicit_terms: ["——", "性交", "插入", "自慰", "潮吹", "口交", "肛交", "射精", "体液", "多人性行为", "阴茎口部刺激", "外阴口部刺激", "相互口部刺激", "阴茎手部刺激", "外阴手部刺激", "相互手部刺激", "成人道具刺激外阴", "成人道具刺激阴茎", "成人道具阴道插入", "成人道具肛门插入", "伴侣辅助成人道具"],
+	explicit_terms: ["——", "性交", "插入", "自慰", "潮吹", "女性刺激潮吹结果", "口交", "肛交", "射精", "男性刺激射精结果", "体液", "受控体液结果", "多人性行为", "阴茎口部刺激", "外阴口部刺激", "相互口部刺激", "阴茎手部刺激", "外阴手部刺激", "相互手部刺激", "成人道具刺激外阴", "成人道具刺激阴茎", "成人道具阴道插入", "成人道具肛门插入", "伴侣辅助成人道具"],
 	adult_action_style: ["——", "单人私密姿态，动作含蓄，表情张力明确", "单人挑逗动作，身体线条舒展，镜头保持完整构图", "脱衣动作，节奏缓慢，镜头保持全身关系", "舔唇表情，视线集中，面部情绪明确", "弯腰姿态，重心稳定，身体线条可读", "手部抚摸动作，动作连续，避免局部抢镜", "身体扭动，湿身滴水，动态自然", "胸部抚摸动作，表情迷离，镜头克制", "臀部慢摇，曲线突出，姿态不变形", "倚墙伸展姿态，手臂上举，身体比例稳定", "双手高举，身体拉伸，肩颈线条清楚", "低姿爬行动作，回头视线，空间透视稳定", "侧躺私房姿态，腿部交叠，曲线自然可读", "跪姿私房构图，背部拱起，发丝自然垂落", "微张嘴唇，呼吸感明显，表情张力集中", "湿身浴室动作，水汽与泡沫作为氛围遮挡", "道具氛围点缀，保留成人张力但避免局部特写", "成人道具参与，动作关系清楚，避免局部特写", "双人亲密拥抱，肢体靠近，主体关系清楚", "双人亲密互动，动作连续，镜头克制不直白", "站姿双人互动，重心稳定，身体关系明确", "跨坐互动，腰部距离清楚，人物关系稳定", "从后拥抱，颈部贴近，情绪亲密", "口部亲密互动，镜头克制，人物关系清楚", "轻拍臀部互动，动作提示明确，镜头不贴脸", "推拉节奏互动，肢体缠绕，人物关系不混乱", "侧躺双人互动，动作柔和，空间关系稳定", "亲密低语，头发触碰，眼神对视", "浴室双人亲密氛围，泡沫与水汽包裹主体", "车内亲密氛围，狭窄空间与玻璃反光增强张力", "腿部打开姿态，手部位置清楚，构图保持全身", "主从感互动，束缚元素作为造型叙事，避免暴力表达", "主从感跪姿互动，服从姿态作为叙事，避免暴力羞辱", "多人亲密氛围，主体优先，人物关系不混乱", ...NSFW_EXPLICIT_ACTION_CONTRACTS],
 	camera_movement: ["——", "静态封面肖像，主体稳定，背景干净", "缓慢推近面部，焦点停在眼睛和唇部妆感", "从全身到半身，先交代服装轮廓再收束表情", "拉远保留全身，脚部和衣摆完整入镜", "环绕式展示服装轮廓，保持单一主体比例", "镜前反射切换，主体与镜像关系清楚", "快速推进至局部细节，随后回到全身关系", "360度环绕，捕捉全身轮廓与服装材质", "低角度慢扫，从脚踝到腰线，节奏渐强", "柔焦跟随，锁定亲密动作关系", "动态放大后拉远，强调身体曲线与空间", "晃动镜头，营造紧张挑逗氛围", "快速变焦，强调情绪峰值"],
 	camera_angle: ["——", "眼平视角，人物关系稳定", "轻微俯拍，面部与肩线清楚", "低角度全身，腿部比例自然", "过肩镜中视角，镜像不制造多人错觉", "侧面三分之二，脸部仍可读", "背面回头，发丝和衣摆完整", "窗边侧逆光视角，轮廓光分离主体", "低角度，突出臀部与腿部线条", "高角度，俯视亲密姿态，身体关系清楚", "过肩视角，聚焦亲密互动，主体关系稳定", "平视角度，强调表情与动作连续性"],
@@ -358,10 +358,10 @@ const RANDOM_COMBO_IDENTITY_GROUP_NAME = "主体";
 const RANDOM_COMBO_SCENE_GROUP_NAME = "场景背景";
 const RANDOM_COMBO_IDENTITY_SECTION_NAMES = ["特殊身份", "奇幻角色", "现代人物"];
 const RANDOM_COMBO_SCENE_EXCLUDE_TAGS = new Set(["白色背景", "纯色背景"]);
-const STAGE_EMBEDDED_LOCAL_MODEL_WIDGET_NAMES = ["内置模型系列", "内置主模型", "内置视觉投影mmproj", "内置启用思考", "内置上下文长度", "内置GPU层数", "内置KV缓存K类型", "内置KV缓存V类型"];
+const STAGE_EMBEDDED_LOCAL_MODEL_WIDGET_NAMES = ["内置模型系列", "内置主模型", "内置视觉投影mmproj", "内置启用思考", "内置上下文长度", "内置GPU层数", "内置KV缓存K类型", "内置KV缓存V类型", "内置批处理大小", "内置微批处理大小", "内置线程数", "内置批处理线程数", "内置Flash注意力", "内置KQV卸载", "内置内存映射", "内置锁定内存", "内置RoPE频率基值", "内置RoPE频率缩放", "内置模型参数JSON"];
+const STAGE_LOCAL_MODEL_ADVANCED_WIDGET_NAMES = ["内置批处理大小", "内置微批处理大小", "内置线程数", "内置批处理线程数", "内置Flash注意力", "内置KQV卸载", "内置内存映射", "内置锁定内存", "内置RoPE频率基值", "内置RoPE频率缩放", "内置模型参数JSON"];
 const STAGE_EMBEDDED_API_MODEL_WIDGET_NAMES = ["API服务商", "API地址", "API密钥", "API模型", "API超时秒", "API额外请求头"];
 const STAGE_EMBEDDED_MODEL_WIDGET_NAMES = ["模型来源", ...STAGE_EMBEDDED_LOCAL_MODEL_WIDGET_NAMES, ...STAGE_EMBEDDED_API_MODEL_WIDGET_NAMES];
-const STAGE_EMBEDDED_MODEL_WIDGET_COUNT = STAGE_EMBEDDED_MODEL_WIDGET_NAMES.length;
 const MODEL_WIDGET_ALIASES = {
 	"模型来源": ["模型来源"],
 	"模型系列": ["模型系列", "内置模型系列"],
@@ -372,6 +372,17 @@ const MODEL_WIDGET_ALIASES = {
 	"GPU层数": ["GPU层数", "内置GPU层数"],
 	"KV缓存K类型": ["KV缓存K类型", "内置KV缓存K类型"],
 	"KV缓存V类型": ["KV缓存V类型", "内置KV缓存V类型"],
+	"批处理大小": ["批处理大小", "内置批处理大小"],
+	"微批处理大小": ["微批处理大小", "内置微批处理大小"],
+	"线程数": ["线程数", "内置线程数"],
+	"批处理线程数": ["批处理线程数", "内置批处理线程数"],
+	"Flash注意力": ["Flash注意力", "内置Flash注意力"],
+	"KQV卸载": ["KQV卸载", "内置KQV卸载"],
+	"内存映射": ["内存映射", "内置内存映射"],
+	"锁定内存": ["锁定内存", "内置锁定内存"],
+	"RoPE频率基值": ["RoPE频率基值", "内置RoPE频率基值"],
+	"RoPE频率缩放": ["RoPE频率缩放", "内置RoPE频率缩放"],
+	"模型参数JSON": ["模型参数JSON", "内置模型参数JSON"],
 	"API服务商": ["API服务商"],
 	"API地址": ["API地址"],
 	"API密钥": ["API密钥"],
@@ -547,6 +558,7 @@ const ADVANCED_PANEL_SECTIONS = [
 	},
 ];
 const MODEL_FAMILY_BUTTONS = [
+	{ value: "Qwen3.8-VL", label: "Qwen3.8", hint: "Qwen3.8 视觉；优先专用 handler，缺失时使用 GGUF 自带模板" },
 	{ value: "Qwen3.5-VL", label: "Qwen3.5", hint: "Qwen VL 主力" },
 	{ value: "Qwen3-VL", label: "Qwen3", hint: "Qwen3 视觉" },
 	{ value: "Gemma4", label: "Gemma4", hint: "Gemma 多模态/文本" },
@@ -556,6 +568,8 @@ const MODEL_FAMILY_BUTTONS = [
 	{ value: "通用GGUF", label: "通用", hint: "自动推断格式" },
 ];
 const MODEL_CONTEXT_BUTTONS = [4096, 8192, 16384, 32768];
+const MODEL_BATCH_BUTTONS = [512, 1024, 2048, 4096, 8192];
+const MODEL_UBATCH_BUTTONS = [128, 256, 512, 1024, 2048];
 const MODEL_GPU_BUTTONS = [
 	{ value: -1, label: "自动GPU" },
 	{ value: 0, label: "CPU" },
@@ -687,6 +701,17 @@ const PRESET_SETTING_NAMES = [
 	"内置GPU层数",
 	"内置KV缓存K类型",
 	"内置KV缓存V类型",
+	"内置批处理大小",
+	"内置微批处理大小",
+	"内置线程数",
+	"内置批处理线程数",
+	"内置Flash注意力",
+	"内置KQV卸载",
+	"内置内存映射",
+	"内置锁定内存",
+	"内置RoPE频率基值",
+	"内置RoPE频率缩放",
+	"内置模型参数JSON",
 	"API服务商",
 	"API地址",
 	"API模型",
@@ -741,6 +766,17 @@ const PRESET_SETTING_DEFAULTS = {
 	"内置GPU层数": -1,
 	"内置KV缓存K类型": "默认(F16)",
 	"内置KV缓存V类型": "默认(F16)",
+	"内置批处理大小": 2048,
+	"内置微批处理大小": 512,
+	"内置线程数": 0,
+	"内置批处理线程数": 0,
+	"内置Flash注意力": "自动",
+	"内置KQV卸载": true,
+	"内置内存映射": true,
+	"内置锁定内存": false,
+	"内置RoPE频率基值": 0,
+	"内置RoPE频率缩放": 0,
+	"内置模型参数JSON": "",
 	"API服务商": "OpenAI兼容",
 	"API地址": "",
 	"API模型": "",
@@ -4809,13 +4845,24 @@ function normalizeLegacyWidgetValues(node, widgetValues) {
 	if (values.length > currentLength) values = values.slice(values.length - currentLength);
 	if (values.length === currentLength) return values;
 	const embeddedModelIndex = widgets.findIndex((widget) => widget.name === STAGE_EMBEDDED_MODEL_WIDGET_NAMES[0]);
+	const presentEmbeddedModelNames = STAGE_EMBEDDED_MODEL_WIDGET_NAMES.filter((name) => widgets.some((widget) => widget.name === name));
 	const legacyMissingEmbeddedModelWidgets =
 		embeddedModelIndex >= 0 &&
-		values.length <= currentLength - STAGE_EMBEDDED_MODEL_WIDGET_COUNT &&
-		STAGE_EMBEDDED_MODEL_WIDGET_NAMES.every((name, index) => widgets[embeddedModelIndex + index]?.name === name);
+		values.length <= currentLength - presentEmbeddedModelNames.length &&
+		presentEmbeddedModelNames.every((name, index) => widgets[embeddedModelIndex + index]?.name === name);
 	if (legacyMissingEmbeddedModelWidgets) {
-		const defaults = STAGE_EMBEDDED_MODEL_WIDGET_NAMES.map((name) => getDefaultWidgetValue(widgets.find((widget) => widget.name === name)));
+		const defaults = presentEmbeddedModelNames.map((name) => getDefaultWidgetValue(widgets.find((widget) => widget.name === name)));
 		values = [...values.slice(0, embeddedModelIndex), ...defaults, ...values.slice(embeddedModelIndex)];
+		if (values.length === currentLength) return values;
+	}
+	const advancedModelIndex = widgets.findIndex((widget) => widget.name === STAGE_LOCAL_MODEL_ADVANCED_WIDGET_NAMES[0]);
+	const legacyMissingAdvancedModelWidgets =
+		advancedModelIndex >= 0 &&
+		values.length === currentLength - STAGE_LOCAL_MODEL_ADVANCED_WIDGET_NAMES.length &&
+		STAGE_LOCAL_MODEL_ADVANCED_WIDGET_NAMES.every((name, index) => widgets[advancedModelIndex + index]?.name === name);
+	if (legacyMissingAdvancedModelWidgets) {
+		const defaults = STAGE_LOCAL_MODEL_ADVANCED_WIDGET_NAMES.map((name) => getDefaultWidgetValue(widgets.find((widget) => widget.name === name)));
+		values = [...values.slice(0, advancedModelIndex), ...defaults, ...values.slice(advancedModelIndex)];
 		if (values.length === currentLength) return values;
 	}
 	const expandedTagWidgets = widgets.filter((widget) => {
@@ -5667,6 +5714,14 @@ function refreshModelLoaderDeck(deck, node) {
 	const family = String(getModelWidget(node, "模型系列")?.value ?? "");
 	const ctx = Number(getModelWidget(node, "上下文长度")?.value ?? 0);
 	const gpu = Number(getModelWidget(node, "GPU层数")?.value ?? -1);
+	const batch = Number(getModelWidget(node, "批处理大小")?.value ?? 2048);
+	const ubatch = Number(getModelWidget(node, "微批处理大小")?.value ?? 512);
+	const threads = Number(getModelWidget(node, "线程数")?.value ?? 0);
+	const batchThreads = Number(getModelWidget(node, "批处理线程数")?.value ?? 0);
+	const flash = String(getModelWidget(node, "Flash注意力")?.value ?? "自动");
+	const kqv = !!getModelWidget(node, "KQV卸载")?.value;
+	const mmap = !!getModelWidget(node, "内存映射")?.value;
+	const mlock = !!getModelWidget(node, "锁定内存")?.value;
 	const think = !!getModelWidget(node, "启用思考")?.value;
 	const kvK = String(getModelWidget(node, "KV缓存K类型")?.value ?? "默认(F16)");
 	const kvV = String(getModelWidget(node, "KV缓存V类型")?.value ?? "默认(F16)");
@@ -5702,6 +5757,12 @@ function refreshModelLoaderDeck(deck, node) {
 	for (const button of deck.gpuButtons ?? []) {
 		button.classList.toggle("is-active", Number(button.dataset.value) === gpu);
 	}
+	for (const button of deck.batchButtons ?? []) {
+		button.classList.toggle("is-active", Number(button.dataset.value) === batch);
+	}
+	for (const button of deck.ubatchButtons ?? []) {
+		button.classList.toggle("is-active", Number(button.dataset.value) === ubatch);
+	}
 	for (const button of deck.kvButtons ?? []) {
 		button.classList.toggle("is-active", String(button.dataset.value) === kvK && String(button.dataset.value) === kvV);
 	}
@@ -5709,6 +5770,10 @@ function refreshModelLoaderDeck(deck, node) {
 		deck.thinkButton.classList.toggle("is-active", think);
 		deck.thinkButton.textContent = think ? "思考 开" : "思考 关";
 	}
+	if (deck.kqvButton) deck.kqvButton.classList.toggle("is-active", kqv);
+	if (deck.mmapButton) deck.mmapButton.classList.toggle("is-active", mmap);
+	if (deck.mlockButton) deck.mlockButton.classList.toggle("is-active", mlock);
+	if (deck.flashSelect) deck.flashSelect.value = flash;
 	if (deck.sectionValues) {
 		const values = deck.sectionValues;
 		if (values.source) {
@@ -5734,6 +5799,10 @@ function refreshModelLoaderDeck(deck, node) {
 		if (values.kv) {
 			values.kv.textContent = kvK === kvV ? kvK : `${kvK} / ${kvV}`;
 			values.kv.title = values.kv.textContent;
+		}
+		if (values.performance) {
+			values.performance.textContent = `批${batch} / 微${ubatch} / 线程${threads || "自动"} / 预填充线程${batchThreads || "自动"} / Flash ${flash}`;
+			values.performance.title = values.performance.textContent;
 		}
 		if (values.apiProvider) {
 			values.apiProvider.textContent = apiProviderDisplay;
@@ -6033,6 +6102,45 @@ function buildModelLoaderDeck(node, options = {}) {
 		kvGrid.appendChild(button);
 		return button;
 	});
+	const performanceSection = createModelSection("性能参数", "批处理 / 线程 / 内存");
+	settingsGrid.appendChild(performanceSection.section);
+	const performanceGrid = document.createElement("div");
+	performanceGrid.className = "qwen-te-model__grid qwen-te-model__grid--wide";
+	performanceSection.section.appendChild(performanceGrid);
+	const batchButtons = MODEL_BATCH_BUTTONS.map((value) => {
+		const button = createModelLoaderButton(node, `批${value}`, value, () => setModelLoaderWidgetValue(node, "批处理大小", value));
+		performanceGrid.appendChild(button);
+		return button;
+	});
+	const ubatchButtons = MODEL_UBATCH_BUTTONS.map((value) => {
+		const button = createModelLoaderButton(node, `微${value}`, value, () => setModelLoaderWidgetValue(node, "微批处理大小", value));
+		performanceGrid.appendChild(button);
+		return button;
+	});
+	const threadInput = createModelLoaderTextInput(node, "线程数", "线程数", { placeholder: "0=自动" });
+	const batchThreadInput = createModelLoaderTextInput(node, "批处理线程数", "批处理线程", { placeholder: "0=自动" });
+	const flashSelect = createModelLoaderSelect(node, "Flash注意力", "Flash 注意力");
+	performanceGrid.appendChild(threadInput);
+	performanceGrid.appendChild(batchThreadInput);
+	performanceGrid.appendChild(flashSelect);
+	const perfToggleGrid = document.createElement("div");
+	perfToggleGrid.className = "qwen-te-model__quickbar";
+	performanceSection.section.appendChild(perfToggleGrid);
+	const kqvButton = createModelLoaderButton(node, "KQV卸载", "kqv", () => setModelLoaderWidgetValue(node, "KQV卸载", !getModelWidget(node, "KQV卸载")?.value));
+	const mmapButton = createModelLoaderButton(node, "内存映射", "mmap", () => setModelLoaderWidgetValue(node, "内存映射", !getModelWidget(node, "内存映射")?.value));
+	const mlockButton = createModelLoaderButton(node, "锁定内存", "mlock", () => setModelLoaderWidgetValue(node, "锁定内存", !getModelWidget(node, "锁定内存")?.value));
+	perfToggleGrid.appendChild(kqvButton);
+	perfToggleGrid.appendChild(mmapButton);
+	perfToggleGrid.appendChild(mlockButton);
+	const ropeGrid = document.createElement("div");
+	ropeGrid.className = "qwen-te-model__api-grid";
+	performanceSection.section.appendChild(ropeGrid);
+	const ropeBaseInput = createModelLoaderTextInput(node, "RoPE频率基值", "RoPE 基值", { placeholder: "0=模型默认" });
+	const ropeScaleInput = createModelLoaderTextInput(node, "RoPE频率缩放", "RoPE 缩放", { placeholder: "0=模型默认" });
+	ropeGrid.appendChild(ropeBaseInput);
+	ropeGrid.appendChild(ropeScaleInput);
+	const customParamsInput = createModelLoaderTextInput(node, "模型参数JSON", "自定义参数 JSON", { multiline: true, placeholder: '{"n_seq_max": 2, "use_direct_io": true}' });
+	performanceSection.section.appendChild(customParamsInput);
 	const hint = document.createElement("div");
 	hint.className = "qwen-te-model__hint";
 	hint.textContent = options.hint ?? "当前节点按“模型来源”决定是否调用模型；env 密钥只发送到服务商预设来源，自定义来源需配置 QWEN_TE_CUSTOM_API_SECRET_ORIGINS。直接填写的 Key 会保存在工作流里。";
@@ -6051,18 +6159,25 @@ function buildModelLoaderDeck(node, options = {}) {
 			runtime: runtimeSection.value,
 			context: ctxSection.value,
 			kv: kvSection.value,
+			performance: performanceSection.value,
 		},
 		sourceButtons,
 		providerButtons,
 		familyButtons,
 		ctxButtons,
+		batchButtons,
+		ubatchButtons,
 		gpuButtons,
 		kvButtons,
 		thinkButton,
+		kqvButton,
+		mmapButton,
+		mlockButton,
+		flashSelect,
 		selects: [modelSelect, mmprojSelect],
-		inputs: [apiBaseInput, apiKeyInput, apiModelInput, apiTimeoutInput, apiHeaderInput],
+		inputs: [apiBaseInput, apiKeyInput, apiModelInput, apiTimeoutInput, apiHeaderInput, threadInput, batchThreadInput, ropeBaseInput, ropeScaleInput, customParamsInput],
 		apiSections: hasStageModelSource ? [apiProviderSection.section, apiTextSection.section, apiHeaderSection.section] : [],
-		localSections: [familySection.section, selectSection.section, runtimeSection.section, ctxSection.section, kvSection.section],
+		localSections: [familySection.section, selectSection.section, runtimeSection.section, ctxSection.section, kvSection.section, performanceSection.section],
 	};
 }
 
@@ -7654,6 +7769,7 @@ function sanitizeStagePromptNode(node, library) {
 		"内置视觉投影mmproj": "无",
 		"内置KV缓存K类型": "默认(F16)",
 		"内置KV缓存V类型": "默认(F16)",
+		"内置Flash注意力": "自动",
 		"API服务商": "OpenAI兼容",
 		"模板风格": "自动",
 		"主体类型": "自动",
@@ -7669,10 +7785,14 @@ function sanitizeStagePromptNode(node, library) {
 		"智能文本风格优先": "自动判断",
 		"图片反推模式": "角色设定图",
 	};
-	const boolDefaults = { "内置启用思考": false, "运行时随机标签": false, "优先柔和肤质": false, "抑制文字伪影": false, "图片反推生成": false, "智能文本匹配": false, [TAG_BLOCK_COMPOSER_ENABLED_WIDGET_NAME]: false, "输出think块": false };
+	const boolDefaults = { "内置启用思考": false, "内置KQV卸载": true, "内置内存映射": true, "内置锁定内存": false, "运行时随机标签": false, "优先柔和肤质": false, "抑制文字伪影": false, "图片反推生成": false, "智能文本匹配": false, [TAG_BLOCK_COMPOSER_ENABLED_WIDGET_NAME]: false, "输出think块": false };
 	const intDefaults = {
 		"内置上下文长度": { defaultValue: 8192, min: 1024, max: 327680 },
 		"内置GPU层数": { defaultValue: -1, min: -1, max: 9999 },
+		"内置批处理大小": { defaultValue: 2048, min: 32, max: 131072 },
+		"内置微批处理大小": { defaultValue: 512, min: 32, max: 131072 },
+		"内置线程数": { defaultValue: 0, min: 0, max: 512 },
+		"内置批处理线程数": { defaultValue: 0, min: 0, max: 512 },
 		"API超时秒": { defaultValue: 120, min: 5, max: 600 },
 		"图片反推最大边长": { defaultValue: 960, min: 256, max: 2048 },
 		"核心标签锁定数量": { defaultValue: 10, min: 0, max: 500 },
@@ -7681,7 +7801,7 @@ function sanitizeStagePromptNode(node, library) {
 		"top_k": { defaultValue: 40, min: 0, max: 200 },
 		"seed": { defaultValue: 0, min: 0, max: 0xffffffffffffffff },
 	};
-	const floatDefaults = { "温度": { defaultValue: 0.62, min: 0, max: 2 }, "top_p": { defaultValue: 0.9, min: 0, max: 1 }, "重复惩罚": { defaultValue: 1.08, min: 0.5, max: 2 }, "频率惩罚": { defaultValue: 0, min: 0, max: 2 }, "存在惩罚": { defaultValue: 0, min: 0, max: 2 } };
+	const floatDefaults = { "内置RoPE频率基值": { defaultValue: 0, min: 0, max: 1000000 }, "内置RoPE频率缩放": { defaultValue: 0, min: 0, max: 100 }, "温度": { defaultValue: 0.62, min: 0, max: 2 }, "top_p": { defaultValue: 0.9, min: 0, max: 1 }, "重复惩罚": { defaultValue: 1.08, min: 0.5, max: 2 }, "频率惩罚": { defaultValue: 0, min: 0, max: 2 }, "存在惩罚": { defaultValue: 0, min: 0, max: 2 } };
 	for (const [name, defaultValue] of Object.entries(comboDefaults)) {
 		const widget = getWidget(node, name);
 		if (!widget) continue;
@@ -11086,7 +11206,7 @@ function firstPresentNsfwMarker(text, markers) {
 	return positioned[0]?.[1] ?? "";
 }
 
-function resolveNsfwActionContract(workspace) {
+function resolveNsfwActionContractBase(workspace) {
 	for (const field of NSFW_ACTION_CONTRACT_FIELDS) {
 		const candidate = nsfwWorkspaceFieldsText(workspace, [field]);
 		if (hasCompleteNsfwActionContract(candidate)) return candidate;
@@ -11229,6 +11349,40 @@ function resolveNsfwActionContract(workspace) {
 		return "正面阴道插入: 一名成年男性面对一名成年女性, 以阴茎插入成年女性阴道; 双方均为成年人且自愿, 面对面骨盆接触点、四肢支撑与身体朝向保持清楚";
 	}
 	return "";
+}
+
+const NSFW_EXPLICIT_RESULT_MARKERS = ["女性刺激潮吹结果", "男性刺激射精结果", "受控体液结果", "潮吹", "射精", "体液"];
+function orderedNsfwResultMarkers(explicitText) {
+	const aliases = { "女性刺激潮吹结果": "潮吹", "男性刺激射精结果": "射精", "受控体液结果": "体液" };
+	const seen = new Set();
+	return NSFW_EXPLICIT_RESULT_MARKERS
+		.map((marker) => [explicitText.indexOf(marker), aliases[marker] ?? marker])
+		.filter(([index, marker]) => index >= 0 && !seen.has(marker) && seen.add(marker))
+		.sort(([left], [right]) => left - right)
+		.map(([, marker]) => marker);
+}
+
+function appendNsfwResultContract(actionContract, explicitText) {
+	if (!actionContract) return "";
+	const clauses = [];
+	for (const marker of orderedNsfwResultMarkers(explicitText)) {
+		if (marker === "潮吹" && ["外阴", "阴蒂", "阴道"].some((target) => actionContract.includes(target))) {
+			clauses.push("潮吹仅作为当前女性刺激动作的结果，液体来源、方向与落点受既有接触关系约束，不新增人物或动作分支");
+		} else if (marker === "射精" && actionContract.includes("阴茎")) {
+			clauses.push("射精仅作为当前男性刺激动作的结果，体液来源、方向与落点受既有接触关系约束，不改变主客体身份");
+		} else if (marker === "体液") {
+			clauses.push("其他体液仅出现在当前接触区域与已存在的身体或道具表面，不扩散成新的场景元素");
+		}
+	}
+	if (!clauses.length) return actionContract;
+	clauses.push("结果发生前后保持原有姿态、接触点、人物数量与镜头轴线，结束状态能够连续追踪");
+	return `${actionContract}；动作结果阶段: ${clauses.join("; ")}`;
+}
+
+function resolveNsfwActionContract(workspace) {
+	const actionContract = resolveNsfwActionContractBase(workspace);
+	const explicitText = nsfwWorkspaceFieldsText(workspace, ["explicit_terms"]);
+	return appendNsfwResultContract(actionContract, explicitText);
 }
 
 function mapNsfwWorkspaceToStageState(node, library, workspace, catalogOrNegativePresets) {

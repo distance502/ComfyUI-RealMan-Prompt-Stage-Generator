@@ -59,6 +59,7 @@ _EXPLICIT_ACTION_PRIORITY = (
     "性交",
     "插入",
 )
+_EXPLICIT_RESULT_MARKERS = ("女性刺激潮吹结果", "男性刺激射精结果", "受控体液结果", "潮吹", "射精", "体液")
 _VALUE_FIELDS = (
     "workspace_custom_tags",
     *NSFW_SELECTOR_FIELDS,
@@ -322,7 +323,7 @@ def _first_present_marker(text: str, markers: Iterable[str]) -> str:
     return min(positioned, key=lambda item: item[0], default=(-1, ""))[1]
 
 
-def resolve_nsfw_action_contract(workspace: dict[str, Any]) -> str:
+def _resolve_nsfw_action_contract_base(workspace: dict[str, Any]) -> str:
     """Resolve explicit opt-in fragments into one adult subject-action-object sentence."""
 
     for field in _ACTION_CONTRACT_FIELDS:
@@ -539,6 +540,58 @@ def resolve_nsfw_action_contract(workspace: dict[str, Any]) -> str:
             "面对面骨盆接触点、四肢支撑与身体朝向保持清楚"
         )
     return ""
+
+
+def _ordered_nsfw_result_markers(explicit_text: str) -> list[str]:
+    positioned: list[tuple[int, str]] = []
+    canonical_seen: set[str] = set()
+    aliases = {
+        "女性刺激潮吹结果": "潮吹",
+        "男性刺激射精结果": "射精",
+        "受控体液结果": "体液",
+    }
+    for marker in _EXPLICIT_RESULT_MARKERS:
+        index = explicit_text.find(marker)
+        if index < 0:
+            continue
+        canonical = aliases.get(marker, marker)
+        if canonical in canonical_seen:
+            continue
+        canonical_seen.add(canonical)
+        positioned.append((index, canonical))
+    positioned.sort(key=lambda item: item[0])
+    return [marker for _, marker in positioned]
+
+
+def _append_nsfw_result_contract(action_contract: str, explicit_text: str) -> str:
+    if not action_contract:
+        return ""
+    clauses: list[str] = []
+    for marker in _ordered_nsfw_result_markers(explicit_text):
+        if marker == "潮吹" and any(target in action_contract for target in ("外阴", "阴蒂", "阴道")):
+            clauses.append(
+                "潮吹仅作为当前女性刺激动作的结果，液体来源、方向与落点受既有接触关系约束，不新增人物或动作分支"
+            )
+        elif marker == "射精" and "阴茎" in action_contract:
+            clauses.append(
+                "射精仅作为当前男性刺激动作的结果，体液来源、方向与落点受既有接触关系约束，不改变主客体身份"
+            )
+        elif marker == "体液":
+            clauses.append(
+                "其他体液仅出现在当前接触区域与已存在的身体或道具表面，不扩散成新的场景元素"
+            )
+    if not clauses:
+        return action_contract
+    clauses.append("结果发生前后保持原有姿态、接触点、人物数量与镜头轴线，结束状态能够连续追踪")
+    return f"{action_contract}；动作结果阶段: {'; '.join(clauses)}"
+
+
+def resolve_nsfw_action_contract(workspace: dict[str, Any]) -> str:
+    """Resolve an adult action and fold compatible result terms into the same contract."""
+
+    action_contract = _resolve_nsfw_action_contract_base(workspace)
+    explicit_text = _workspace_fields_text(workspace, ("explicit_terms",))
+    return _append_nsfw_result_contract(action_contract, explicit_text)
 
 
 def _iter_workspace_terms(workspace: dict[str, Any]) -> Iterable[str]:

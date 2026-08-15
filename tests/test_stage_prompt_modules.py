@@ -13666,6 +13666,94 @@ class TestStagePromptModules(unittest.TestCase):
                 "qwen",
             )
 
+    def test_qwen38_model_loads_without_a_dedicated_runtime_handler(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            models_dir = pathlib.Path(temp_dir)
+            llm_dir = models_dir / "LLM"
+            llm_dir.mkdir()
+            (llm_dir / "Qwen3.8-4B-Q4_K_M.gguf").touch()
+            (llm_dir / "mmproj-Qwen3.8-f16.gguf").touch()
+            module, fake_llama, _runtime = load_nodes_for_storage_test(models_dir)
+
+            model = module._QwenStorage.load(
+                {
+                    "model": "Qwen3.8-4B-Q4_K_M.gguf",
+                    "family": "Qwen3.8-VL",
+                    "mmproj": "mmproj-Qwen3.8-f16.gguf",
+                    "think": False,
+                }
+            )
+
+            self.assertEqual(len(fake_llama.created), 1)
+            self.assertIsNone(model.chat_handler)
+            self.assertNotIn("chat_format", model.llm.init_kwargs)
+            self.assertEqual(model.llm.chat_format, "qwen")
+            self.assertTrue(module._应使用llama内置聊天模板(family="Qwen3.8-VL"))
+            self.assertIsNone(
+                module._推断llama默认聊天格式(
+                    family="Qwen3.8-VL",
+                    model_name="Qwen3.8-4B-Q4_K_M.gguf",
+                )
+            )
+
+    def test_local_model_advanced_and_custom_parameters_are_normalized_and_filtered(self) -> None:
+        module, _fake_llama, _runtime = load_nodes_for_storage_test(pathlib.Path("."))
+        module._LLAMA_INIT_PARAMS_CACHE = {
+            "n_batch",
+            "n_ubatch",
+            "n_threads",
+            "n_threads_batch",
+            "flash_attn_type",
+            "offload_kqv",
+            "use_mmap",
+            "use_mlock",
+            "rope_freq_base",
+            "rope_freq_scale",
+            "n_seq_max",
+            "tensor_split",
+            "model_path",
+        }
+        kwargs: dict[str, object] = {}
+        config = {
+            "n_batch": 1024,
+            "n_ubatch": 4096,
+            "n_threads": 12,
+            "n_threads_batch": 16,
+            "flash_attn": "开启",
+            "offload_kqv": False,
+            "use_mmap": True,
+            "use_mlock": True,
+            "rope_freq_base": 10000,
+            "rope_freq_scale": 0.5,
+            "custom_llama_params": json.dumps(
+                {
+                    "n_seq_max": 2,
+                    "tensor_split": [0.6, 0.4],
+                    "model_path": "must-not-override.gguf",
+                    "unknown_option": True,
+                }
+            ),
+        }
+        module._加入llama高级加载参数(kwargs, config)
+        module._加入llama自定义参数(kwargs, config)
+
+        self.assertEqual(kwargs["n_batch"], 1024)
+        self.assertEqual(kwargs["n_ubatch"], 1024)
+        self.assertEqual(kwargs["n_threads"], 12)
+        self.assertEqual(kwargs["n_threads_batch"], 16)
+        self.assertEqual(kwargs["flash_attn_type"], 1)
+        self.assertFalse(kwargs["offload_kqv"])
+        self.assertTrue(kwargs["use_mmap"])
+        self.assertTrue(kwargs["use_mlock"])
+        self.assertEqual(kwargs["rope_freq_base"], 10000.0)
+        self.assertEqual(kwargs["rope_freq_scale"], 0.5)
+        self.assertEqual(kwargs["n_seq_max"], 2)
+        self.assertEqual(kwargs["tensor_split"], [0.6, 0.4])
+        self.assertNotIn("model_path", kwargs)
+        self.assertNotIn("unknown_option", kwargs)
+        with self.assertRaisesRegex(ValueError, "合法 JSON 对象"):
+            module._解析llama自定义参数("not-json")
+
     def test_qwen35_managed_call_keeps_compatible_cached_chat_format(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             models_dir = pathlib.Path(temp_dir)
@@ -20590,6 +20678,17 @@ class TestStagePromptModules(unittest.TestCase):
             "内置GPU层数",
             "内置KV缓存K类型",
             "内置KV缓存V类型",
+            "内置批处理大小",
+            "内置微批处理大小",
+            "内置线程数",
+            "内置批处理线程数",
+            "内置Flash注意力",
+            "内置KQV卸载",
+            "内置内存映射",
+            "内置锁定内存",
+            "内置RoPE频率基值",
+            "内置RoPE频率缩放",
+            "内置模型参数JSON",
             "API服务商",
             "API地址",
             "API密钥",
@@ -22685,6 +22784,8 @@ class TestStagePromptModules(unittest.TestCase):
             self.assertIn(required, catalog["options"]["anatomy_terms"])
         self.assertIn("explicit_terms", catalog["options"])
         for required in ("性交", "插入", "自慰", "潮吹"):
+            self.assertIn(required, catalog["options"]["explicit_terms"])
+        for required in ("女性刺激潮吹结果", "男性刺激射精结果", "受控体液结果"):
             self.assertIn(required, catalog["options"]["explicit_terms"])
         for required in ("阴茎口部刺激", "外阴口部刺激", "相互口部刺激", "阴茎手部刺激", "外阴手部刺激", "相互手部刺激"):
             self.assertIn(required, catalog["options"]["explicit_terms"])
@@ -24944,6 +25045,45 @@ class TestStagePromptModules(unittest.TestCase):
         )
         self.assertFalse(any("双成年女性" in tag for tag in ambiguous_pair["custom_tags"]))
         self.assertIn("口交", ambiguous_pair["custom_tags"])
+
+    def test_nsfw_mapper_folds_compatible_result_terms_into_action_contract(self) -> None:
+        female = nsfw_mapper.map_nsfw_workspace_to_stage_state(
+            {
+                "selector_character": "成年女性",
+                "anatomy_terms": "外阴、阴蒂",
+                "explicit_terms": "自慰、女性刺激潮吹结果、受控体液结果",
+            },
+            tag_group_index={},
+            group_slot_limits={},
+        )
+        female_contract = next(tag for tag in female["custom_tags"] if tag.startswith("成年女性自慰:"))
+        self.assertIn("潮吹仅作为当前女性刺激动作的结果", female_contract)
+        self.assertIn("其他体液仅出现在当前接触区域", female_contract)
+        self.assertIn("人物数量与镜头轴线", female_contract)
+        for loose_term in ("自慰", "潮吹", "体液"):
+            self.assertNotIn(loose_term, female["custom_tags"])
+
+        male_pair = nsfw_mapper.map_nsfw_workspace_to_stage_state(
+            {
+                "selector_character": "成年情侣",
+                "anatomy_terms": "阴茎、阴道",
+                "explicit_terms": "性交、射精",
+            },
+            tag_group_index={},
+            group_slot_limits={},
+        )
+        male_contract = next(tag for tag in male_pair["custom_tags"] if tag.startswith("正面阴道插入:"))
+        self.assertIn("射精仅作为当前男性刺激动作的结果", male_contract)
+        self.assertNotIn("射精", male_pair["custom_tags"])
+
+    def test_nsfw_mapper_keeps_result_word_unbound_without_base_action(self) -> None:
+        result = nsfw_mapper.map_nsfw_workspace_to_stage_state(
+            {"selector_character": "成年女性", "explicit_terms": "潮吹"},
+            tag_group_index={},
+            group_slot_limits={},
+        )
+        self.assertFalse(any("动作结果阶段" in tag for tag in result["custom_tags"]))
+        self.assertIn("潮吹", result["custom_tags"])
 
     def test_nsfw_negative_preset_prefers_custom_when_selected(self) -> None:
         workspace = {
