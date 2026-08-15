@@ -77,6 +77,7 @@ except Exception:  # pragma: no cover - focused tests may stub .nodes
 
 try:
     from .nodes import (
+        Flash注意力选项 as _内置模型Flash注意力选项,
         KV缓存类型选项 as _内置模型KV缓存类型选项,
         TE通用模型系列选项 as _内置模型系列选项,
         _QwenStorage as _内置QwenStorage,
@@ -84,8 +85,9 @@ try:
         默认KV缓存类型 as _内置默认KV缓存类型,
     )
 except Exception:  # pragma: no cover - focused tests may stub .nodes
-    _内置模型系列选项 = ["Qwen3-VL", "Qwen3.5-VL", "Gemma4", "Llama", "Mistral", "DeepSeek", "通用GGUF"]
+    _内置模型系列选项 = ["Qwen3-VL", "Qwen3.5-VL", "Qwen3.8-VL", "Gemma4", "Llama", "Mistral", "DeepSeek", "通用GGUF"]
     _内置模型KV缓存类型选项 = ["默认(F16)", "q8_0"]
+    _内置模型Flash注意力选项 = ["自动", "开启", "关闭"]
     _内置默认KV缓存类型 = "默认(F16)"
     _内置QwenStorage = None
 
@@ -172,6 +174,7 @@ from .stage_prompt.model_refiner import (
     stabilize_prompt_output as _stabilize_prompt_output_impl,
     summarize_global_creative_spine_contract as _summarize_global_creative_spine_contract_impl,
 )
+from .stage_prompt.model_call_skill import ModelCallSkill as _ModelCallSkill
 from .stage_prompt.intelligence import (
     apply_relation_hint_resolution as _apply_relation_hint_resolution_impl,
     build_intelligence_profile as _build_intelligence_profile_impl,
@@ -553,6 +556,11 @@ _MODEL_RUNTIME_STATE_KEYS = (
     "模型调用失败次数",
     "模型调用采纳次数",
     "模型调用错误",
+    "模型调用Skill名称",
+    "模型调用Skill版本",
+    "模型调用Skill状态",
+    "模型调用Skill通道",
+    "模型调用Skill错误",
     "模型活动回退数量",
     "模型调用基础来源",
     "模型传输重试次数",
@@ -637,6 +645,17 @@ _IMAGE_REVERSE_MODEL_SETTING_KEYS = (
     "内置GPU层数",
     "内置KV缓存K类型",
     "内置KV缓存V类型",
+    "内置批处理大小",
+    "内置微批处理大小",
+    "内置线程数",
+    "内置批处理线程数",
+    "内置Flash注意力",
+    "内置KQV卸载",
+    "内置内存映射",
+    "内置锁定内存",
+    "内置RoPE频率基值",
+    "内置RoPE频率缩放",
+    "内置模型参数JSON",
     "API服务商",
     "API地址",
     "API模型",
@@ -651,6 +670,17 @@ _IMAGE_REVERSE_ATTACHED_CONFIG_KEYS = (
     "n_gpu_layers",
     "cache_type_k",
     "cache_type_v",
+    "n_batch",
+    "n_ubatch",
+    "n_threads",
+    "n_threads_batch",
+    "flash_attn",
+    "offload_kqv",
+    "use_mmap",
+    "use_mlock",
+    "rope_freq_base",
+    "rope_freq_scale",
+    "custom_llama_params",
     "provider",
     "kind",
     "url",
@@ -876,6 +906,11 @@ SETTING_DEFAULTS = {
     "模型调用采纳次数": 0,
     "模型活动回退数量": 0,
     "模型调用错误": [],
+    "模型调用Skill名称": "",
+    "模型调用Skill版本": "",
+    "模型调用Skill状态": "",
+    "模型调用Skill通道": "",
+    "模型调用Skill错误": "",
     "模型传输重试次数": 0,
     "模型最近瞬时错误": "",
     "模型调用基础来源": "仅Skill",
@@ -889,6 +924,17 @@ SETTING_DEFAULTS = {
     "内置GPU层数": -1,
     "内置KV缓存K类型": _内置默认KV缓存类型,
     "内置KV缓存V类型": _内置默认KV缓存类型,
+    "内置批处理大小": 2048,
+    "内置微批处理大小": 512,
+    "内置线程数": 0,
+    "内置批处理线程数": 0,
+    "内置Flash注意力": "自动",
+    "内置KQV卸载": True,
+    "内置内存映射": True,
+    "内置锁定内存": False,
+    "内置RoPE频率基值": 0.0,
+    "内置RoPE频率缩放": 0.0,
+    "内置模型参数JSON": "",
     "API服务商": "OpenAI兼容",
     "API地址": "",
     "API密钥": "env:QWEN_TE_API_KEY",
@@ -2122,6 +2168,17 @@ def _解析内置模型配置(kwargs: dict[str, Any]) -> dict[str, Any]:
         "n_gpu_layers": _safe_int(kwargs.get("内置GPU层数", SETTING_DEFAULTS["内置GPU层数"]), SETTING_DEFAULTS["内置GPU层数"], -1, 9999),
         "cache_type_k": str(kwargs.get("内置KV缓存K类型", _内置默认KV缓存类型) or _内置默认KV缓存类型),
         "cache_type_v": str(kwargs.get("内置KV缓存V类型", _内置默认KV缓存类型) or _内置默认KV缓存类型),
+        "n_batch": _safe_int(kwargs.get("内置批处理大小", SETTING_DEFAULTS["内置批处理大小"]), SETTING_DEFAULTS["内置批处理大小"], 32, 131072),
+        "n_ubatch": _safe_int(kwargs.get("内置微批处理大小", SETTING_DEFAULTS["内置微批处理大小"]), SETTING_DEFAULTS["内置微批处理大小"], 32, 131072),
+        "n_threads": _safe_int(kwargs.get("内置线程数", SETTING_DEFAULTS["内置线程数"]), SETTING_DEFAULTS["内置线程数"], 0, 512),
+        "n_threads_batch": _safe_int(kwargs.get("内置批处理线程数", SETTING_DEFAULTS["内置批处理线程数"]), SETTING_DEFAULTS["内置批处理线程数"], 0, 512),
+        "flash_attn": str(kwargs.get("内置Flash注意力", SETTING_DEFAULTS["内置Flash注意力"]) or SETTING_DEFAULTS["内置Flash注意力"]),
+        "offload_kqv": bool(kwargs.get("内置KQV卸载", SETTING_DEFAULTS["内置KQV卸载"])),
+        "use_mmap": bool(kwargs.get("内置内存映射", SETTING_DEFAULTS["内置内存映射"])),
+        "use_mlock": bool(kwargs.get("内置锁定内存", SETTING_DEFAULTS["内置锁定内存"])),
+        "rope_freq_base": _safe_float(kwargs.get("内置RoPE频率基值", SETTING_DEFAULTS["内置RoPE频率基值"]), SETTING_DEFAULTS["内置RoPE频率基值"], 0.0, 1_000_000.0),
+        "rope_freq_scale": _safe_float(kwargs.get("内置RoPE频率缩放", SETTING_DEFAULTS["内置RoPE频率缩放"]), SETTING_DEFAULTS["内置RoPE频率缩放"], 0.0, 100.0),
+        "custom_llama_params": str(kwargs.get("内置模型参数JSON", SETTING_DEFAULTS["内置模型参数JSON"]) or ""),
     }
 
 
@@ -4693,8 +4750,22 @@ def _reverse_reference_image(model: Any, image: Any, settings: dict[str, Any]) -
                 ],
             },
         ]
-        out = _调用chat_completion(model.llm, messages=messages, params=params)
-        text = _清洗think块文本(_extract_chat_text(out)).strip()
+        reverse_skill = _ModelCallSkill(
+            resolve_backend=lambda backend: backend,
+            resolve_system_prompt=lambda _settings: "",
+            compose_user_prompt=lambda value, _settings: value,
+            extract_text=_extract_chat_text,
+            clean_think_text=_清洗think块文本,
+            sampling_params=lambda _settings, _count: {},
+            chat_completion=_调用chat_completion,
+        )
+        text = reverse_skill.invoke_messages(
+            model.llm,
+            messages,
+            settings,
+            params=params,
+            force_chat_completion=True,
+        ).strip()
         text = re.sub(r"^\s*(?:以下是|这是|为你生成的).*?[：:]\s*", "", text)
         return text
     except BaseException as exc:
@@ -6958,6 +7029,17 @@ _阶段输入参数说明 = {
     "内置GPU层数": "内置 GGUF 路线的 GPU 卸载层数。-1=尽可能使用 GPU，0=纯 CPU；显存不足时逐步降低。",
     "内置KV缓存K类型": "本地模型 K 缓存精度。默认 F16 最稳；显存紧张且 llama-cpp-python 支持时可用 q8_0。",
     "内置KV缓存V类型": "本地模型 V 缓存精度。默认 F16 最稳；显存紧张且 llama-cpp-python 支持时可用 q8_0。",
+    "内置批处理大小": "llama.cpp n_batch。控制提示词预填充批量；显存不足先降低，长上下文或高吞吐可提高。",
+    "内置微批处理大小": "llama.cpp n_ubatch。控制微批量，通常设置为不大于批处理大小的 1/4 到 1/2。",
+    "内置线程数": "llama.cpp n_threads。0 表示自动；CPU 推理可按物理核心数小幅调整。",
+    "内置批处理线程数": "llama.cpp n_threads_batch。0 表示自动；主要影响提示词预填充阶段。",
+    "内置Flash注意力": "Flash Attention 模式。自动最稳；开启可能降低显存和长上下文开销，但需要当前 llama.cpp 编译支持。",
+    "内置KQV卸载": "是否将 K/Q/V 计算卸载到 GPU。显存充足时开启通常更快。",
+    "内置内存映射": "是否使用 mmap 读取 GGUF。通常保持开启，可减少启动内存峰值。",
+    "内置锁定内存": "是否使用 mlock 锁定模型页。仅在系统内存充足且不希望页面换出时开启。",
+    "内置RoPE频率基值": "RoPE 频率基值。0 表示遵循模型元数据；除非明确做长上下文实验，否则保持 0。",
+    "内置RoPE频率缩放": "RoPE 频率缩放。0 表示遵循模型元数据；错误设置会破坏注意力位置编码。",
+    "内置模型参数JSON": "高级自定义 Llama 参数 JSON。键名必须是当前 llama-cpp-python 的构造参数；模型路径、聊天 handler、chat_format、n_ctx、n_gpu_layers 和 KV 类型等受保护键不会覆盖节点控制。",
     "模板风格": "控制整体媒介和视觉风格。自动最通用；明确选风格可提高一致性，但批量变化会相对收敛。",
     "主体类型": "自动判断人物、非人物或场景主体；自动识别不准时再手动指定。",
     "案例输出结构": "控制提示词组织方式。自动会按当前任务选择；长段版适合直接出图，分段版更便于检查和编辑。",
@@ -7029,7 +7111,7 @@ class QwenTE阶段式提示词生成器:
         model_list, mmproj_list = _内置模型文件选项()
         required = OrderedDict()
         required["模型来源"] = (模型来源选项, {"default": "仅Skill", "tooltip": "仅Skill=本地Skill直接生成图像、智能文本和视频提示词；本地模型=Skill先生成可靠底稿，再由外接兼容模型或 models/LLM 中的内置模型后置润色；API接口=Skill底稿交给云端、Ollama、LM Studio 或其他兼容服务润色。旧值本地GGUF会自动迁移。"})
-        required["内置模型系列"] = (_内置模型系列选项, {"default": "Qwen3.5-VL", "tooltip": "本地模型未连接外部输入时，阶段提示词节点会按这里的设置直接加载内置 GGUF。"})
+        required["内置模型系列"] = (_内置模型系列选项, {"default": "Qwen3.5-VL", "tooltip": "本地模型未连接外部输入时，阶段提示词节点会按这里的设置直接加载内置 GGUF；支持 Qwen3、Qwen3.5 和 Qwen3.8。"})
         required["内置主模型"] = (model_list, {"default": model_list[0], "tooltip": "内置加载路线使用的 GGUF 文件，放到 ComfyUI/models/LLM/；其他模型可连接 qwen模型 输入。"})
         required["内置视觉投影mmproj"] = (mmproj_list, {"default": "无", "tooltip": "多模态需要 mmproj；纯文本提示词生成可选“无”。"})
         required["内置启用思考"] = ("BOOLEAN", {"default": False, "tooltip": "Qwen/Gemma 思考开关；提示词生成通常可关闭。"})
@@ -7037,6 +7119,17 @@ class QwenTE阶段式提示词生成器:
         required["内置GPU层数"] = ("INT", {"default": -1, "min": -1, "max": 9999, "step": 1})
         required["内置KV缓存K类型"] = (_内置模型KV缓存类型选项, {"default": _内置默认KV缓存类型})
         required["内置KV缓存V类型"] = (_内置模型KV缓存类型选项, {"default": _内置默认KV缓存类型})
+        required["内置批处理大小"] = ("INT", {"default": 2048, "min": 32, "max": 131072, "step": 32, "tooltip": "llama.cpp n_batch；显存不足时降低。"})
+        required["内置微批处理大小"] = ("INT", {"default": 512, "min": 32, "max": 131072, "step": 32, "tooltip": "llama.cpp n_ubatch；通常不大于批处理大小。"})
+        required["内置线程数"] = ("INT", {"default": 0, "min": 0, "max": 512, "step": 1, "tooltip": "llama.cpp n_threads；0=自动。"})
+        required["内置批处理线程数"] = ("INT", {"default": 0, "min": 0, "max": 512, "step": 1, "tooltip": "llama.cpp n_threads_batch；0=自动。"})
+        required["内置Flash注意力"] = (_内置模型Flash注意力选项, {"default": "自动", "tooltip": "自动/开启/关闭 Flash Attention。"})
+        required["内置KQV卸载"] = ("BOOLEAN", {"default": True, "tooltip": "对应 offload_kqv。"})
+        required["内置内存映射"] = ("BOOLEAN", {"default": True, "tooltip": "对应 use_mmap。"})
+        required["内置锁定内存"] = ("BOOLEAN", {"default": False, "tooltip": "对应 use_mlock。"})
+        required["内置RoPE频率基值"] = ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1000000.0, "step": 1.0, "tooltip": "对应 rope_freq_base；0=模型默认。"})
+        required["内置RoPE频率缩放"] = ("FLOAT", {"default": 0.0, "min": 0.0, "max": 100.0, "step": 0.01, "tooltip": "对应 rope_freq_scale；0=模型默认。"})
+        required["内置模型参数JSON"] = ("STRING", {"default": "", "multiline": True, "tooltip": "可选自定义 llama-cpp-python 参数 JSON；不支持或受保护的键会被忽略。"})
         required["API服务商"] = (API服务商选项, {"default": "OpenAI兼容", "tooltip": "大多数云模型和本地服务都支持 OpenAI-compatible /v1/chat/completions；Claude/Gemini 也提供原生适配。"})
         required["API地址"] = ("STRING", {"default": "", "multiline": False, "tooltip": "可填 Base URL，例如 https://api.openai.com/v1；不得包含查询参数或片段。留空时使用服务商预设。"})
         required["API密钥"] = ("STRING", {"default": "env:QWEN_TE_API_KEY", "multiline": False, "tooltip": "推荐 env:环境变量名。环境变量密钥只会发送到服务商预设来源；自定义来源需加入 QWEN_TE_CUSTOM_API_SECRET_ORIGINS。直接填写的 key 会保存在工作流中。"})
@@ -7196,6 +7289,17 @@ class QwenTE通用模型阶段式提示词生成器(QwenTE阶段式提示词生�
             "内置GPU层数",
             "内置KV缓存K类型",
             "内置KV缓存V类型",
+            "内置批处理大小",
+            "内置微批处理大小",
+            "内置线程数",
+            "内置批处理线程数",
+            "内置Flash注意力",
+            "内置KQV卸载",
+            "内置内存映射",
+            "内置锁定内存",
+            "内置RoPE频率基值",
+            "内置RoPE频率缩放",
+            "内置模型参数JSON",
             "API服务商",
             "API地址",
             "API密钥",

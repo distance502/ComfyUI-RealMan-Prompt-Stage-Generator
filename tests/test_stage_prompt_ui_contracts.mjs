@@ -1664,7 +1664,7 @@ test("stage panel keeps daily generation settings in hidden native widgets", asy
 test("stage model dialog exposes compact controls without taking over external loader nodes", async () => {
 	const source = await fs.readFile(UI_PATH, "utf8");
 	assert.equal(source.includes("TE MODEL DECK"), true);
-	for (const family of ["Qwen3.5-VL", "Qwen3-VL", "Gemma4", "Llama", "Mistral", "DeepSeek", "通用GGUF"]) {
+	for (const family of ["Qwen3.8-VL", "Qwen3.5-VL", "Qwen3-VL", "Gemma4", "Llama", "Mistral", "DeepSeek", "通用GGUF"]) {
 		assert.equal(source.includes(`value: "${family}"`), true, `${family} should be available from the model deck`);
 	}
 	assert.equal(source.includes("function openStageModelDialog(stageNode)"), true);
@@ -1682,6 +1682,10 @@ test("stage model dialog exposes compact controls without taking over external l
 	assert.equal(source.includes('return source === "本地GGUF" ? "本地模型" : source;'), true);
 	assert.equal(source.includes("MODEL_API_PROVIDER_BUTTONS"), true);
 	assert.equal(source.includes("内置主模型"), true);
+	assert.equal(source.includes("内置批处理大小"), true);
+	assert.equal(source.includes("内置Flash注意力"), true);
+	assert.equal(source.includes("内置模型参数JSON"), true);
+	assert.equal(source.includes("自定义参数 JSON"), true);
 	assert.equal(source.includes("API服务商"), true);
 	assert.equal(source.includes("API密钥"), true);
 	assert.equal(source.includes("OpenAI兼容"), true);
@@ -2462,6 +2466,29 @@ test("legacy widget values insert embedded model controls before stage settings"
 	assert.equal(normalized[15], "真实感");
 	assert.equal(normalized[22], "自动");
 	assert.equal(normalized[23], "纯中文");
+});
+
+test("legacy widget values insert new local performance controls without shifting stage settings", async () => {
+	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	const advanced = [
+		"内置批处理大小", "内置微批处理大小", "内置线程数", "内置批处理线程数", "内置Flash注意力",
+		"内置KQV卸载", "内置内存映射", "内置锁定内存", "内置RoPE频率基值", "内置RoPE频率缩放", "内置模型参数JSON",
+	];
+	const widgetNames = [
+		"模型来源", "内置模型系列", "内置主模型", "内置视觉投影mmproj", "内置启用思考", "内置上下文长度", "内置GPU层数", "内置KV缓存K类型", "内置KV缓存V类型",
+		...advanced,
+		"API服务商", "API地址", "API密钥", "API模型", "API超时秒", "API额外请求头", "模板风格", "主体类型",
+	];
+	const node = { properties: {}, widgets: widgetNames.map((name) => ({ name, value: `default:${name}` })) };
+	const legacyValues = widgetNames.filter((name) => !advanced.includes(name)).map((name) => `legacy:${name}`);
+	const normalized = exports.normalizeLegacyWidgetValues(node, legacyValues);
+	assert.equal(normalized.length, widgetNames.length);
+	assert.equal(normalized[8], "legacy:内置KV缓存V类型");
+	assert.equal(normalized[9], "default:内置批处理大小");
+	assert.equal(normalized[19], "default:内置模型参数JSON");
+	assert.equal(normalized[20], "legacy:API服务商");
+	assert.equal(normalized.at(-2), "legacy:模板风格");
+	assert.equal(normalized.at(-1), "legacy:主体类型");
 });
 
 test("legacy widget values append runtime random internals after existing caches", async () => {
@@ -5966,6 +5993,46 @@ test("buildNsfwWorkspaceMappedState resolves richer legacy actions to one main c
 			assert.equal(mapped.custom_tags.includes(looseTerm), false);
 		}
 	}
+});
+
+test("buildNsfwWorkspaceMappedState folds compatible result terms into the same contract", async () => {
+	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	const node = { properties: {}, widgets: [] };
+	const library = { slot_config: [], tag_library: {} };
+	const female = exports.buildNsfwWorkspaceMappedState(node, library, {
+		selector_character: "成年女性",
+		anatomy_terms: "外阴、阴蒂",
+		explicit_terms: "自慰、女性刺激潮吹结果、受控体液结果",
+		negative_preset: "标准负面提示词",
+	});
+	const femaleContract = female.custom_tags.find((tag) => tag.startsWith("成年女性自慰:"));
+	assert.equal(typeof femaleContract, "string");
+	assert.equal(femaleContract.includes("潮吹仅作为当前女性刺激动作的结果"), true);
+	assert.equal(femaleContract.includes("其他体液仅出现在当前接触区域"), true);
+	assert.equal(femaleContract.includes("人物数量与镜头轴线"), true);
+	for (const looseTerm of ["自慰", "潮吹", "体液"]) assert.equal(female.custom_tags.includes(looseTerm), false);
+
+	const malePair = exports.buildNsfwWorkspaceMappedState(node, library, {
+		selector_character: "成年情侣",
+		anatomy_terms: "阴茎、阴道",
+		explicit_terms: "性交、射精",
+		negative_preset: "标准负面提示词",
+	});
+	const maleContract = malePair.custom_tags.find((tag) => tag.startsWith("正面阴道插入:"));
+	assert.equal(typeof maleContract, "string");
+	assert.equal(maleContract.includes("射精仅作为当前男性刺激动作的结果"), true);
+	assert.equal(malePair.custom_tags.includes("射精"), false);
+});
+
+test("buildNsfwWorkspaceMappedState leaves result terms unbound without a base action", async () => {
+	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	const result = exports.buildNsfwWorkspaceMappedState(
+		{ properties: {}, widgets: [] },
+		{ slot_config: [], tag_library: {} },
+		{ selector_character: "成年女性", explicit_terms: "潮吹", negative_preset: "标准负面提示词" },
+	);
+	assert.equal(result.custom_tags.some((tag) => tag.includes("动作结果阶段")), false);
+	assert.equal(result.custom_tags.includes("潮吹"), true);
 });
 
 test("buildNsfwWorkspaceMappedState does not infer a two-person contract without a pair role", async () => {
