@@ -3908,7 +3908,25 @@ def 应用NSFW工作台到阶段状态(
         "protected_tags": protected_tags,
         "negative_prompt": str(mapped.get("negative_prompt") or "").strip(),
         "negative": dict(mapped.get("negative", {})) if isinstance(mapped.get("negative"), dict) else {},
+        "result_contract": (
+            dict(mapped.get("result_contract", {}))
+            if isinstance(mapped.get("result_contract"), dict)
+            else {}
+        ),
     }
+
+
+def _publish_nsfw_result_contract(
+    settings: dict[str, Any],
+    nsfw_output: dict[str, Any] | None,
+) -> None:
+    contract = (
+        dict(nsfw_output.get("result_contract", {}))
+        if isinstance(nsfw_output, dict) and isinstance(nsfw_output.get("result_contract"), dict)
+        else {}
+    )
+    settings["NSFW结果合同"] = contract
+    settings["视频提示词结果合同"] = dict(contract)
 
 
 def _build_state_from_kwargs(
@@ -4375,6 +4393,21 @@ def _build_nsfw_model_context_summary(
             raw_terms.extend(str(item).strip() for item in value if str(item).strip())
         elif str(value or "").strip() and str(value or "").strip() != "——":
             raw_terms.extend(_parse_tags(str(value)))
+    result_contract = (
+        nsfw_output.get("result_contract", {})
+        if isinstance(nsfw_output, dict) and isinstance(nsfw_output.get("result_contract"), dict)
+        else {}
+    )
+    if bool(result_contract.get("enabled", False)):
+        result_terms = {
+            "潮吹",
+            "射精",
+            "体液",
+            "女性刺激潮吹结果",
+            "男性刺激射精结果",
+            "受控体液结果",
+        }
+        raw_terms = [term for term in raw_terms if str(term).strip() not in result_terms]
     seen_keys: set[str] = set()
     raw_summary = _compact_fresh_tag_summary(raw_terms, seen_keys=seen_keys, limit=32)
     mapped_summary = _compact_fresh_tag_summary(mapped_tags, seen_keys=seen_keys, limit=40)
@@ -4386,6 +4419,9 @@ def _build_nsfw_model_context_summary(
         parts.append(f"映射新增标签：{mapped_summary}")
     if active_summary:
         parts.append(f"节点额外激活标签：{active_summary}")
+    result_text = str(result_contract.get("text", "") or "").strip()
+    if result_text:
+        parts.append(f"动作结果合同：{result_text}")
     return "；".join(parts)
 
 
@@ -5002,6 +5038,8 @@ def _run_stage_impl(
     settings["NSFW工作台状态指纹"] = _nsfw_workspace_state_fingerprint(nsfw_workspace)
     nsfw_output: dict[str, Any] | None = None
     nsfw_enabled = isinstance(nsfw_workspace, dict) and bool(nsfw_workspace.get("enabled", False))
+    settings["NSFW结果合同"] = {}
+    settings["视频提示词结果合同"] = {}
     settings["运行时随机保护标签"] = ""
     settings["智能随机冲突修复"] = {}
     if nsfw_enabled:
@@ -5036,6 +5074,7 @@ def _run_stage_impl(
         )
         selected = nsfw_output["selected"]
         custom_tags = nsfw_output["custom_tags"]
+        _publish_nsfw_result_contract(settings, nsfw_output)
         settings["运行时随机保护标签"] = ",".join(
             _uniq([*_parse_tags(settings.get("运行时随机保护标签")), *nsfw_output.get("protected_tags", [])])
         )
@@ -5193,6 +5232,7 @@ def _run_stage_impl(
         )
         selected = nsfw_output["selected"]
         custom_tags = nsfw_output["custom_tags"]
+        _publish_nsfw_result_contract(settings, nsfw_output)
         settings["运行时随机保护标签"] = ",".join(nsfw_output.get("protected_tags", []))
         _merge_inference_notes(settings, ["NSFW工作台锚点保护：仅保留最终归一化后仍有效的工作台显式选择。"])
         selected, custom_tags, post_nsfw_notes = _normalize_inference_state(
@@ -5823,6 +5863,7 @@ def _run_stage_impl(
     json_payload["normalization_notes"] = list(settings.get("推理纠偏说明", []))
     json_payload["prompt_skill_context"] = dict(settings.get("提示词Skill上下文", {}) or {})
     json_payload["prompt_skill_summary"] = str(settings.get("提示词Skill摘要", "") or "")
+    json_payload["nsfw_result_contract"] = dict(settings.get("NSFW结果合同", {}) or {})
     if nsfw_output is not None:
         json_payload["nsfw_workspace"] = dict(nsfw_workspace)
         json_payload["nsfw_workspace_source"] = nsfw_workspace_source
@@ -6855,6 +6896,8 @@ def 构建运行时随机预览状态(payload: dict[str, Any]) -> dict[str, Any]
     )
     settings["NSFW工作台状态指纹"] = _nsfw_workspace_state_fingerprint(nsfw_workspace)
     nsfw_enabled = nsfw_workspace is not None and bool(nsfw_workspace.get("enabled", False))
+    settings["NSFW结果合同"] = {}
+    settings["视频提示词结果合同"] = {}
     if nsfw_enabled:
         _apply_nsfw_generation_profile(settings)
         nsfw_output = 应用NSFW工作台到阶段状态(
@@ -6865,6 +6908,7 @@ def 构建运行时随机预览状态(payload: dict[str, Any]) -> dict[str, Any]
         )
         selected = nsfw_output["selected"]
         custom_tags = nsfw_output["custom_tags"]
+        _publish_nsfw_result_contract(settings, nsfw_output)
         settings["运行时随机保护标签"] = ",".join(
             _uniq([*_parse_tags(settings.get("运行时随机保护标签")), *nsfw_output.get("protected_tags", [])])
         )
@@ -6960,6 +7004,7 @@ def 构建运行时随机预览状态(payload: dict[str, Any]) -> dict[str, Any]
         )
         selected = nsfw_output["selected"]
         custom_tags = nsfw_output["custom_tags"]
+        _publish_nsfw_result_contract(settings, nsfw_output)
         settings["运行时随机保护标签"] = ",".join(nsfw_output.get("protected_tags", []))
         _merge_inference_notes(settings, ["NSFW工作台锚点保护：仅保留最终归一化后仍有效的工作台显式选择。"])
         tags_before_post_nsfw_normalization = _collect_all_tags(selected, custom_tags)

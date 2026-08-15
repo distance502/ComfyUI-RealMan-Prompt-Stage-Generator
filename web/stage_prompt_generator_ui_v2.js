@@ -11350,36 +11350,105 @@ function resolveNsfwActionContractBase(workspace) {
 }
 
 const NSFW_EXPLICIT_RESULT_MARKERS = ["女性刺激潮吹结果", "男性刺激射精结果", "受控体液结果", "潮吹", "射精", "体液"];
+const NSFW_EXPLICIT_RESULT_ALIASES = { "女性刺激潮吹结果": "潮吹", "男性刺激射精结果": "射精", "受控体液结果": "体液" };
+const NSFW_EXPLICIT_RESULT_TYPES = { "潮吹": "female_stimulation_squirt", "射精": "male_stimulation_ejaculation", "体液": "controlled_fluid" };
+const NSFW_RESULT_SOURCE_FIELDS = ["explicit_terms", "workspace_custom_tags", "trigger_words", "custom_prefix", "custom_suffix"];
+const NSFW_RESULT_CONTACT_POINTS = ["外阴", "阴蒂", "阴道", "肛门", "阴茎", "口部"];
 function orderedNsfwResultMarkers(explicitText) {
-	const aliases = { "女性刺激潮吹结果": "潮吹", "男性刺激射精结果": "射精", "受控体液结果": "体液" };
-	const seen = new Set();
-	return NSFW_EXPLICIT_RESULT_MARKERS
-		.map((marker) => [explicitText.indexOf(marker), aliases[marker] ?? marker])
-		.filter(([index, marker]) => index >= 0 && !seen.has(marker) && seen.add(marker))
-		.sort(([left], [right]) => left - right)
-		.map(([, marker]) => marker);
+	const canonicalPositions = new Map();
+	for (const marker of NSFW_EXPLICIT_RESULT_MARKERS) {
+		const index = explicitText.indexOf(marker);
+		if (index < 0) continue;
+		const canonical = NSFW_EXPLICIT_RESULT_ALIASES[marker] ?? marker;
+		canonicalPositions.set(canonical, Math.min(index, canonicalPositions.get(canonical) ?? index));
+	}
+	return [...canonicalPositions.entries()]
+		.sort(([, left], [, right]) => left - right)
+		.map(([marker]) => marker);
 }
 
-function appendNsfwResultContract(actionContract, explicitText) {
-	if (!actionContract) return "";
+function emptyNsfwResultContract(actionContract = "", requestedMarkers = []) {
+	return {
+		enabled: false,
+		requested_markers: [...requestedMarkers],
+		markers: [],
+		types: [],
+		action_contract: actionContract,
+		contact_points: [],
+		person_count: 0,
+		camera_axis: "",
+		end_state: "",
+		continuity_clause: "",
+		required_anchors: [],
+		text: "",
+	};
+}
+
+function inferNsfwResultPersonCount(actionContract) {
+	if (["双方", "两名", "双成年", "双人", "另一名", "伴侣", "夫妇", "情侣", "男女配对"].some((marker) => actionContract.includes(marker))) return 2;
+	if (["三名", "三人"].some((marker) => actionContract.includes(marker))) return 3;
+	return 1;
+}
+
+function buildNsfwResultContract(actionContract, explicitText) {
+	const requestedMarkers = orderedNsfwResultMarkers(explicitText);
+	if (!actionContract || !requestedMarkers.length) return emptyNsfwResultContract(actionContract, requestedMarkers);
 	const clauses = [];
-	for (const marker of orderedNsfwResultMarkers(explicitText)) {
+	const markers = [];
+	const types = [];
+	for (const marker of requestedMarkers) {
 		if (marker === "潮吹" && ["外阴", "阴蒂", "阴道"].some((target) => actionContract.includes(target))) {
 			clauses.push("潮吹仅作为当前女性刺激动作的结果，液体来源、方向与落点受既有接触关系约束，不新增人物或动作分支");
 		} else if (marker === "射精" && actionContract.includes("阴茎")) {
 			clauses.push("射精仅作为当前男性刺激动作的结果，体液来源、方向与落点受既有接触关系约束，不改变主客体身份");
 		} else if (marker === "体液") {
 			clauses.push("其他体液仅出现在当前接触区域与已存在的身体或道具表面，不扩散成新的场景元素");
-		}
+		} else continue;
+		markers.push(marker);
+		types.push(NSFW_EXPLICIT_RESULT_TYPES[marker]);
 	}
-	if (!clauses.length) return actionContract;
-	clauses.push("结果发生前后保持原有姿态、接触点、人物数量与镜头轴线，结束状态能够连续追踪");
-	return `${actionContract}；动作结果阶段: ${clauses.join("; ")}`;
+	if (!clauses.length) return emptyNsfwResultContract(actionContract, requestedMarkers);
+	const contactPoints = NSFW_RESULT_CONTACT_POINTS.filter((point) => actionContract.includes(point));
+	if (!contactPoints.length) contactPoints.push("当前既有接触点");
+	const personCount = inferNsfwResultPersonCount(actionContract);
+	const contactText = contactPoints.join("、");
+	const cameraAxis = "沿当前镜头轴线保持不变，不换轴、不跳切";
+	const continuityClause = "结果发生前后保持原有姿态、接触点、人物数量与镜头轴线，结束状态能够连续追踪";
+	const endState = `动作结束后保持原有姿态与空间关系，结果只停留在${contactText}，不新增人物、地点、道具或动作分支`;
+	clauses.push(continuityClause, `固定接触点为${contactText}，人物数量固定为${personCount}名，${cameraAxis}；${endState}`);
+	return {
+		enabled: true,
+		requested_markers: requestedMarkers,
+		markers,
+		types,
+		action_contract: actionContract,
+		contact_points: contactPoints,
+		person_count: personCount,
+		camera_axis: cameraAxis,
+		end_state: endState,
+		continuity_clause: continuityClause,
+		required_anchors: [`固定接触点为${contactText}`, `人物数量固定为${personCount}名`, "沿当前镜头轴线保持不变", "结束状态能够连续追踪"],
+		text: `动作结果阶段: ${clauses.join("; ")}`,
+	};
+}
+
+function appendNsfwResultContract(actionContract, explicitText) {
+	if (!actionContract) return "";
+	const resultContract = buildNsfwResultContract(actionContract, explicitText);
+	return resultContract.text ? `${actionContract}；${resultContract.text}` : actionContract;
+}
+
+function nsfwResultSourceText(workspace) {
+	return nsfwWorkspaceFieldsText(workspace, NSFW_RESULT_SOURCE_FIELDS);
+}
+
+function isStandaloneNsfwResultTerm(value) {
+	return NSFW_EXPLICIT_RESULT_MARKERS.includes(String(value ?? "").trim());
 }
 
 function resolveNsfwActionContract(workspace) {
 	const actionContract = resolveNsfwActionContractBase(workspace);
-	const explicitText = nsfwWorkspaceFieldsText(workspace, ["explicit_terms"]);
+	const explicitText = nsfwResultSourceText(workspace);
 	return appendNsfwResultContract(actionContract, explicitText);
 }
 
@@ -11394,6 +11463,10 @@ function mapNsfwWorkspaceToStageState(node, library, workspace, catalogOrNegativ
 	const generatedTerms = [];
 	const tagGroupIndex = buildTagGroupIndex(library);
 	const groupLimits = Object.fromEntries((library?.slot_config ?? []).map((group) => [group.name, getTagGroupSlotLimit(library, group.name)]));
+	const actionContractBase = resolveNsfwActionContractBase(effectiveWorkspace);
+	const resultSourceText = nsfwResultSourceText(effectiveWorkspace);
+	const resultContract = buildNsfwResultContract(actionContractBase, resultSourceText);
+	const actionContract = appendNsfwResultContract(actionContractBase, resultSourceText);
 	const pushGeneratedTerm = (value) => {
 		const text = String(value ?? "").trim();
 		if (text && text !== "——" && !generatedTerms.includes(text)) generatedTerms.push(text);
@@ -11401,6 +11474,7 @@ function mapNsfwWorkspaceToStageState(node, library, workspace, catalogOrNegativ
 	const pushMappedTerm = (value) => {
 		const text = String(value ?? "").trim();
 		if (!text || text === "——") return;
+		if (actionContract && isStandaloneNsfwResultTerm(text)) return;
 		pushGeneratedTerm(text);
 		const groupName = tagGroupIndex.get(text);
 		const limit = Math.max(0, Number(groupLimits[groupName] ?? 0));
@@ -11422,7 +11496,6 @@ function mapNsfwWorkspaceToStageState(node, library, workspace, catalogOrNegativ
 		? effectiveWorkspace.trigger_words.map((item) => String(item ?? "").trim()).filter(Boolean)
 		: parseCustomTags(effectiveWorkspace?.trigger_words ?? "");
 	const textFields = ["workspace_custom_tags", "selector_character", "selector_outfit", "selector_action", "selector_scene", "selector_expression", "selector_prop", "scene", "action", "outfit", "mood", "anatomy_terms", "explicit_terms", "adult_action_style", "camera_movement", "camera_angle", "light_source", "light_type", "lens_type", "focal_length", "color_tone", "visual_style", "effect", "filter", "custom_prefix", "custom_suffix"];
-	const actionContract = resolveNsfwActionContract(effectiveWorkspace);
 	let actionContractEmitted = false;
 	for (const tag of triggerWords) pushMappedTerms(tag);
 	for (const field of textFields) {
@@ -11459,6 +11532,7 @@ function mapNsfwWorkspaceToStageState(node, library, workspace, catalogOrNegativ
 		negative_prompt: negativePrompt,
 		negative,
 		effective_workspace: effectiveWorkspace,
+		result_contract: resultContract,
 	};
 }
 

@@ -24,7 +24,7 @@ except Exception:  # pragma: no cover - direct file loading in focused tests
     )
 
 
-VIDEO_PROMPT_SKILL_VERSION = "video-prompt-skill-v10"
+VIDEO_PROMPT_SKILL_VERSION = "video-prompt-skill-v11"
 VIDEO_PROMPT_DURATION_SECONDS = 8
 VIDEO_PROMPT_MIN_CHARS_ZH = 0  # Compatibility export: text length has been unbounded since v4.
 VIDEO_PROMPT_MAX_CHARS_ZH = 0  # Zero means unbounded.
@@ -39,6 +39,7 @@ VIDEO_PROMPT_MODEL_SYSTEM_TEMPLATE = """
 4. 严格保留底稿中的主体、服装、场景、动作、道具、风格、光影和声音锚点；首镜明确建立主体、服装、主场景和关键道具，后续每镜都要用全称、代词、同一空间参照或可见状态变化保持它们可追踪。可以在故事需要时改变景别和机位，也允许有动作因果的服装撕裂、沾湿、脱落或明确换装，但不得无理由换人、换地点、换服装，或让道具凭空出现、消失。
 5. 使用连贯自然语言，不堆关键词，不复述规则，不写无法直接拍摄的抽象评价。每段必须是可独立拍摄、又能承接下一段的分镜描述。
 6. 不限制正文总字数、单段字数或英文单词数；长度由剧情和分镜需要决定。正文仍不得写具体秒数或时长参数。
+7. 输入包含动作结果阶段时，必须把结果写成既有动作的因果结果，不得拆成独立标签或无来源事件；结果前后固定接触点、人物数量、镜头轴线与结束状态，不得新增人物、地点、道具、接触关系或跳轴镜头。
 """.strip()
 
 _EMPTY_VALUES = {"", "无", "自动", "未启用", "none", "null", "undefined"}
@@ -162,6 +163,12 @@ def video_prompt_required_anchors(
         anchor = _clean(values[0], limit=96)
         if anchor and anchor not in anchors:
             anchors.append(anchor)
+    result_contract = _video_result_contract(settings)
+    if result_contract:
+        english = str(settings.get("提示词语言", "纯中文") or "纯中文").strip() == "纯英文"
+        for anchor in _video_result_required_anchors(result_contract, english=english):
+            if anchor and anchor not in anchors:
+                anchors.append(anchor)
     return anchors
 
 
@@ -188,6 +195,10 @@ def video_prompt_anchor_roles(
         anchor = _clean(values[0], limit=96)
         if anchor:
             result[role] = [anchor]
+    result_contract = _video_result_contract(settings)
+    if result_contract:
+        english = str(settings.get("提示词语言", "纯中文") or "纯中文").strip() == "纯英文"
+        result["result"] = _video_result_required_anchors(result_contract, english=english)
     return result
 
 
@@ -203,6 +214,104 @@ def _series(groups: Mapping[str, list[str]], name: str, *, limit: int = 4) -> st
     if len(values) == 1:
         return values[0]
     return "、".join(values[:-1]) + "和" + values[-1]
+
+
+def _video_result_contract(settings: Mapping[str, Any]) -> dict[str, Any]:
+    raw = settings.get("视频提示词结果合同")
+    if not isinstance(raw, Mapping):
+        raw = settings.get("NSFW结果合同")
+    if not isinstance(raw, Mapping) or not bool(raw.get("enabled", False)):
+        return {}
+    return dict(raw)
+
+
+def _video_result_required_anchors(
+    contract: Mapping[str, Any],
+    *,
+    english: bool,
+) -> list[str]:
+    if english:
+        count = max(1, int(contract.get("person_count", 1) or 1))
+        return [
+            "fixed contact points",
+            f"participant count remains {count}",
+            "camera axis does not change",
+            "ending state remains traceable",
+        ]
+    anchors = _unique_values(contract.get("required_anchors"), limit=8)
+    marker_anchors = {
+        "潮吹": "潮吹仅作为当前女性刺激动作的结果",
+        "射精": "射精仅作为当前男性刺激动作的结果",
+        "体液": "其他体液仅出现在当前接触区域",
+    }
+    for marker in contract.get("markers", []) if isinstance(contract.get("markers"), list) else []:
+        anchor = marker_anchors.get(str(marker))
+        if anchor and anchor not in anchors:
+            anchors.append(anchor)
+    return anchors
+
+
+def _video_result_phrases_zh(contract: Mapping[str, Any]) -> dict[str, str]:
+    contact_points = _unique_values(contract.get("contact_points"), limit=8) or ["当前既有接触点"]
+    contact_text = "、".join(contact_points)
+    person_count = max(1, int(contract.get("person_count", 1) or 1))
+    action_contract = _clean(contract.get("action_contract"), limit=800)
+    result_text = _clean(contract.get("text"), limit=1600)
+    camera_axis = _clean(contract.get("camera_axis"), limit=180) or "沿当前镜头轴线保持不变，不换轴、不跳切"
+    end_state = _clean(contract.get("end_state"), limit=420) or (
+        f"动作结束后保持原有姿态与空间关系，结果只停留在{contact_text}"
+    )
+    continuity = _clean(contract.get("continuity_clause"), limit=300) or (
+        "结果发生前后保持原有姿态、接触点、人物数量与镜头轴线，结束状态能够连续追踪"
+    )
+    return {
+        "setup": (
+            f"画面从一开始就把既有动作关系交代清楚：{action_contract}。"
+            f"固定接触点为{contact_text}，人物数量固定为{person_count}名，所有人的身份与空间位置保持可辨。"
+        ),
+        "trace": (
+            f"过渡中仍以{contact_text}为唯一接触区域，人物数量不变，既有主客体关系持续可见。"
+        ),
+        "action": f"动作沿既有接触方向继续，{continuity}；镜头{camera_axis}。",
+        "result": f"{result_text}。结果只由上一分镜的连续动作引发，画面不另起事件。",
+        "ending": f"{end_state}，结束状态能够连续追踪；镜头{camera_axis}。",
+    }
+
+
+def _video_result_phrases_en(contract: Mapping[str, Any]) -> dict[str, str]:
+    point_names = {
+        "外阴": "vulva",
+        "阴蒂": "clitoris",
+        "阴道": "vagina",
+        "肛门": "anus",
+        "阴茎": "penis",
+        "口部": "mouth",
+        "当前既有接触点": "the established contact area",
+    }
+    raw_points = contract.get("contact_points", [])
+    points = [point_names.get(str(point), "the established contact area") for point in raw_points] if isinstance(raw_points, list) else []
+    points = list(dict.fromkeys(points)) or ["the established contact area"]
+    contact_text = ", ".join(points)
+    count = max(1, int(contract.get("person_count", 1) or 1))
+    types = set(str(value) for value in contract.get("types", []) if str(value))
+    result_events: list[str] = []
+    if "female_stimulation_squirt" in types:
+        result_events.append("squirting occurs only as the result of the established female stimulation")
+    if "male_stimulation_ejaculation" in types:
+        result_events.append("ejaculation occurs only as the result of the established male stimulation")
+    if "controlled_fluid" in types:
+        result_events.append("other fluid remains limited to the established contact area and existing surfaces")
+    event_text = "; ".join(result_events) or "the visible result follows only from the established action"
+    return {
+        "setup": (
+            f"Result continuity begins with fixed contact points at {contact_text}; "
+            f"participant count remains {count}, and every identity and spatial relation stays readable."
+        ),
+        "trace": "The same contact relation remains visible through the transition without adding a person, place, prop, or action branch.",
+        "action": "The movement continues through the same contact direction, and the camera axis does not change or jump across the action.",
+        "result": f"At the visual climax, {event_text}; the result does not become a separate event.",
+        "ending": "The original pose, contact relation, participant count, and spatial order remain intact, so the ending state remains traceable.",
+    }
 
 
 def _primary_composition(groups: Mapping[str, list[str]]) -> str:
@@ -359,9 +468,10 @@ def _build_chinese_video_prompt(
     reference = _subject_reference_zh(subject, non_person)
     style = _first(groups, "画面风格", str(settings.get("模板风格", "电影写实") or "电影写实"))
     scene = _first(groups, "场景背景") or "当前主场景"
+    result_contract = _video_result_contract(settings)
     action = _first(groups, "动作姿态") or ("完成一次有明确方向的状态变化" if non_person else "先停下确认线索，再做出一个明确动作")
     outfit = _first(groups, "服装造型")
-    props = _series(groups, "道具世界观") or "场景中的关键线索"
+    props = _series(groups, "道具世界观") or ("既有接触关系" if result_contract else "场景中的关键线索")
     lighting = _first(groups, "光影氛围") or "主光随动作轻微移动，环境反射保留空间层次"
     composition = _primary_composition(groups)
     style_skill = settings.get("模板风格Skill")
@@ -393,38 +503,54 @@ def _build_chinese_video_prompt(
     climax = _personalize(plan.get("climax_zh"), reference, scene)
     turn = _personalize(plan.get("turn_zh"), reference, scene)
     ending = _personalize(plan.get("ending_zh"), reference, scene)
+    if result_contract:
+        contact_points = _unique_values(result_contract.get("contact_points"), limit=8) or ["当前既有接触点"]
+        contact_text = "、".join(contact_points)
+        opening = f"{reference}在同一空间位置保持既有姿态，动作从{contact_text}的接触关系自然延续"
+        motive = "画面的推进只来自成年主体之间已经建立的自愿动作，不添加外部任务或旁支事件"
+        trigger = f"{contact_text}处的刺激节奏沿原有方向逐步增强"
+        response = f"{reference}维持原有主客体关系，只以呼吸、肌肉张力和重心变化回应"
+        escalation = "动作幅度、呼吸节奏与身体反馈按同一因果顺序增强"
+        feedback_plan = f"所有可见反馈都从{contact_text}向既有身体轮廓和接触表面传递"
+        turn = "人物情绪由持续紧张转向结果即将发生时的集中"
+        climax = "既有动作进入结果阶段，前后空间关系保持不变"
+        ending = "动作在原有位置收束，人物姿态、接触关系和可见结果共同形成明确结束状态"
     camera = _camera_move_zh(action, composition, scene, seed=seed).replace("主体", subject)
     feedback = _environment_feedback_zh(scene, action, reference, outfit)
     outfit_clause = f"身穿{outfit}，" if outfit and not non_person else ""
     brief_clause = f"这条故事围绕“{brief}”展开，" if brief else ""
     audio = _audio_zh(scene, action, non_person)
+    result_phrases = _video_result_phrases_zh(result_contract) if result_contract else {}
     paragraphs = (
         (
             f"分镜一（建立）：镜头以{composition}建立{scene}的空间关系，{subject}{outfit_clause}位于画面中心偏前，"
             f"{props}留在视线能够回到的位置。{brief_clause}{opening}；{motive}。"
             f"{style}决定画面的线条、色彩与材质表达；{medium or '当前媒介'}保持统一，{rendering or '材质与光线保持空间关系连续'}。"
-            f"{lighting}先把主体与关键线索从背景中分离，{audio}。"
+            f"{lighting}先把主体与关键线索从背景中分离，{audio}。{result_phrases.get('setup', '')}"
         ),
         (
             f"分镜二（触发）：镜头从环境关系推进到{reference}的视线、手部与{props}之间，先让观众读懂线索，再发生变化。"
             f"起初{reference}只是在确认现场，因为{trigger}，原有节奏被打破；焦点短暂落到{props}，随后回到{reference}的反应。"
             f"这一分镜承接开场动机，并把问题明确推向下一步行动，光线和环境声先出现细微偏移。"
+            f"{result_phrases.get('trace', '')}"
         ),
         (
             f"分镜三（行动）：镜头{camera}，在完整记录重心变化的同时保持{scene}方向清楚。"
             f"{reference}随即{action}，{response}；{outfit or '主体外观'}的边缘、接触点与受力方向跟随动作变化，{feedback}。"
             f"动作不是孤立展示，而是对上一分镜线索的直接回应，并由{props}的位置变化把故事带向更大的后果。"
+            f"{result_phrases.get('action', '')}"
         ),
         (
             f"分镜四（升级）：镜头改变景别观察行动造成的连锁结果，前景遮挡、中景动作和背景信息沿同一方向展开。"
             f"{escalation}，{feedback_plan}；与此同时{turn}。{climax}，{lighting}随局势重新分配明暗与色温。"
             f"声音从近处材质接触扩展到{scene}的空间回声，让视觉高潮既有来源，也为最后一段留下可继续追踪的结果。"
+            f"{result_phrases.get('result', '')}"
         ),
         (
             f"分镜五（收束）：镜头在高潮之后放慢观察，不再引入无关人物或新地点，而是回看{subject}、{props}与环境后果之间的新关系。"
             f"最后，{ending}；{reference}的视线、{props}的状态和背景光共同说明这次选择已经改变局势。"
             f"结尾保留清楚结果与开放余韵，使五段分镜组成一条完整剧情，也让下一次行动拥有自然入口。"
-            f"全程遵守{video_rules or '同一媒介、空间与主体的连续性'}。"
+            f"全程遵守{video_rules or '同一媒介、空间与主体的连续性'}。{result_phrases.get('ending', '')}"
         ),
     )
     return _join_storyboard_paragraphs(paragraphs)
@@ -443,16 +569,29 @@ def _build_english_video_prompt(settings: Mapping[str, Any], *, primary_prompt: 
     climax = _clean(plan.get("climax_en"), limit=200)
     turn = _clean(plan.get("turn_en"), limit=160)
     ending = _clean(plan.get("ending_en"), limit=180)
+    result_contract = _video_result_contract(settings)
+    if result_contract:
+        opening = "the adult participants hold their established positions as the action continues from the same contact relation"
+        motive = "the scene advances only through the already established consensual action, without an outside task or subplot"
+        trigger = "the stimulation increases gradually along the same direction and contact points"
+        response = "the participants answer only through breathing, muscle tension, and a readable shift of weight while preserving their roles"
+        escalation = "movement, breathing, and physical feedback intensify in one causal order"
+        feedback = "every visible response travels from the same contact points across the already visible bodies and surfaces"
+        turn = "the emotional focus narrows as the established result approaches"
+        climax = "the same action reaches its result phase without changing the spatial relation"
+        ending = "the action resolves in place, leaving pose, contact relation, and visible result in one readable ending state"
     opening = opening[:1].lower() + opening[1:]
     feedback = feedback[:1].lower() + feedback[1:]
     ending = ending[:1].lower() + ending[1:]
     camera = _camera_move_en(primary_prompt, seed=seed)
+    result_phrases = _video_result_phrases_en(result_contract) if result_contract else {}
+    focus_object = "the established contact relation" if result_contract else "the key visual clue"
     paragraphs = (
-        f"Shot 1 (setup): The camera opens on a readable wide view of this established visual world: {source}. {opening}. {motive}. Light, material, and ambient sound establish the location before the conflict begins.",
-        f"Shot 2 (trigger): The camera moves from the location to the subject's attention and the key visual clue. At first the rhythm remains controlled; when {trigger}, that rhythm breaks and the focus returns to the subject's reaction. This shot turns the setup into a clear question that the next action must answer.",
-        f"Shot 3 (action): The camera {camera} while preserving a readable direction of travel. The subject responds: {response}. Material contact, reflections, and spatial sound follow the movement in causal order, so the action grows directly from the preceding clue.",
-        f"Shot 4 (escalation): The camera changes scale to reveal the consequence across foreground, middle ground, and background. {escalation}; {feedback}. The emotion shifts as {turn}, and {climax}. Light and sound expand the result without introducing an unrelated storyline.",
-        f"Shot 5 (resolution): The camera settles after the climax and observes the new relationship between subject, clue, and location. Finally, {ending}. The final image makes the consequence readable, preserves an open emotional aftertone, and gives the complete storyboard a natural path into whatever happens next.",
+        f"Shot 1 (setup): The camera opens on a readable wide view of this established visual world: {source}. {opening}. {motive}. Light, material, and ambient sound establish the location before the conflict begins. {result_phrases.get('setup', '')}",
+        f"Shot 2 (trigger): The camera moves from the location to the subject's attention and {focus_object}. At first the rhythm remains controlled; when {trigger}, that rhythm breaks and the focus returns to the subject's reaction. This shot turns the setup into a clear cause that the next action must continue. {result_phrases.get('trace', '')}",
+        f"Shot 3 (action): The camera {camera} while preserving a readable direction of travel. The subject responds: {response}. Material contact, reflections, and spatial sound follow the movement in causal order, so the action grows directly from the preceding clue. {result_phrases.get('action', '')}",
+        f"Shot 4 (escalation): The camera changes scale to reveal the consequence across foreground, middle ground, and background. {escalation}; {feedback}. The emotion shifts as {turn}, and {climax}. Light and sound expand the result without introducing an unrelated storyline. {result_phrases.get('result', '')}",
+        f"Shot 5 (resolution): The camera settles after the climax and observes the new relationship between subject, clue, and location. Finally, {ending}. The final image makes the consequence readable, preserves an open emotional aftertone, and gives the complete storyboard a natural path into whatever happens next. {result_phrases.get('ending', '')}",
     )
     return _join_storyboard_paragraphs(paragraphs)
 
@@ -527,7 +666,8 @@ def is_natural_video_prompt(text: str, *, language: str = "纯中文") -> bool:
             and is_natural_video_prompt(chinese.strip(), language="纯中文")
             and is_natural_video_prompt(english.strip(), language="纯英文")
         )
-    if prompt.count("、") > 18 or len(re.findall(r"(?:^|[，,])[^。.!?]{0,18}(?:[，,]|$)", prompt)) > 48:
+    enumeration_limit = max(18, len(prompt) // 40)
+    if prompt.count("、") > enumeration_limit or len(re.findall(r"(?:^|[，,])[^。.!?]{0,18}(?:[，,]|$)", prompt)) > 48:
         return False
     if mode == "纯英文":
         lowered = prompt.casefold()

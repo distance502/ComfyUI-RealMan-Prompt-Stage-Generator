@@ -14536,6 +14536,84 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertIn("adult_mature_scene_consistency", skill_names)
         self.assertIn("nsfw_workspace_strategy", skill_names)
         self.assertIn("adult_mature_group_compactor", skill_names)
+        self.assertIn("template_style_skill_context", skill_names)
+        self.assertIn("user_selected_tag_skill_context", skill_names)
+
+    def test_every_template_style_has_a_complete_style_skill(self) -> None:
+        catalog = skills.build_template_style_skill_catalog()
+        self.assertEqual(set(catalog), set(skills.TEMPLATE_STYLE_BASE_MAP))
+        for style_name, skill in catalog.items():
+            with self.subTest(style=style_name):
+                self.assertEqual(skill["name"], style_name)
+                self.assertTrue(skill["medium"])
+                self.assertTrue(skill["rendering"])
+                self.assertTrue(skill["image_rules"])
+                self.assertTrue(skill["video_rules"])
+                self.assertIn(style_name, skill["anchors"]["画面风格"])
+
+    def test_user_tag_skill_preserves_groups_sources_and_relations(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["女冒险者"],
+                "画面风格": ["暗黑漫画"],
+                "服装造型": ["皮革护甲"],
+                "场景背景": ["地下城遗迹"],
+                "动作姿态": ["举起火炬"],
+                "道具世界观": ["火炬"],
+            }
+        )
+        context = skills.build_prompt_skill_context(
+            "暗黑漫画",
+            selected,
+            ["宝石反光"],
+            explicit_tags=["女冒险者", "皮革护甲", "地下城遗迹", "举起火炬", "火炬", "宝石反光"],
+        )
+        style_skill = context["template_style"]
+        user_skill = context["user_tags"]
+        self.assertEqual(style_skill["base_style"], "插画感")
+        self.assertIn("黑白线稿", style_skill["anchors"]["技术画质"])
+        self.assertEqual(user_skill["groups"]["主体"], ["女冒险者"])
+        self.assertEqual(user_skill["groups"]["自定义补充"], ["宝石反光"])
+        self.assertIn("火炬", user_skill["protected_tags"])
+        self.assertTrue(any("道具必须存在于当前场景" in item["rule"] for item in user_skill["relations"]))
+        summary = skills.summarize_prompt_skill_context(context)
+        self.assertIn("模板风格 Skill [暗黑漫画/插画感]", summary)
+        self.assertIn("用户标签 Skill", summary)
+
+    def test_stage_image_and_video_share_template_and_user_tag_skill(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        result = module._run_stage(
+            None,
+            unique_id="shared-style-user-skill",
+            模板风格="暗黑漫画",
+            主体标签1="女冒险者",
+            画面风格标签1="暗黑漫画",
+            服装造型标签1="皮革护甲",
+            场景背景标签1="地下城遗迹",
+            动作姿态标签1="举起火炬",
+            道具世界观标签1="火炬",
+            技术画质标签1="黑白线稿",
+            提示词语言="纯中文",
+            运行时随机标签=False,
+            模型来源="仅Skill",
+            生成数量=1,
+            seed=123,
+        )
+        image_prompt = result[1]
+        selected_tags_text = result[2]
+        payload = json.loads(result[3])
+        video_prompt = result[7]
+        skill_context = payload["prompt_skill_context"]
+        self.assertEqual(skill_context["template_style"]["name"], "暗黑漫画")
+        self.assertIn("女冒险者", skill_context["user_tags"]["protected_tags"])
+        self.assertIn("二维插画与手绘平面媒介", image_prompt)
+        self.assertIn("二维插画与手绘平面媒介", video_prompt)
+        self.assertIn("女冒险者", image_prompt)
+        self.assertIn("女冒险者", video_prompt)
+        self.assertIn("模板风格Skill：暗黑漫画 / 插画感", selected_tags_text)
+        self.assertIn("用户标签Skill：", selected_tags_text)
+        self.assertEqual(payload["template_style_skill"]["name"], "暗黑漫画")
+        self.assertIn("女冒险者", payload["user_selected_tag_skill"]["protected_tags"])
 
     def test_global_nonlocking_diversity_skill_publishes_strategy_without_changing_tags(self) -> None:
         selected = OrderedDict(
@@ -25092,6 +25170,120 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertIn("射精仅作为当前男性刺激动作的结果", male_contract)
         self.assertNotIn("射精", male_pair["custom_tags"])
 
+    def test_nsfw_mapper_exposes_structured_result_contract_and_filters_all_result_sources(self) -> None:
+        result = nsfw_mapper.map_nsfw_workspace_to_stage_state(
+            {
+                "selector_character": "成年女性",
+                "anatomy_terms": "外阴、阴蒂",
+                "explicit_terms": "自慰",
+                "workspace_custom_tags": ["女性刺激潮吹结果"],
+                "trigger_words": ["受控体液结果"],
+                "custom_prefix": "潮吹",
+                "custom_suffix": "体液",
+            },
+            tag_group_index={},
+            group_slot_limits={},
+        )
+        contract = result["result_contract"]
+        self.assertTrue(contract["enabled"])
+        self.assertEqual(contract["markers"], ["潮吹", "体液"])
+        self.assertEqual(
+            contract["types"],
+            ["female_stimulation_squirt", "controlled_fluid"],
+        )
+        self.assertEqual(contract["contact_points"], ["外阴", "阴蒂"])
+        self.assertEqual(contract["person_count"], 1)
+        self.assertIn("镜头轴线保持不变", contract["camera_axis"])
+        self.assertIn("结果只停留在外阴、阴蒂", contract["end_state"])
+        for loose_term in (
+            "女性刺激潮吹结果",
+            "受控体液结果",
+            "潮吹",
+            "体液",
+        ):
+            self.assertNotIn(loose_term, result["custom_tags"])
+
+    def test_video_prompt_consumes_nsfw_result_contract_as_continuous_story_phase(self) -> None:
+        mapped = nsfw_mapper.map_nsfw_workspace_to_stage_state(
+            {
+                "selector_character": "成年女性",
+                "anatomy_terms": "外阴、阴蒂",
+                "explicit_terms": "自慰、女性刺激潮吹结果、受控体液结果",
+            },
+            tag_group_index={},
+            group_slot_limits={},
+        )
+        settings = {
+            "提示词语言": "纯中文",
+            "主体类型": "人物角色",
+            "模板风格": "电影写实",
+            "seed": 37,
+            "NSFW结果合同": mapped["result_contract"],
+            "视频提示词结果合同": mapped["result_contract"],
+        }
+        selected = OrderedDict(
+            {
+                "主体": ["成年女性"],
+                "场景背景": ["豪华卧室"],
+                "动作姿态": ["坐姿"],
+                "构图视角": ["中景"],
+                "光影氛围": ["柔光"],
+            }
+        )
+        prompt = video_prompt_skill.build_video_prompt(selected, [], settings, primary_prompt="成年女性坐在豪华卧室内。")
+        self.assertTrue(video_prompt_skill.is_natural_video_prompt(prompt, language="纯中文"))
+        self.assertIn("固定接触点为外阴、阴蒂", prompt)
+        self.assertIn("人物数量固定为1名", prompt)
+        self.assertIn("潮吹仅作为当前女性刺激动作的结果", prompt)
+        self.assertIn("其他体液仅出现在当前接触区域", prompt)
+        self.assertIn("结束状态能够连续追踪", prompt)
+        self.assertNotIn("场景中的关键线索", prompt)
+        self.assertNotIn("承诺", prompt)
+        for anchor in video_prompt_skill.video_prompt_required_anchors(selected, [], settings):
+            self.assertIn(anchor, prompt)
+
+    def test_stage_generator_propagates_nsfw_result_contract_to_json_video_and_model_context(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        result = module._run_stage(
+            None,
+            unique_id="nsfw-result-contract-e2e",
+            nsfw_workspace={
+                "enabled": True,
+                "selector_character": "成年情侣",
+                "anatomy_terms": "阴茎、阴道",
+                "explicit_terms": "性交、男性刺激射精结果、受控体液结果",
+                "negative_preset": "标准负面提示词",
+            },
+            模板风格="电影写实",
+            主体类型="人物角色",
+            提示词语言="纯中文",
+            运行时随机标签=False,
+            模型来源="仅Skill",
+            生成数量=1,
+            seed=73,
+        )
+        payload = json.loads(result[3])
+        contract = payload["nsfw_result_contract"]
+        self.assertTrue(contract["enabled"])
+        self.assertEqual(contract["person_count"], 2)
+        self.assertEqual(contract["markers"], ["射精", "体液"])
+        self.assertEqual(payload["video_prompt_result_contract"], contract)
+        self.assertIn("射精仅作为当前男性刺激动作的结果", result[7])
+        self.assertIn("人物数量固定为2名", result[7])
+        self.assertIn("沿当前镜头轴线保持不变", result[7])
+        self.assertIn("NSFW结果合同：射精、体液", result[2])
+
+        context = model_refiner._skill_context_for_model(
+            {
+                "模型来源": "本地模型",
+                "NSFW策略启用": True,
+                "NSFW结果合同": contract,
+            }
+        )
+        self.assertIn("NSFW 动作结果阶段", context)
+        self.assertIn("人物数量=2名", context)
+        self.assertIn("不得拆成独立标签", context)
+
     def test_nsfw_mapper_keeps_result_word_unbound_without_base_action(self) -> None:
         result = nsfw_mapper.map_nsfw_workspace_to_stage_state(
             {"selector_character": "成年女性", "explicit_terms": "潮吹"},
@@ -31269,7 +31461,7 @@ class TestStagePromptModules(unittest.TestCase):
         payload = json.loads(result[3])
         self.assertEqual(payload["video_prompt"], video_prompt)
         self.assertEqual(payload["video_prompt_skill_status"], "已生成")
-        self.assertEqual(payload["video_prompt_skill_version"], "video-prompt-skill-v10")
+        self.assertEqual(payload["video_prompt_skill_version"], "video-prompt-skill-v11")
         self.assertEqual(payload["video_prompt_model_status"], "未调用（仅Skill）")
         self.assertEqual(payload["video_prompt_model_source"], "仅Skill")
         self.assertGreaterEqual(payload["video_prompt_required_anchor_count"], 1)
