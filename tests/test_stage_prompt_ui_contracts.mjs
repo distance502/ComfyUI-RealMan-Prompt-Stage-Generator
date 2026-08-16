@@ -1690,6 +1690,7 @@ test("stage model dialog exposes compact controls without taking over external l
 	assert.equal(source.includes("API密钥"), true);
 	assert.equal(source.includes("OpenAI兼容"), true);
 	assert.equal(source.includes("Claude Anthropic"), true);
+	assert.equal(source.includes("域名根地址会自动补全 /v1/messages"), true);
 	assert.equal(source.includes("Gemini 原生"), true);
 	assert.equal(source.includes('{ value: "通义千问DashScope", label: "通义", baseUrl: "https://dashscope.aliyuncs.com/api/v1", model: "qwen3.7-max"'), true);
 	for (const provider of ["Groq", "Together", "Fireworks", "Perplexity", "Gemini OpenAI兼容", "自定义"]) {

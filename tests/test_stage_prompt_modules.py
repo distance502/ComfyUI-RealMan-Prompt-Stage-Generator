@@ -20951,6 +20951,29 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertEqual(image_part["detail"], "high")
         self.assertEqual(module._extract_chat_text(response), "responses refined prompt")
 
+    def test_stage_api_supports_anthropic_native_base_url_forms(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        cases = {
+            "https://api.anthropic.com": "https://api.anthropic.com/v1/messages",
+            "https://api.anthropic.com/v1/": "https://api.anthropic.com/v1/messages",
+            "https://api.anthropic.com/v1/messages/": "https://api.anthropic.com/v1/messages",
+            "https://proxy.example.com": "https://proxy.example.com/v1/messages",
+            "https://proxy.example.com/anthropic/v1": "https://proxy.example.com/anthropic/v1/messages",
+        }
+
+        for base_url, expected_url in cases.items():
+            with self.subTest(base_url=base_url):
+                config = module._解析API模型配置(
+                    {
+                        "API服务商": "Claude Anthropic",
+                        "API地址": base_url,
+                        "API密钥": "anthropic-test-key",
+                        "API模型": "claude-haiku-4-5",
+                    }
+                )
+                self.assertEqual(config["kind"], "anthropic")
+                self.assertEqual(config["url"], expected_url)
+
     def test_stage_api_http_error_includes_server_json_detail_for_sanitized_fallback(self) -> None:
         module = load_stage_prompt_generator_for_integration_test()
         secret = "sk-test-secret-value-123456"

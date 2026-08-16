@@ -1229,7 +1229,13 @@ def _normalize_api_base_url(base_url: Any, *, provider: str, kind: str) -> str:
         return _validate_api_http_url(normalized)
     if kind == "anthropic":
         trimmed = base.rstrip("/")
-        normalized = trimmed if trimmed.endswith("/messages") else f"{trimmed}/messages"
+        endpoint_path = str(parsed_base.path or "").rstrip("/").casefold()
+        if endpoint_path.endswith("/messages"):
+            normalized = trimmed
+        elif not endpoint_path:
+            normalized = f"{trimmed}/v1/messages"
+        else:
+            normalized = f"{trimmed}/messages"
         return _validate_api_http_url(normalized)
     if kind == "gemini":
         return _validate_api_http_url(base.rstrip("/"))
