@@ -21070,16 +21070,74 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertEqual(raised.exception.retry_after, 1.25)
         self.assertTrue(model_refiner._is_transient_model_error(raised.exception))
 
-    def test_stage_api_connection_refused_reports_target_and_proxy_guidance(self) -> None:
+    def test_stage_api_connection_refused_retries_without_a_dead_loopback_proxy(self) -> None:
         module = load_stage_prompt_generator_for_integration_test()
         refused = ConnectionRefusedError(10061, "由于目标计算机积极拒绝，无法连接")
-        opener = mock.Mock()
-        opener.open.side_effect = module.urllib.error.URLError(refused)
+        proxy_opener = mock.Mock()
+        proxy_opener.open.side_effect = module.urllib.error.URLError(refused)
 
-        with mock.patch.object(module, "_API_HTTP_OPENER", opener), mock.patch.object(
+        class DummyHeaders:
+            def get_content_charset(self):
+                return "utf-8"
+
+        class DummyResponse:
+            headers = DummyHeaders()
+
+            def __init__(self):
+                self.payload = json.dumps({"choices": [{"message": {"content": "direct recovery"}}]}).encode("utf-8")
+                self.offset = 0
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self, size=-1):
+                if size is None or size < 0:
+                    size = len(self.payload) - self.offset
+                chunk = self.payload[self.offset : self.offset + size]
+                self.offset += len(chunk)
+                return chunk
+
+        direct_opener = mock.Mock()
+        direct_opener.open.return_value = DummyResponse()
+
+        with mock.patch.object(module, "_API_HTTP_OPENER", proxy_opener), mock.patch.object(
+            module,
+            "_API_DIRECT_HTTP_OPENER",
+            direct_opener,
+        ), mock.patch.object(
             module.urllib.request,
             "getproxies",
             return_value={"https": "http://127.0.0.1:7890"},
+        ):
+            response = module._http_post_json(
+                "https://api.deepseek.com/chat/completions",
+                {"model": "deepseek-v4-pro"},
+                {},
+                5.0,
+            )
+
+        self.assertEqual(response["choices"][0]["message"]["content"], "direct recovery")
+        proxy_opener.open.assert_called_once()
+        direct_opener.open.assert_called_once()
+
+    def test_stage_api_dead_remote_proxy_is_not_silently_bypassed(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        refused = ConnectionRefusedError(10061, "connection refused")
+        proxy_opener = mock.Mock()
+        proxy_opener.open.side_effect = module.urllib.error.URLError(refused)
+        direct_opener = mock.Mock()
+
+        with mock.patch.object(module, "_API_HTTP_OPENER", proxy_opener), mock.patch.object(
+            module,
+            "_API_DIRECT_HTTP_OPENER",
+            direct_opener,
+        ), mock.patch.object(
+            module.urllib.request,
+            "getproxies",
+            return_value={"https": "https://proxy.corporate.example:8443"},
         ):
             with self.assertRaises(module._ModelAPITransportError) as raised:
                 module._http_post_json(
@@ -21089,11 +21147,35 @@ class TestStagePromptModules(unittest.TestCase):
                     5.0,
                 )
 
-        message = str(raised.exception)
-        self.assertIn("连接被拒绝", message)
-        self.assertIn("https://api.deepseek.com/chat/completions", message)
-        self.assertIn("系统代理", message)
-        self.assertEqual(raised.exception.status, 0)
+        self.assertIn("连接被拒绝", str(raised.exception))
+        direct_opener.open.assert_not_called()
+
+    def test_stage_api_reports_when_dead_loopback_proxy_and_direct_connection_both_fail(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        proxy_opener = mock.Mock()
+        proxy_opener.open.side_effect = module.urllib.error.URLError(ConnectionRefusedError(10061, "proxy refused"))
+        direct_opener = mock.Mock()
+        direct_opener.open.side_effect = module.urllib.error.URLError(ConnectionRefusedError(10061, "direct refused"))
+
+        with mock.patch.object(module, "_API_HTTP_OPENER", proxy_opener), mock.patch.object(
+            module,
+            "_API_DIRECT_HTTP_OPENER",
+            direct_opener,
+        ), mock.patch.object(
+            module.urllib.request,
+            "getproxies",
+            return_value={"https": "http://localhost:7890"},
+        ):
+            with self.assertRaises(module._ModelAPITransportError) as raised:
+                module._http_post_json(
+                    "https://api.deepseek.com/chat/completions",
+                    {"model": "deepseek-v4-pro"},
+                    {},
+                    5.0,
+                )
+
+        self.assertIn("自动直连", str(raised.exception))
+        self.assertIn("direct refused", str(raised.exception))
         self.assertTrue(model_refiner._is_transient_model_error(raised.exception))
 
     def test_model_response_extractor_is_strict_and_supports_content_blocks(self) -> None:

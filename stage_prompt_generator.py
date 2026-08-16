@@ -1452,6 +1452,42 @@ class _NoSecretRedirectHandler(urllib.request.HTTPRedirectHandler):
 
 
 _API_HTTP_OPENER = urllib.request.build_opener(_NoSecretRedirectHandler())
+_API_DIRECT_HTTP_OPENER = urllib.request.build_opener(
+    urllib.request.ProxyHandler({}),
+    _NoSecretRedirectHandler(),
+)
+
+
+def _api_error_reason(exc: Exception) -> Any:
+    return getattr(exc, "reason", None) or exc
+
+
+def _is_api_connection_refused(exc: Exception) -> bool:
+    reason = _api_error_reason(exc)
+    reason_text = re.sub(r"\s+", " ", str(reason or "")).strip()
+    folded = f"{type(reason).__name__}: {reason_text}".casefold()
+    return (
+        isinstance(reason, ConnectionRefusedError)
+        or getattr(reason, "errno", None) in {61, 111, 10061}
+        or getattr(reason, "winerror", None) == 10061
+        or "connection refused" in folded
+        or "积极拒绝" in folded
+    )
+
+
+def _api_uses_loopback_proxy(url: str) -> bool:
+    try:
+        parsed_target = urllib.parse.urlsplit(str(url or ""))
+        scheme = str(parsed_target.scheme or "").casefold()
+        proxies = urllib.request.getproxies()
+        proxy_value = str(proxies.get(scheme) or proxies.get("all") or "").strip()
+        if not proxy_value:
+            return False
+        proxy_url = proxy_value if "://" in proxy_value else f"http://{proxy_value}"
+        proxy_host = str(urllib.parse.urlsplit(proxy_url).hostname or "").casefold()
+        return proxy_host in {"localhost", "0.0.0.0", "::1"} or proxy_host.startswith("127.")
+    except Exception:
+        return False
 
 
 def _safe_api_request_target(url: Any) -> str:
@@ -1473,13 +1509,11 @@ def _safe_api_request_target(url: Any) -> str:
 
 
 def _api_transport_error(url: str, exc: Exception) -> _ModelAPITransportError:
-    reason = getattr(exc, "reason", None) or exc
+    reason = _api_error_reason(exc)
     reason_text = re.sub(r"\s+", " ", str(reason or "")).strip()
     if len(reason_text) > 180:
         reason_text = f"{reason_text[:177]}..."
     folded = f"{type(reason).__name__}: {reason_text}".casefold()
-    error_number = getattr(reason, "errno", None)
-    win_error = getattr(reason, "winerror", None)
     target = _safe_api_request_target(url)
     hostname = str(urllib.parse.urlsplit(str(url or "")).hostname or "").casefold()
     local_target = hostname in {"localhost", "0.0.0.0", "::1"} or hostname.startswith("127.")
@@ -1492,13 +1526,7 @@ def _api_transport_error(url: str, exc: Exception) -> _ModelAPITransportError:
     except Exception:
         proxy_configured = False
 
-    refused = (
-        isinstance(reason, ConnectionRefusedError)
-        or error_number in {61, 111, 10061}
-        or win_error == 10061
-        or "connection refused" in folded
-        or "积极拒绝" in folded
-    )
+    refused = _is_api_connection_refused(exc)
     timed_out = isinstance(reason, TimeoutError) or "timed out" in folded or "timeout" in folded or "超时" in folded
     dns_failed = type(reason).__name__.casefold() == "gaierror" or any(
         marker in folded
@@ -1630,6 +1658,17 @@ def _decode_api_json(raw: bytes, *, charset: str, label: str) -> dict[str, Any]:
     return parsed
 
 
+def _perform_api_http_request(opener: Any, request: urllib.request.Request, timeout: float) -> tuple[bytes, str]:
+    with opener.open(request, timeout=timeout) as response:
+        raw = _read_http_response_limited(
+            response,
+            max_bytes=_API_RESPONSE_MAX_BYTES,
+            timeout=timeout,
+            label="模型 API",
+        )
+        return raw, _http_response_charset(response)
+
+
 def _http_post_json(url: str, payload: dict[str, Any], headers: dict[str, str], timeout: float) -> dict[str, Any]:
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     request_headers = dict(headers or {})
@@ -1640,14 +1679,23 @@ def _http_post_json(url: str, payload: dict[str, Any], headers: dict[str, str], 
         request_headers["User-Agent"] = _API_HTTP_USER_AGENT
     request = urllib.request.Request(url, data=data, headers=request_headers, method="POST")
     try:
-        with _API_HTTP_OPENER.open(request, timeout=timeout) as response:
-            raw = _read_http_response_limited(
-                response,
-                max_bytes=_API_RESPONSE_MAX_BYTES,
-                timeout=timeout,
-                label="模型 API",
-            )
-            charset = _http_response_charset(response)
+        try:
+            raw, charset = _perform_api_http_request(_API_HTTP_OPENER, request, timeout)
+        except urllib.error.HTTPError:
+            raise
+        except (urllib.error.URLError, TimeoutError, OSError) as proxy_error:
+            if not (_is_api_connection_refused(proxy_error) and _api_uses_loopback_proxy(url)):
+                raise
+            try:
+                raw, charset = _perform_api_http_request(_API_DIRECT_HTTP_OPENER, request, timeout)
+            except urllib.error.HTTPError:
+                raise
+            except (urllib.error.URLError, TimeoutError, OSError) as direct_error:
+                detail = _api_transport_error(url, direct_error)
+                raise _ModelAPITransportError(
+                    f"检测到失效的本机代理并已自动直连，但直连仍失败。{detail}",
+                    reason=_api_error_reason(direct_error),
+                ) from direct_error
     except urllib.error.HTTPError as exc:
         retry_after = 0.0
         try:
