@@ -606,7 +606,7 @@ const MODEL_API_PROVIDER_BUTTONS = [
 	{ value: "Mistral", label: "Mistral", baseUrl: "https://api.mistral.ai/v1", model: "mistral-small-latest", keyRef: "env:MISTRAL_API_KEY" },
 	{ value: "Perplexity", label: "PPLX", baseUrl: "https://api.perplexity.ai", model: "sonar", keyRef: "env:PPLX_API_KEY" },
 	{ value: "Gemini OpenAI兼容", label: "Gemini兼容", baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", model: "gemini-2.5-flash", keyRef: "env:GEMINI_API_KEY" },
-	{ value: "Claude Anthropic", label: "Claude", baseUrl: "https://api.anthropic.com/v1/messages", model: "claude-haiku-4-5", keyRef: "env:ANTHROPIC_API_KEY" },
+	{ value: "Claude Anthropic", label: "Claude", baseUrl: "https://api.anthropic.com/v1/messages", model: "claude-haiku-4-5", keyRef: "env:ANTHROPIC_API_KEY", hint: "Anthropic 原生 Messages API：支持填写官方或代理 base_url，域名根地址会自动补全 /v1/messages。" },
 	{ value: "Gemini 原生", label: "Gemini", baseUrl: "https://generativelanguage.googleapis.com/v1beta", model: "gemini-2.5-flash", keyRef: "env:GEMINI_API_KEY" },
 	{ value: "Ollama本地", label: "Ollama", baseUrl: "http://127.0.0.1:11434/api/chat", model: "qwen2.5", keyRef: "" },
 	{ value: "LM Studio本地", label: "LMStudio", baseUrl: "http://127.0.0.1:1234/v1", model: "", keyRef: "" },
@@ -5485,6 +5485,15 @@ function getModelApiEffectiveConfig(node) {
 	};
 }
 
+function isModelApiCustomAddress(node) {
+	const provider = String(getModelWidget(node, "API服务商")?.value ?? "OpenAI兼容").trim() || "OpenAI兼容";
+	const preset = getModelApiProviderPreset(provider);
+	const rawBaseUrl = normalizeModelApiBaseUrl(getModelWidget(node, "API地址")?.value ?? "");
+	if (!rawBaseUrl) return false;
+	const presetBaseUrl = normalizeModelApiBaseUrl(preset?.baseUrl ?? "");
+	return !presetBaseUrl || rawBaseUrl !== presetBaseUrl;
+}
+
 function getModelApiConfigValidationError(node) {
 	const provider = String(getModelWidget(node, "API服务商")?.value ?? "OpenAI兼容").trim() || "OpenAI兼容";
 	const preset = getModelApiProviderPreset(provider);
@@ -5634,7 +5643,8 @@ function getModelLoaderSummary(node) {
 		const displayProvider = getApiProviderDisplayName(provider, baseUrl);
 		const shortModel = modelName.length > 34 ? `${modelName.slice(0, 31)}...` : modelName;
 		const incomplete = !config.model || !config.baseUrl;
-		return `API · ${displayProvider} · ${shortModel}${rawBaseUrl ? " · 自定义地址" : " · 预设地址"}${incomplete ? " · 未完整会回退Skill" : ""}`;
+		const addressMode = isModelApiCustomAddress(node) ? "自定义地址" : "预设地址";
+		return `API · ${displayProvider} · ${shortModel}${rawBaseUrl || baseUrl ? ` · ${addressMode}` : ""}${incomplete ? " · 未完整会回退Skill" : ""}`;
 	}
 	const family = String(getModelWidget(node, "模型系列")?.value ?? "未知").trim();
 	const model = String(getModelWidget(node, "主模型")?.value ?? "未选择").trim();
@@ -5818,7 +5828,7 @@ function refreshModelLoaderDeck(deck, node) {
 			values.apiAuth.title = values.apiAuth.textContent;
 		}
 		if (values.apiRuntime) {
-			values.apiRuntime.textContent = `${apiTimeout || 60}s${apiBaseUrl ? " / 自定义地址" : " / 预设地址"}`;
+			values.apiRuntime.textContent = `${apiTimeout || 60}s / ${isModelApiCustomAddress(node) ? "自定义地址" : "预设地址"}`;
 			values.apiRuntime.title = values.apiRuntime.textContent;
 		}
 	}
@@ -6015,7 +6025,7 @@ function buildModelLoaderDeck(node, options = {}) {
 	const apiInputGrid = document.createElement("div");
 	apiInputGrid.className = "qwen-te-model__api-grid";
 	apiTextSection.section.appendChild(apiInputGrid);
-	const apiBaseInput = createModelLoaderTextInput(node, "API地址", "API 地址", { placeholder: "Base URL，或完整 /chat/completions、/responses、/api/chat 地址" });
+	const apiBaseInput = createModelLoaderTextInput(node, "API地址", "API 地址", { placeholder: "Base URL，或完整 /chat/completions、/responses、/v1/messages、/api/chat 地址" });
 	const apiKeyInput = createModelLoaderTextInput(node, "API密钥", "API Key", { placeholder: "推荐 env:变量名；自定义地址需授权来源" });
 	const apiModelInput = createModelLoaderTextInput(node, "API模型", "API 模型名", { placeholder: "例如 gpt-4o-mini / deepseek-chat / qwen-plus" });
 	const apiTimeoutInput = createModelLoaderTextInput(node, "API超时秒", "超时秒", { placeholder: "建议 90-180，瞬时错误自动重试" });

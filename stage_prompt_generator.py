@@ -1229,7 +1229,13 @@ def _normalize_api_base_url(base_url: Any, *, provider: str, kind: str) -> str:
         return _validate_api_http_url(normalized)
     if kind == "anthropic":
         trimmed = base.rstrip("/")
-        normalized = trimmed if trimmed.endswith("/messages") else f"{trimmed}/messages"
+        endpoint_path = str(parsed_base.path or "").rstrip("/").casefold()
+        if endpoint_path.endswith("/messages"):
+            normalized = trimmed
+        elif not endpoint_path:
+            normalized = f"{trimmed}/v1/messages"
+        else:
+            normalized = f"{trimmed}/messages"
         return _validate_api_http_url(normalized)
     if kind == "gemini":
         return _validate_api_http_url(base.rstrip("/"))
@@ -1422,6 +1428,15 @@ class _ModelAPIHTTPError(RuntimeError):
         super().__init__(f"模型 API 请求失败：{status_text}{f'；{self.detail}' if self.detail else ''}")
 
 
+class _ModelAPITransportError(RuntimeError):
+    def __init__(self, message: str, *, reason: Any = None):
+        self.status = 0
+        self.code = 0
+        self.reason = reason
+        self.retry_after = 0.0
+        super().__init__(str(message or "模型 API 网络连接失败。"))
+
+
 class _NoSecretRedirectHandler(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         try:
@@ -1437,6 +1452,104 @@ class _NoSecretRedirectHandler(urllib.request.HTTPRedirectHandler):
 
 
 _API_HTTP_OPENER = urllib.request.build_opener(_NoSecretRedirectHandler())
+_API_DIRECT_HTTP_OPENER = urllib.request.build_opener(
+    urllib.request.ProxyHandler({}),
+    _NoSecretRedirectHandler(),
+)
+
+
+def _api_error_reason(exc: Exception) -> Any:
+    return getattr(exc, "reason", None) or exc
+
+
+def _is_api_connection_refused(exc: Exception) -> bool:
+    reason = _api_error_reason(exc)
+    reason_text = re.sub(r"\s+", " ", str(reason or "")).strip()
+    folded = f"{type(reason).__name__}: {reason_text}".casefold()
+    return (
+        isinstance(reason, ConnectionRefusedError)
+        or getattr(reason, "errno", None) in {61, 111, 10061}
+        or getattr(reason, "winerror", None) == 10061
+        or "connection refused" in folded
+        or "积极拒绝" in folded
+    )
+
+
+def _api_uses_loopback_proxy(url: str) -> bool:
+    try:
+        parsed_target = urllib.parse.urlsplit(str(url or ""))
+        scheme = str(parsed_target.scheme or "").casefold()
+        proxies = urllib.request.getproxies()
+        proxy_value = str(proxies.get(scheme) or proxies.get("all") or "").strip()
+        if not proxy_value:
+            return False
+        proxy_url = proxy_value if "://" in proxy_value else f"http://{proxy_value}"
+        proxy_host = str(urllib.parse.urlsplit(proxy_url).hostname or "").casefold()
+        return proxy_host in {"localhost", "0.0.0.0", "::1"} or proxy_host.startswith("127.")
+    except Exception:
+        return False
+
+
+def _safe_api_request_target(url: Any) -> str:
+    try:
+        parsed = urllib.parse.urlsplit(str(url or ""))
+        scheme = str(parsed.scheme or "").lower()
+        hostname = str(parsed.hostname or "").encode("idna").decode("ascii").lower()
+        if not scheme or not hostname:
+            return "<未知目标>"
+        host = f"[{hostname}]" if ":" in hostname else hostname
+        port = parsed.port
+        if (scheme == "https" and port == 443) or (scheme == "http" and port == 80):
+            port = None
+        origin = f"{scheme}://{host}{f':{port}' if port is not None else ''}"
+        path = str(parsed.path or "").rstrip("/")
+        return f"{origin}{path if path and path != '/' else ''}"
+    except (UnicodeError, ValueError):
+        return "<未知目标>"
+
+
+def _api_transport_error(url: str, exc: Exception) -> _ModelAPITransportError:
+    reason = _api_error_reason(exc)
+    reason_text = re.sub(r"\s+", " ", str(reason or "")).strip()
+    if len(reason_text) > 180:
+        reason_text = f"{reason_text[:177]}..."
+    folded = f"{type(reason).__name__}: {reason_text}".casefold()
+    target = _safe_api_request_target(url)
+    hostname = str(urllib.parse.urlsplit(str(url or "")).hostname or "").casefold()
+    local_target = hostname in {"localhost", "0.0.0.0", "::1"} or hostname.startswith("127.")
+
+    proxy_configured = False
+    try:
+        proxies = urllib.request.getproxies()
+        scheme = str(urllib.parse.urlsplit(str(url or "")).scheme or "").casefold()
+        proxy_configured = bool(proxies.get(scheme) or proxies.get("all"))
+    except Exception:
+        proxy_configured = False
+
+    refused = _is_api_connection_refused(exc)
+    timed_out = isinstance(reason, TimeoutError) or "timed out" in folded or "timeout" in folded or "超时" in folded
+    dns_failed = type(reason).__name__.casefold() == "gaierror" or any(
+        marker in folded
+        for marker in ("getaddrinfo failed", "name or service not known", "nodename nor servname", "无法解析")
+    )
+
+    if refused:
+        if local_target:
+            guidance = "请确认地址和端口正确，并先启动对应的 Ollama、LM Studio 或本地中转服务。"
+        else:
+            guidance = "请确认地址和端口正确，并检查网络、防火墙以及 HTTP_PROXY/HTTPS_PROXY。"
+        if proxy_configured:
+            guidance += " 已检测到系统代理配置，请确认代理服务正在监听，或清理失效的代理环境变量。"
+        message = f"模型 API 连接被拒绝（Connection refused）：目标 {target} 未接受连接。{guidance}"
+    elif timed_out:
+        message = f"模型 API 连接或读取超时：目标 {target} 未在时限内响应。请检查网络、代理和 API 超时设置。"
+    elif dns_failed:
+        message = f"模型 API 主机无法解析：目标 {target}。请检查 API 地址、DNS 和网络连接。"
+    else:
+        message = f"模型 API 网络连接失败：目标 {target}。请检查 API 地址、端口、网络和代理设置。"
+    if reason_text:
+        message = f"{message} 原始原因：{reason_text}"
+    return _ModelAPITransportError(message, reason=reason)
 
 
 def _set_http_response_timeout(response: Any, timeout: float) -> None:
@@ -1545,6 +1658,17 @@ def _decode_api_json(raw: bytes, *, charset: str, label: str) -> dict[str, Any]:
     return parsed
 
 
+def _perform_api_http_request(opener: Any, request: urllib.request.Request, timeout: float) -> tuple[bytes, str]:
+    with opener.open(request, timeout=timeout) as response:
+        raw = _read_http_response_limited(
+            response,
+            max_bytes=_API_RESPONSE_MAX_BYTES,
+            timeout=timeout,
+            label="模型 API",
+        )
+        return raw, _http_response_charset(response)
+
+
 def _http_post_json(url: str, payload: dict[str, Any], headers: dict[str, str], timeout: float) -> dict[str, Any]:
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     request_headers = dict(headers or {})
@@ -1555,14 +1679,23 @@ def _http_post_json(url: str, payload: dict[str, Any], headers: dict[str, str], 
         request_headers["User-Agent"] = _API_HTTP_USER_AGENT
     request = urllib.request.Request(url, data=data, headers=request_headers, method="POST")
     try:
-        with _API_HTTP_OPENER.open(request, timeout=timeout) as response:
-            raw = _read_http_response_limited(
-                response,
-                max_bytes=_API_RESPONSE_MAX_BYTES,
-                timeout=timeout,
-                label="模型 API",
-            )
-            charset = _http_response_charset(response)
+        try:
+            raw, charset = _perform_api_http_request(_API_HTTP_OPENER, request, timeout)
+        except urllib.error.HTTPError:
+            raise
+        except (urllib.error.URLError, TimeoutError, OSError) as proxy_error:
+            if not (_is_api_connection_refused(proxy_error) and _api_uses_loopback_proxy(url)):
+                raise
+            try:
+                raw, charset = _perform_api_http_request(_API_DIRECT_HTTP_OPENER, request, timeout)
+            except urllib.error.HTTPError:
+                raise
+            except (urllib.error.URLError, TimeoutError, OSError) as direct_error:
+                detail = _api_transport_error(url, direct_error)
+                raise _ModelAPITransportError(
+                    f"检测到失效的本机代理并已自动直连，但直连仍失败。{detail}",
+                    reason=_api_error_reason(direct_error),
+                ) from direct_error
     except urllib.error.HTTPError as exc:
         retry_after = 0.0
         try:
@@ -1603,6 +1736,8 @@ def _http_post_json(url: str, payload: dict[str, Any], headers: dict[str, str], 
             detail,
             retry_after=retry_after,
         ) from exc
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise _api_transport_error(url, exc) from exc
     return _decode_api_json(raw, charset=charset, label="模型 API")
 
 
