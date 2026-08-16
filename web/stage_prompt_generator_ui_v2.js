@@ -5485,6 +5485,15 @@ function getModelApiEffectiveConfig(node) {
 	};
 }
 
+function isModelApiCustomAddress(node) {
+	const provider = String(getModelWidget(node, "API服务商")?.value ?? "OpenAI兼容").trim() || "OpenAI兼容";
+	const preset = getModelApiProviderPreset(provider);
+	const rawBaseUrl = normalizeModelApiBaseUrl(getModelWidget(node, "API地址")?.value ?? "");
+	if (!rawBaseUrl) return false;
+	const presetBaseUrl = normalizeModelApiBaseUrl(preset?.baseUrl ?? "");
+	return !presetBaseUrl || rawBaseUrl !== presetBaseUrl;
+}
+
 function getModelApiConfigValidationError(node) {
 	const provider = String(getModelWidget(node, "API服务商")?.value ?? "OpenAI兼容").trim() || "OpenAI兼容";
 	const preset = getModelApiProviderPreset(provider);
@@ -5634,7 +5643,8 @@ function getModelLoaderSummary(node) {
 		const displayProvider = getApiProviderDisplayName(provider, baseUrl);
 		const shortModel = modelName.length > 34 ? `${modelName.slice(0, 31)}...` : modelName;
 		const incomplete = !config.model || !config.baseUrl;
-		return `API · ${displayProvider} · ${shortModel}${rawBaseUrl ? " · 自定义地址" : " · 预设地址"}${incomplete ? " · 未完整会回退Skill" : ""}`;
+		const addressMode = isModelApiCustomAddress(node) ? "自定义地址" : "预设地址";
+		return `API · ${displayProvider} · ${shortModel}${rawBaseUrl || baseUrl ? ` · ${addressMode}` : ""}${incomplete ? " · 未完整会回退Skill" : ""}`;
 	}
 	const family = String(getModelWidget(node, "模型系列")?.value ?? "未知").trim();
 	const model = String(getModelWidget(node, "主模型")?.value ?? "未选择").trim();
@@ -5818,7 +5828,7 @@ function refreshModelLoaderDeck(deck, node) {
 			values.apiAuth.title = values.apiAuth.textContent;
 		}
 		if (values.apiRuntime) {
-			values.apiRuntime.textContent = `${apiTimeout || 60}s${apiBaseUrl ? " / 自定义地址" : " / 预设地址"}`;
+			values.apiRuntime.textContent = `${apiTimeout || 60}s / ${isModelApiCustomAddress(node) ? "自定义地址" : "预设地址"}`;
 			values.apiRuntime.title = values.apiRuntime.textContent;
 		}
 	}

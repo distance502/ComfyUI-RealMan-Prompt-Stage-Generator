@@ -21047,6 +21047,32 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertEqual(raised.exception.retry_after, 1.25)
         self.assertTrue(model_refiner._is_transient_model_error(raised.exception))
 
+    def test_stage_api_connection_refused_reports_target_and_proxy_guidance(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        refused = ConnectionRefusedError(10061, "由于目标计算机积极拒绝，无法连接")
+        opener = mock.Mock()
+        opener.open.side_effect = module.urllib.error.URLError(refused)
+
+        with mock.patch.object(module, "_API_HTTP_OPENER", opener), mock.patch.object(
+            module.urllib.request,
+            "getproxies",
+            return_value={"https": "http://127.0.0.1:7890"},
+        ):
+            with self.assertRaises(module._ModelAPITransportError) as raised:
+                module._http_post_json(
+                    "https://api.deepseek.com/chat/completions",
+                    {"model": "deepseek-v4-pro"},
+                    {},
+                    5.0,
+                )
+
+        message = str(raised.exception)
+        self.assertIn("连接被拒绝", message)
+        self.assertIn("https://api.deepseek.com/chat/completions", message)
+        self.assertIn("系统代理", message)
+        self.assertEqual(raised.exception.status, 0)
+        self.assertTrue(model_refiner._is_transient_model_error(raised.exception))
+
     def test_model_response_extractor_is_strict_and_supports_content_blocks(self) -> None:
         self.assertEqual(
             model_refiner.extract_text(

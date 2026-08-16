@@ -1422,6 +1422,15 @@ class _ModelAPIHTTPError(RuntimeError):
         super().__init__(f"模型 API 请求失败：{status_text}{f'；{self.detail}' if self.detail else ''}")
 
 
+class _ModelAPITransportError(RuntimeError):
+    def __init__(self, message: str, *, reason: Any = None):
+        self.status = 0
+        self.code = 0
+        self.reason = reason
+        self.retry_after = 0.0
+        super().__init__(str(message or "模型 API 网络连接失败。"))
+
+
 class _NoSecretRedirectHandler(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         try:
@@ -1437,6 +1446,76 @@ class _NoSecretRedirectHandler(urllib.request.HTTPRedirectHandler):
 
 
 _API_HTTP_OPENER = urllib.request.build_opener(_NoSecretRedirectHandler())
+
+
+def _safe_api_request_target(url: Any) -> str:
+    try:
+        parsed = urllib.parse.urlsplit(str(url or ""))
+        scheme = str(parsed.scheme or "").lower()
+        hostname = str(parsed.hostname or "").encode("idna").decode("ascii").lower()
+        if not scheme or not hostname:
+            return "<未知目标>"
+        host = f"[{hostname}]" if ":" in hostname else hostname
+        port = parsed.port
+        if (scheme == "https" and port == 443) or (scheme == "http" and port == 80):
+            port = None
+        origin = f"{scheme}://{host}{f':{port}' if port is not None else ''}"
+        path = str(parsed.path or "").rstrip("/")
+        return f"{origin}{path if path and path != '/' else ''}"
+    except (UnicodeError, ValueError):
+        return "<未知目标>"
+
+
+def _api_transport_error(url: str, exc: Exception) -> _ModelAPITransportError:
+    reason = getattr(exc, "reason", None) or exc
+    reason_text = re.sub(r"\s+", " ", str(reason or "")).strip()
+    if len(reason_text) > 180:
+        reason_text = f"{reason_text[:177]}..."
+    folded = f"{type(reason).__name__}: {reason_text}".casefold()
+    error_number = getattr(reason, "errno", None)
+    win_error = getattr(reason, "winerror", None)
+    target = _safe_api_request_target(url)
+    hostname = str(urllib.parse.urlsplit(str(url or "")).hostname or "").casefold()
+    local_target = hostname in {"localhost", "0.0.0.0", "::1"} or hostname.startswith("127.")
+
+    proxy_configured = False
+    try:
+        proxies = urllib.request.getproxies()
+        scheme = str(urllib.parse.urlsplit(str(url or "")).scheme or "").casefold()
+        proxy_configured = bool(proxies.get(scheme) or proxies.get("all"))
+    except Exception:
+        proxy_configured = False
+
+    refused = (
+        isinstance(reason, ConnectionRefusedError)
+        or error_number in {61, 111, 10061}
+        or win_error == 10061
+        or "connection refused" in folded
+        or "积极拒绝" in folded
+    )
+    timed_out = isinstance(reason, TimeoutError) or "timed out" in folded or "timeout" in folded or "超时" in folded
+    dns_failed = type(reason).__name__.casefold() == "gaierror" or any(
+        marker in folded
+        for marker in ("getaddrinfo failed", "name or service not known", "nodename nor servname", "无法解析")
+    )
+
+    if refused:
+        if local_target:
+            guidance = "请确认地址和端口正确，并先启动对应的 Ollama、LM Studio 或本地中转服务。"
+        else:
+            guidance = "请确认地址和端口正确，并检查网络、防火墙以及 HTTP_PROXY/HTTPS_PROXY。"
+        if proxy_configured:
+            guidance += " 已检测到系统代理配置，请确认代理服务正在监听，或清理失效的代理环境变量。"
+        message = f"模型 API 连接被拒绝（Connection refused）：目标 {target} 未接受连接。{guidance}"
+    elif timed_out:
+        message = f"模型 API 连接或读取超时：目标 {target} 未在时限内响应。请检查网络、代理和 API 超时设置。"
+    elif dns_failed:
+        message = f"模型 API 主机无法解析：目标 {target}。请检查 API 地址、DNS 和网络连接。"
+    else:
+        message = f"模型 API 网络连接失败：目标 {target}。请检查 API 地址、端口、网络和代理设置。"
+    if reason_text:
+        message = f"{message} 原始原因：{reason_text}"
+    return _ModelAPITransportError(message, reason=reason)
 
 
 def _set_http_response_timeout(response: Any, timeout: float) -> None:
@@ -1603,6 +1682,8 @@ def _http_post_json(url: str, payload: dict[str, Any], headers: dict[str, str], 
             detail,
             retry_after=retry_after,
         ) from exc
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise _api_transport_error(url, exc) from exc
     return _decode_api_json(raw, charset=charset, label="模型 API")
 
 

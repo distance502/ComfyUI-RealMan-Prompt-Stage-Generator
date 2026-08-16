@@ -1834,8 +1834,28 @@ test("model API effective config applies provider defaults when legacy fields ar
 	assert.equal(config.baseUrl, "https://api.openai.com/v1");
 	assert.equal(config.model, "gpt-4o-mini");
 	assert.match(exports.getModelLoaderSummary(node), /gpt-4o-mini/u);
+	assert.match(exports.getModelLoaderSummary(node), /预设地址/u);
 	assert.doesNotMatch(exports.getModelLoaderSummary(node), /未完整会回退Skill/u);
 	assert.match(exports.buildModelApiConfigSignature(node), /^model-api-v1:[0-9a-f]{16}$/u);
+});
+
+test("model API summary distinguishes a provider preset from a genuinely custom address", async () => {
+	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	const node = {
+		properties: {},
+		widgets: [
+			{ name: "模型来源", value: "API接口" },
+			{ name: "API服务商", value: "DeepSeek" },
+			{ name: "API地址", value: "https://api.deepseek.com/" },
+			{ name: "API密钥", value: "env:DEEPSEEK_API_KEY" },
+			{ name: "API模型", value: "deepseek-v4-pro" },
+		],
+	};
+
+	assert.match(exports.getModelLoaderSummary(node), /预设地址/u);
+	assert.doesNotMatch(exports.getModelLoaderSummary(node), /自定义地址/u);
+	node.widgets[2].value = "http://127.0.0.1:9000/v1";
+	assert.match(exports.getModelLoaderSummary(node), /自定义地址/u);
 });
 
 test("model API config signatures track key and header revisions without exposing plaintext", async () => {
