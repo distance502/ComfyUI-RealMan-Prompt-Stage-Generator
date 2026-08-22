@@ -9,6 +9,7 @@ import os
 import random
 import re
 import secrets
+import socket
 import threading
 import time
 import weakref
@@ -1075,6 +1076,67 @@ def _api_provider_preset(provider: str) -> dict[str, Any]:
     return dict(API服务商预设.get(str(provider or "").strip()) or API服务商预设["OpenAI兼容"])
 
 
+_API_FOREIGN_ADAPTER_PATH_RE = re.compile(
+    r"^/(?:anthropic|claude|gemini|openai|dashscope|ollama|lm[-_]?studio)(?:/(?:v\d+(?:beta)?|api))?$",
+    re.IGNORECASE,
+)
+
+
+def _repair_stale_provider_base_url(provider: str, base_url: str) -> tuple[str, str]:
+    """Remove a known adapter suffix left by an older provider switch on a preset host."""
+
+    preset = _api_provider_preset(provider)
+    preset_base_url = str(preset.get("base_url") or "").strip()
+    if not preset_base_url and provider in {"OpenAI兼容", "自定义"}:
+        try:
+            base_origin = _api_url_origin(base_url)
+            for candidate in API服务商预设.values():
+                candidate_base = str(candidate.get("base_url") or "").strip()
+                if candidate_base and _api_url_origin(candidate_base) == base_origin:
+                    preset_base_url = candidate_base
+                    break
+        except (RuntimeError, ValueError):
+            preset_base_url = ""
+    if not preset_base_url or not base_url:
+        return base_url, ""
+    try:
+        if _api_url_origin(base_url) != _api_url_origin(preset_base_url):
+            return base_url, ""
+        path = str(urllib.parse.urlsplit(base_url).path or "").rstrip("/")
+    except (RuntimeError, ValueError):
+        return base_url, ""
+    preset_path = str(urllib.parse.urlsplit(preset_base_url).path or "").rstrip("/")
+    if path.casefold() == preset_path.casefold():
+        return base_url, ""
+
+    # Some providers expose multiple adapters under one origin, such as
+    # Gemini native `/v1beta` and OpenAI-compatible `/v1beta/openai`.
+    # A provider switch can leave the sibling preset path behind.
+    if provider not in {"OpenAI兼容", "自定义"}:
+        actual_path_key = path.casefold()
+        for candidate in API服务商预设.values():
+            candidate_base = str(candidate.get("base_url") or "").strip()
+            if not candidate_base:
+                continue
+            try:
+                if _api_url_origin(candidate_base) != _api_url_origin(preset_base_url):
+                    continue
+                candidate_path = str(urllib.parse.urlsplit(candidate_base).path or "").rstrip("/")
+            except (RuntimeError, ValueError):
+                continue
+            if candidate_path and candidate_path.casefold() == actual_path_key:
+                return preset_base_url, (
+                    f"检测到服务商“{provider}”地址残留了同域名其他协议路径 {path}，"
+                    "已恢复为该服务商预设 Base URL。"
+                )
+
+    if not _API_FOREIGN_ADAPTER_PATH_RE.fullmatch(path):
+        return base_url, ""
+    return preset_base_url, (
+        f"检测到服务商“{provider}”地址残留了旧协议路径 {path}，已恢复为该服务商预设 Base URL。"
+    )
+
+
 def _validate_api_http_url(raw_url: Any, *, label: str = "API地址") -> str:
     url = str(raw_url or "").strip()
     if not url:
@@ -1476,17 +1538,36 @@ def _is_api_connection_refused(exc: Exception) -> bool:
 
 
 def _api_uses_loopback_proxy(url: str) -> bool:
+    return _api_loopback_proxy_endpoint(url) is not None
+
+
+def _api_loopback_proxy_endpoint(url: str) -> tuple[str, int] | None:
     try:
         parsed_target = urllib.parse.urlsplit(str(url or ""))
         scheme = str(parsed_target.scheme or "").casefold()
         proxies = urllib.request.getproxies()
         proxy_value = str(proxies.get(scheme) or proxies.get("all") or "").strip()
         if not proxy_value:
-            return False
+            return None
         proxy_url = proxy_value if "://" in proxy_value else f"http://{proxy_value}"
-        proxy_host = str(urllib.parse.urlsplit(proxy_url).hostname or "").casefold()
-        return proxy_host in {"localhost", "0.0.0.0", "::1"} or proxy_host.startswith("127.")
+        parsed_proxy = urllib.parse.urlsplit(proxy_url)
+        proxy_host = str(parsed_proxy.hostname or "").casefold()
+        if proxy_host not in {"localhost", "0.0.0.0", "::1"} and not proxy_host.startswith("127."):
+            return None
+        proxy_port = int(parsed_proxy.port or (443 if parsed_proxy.scheme.casefold() == "https" else 80))
+        return proxy_host, proxy_port
     except Exception:
+        return None
+
+
+def _api_loopback_proxy_is_listening(url: str, *, timeout: float = 0.35) -> bool:
+    endpoint = _api_loopback_proxy_endpoint(url)
+    if endpoint is None:
+        return False
+    try:
+        with socket.create_connection(endpoint, timeout=max(0.05, float(timeout))):
+            return True
+    except OSError:
         return False
 
 
@@ -1678,14 +1759,10 @@ def _http_post_json(url: str, payload: dict[str, Any], headers: dict[str, str], 
     if "user-agent" not in folded_header_names:
         request_headers["User-Agent"] = _API_HTTP_USER_AGENT
     request = urllib.request.Request(url, data=data, headers=request_headers, method="POST")
+    loopback_proxy = _api_uses_loopback_proxy(url)
+    dead_loopback_proxy = loopback_proxy and not _api_loopback_proxy_is_listening(url)
     try:
-        try:
-            raw, charset = _perform_api_http_request(_API_HTTP_OPENER, request, timeout)
-        except urllib.error.HTTPError:
-            raise
-        except (urllib.error.URLError, TimeoutError, OSError) as proxy_error:
-            if not (_is_api_connection_refused(proxy_error) and _api_uses_loopback_proxy(url)):
-                raise
+        if dead_loopback_proxy:
             try:
                 raw, charset = _perform_api_http_request(_API_DIRECT_HTTP_OPENER, request, timeout)
             except urllib.error.HTTPError:
@@ -1693,9 +1770,27 @@ def _http_post_json(url: str, payload: dict[str, Any], headers: dict[str, str], 
             except (urllib.error.URLError, TimeoutError, OSError) as direct_error:
                 detail = _api_transport_error(url, direct_error)
                 raise _ModelAPITransportError(
-                    f"检测到失效的本机代理并已自动直连，但直连仍失败。{detail}",
+                    f"检测到本机代理未监听（已跳过代理并尝试直连），但直连仍失败。{detail}",
                     reason=_api_error_reason(direct_error),
                 ) from direct_error
+        else:
+            try:
+                raw, charset = _perform_api_http_request(_API_HTTP_OPENER, request, timeout)
+            except urllib.error.HTTPError:
+                raise
+            except (urllib.error.URLError, TimeoutError, OSError) as proxy_error:
+                if not (_is_api_connection_refused(proxy_error) and loopback_proxy):
+                    raise
+                try:
+                    raw, charset = _perform_api_http_request(_API_DIRECT_HTTP_OPENER, request, timeout)
+                except urllib.error.HTTPError:
+                    raise
+                except (urllib.error.URLError, TimeoutError, OSError) as direct_error:
+                    detail = _api_transport_error(url, direct_error)
+                    raise _ModelAPITransportError(
+                        f"检测到失效的本机代理并已自动直连，但直连仍失败。{detail}",
+                        reason=_api_error_reason(direct_error),
+                    ) from direct_error
     except urllib.error.HTTPError as exc:
         retry_after = 0.0
         try:
@@ -2259,7 +2354,10 @@ def _解析API模型配置(kwargs: dict[str, Any]) -> dict[str, Any]:
     kind = str(preset.get("kind") or "openai")
     model = str(kwargs.get("API模型", "") or "").strip() or str(preset.get("model") or "").strip()
     configured_base_url = str(kwargs.get("API地址", "") or "").strip() or str(preset.get("base_url") or "").strip()
-    url = _normalize_api_base_url(kwargs.get("API地址", ""), provider=provider, kind=kind)
+    configured_base_url, repair_note = _repair_stale_provider_base_url(provider, configured_base_url)
+    if repair_note:
+        kwargs["API地址自动修复说明"] = repair_note
+    url = _normalize_api_base_url(configured_base_url, provider=provider, kind=kind)
     kind = _resolve_api_endpoint_kind(kind, url)
     kwargs["API服务商有效"] = provider
     kwargs["API地址有效"] = _normalize_api_config_base_url(configured_base_url)
@@ -2411,6 +2509,8 @@ def _安全加载阶段模型(settings: dict[str, Any]) -> Any:
     settings["模型来源实际"] = source
     settings["模型回退说明"] = ""
     settings["模型调用状态"] = "已加载，等待调用"
+    if settings.get("API地址自动修复说明"):
+        _append_runtime_note(settings, str(settings["API地址自动修复说明"]))
     return model
 
 

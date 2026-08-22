@@ -213,6 +213,7 @@ globalThis.__stagePromptUiTestExports = {
 	buildModelApiConfigSignature,
 	buildModelApiConfigSignatureFromValues,
 	applyModelApiProviderPreset,
+	setModelLoaderWidgetValue,
 	NODE_MODEL_API_RUNTIME_SIGNATURE_KEY,
 	searchOnlinePromptTags,
 	searchOnlinePrompts,
@@ -1743,6 +1744,29 @@ test("model API provider switching clears stale address and model values", async
 	assert.equal(node.widgets[5].value, "");
 	assert.equal(exports.NODE_MODEL_API_RUNTIME_SIGNATURE_KEY in node.properties, false);
 	assert.equal(node[exports.PANEL_KEY].modelApiRuntimeInvalidated, true);
+});
+
+test("model API provider select changes also apply the matching preset", async () => {
+	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	const node = {
+		properties: {},
+		widgets: [
+			{ name: "模型来源", value: "API接口" },
+			{ name: "API服务商", value: "Claude Anthropic" },
+			{ name: "API地址", value: "https://api.anthropic.com/v1/messages" },
+			{ name: "API模型", value: "claude-haiku-4-5" },
+			{ name: "API密钥", value: "env:ANTHROPIC_API_KEY" },
+			{ name: "API额外请求头", value: "X-Old: stale" },
+		],
+		[exports.PANEL_KEY]: { modelApiRuntimeInvalidated: false },
+	};
+	assert.equal(typeof exports.setModelLoaderWidgetValue, "function");
+	exports.setModelLoaderWidgetValue(node, "API服务商", "DeepSeek");
+	assert.equal(node.widgets[1].value, "DeepSeek");
+	assert.equal(node.widgets[2].value, "https://api.deepseek.com");
+	assert.equal(node.widgets[3].value, "deepseek-v4-flash");
+	assert.equal(node.widgets[4].value, "env:DEEPSEEK_API_KEY");
+	assert.equal(node.widgets[5].value, "");
 });
 
 test("model runtime summary treats cloud env references as awaiting backend verification", async () => {
