@@ -5860,6 +5860,13 @@ function refreshModelLoaderPanel(node) {
 function setModelLoaderWidgetValue(node, name, value) {
 	const resolvedName = resolveModelWidgetName(node, name);
 	const previousValue = getWidget(node, resolvedName)?.value;
+	if (resolvedName === resolveModelWidgetName(node, "API服务商") && String(previousValue ?? "") !== String(value ?? "")) {
+		const preset = getModelApiProviderPreset(String(value ?? "").trim());
+		if (preset) {
+			applyModelApiProviderPreset(node, preset);
+			return;
+		}
+	}
 	beginNodeStateMutation(node);
 	setWidgetValue(node, resolvedName, value);
 	if (["模型来源", ...STAGE_EMBEDDED_API_MODEL_WIDGET_NAMES].includes(resolvedName) && String(previousValue ?? "") !== String(value ?? "")) {

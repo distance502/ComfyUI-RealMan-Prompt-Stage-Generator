@@ -20974,6 +20974,67 @@ class TestStagePromptModules(unittest.TestCase):
                 self.assertEqual(config["kind"], "anthropic")
                 self.assertEqual(config["url"], expected_url)
 
+    def test_stage_api_repairs_stale_foreign_adapter_path_on_known_provider_host(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        settings = {
+            "API服务商": "DeepSeek",
+            "API地址": "https://api.deepseek.com/anthropic",
+            "API密钥": "deepseek-test-key",
+            "API模型": "deepseek-v4-pro",
+        }
+        config = module._解析API模型配置(settings)
+        self.assertEqual(config["url"], "https://api.deepseek.com/chat/completions")
+        self.assertIn("残留了旧协议路径", settings["API地址自动修复说明"])
+
+    def test_stage_api_preserves_explicit_custom_path_on_known_provider_host(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        settings = {
+            "API服务商": "DeepSeek",
+            "API地址": "https://api.deepseek.com/gateway/v1",
+            "API密钥": "deepseek-test-key",
+            "API模型": "deepseek-v4-pro",
+        }
+        config = module._解析API模型配置(settings)
+        self.assertEqual(config["url"], "https://api.deepseek.com/gateway/v1/chat/completions")
+        self.assertNotIn("API地址自动修复说明", settings)
+
+    def test_stage_api_repairs_stale_path_for_generic_provider_on_known_host(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        settings = {
+            "API服务商": "OpenAI兼容",
+            "API地址": "https://api.deepseek.com/anthropic",
+            "API密钥": "deepseek-test-key",
+            "API模型": "deepseek-v4-pro",
+        }
+        config = module._解析API模型配置(settings)
+        self.assertEqual(config["url"], "https://api.deepseek.com/chat/completions")
+        self.assertIn("残留了旧协议路径", settings["API地址自动修复说明"])
+
+    def test_stage_api_repairs_sibling_gemini_adapter_path(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        native_settings = {
+            "API服务商": "Gemini 原生",
+            "API地址": "https://generativelanguage.googleapis.com/v1beta/openai",
+            "API密钥": "gemini-test-key",
+            "API模型": "gemini-2.5-flash",
+        }
+        native_config = module._解析API模型配置(native_settings)
+        self.assertEqual(native_config["url"], "https://generativelanguage.googleapis.com/v1beta")
+        self.assertIn("同域名其他协议路径", native_settings["API地址自动修复说明"])
+
+        openai_settings = {
+            "API服务商": "Gemini OpenAI兼容",
+            "API地址": "https://generativelanguage.googleapis.com/v1beta",
+            "API密钥": "gemini-test-key",
+            "API模型": "gemini-2.5-flash",
+        }
+        openai_config = module._解析API模型配置(openai_settings)
+        self.assertEqual(
+            openai_config["url"],
+            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+        )
+        self.assertIn("同域名其他协议路径", openai_settings["API地址自动修复说明"])
+
     def test_stage_api_http_error_includes_server_json_detail_for_sanitized_fallback(self) -> None:
         module = load_stage_prompt_generator_for_integration_test()
         secret = "sk-test-secret-value-123456"
@@ -21111,6 +21172,10 @@ class TestStagePromptModules(unittest.TestCase):
             module.urllib.request,
             "getproxies",
             return_value={"https": "http://127.0.0.1:7890"},
+        ), mock.patch.object(
+            module,
+            "_api_loopback_proxy_is_listening",
+            return_value=True,
         ):
             response = module._http_post_json(
                 "https://api.deepseek.com/chat/completions",
@@ -21165,6 +21230,10 @@ class TestStagePromptModules(unittest.TestCase):
             module.urllib.request,
             "getproxies",
             return_value={"https": "http://localhost:7890"},
+        ), mock.patch.object(
+            module,
+            "_api_loopback_proxy_is_listening",
+            return_value=True,
         ):
             with self.assertRaises(module._ModelAPITransportError) as raised:
                 module._http_post_json(
@@ -21177,6 +21246,60 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertIn("自动直连", str(raised.exception))
         self.assertIn("direct refused", str(raised.exception))
         self.assertTrue(model_refiner._is_transient_model_error(raised.exception))
+
+    def test_stage_api_skips_unlistened_loopback_proxy_and_uses_direct_connection(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        proxy_opener = mock.Mock()
+        direct_opener = mock.Mock()
+
+        class DummyHeaders:
+            def get_content_charset(self):
+                return "utf-8"
+
+        class DummyResponse:
+            headers = DummyHeaders()
+
+            def __init__(self):
+                self.payload = b'{"choices":[{"message":{"content":"direct without stale proxy"}}]}'
+                self.offset = 0
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self, size=-1):
+                if size is None or size < 0:
+                    size = len(self.payload) - self.offset
+                chunk = self.payload[self.offset : self.offset + size]
+                self.offset += len(chunk)
+                return chunk
+
+        direct_opener.open.return_value = DummyResponse()
+        with mock.patch.object(module, "_API_HTTP_OPENER", proxy_opener), mock.patch.object(
+            module,
+            "_API_DIRECT_HTTP_OPENER",
+            direct_opener,
+        ), mock.patch.object(
+            module.urllib.request,
+            "getproxies",
+            return_value={"https": "http://127.0.0.1:7897"},
+        ), mock.patch.object(
+            module,
+            "_api_loopback_proxy_is_listening",
+            return_value=False,
+        ):
+            response = module._http_post_json(
+                "https://api.deepseek.com/chat/completions",
+                {"model": "deepseek-v4-flash"},
+                {},
+                5.0,
+            )
+
+        self.assertEqual(response["choices"][0]["message"]["content"], "direct without stale proxy")
+        proxy_opener.open.assert_not_called()
+        direct_opener.open.assert_called_once()
 
     def test_model_response_extractor_is_strict_and_supports_content_blocks(self) -> None:
         self.assertEqual(
