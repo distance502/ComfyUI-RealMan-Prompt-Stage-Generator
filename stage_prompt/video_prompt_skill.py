@@ -29,6 +29,138 @@ VIDEO_PROMPT_DURATION_SECONDS = 8
 VIDEO_PROMPT_MIN_CHARS_ZH = 0  # Compatibility export: text length has been unbounded since v4.
 VIDEO_PROMPT_MAX_CHARS_ZH = 0  # Zero means unbounded.
 VIDEO_PROMPT_MIN_STORYBOARD_PARAGRAPHS = 3
+VIDEO_PROMPT_TARGET_MODEL_OPTIONS = ("通用", "H3", "Wan", "LTX", "Seedance", "自定义")
+VIDEO_PROMPT_INPUT_MODE_OPTIONS = ("T2V", "I2V", "FL2V", "L2V", "Ref2V")
+VIDEO_PROMPT_SHOT_COUNT_OPTIONS = ("自动", "单镜头", "短动作", "标准剧情", "长剧情")
+VIDEO_PROMPT_MODEL_PROFILES: dict[str, dict[str, Any]] = {
+    "通用": {
+        "target_model": "通用",
+        "input_mode": "T2V",
+        "timeline": "optional",
+        "audio_schema": "inline_natural_language",
+        "continuity": "subject_scene_prop_lighting_axis",
+    },
+    "H3": {
+        "target_model": "H3",
+        "input_mode": "T2V",
+        "timeline": "recommended",
+        "audio_schema": "overall_soundscape_dialogue_music",
+        "continuity": "reference_labels_keyframes_lighting_audio_bridge",
+    },
+    "Wan": {
+        "target_model": "Wan",
+        "input_mode": "T2V",
+        "timeline": "optional",
+        "audio_schema": "inline_natural_language",
+        "continuity": "motion_direction_subject_identity_camera_axis",
+    },
+    "LTX": {
+        "target_model": "LTX",
+        "input_mode": "T2V",
+        "timeline": "recommended",
+        "audio_schema": "inline_natural_language",
+        "continuity": "motion_path_keyframe_handoff",
+    },
+    "Seedance": {
+        "target_model": "Seedance",
+        "input_mode": "T2V",
+        "timeline": "recommended",
+        "audio_schema": "inline_natural_language",
+        "continuity": "cinematic_camera_performance_spatial_handoff",
+    },
+    "自定义": {
+        "target_model": "自定义",
+        "input_mode": "T2V",
+        "timeline": "optional",
+        "audio_schema": "inline_natural_language",
+        "continuity": "preserve_explicit_creative_spine",
+    },
+}
+VIDEO_PROMPT_TIMELINE_SEGMENTS = (
+    (0, 2),
+    (2, 4),
+    (4, 6),
+    (6, 7),
+    (7, 8),
+)
+
+
+def _setting_bool(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    normalized = str(value or "").strip().casefold()
+    if normalized in {"1", "true", "yes", "on", "开启", "开", "是"}:
+        return True
+    if normalized in {"0", "false", "no", "off", "关闭", "关", "否", "未启用"}:
+        return False
+    return default
+
+
+def resolve_video_shot_count(settings: Mapping[str, Any] | None) -> int:
+    """Resolve a bounded storyboard size from explicit mode or task intent."""
+
+    source = settings or {}
+    mode = str(source.get("视频提示词镜头段数", "自动") or "自动").strip()
+    explicit = {"单镜头": 1, "短动作": 3, "标准剧情": 5, "长剧情": 7}
+    if mode in explicit:
+        return explicit[mode]
+    task_type = str((source.get("智能任务意图") or {}).get("task_type", "") or "").casefold()
+    if any(marker in task_type for marker in ("single_shot", "single-shot", "one_shot")):
+        return 1
+    if any(marker in task_type for marker in ("short_action", "short-action")):
+        return 3
+    if any(marker in task_type for marker in ("long_form", "long-form", "episodic")):
+        return 7
+    return 5
+
+
+def _timeline_segments_for_count(count: int) -> tuple[tuple[float, float], ...]:
+    if count == 5:
+        return VIDEO_PROMPT_TIMELINE_SEGMENTS
+    unit = VIDEO_PROMPT_DURATION_SECONDS / max(1, count)
+    return tuple((round(index * unit, 2), round((index + 1) * unit, 2)) for index in range(count))
+
+
+def _format_timecode(value: float) -> str:
+    return str(int(value)) if float(value).is_integer() else f"{value:g}"
+
+
+def resolve_video_prompt_profile(settings: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Resolve video target metadata while keeping the generic prompt contract stable."""
+
+    source = settings or {}
+    target = str(source.get("视频提示词目标模型", "通用") or "通用").strip()
+    input_mode = str(source.get("视频提示词输入模式", "T2V") or "T2V").strip()
+    if target not in VIDEO_PROMPT_MODEL_PROFILES:
+        target = "通用"
+    if input_mode not in VIDEO_PROMPT_INPUT_MODE_OPTIONS:
+        input_mode = "T2V"
+    requested_timeline = _setting_bool(source.get("视频提示词启用时间轴", False))
+    timeline_enabled = requested_timeline and target != "通用"
+    shot_count = resolve_video_shot_count(source)
+    segments = _timeline_segments_for_count(shot_count)
+    subject_type = str(
+        source.get("主体类型解析结果", source.get("主体类型", "自动")) or "自动"
+    ).strip()
+    subject_kind = "non_person" if subject_type == "非人物主体" else "person_or_auto"
+    return {
+        **VIDEO_PROMPT_MODEL_PROFILES[target],
+        "target_model": target,
+        "input_mode": input_mode,
+        "timeline_enabled": timeline_enabled,
+        "shot_count": shot_count,
+        "shot_count_mode": str(source.get("视频提示词镜头段数", "自动") or "自动"),
+        "subject_kind": subject_kind,
+        "timeline_segments": [
+            {"start": start, "end": end, "label": f"{_format_timecode(start)}-{_format_timecode(end)}s"}
+            for start, end in segments
+        ] if timeline_enabled else [],
+        "duration_seconds": VIDEO_PROMPT_DURATION_SECONDS if timeline_enabled else None,
+    }
+
+
 VIDEO_PROMPT_MODEL_SYSTEM_TEMPLATE = """
 你是 Qwen TE 的视频提示词后置导演 Skill。输入已经是独立视频 Skill 生成的可靠分镜故事底稿，你负责在同一剧情主线上把它润色得更自然、更具体、更适合视频生成。
 
@@ -364,6 +496,25 @@ def _audio_zh(scene: str, action: str, non_person: bool) -> str:
     return "声音只保留呼吸、脚步、衣料摩擦和当前空间原本存在的环境声"
 
 
+def _audio_metadata(scene: str, action: str, settings: Mapping[str, Any], *, english: bool) -> dict[str, str]:
+    """Expose audio channels without inventing dialogue or off-screen events."""
+
+    target = resolve_video_prompt_profile(settings).get("target_model", "通用")
+    if english:
+        return {
+            "overall_soundscape": f"natural ambience of {scene}, kept spatially consistent",
+            "dialogue": "none unless already present in the source brief",
+            "sound_effects": f"footsteps, material contact, and the direct sound of {action}",
+            "non_diegetic_music": "restrained score only" if target == "H3" else "N/A",
+        }
+    return {
+        "overall_soundscape": f"{scene}原本存在的环境底噪，保持远近层次连续",
+        "dialogue": "除非源文本已有对白，否则不新增对白",
+        "sound_effects": f"脚步、材质接触声以及{action}直接产生的声音",
+        "non_diegetic_music": "只保留克制的非叙事配乐" if target == "H3" else "无",
+    }
+
+
 def _subject_reference_zh(subject: str, non_person: bool) -> str:
     if non_person:
         return "它"
@@ -436,6 +587,94 @@ def _join_storyboard_paragraphs(paragraphs: Sequence[str]) -> str:
         if cleaned:
             result.append(cleaned)
     return "\n\n".join(result)
+
+
+def _timeline_label(index: int, phase: str, settings: Mapping[str, Any], *, english: bool) -> str:
+    """Return a storyboard label with an optional profile timecode."""
+
+    profile = resolve_video_prompt_profile(settings)
+    suffix = ""
+    segments = _timeline_segments_for_count(int(profile.get("shot_count", 5) or 5))
+    if profile.get("timeline_enabled") and 1 <= index <= len(segments):
+        start, end = segments[index - 1]
+        start_text, end_text = _format_timecode(start), _format_timecode(end)
+        suffix = f", {start_text}-{end_text}s" if english else f"，{start_text}-{end_text}秒"
+    if english:
+        return f"Shot {index} ({phase}{suffix}):"
+    return f"分镜{['一', '二', '三', '四', '五', '六', '七', '八', '九'][index - 1]}（{phase}{suffix}）："
+
+
+def _replace_storyboard_label(
+    paragraph: str,
+    index: int,
+    phase: str,
+    settings: Mapping[str, Any],
+    *,
+    english: bool,
+) -> str:
+    pattern = _STORYBOARD_LABEL_EN if english else _STORYBOARD_LABEL_ZH
+    match = pattern.match(paragraph.strip())
+    if not match:
+        return paragraph
+    return _timeline_label(index, phase, settings, english=english) + paragraph.strip()[match.end():].lstrip()
+
+
+def _adapt_storyboard_paragraphs(
+    paragraphs: Sequence[str],
+    settings: Mapping[str, Any],
+    *,
+    english: bool,
+) -> tuple[str, ...]:
+    """Project the five-phase base story onto the requested bounded shot count."""
+
+    base = list(paragraphs)
+    count = resolve_video_shot_count(settings)
+    if count == 5 or len(base) < 5:
+        return tuple(base)
+    if count == 1:
+        return (
+            _replace_storyboard_label(base[2], 1, "action" if english else "行动", settings, english=english),
+        )
+    if count == 3:
+        indexes = (0, 2, 4)
+        phases = ("setup", "action", "resolution") if english else ("建立", "行动", "收束")
+        return tuple(
+            _replace_storyboard_label(base[source], index, phase, settings, english=english)
+            for index, (source, phase) in enumerate(zip(indexes, phases), start=1)
+        )
+    # Long-form mode adds two connective shots without changing the world or
+    # the causal spine of the original five phases.
+    if english:
+        bridge = (
+            "The camera stays on the same axis and follows the immediate physical trace left by the action, "
+            "so the trigger becomes a visible consequence before the escalation continues. "
+            "The established lighting and spatial sound preserve the same location."
+        )
+        aftermath = (
+            "The camera holds the same location for one final breath and records how the established subject, "
+            "prop, and light settle after the consequence, without adding a new event. "
+            "The ending remains on the existing axis and hands the state forward."
+        )
+        return (
+            _replace_storyboard_label(base[0], 1, "setup", settings, english=True),
+            _replace_storyboard_label(base[1], 2, "trigger", settings, english=True),
+            _replace_storyboard_label(base[2], 3, "action", settings, english=True),
+            _timeline_label(4, "action", settings, english=True) + bridge,
+            _replace_storyboard_label(base[3], 5, "escalation", settings, english=True),
+            _replace_storyboard_label(base[4], 6, "resolution", settings, english=True),
+            _timeline_label(7, "aftermath", settings, english=True) + aftermath,
+        )
+    bridge = "镜头沿同一条轴线记录动作留下的直接痕迹，让触发事件在升级前先形成可见后果，不改变人物、道具和地点。光线与空间声音继续证明镜头仍在同一处。"
+    aftermath = "镜头在原有地点多停留片刻，记录主体、道具与光线在结果之后如何稳定下来，不再引入新的事件。结尾保持原有轴线，并把结束状态交给后续行动。"
+    return (
+        _replace_storyboard_label(base[0], 1, "建立", settings, english=False),
+        _replace_storyboard_label(base[1], 2, "触发", settings, english=False),
+        _replace_storyboard_label(base[2], 3, "行动", settings, english=False),
+        _timeline_label(4, "行动", settings, english=False) + bridge,
+        _replace_storyboard_label(base[3], 5, "升级", settings, english=False),
+        _replace_storyboard_label(base[4], 6, "收束", settings, english=False),
+        _timeline_label(7, "余波", settings, english=False) + aftermath,
+    )
 
 
 def _english_source_clause(primary_prompt: str) -> str:
@@ -523,42 +762,90 @@ def _build_chinese_video_prompt(
     result_phrases = _video_result_phrases_zh(result_contract) if result_contract else {}
     paragraphs = (
         (
-            f"分镜一（建立）：镜头以{composition}建立{scene}的空间关系，{subject}{outfit_clause}位于画面中心偏前，"
+            f"{_timeline_label(1, '建立', settings, english=False)}镜头以{composition}建立{scene}的空间关系，{subject}{outfit_clause}位于画面中心偏前，"
             f"{props}留在视线能够回到的位置。{brief_clause}{opening}；{motive}。"
             f"{style}决定画面的线条、色彩与材质表达；{medium or '当前媒介'}保持统一，{rendering or '材质与光线保持空间关系连续'}。"
             f"{lighting}先把主体与关键线索从背景中分离，{audio}。{result_phrases.get('setup', '')}"
         ),
         (
-            f"分镜二（触发）：镜头从环境关系推进到{reference}的视线、手部与{props}之间，先让观众读懂线索，再发生变化。"
+            f"{_timeline_label(2, '触发', settings, english=False)}镜头从环境关系推进到{reference}的视线、手部与{props}之间，先让观众读懂线索，再发生变化。"
             f"起初{reference}只是在确认现场，因为{trigger}，原有节奏被打破；焦点短暂落到{props}，随后回到{reference}的反应。"
             f"这一分镜承接开场动机，并把问题明确推向下一步行动，光线和环境声先出现细微偏移。"
             f"{result_phrases.get('trace', '')}"
         ),
         (
-            f"分镜三（行动）：镜头{camera}，在完整记录重心变化的同时保持{scene}方向清楚。"
+            f"{_timeline_label(3, '行动', settings, english=False)}镜头{camera}，在完整记录重心变化的同时保持{scene}方向清楚。"
             f"{reference}随即{action}，{response}；{outfit or '主体外观'}的边缘、接触点与受力方向跟随动作变化，{feedback}。"
             f"动作不是孤立展示，而是对上一分镜线索的直接回应，并由{props}的位置变化把故事带向更大的后果。"
             f"{result_phrases.get('action', '')}"
         ),
         (
-            f"分镜四（升级）：镜头改变景别观察行动造成的连锁结果，前景遮挡、中景动作和背景信息沿同一方向展开。"
+            f"{_timeline_label(4, '升级', settings, english=False)}镜头改变景别观察行动造成的连锁结果，前景遮挡、中景动作和背景信息沿同一方向展开。"
             f"{escalation}，{feedback_plan}；与此同时{turn}。{climax}，{lighting}随局势重新分配明暗与色温。"
             f"声音从近处材质接触扩展到{scene}的空间回声，让视觉高潮既有来源，也为最后一段留下可继续追踪的结果。"
             f"{result_phrases.get('result', '')}"
         ),
         (
-            f"分镜五（收束）：镜头在高潮之后放慢观察，不再引入无关人物或新地点，而是回看{subject}、{props}与环境后果之间的新关系。"
+            f"{_timeline_label(5, '收束', settings, english=False)}镜头在高潮之后放慢观察，不再引入无关人物或新地点，而是回看{subject}、{props}与环境后果之间的新关系。"
             f"最后，{ending}；{reference}的视线、{props}的状态和背景光共同说明这次选择已经改变局势。"
             f"结尾保留清楚结果与开放余韵，使五段分镜组成一条完整剧情，也让下一次行动拥有自然入口。"
             f"全程遵守{video_rules or '同一媒介、空间与主体的连续性'}。{result_phrases.get('ending', '')}"
         ),
     )
-    return _join_storyboard_paragraphs(paragraphs)
+    return _join_storyboard_paragraphs(_adapt_storyboard_paragraphs(paragraphs, settings, english=False))
 
 
-def _build_english_video_prompt(settings: Mapping[str, Any], *, primary_prompt: str) -> str:
+def _english_group_value(groups: Mapping[str, list[str]] | None, name: str) -> str:
+    """Return an ASCII-safe explicit anchor for the English storyboard path."""
+
+    if not isinstance(groups, Mapping):
+        return ""
+    for value in groups.get(name, []) or []:
+        text = _clean(value, limit=120)
+        if text and not re.search(r"[\u4e00-\u9fff]", text):
+            return text
+    return ""
+
+
+def _english_anchor_sentence(groups: Mapping[str, list[str]] | None) -> str:
+    labels = (
+        ("主体", "the subject"),
+        ("场景背景", "the location"),
+        ("动作姿态", "the central action"),
+        ("服装造型", "the outfit"),
+        ("道具世界观", "the key prop"),
+        ("画面风格", "the visual style"),
+        ("光影氛围", "the lighting"),
+        ("构图视角", "the composition"),
+    )
+    clauses = [
+        f"{label} is {value}"
+        for name, label in labels
+        if (value := _english_group_value(groups, name))
+    ]
+    if not clauses:
+        return ""
+    return "The explicit creative anchors remain consistent: " + "; ".join(clauses) + "."
+
+
+def _build_english_video_prompt(
+    settings: Mapping[str, Any],
+    *,
+    primary_prompt: str,
+    groups: Mapping[str, list[str]] | None = None,
+) -> str:
     seed = int(settings.get("运行时随机有效种子", 0) or settings.get("seed", 0) or 0)
     source = _english_source_clause(primary_prompt)
+    anchor_sentence = _english_anchor_sentence(groups)
+    non_person = str(settings.get("主体类型解析结果", settings.get("主体类型", "")) or "").strip() == "非人物主体"
+    subject = _english_group_value(groups, "主体") or "the established subject"
+    scene = _english_group_value(groups, "场景背景") or "the established location"
+    action = _english_group_value(groups, "动作姿态") or "the established action"
+    outfit = "" if non_person else (_english_group_value(groups, "服装造型") or "the established outfit")
+    prop = _english_group_value(groups, "道具世界观") or "the key visual clue"
+    style = _english_group_value(groups, "画面风格") or "the selected visual style"
+    lighting = _english_group_value(groups, "光影氛围") or "the established lighting"
+    composition = _english_group_value(groups, "构图视角") or "a readable wide composition"
     plan = build_narrative_plan({"source": source}, seed=seed, output_count=1)
     opening = _clean(plan.get("opening_en"), limit=220)
     motive = _clean(plan.get("motive_en"), limit=200)
@@ -586,14 +873,16 @@ def _build_english_video_prompt(settings: Mapping[str, Any], *, primary_prompt: 
     camera = _camera_move_en(primary_prompt, seed=seed)
     result_phrases = _video_result_phrases_en(result_contract) if result_contract else {}
     focus_object = "the established contact relation" if result_contract else "the key visual clue"
+    outfit_clause = f" in {outfit}" if outfit else ""
+    appearance_clause = f"the {outfit} silhouette, " if outfit else "the established surface, "
     paragraphs = (
-        f"Shot 1 (setup): The camera opens on a readable wide view of this established visual world: {source}. {opening}. {motive}. Light, material, and ambient sound establish the location before the conflict begins. {result_phrases.get('setup', '')}",
-        f"Shot 2 (trigger): The camera moves from the location to the subject's attention and {focus_object}. At first the rhythm remains controlled; when {trigger}, that rhythm breaks and the focus returns to the subject's reaction. This shot turns the setup into a clear cause that the next action must continue. {result_phrases.get('trace', '')}",
-        f"Shot 3 (action): The camera {camera} while preserving a readable direction of travel. The subject responds: {response}. Material contact, reflections, and spatial sound follow the movement in causal order, so the action grows directly from the preceding clue. {result_phrases.get('action', '')}",
-        f"Shot 4 (escalation): The camera changes scale to reveal the consequence across foreground, middle ground, and background. {escalation}; {feedback}. The emotion shifts as {turn}, and {climax}. Light and sound expand the result without introducing an unrelated storyline. {result_phrases.get('result', '')}",
-        f"Shot 5 (resolution): The camera settles after the climax and observes the new relationship between subject, clue, and location. Finally, {ending}. The final image makes the consequence readable, preserves an open emotional aftertone, and gives the complete storyboard a natural path into whatever happens next. {result_phrases.get('ending', '')}",
+        f"{_timeline_label(1, 'setup', settings, english=True)} The camera opens on {composition} in {scene}, showing {subject}{outfit_clause} with {prop}. {source}. {anchor_sentence} {opening}. {motive}. {style} shapes the medium and material language, while {lighting} and ambient sound establish the location before the conflict begins. {result_phrases.get('setup', '')}",
+        f"{_timeline_label(2, 'trigger', settings, english=True)} The camera moves from {scene} to {subject}'s attention and {prop}. At first the rhythm remains controlled; when {trigger}, that rhythm breaks and the focus returns to {subject}'s reaction. This shot turns the setup into a clear cause that the next action must continue. {result_phrases.get('trace', '')}",
+        f"{_timeline_label(3, 'action', settings, english=True)} The camera {camera} while preserving a readable direction of travel. {subject} responds through {action}; {appearance_clause}contact points, reflections, and spatial sound follow the movement in causal order, so the action grows directly from the preceding clue. {result_phrases.get('action', '')}",
+        f"{_timeline_label(4, 'escalation', settings, english=True)} The camera changes scale to reveal the consequence across foreground, middle ground, and background of {scene}. {escalation}; {feedback}. The emotion shifts as {turn}, and {climax}. {lighting} and sound expand the result without introducing an unrelated storyline. {result_phrases.get('result', '')}",
+        f"{_timeline_label(5, 'resolution', settings, english=True)} The camera settles after the climax and observes the new relationship between {subject}, {prop}, and {scene}. Finally, {ending}. The final image preserves {composition}, makes the consequence readable, and keeps {style} visually consistent while leaving an open emotional aftertone for what happens next. {result_phrases.get('ending', '')}",
     )
-    return _join_storyboard_paragraphs(paragraphs)
+    return _join_storyboard_paragraphs(_adapt_storyboard_paragraphs(paragraphs, settings, english=True))
 
 
 _STORYBOARD_LABEL_ZH = re.compile(
@@ -636,6 +925,77 @@ def _storyboard_paragraphs(text: str) -> list[str]:
     return paragraphs
 
 
+def build_video_storyboard_metadata(
+    prompt: str,
+    settings: Mapping[str, Any] | None = None,
+    *,
+    selected: Mapping[str, Sequence[Any]] | None = None,
+    custom_tags: Sequence[Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Expose shot-level metadata alongside the human-readable storyboard."""
+
+    resolved = resolve_video_prompt_profile(settings)
+    language = str((settings or {}).get("提示词语言", "纯中文") or "纯中文").strip()
+    english = language == "纯英文"
+    groups = _normalized_groups(selected, custom_tags, settings or {})
+    anchor_names = ("主体", "场景背景", "动作姿态", "服装造型", "道具世界观", "光影氛围", "构图视角")
+    anchors = {
+        name: list(groups.get(name, []))[:4]
+        for name in anchor_names
+        if groups.get(name)
+    }
+    scene = _first(groups, "场景背景") or "当前主场景"
+    action = _first(groups, "动作姿态") or "当前动作"
+    audio_fields = _audio_metadata(scene, action, settings or {}, english=english)
+    result: list[dict[str, Any]] = []
+    timeline_segments = _timeline_segments_for_count(int(resolved.get("shot_count", 5) or 5))
+    for paragraph in _storyboard_paragraphs(prompt):
+        number = _storyboard_paragraph_number(paragraph, english=english)
+        if number is None:
+            continue
+        pattern = _STORYBOARD_LABEL_EN if english else _STORYBOARD_LABEL_ZH
+        match = pattern.match(paragraph.strip())
+        phase = storyboard_phase_token(match.group("title")) if match else None
+        phase = phase or (match.group("title").strip() if match and match.group("title") else "story")
+        timeline_segment = (
+            timeline_segments[number - 1]
+            if resolved.get("timeline_enabled") and 1 <= number <= len(timeline_segments)
+            else None
+        )
+        result.append(
+            {
+                "shot_id": f"S{number:02d}",
+                "number": number,
+                "phase": phase,
+                "duration": (timeline_segment[1] - timeline_segment[0]) if timeline_segment else None,
+                "time_axis": (
+                    f"{_format_timecode(timeline_segment[0])}-{_format_timecode(timeline_segment[1])}s"
+                    if timeline_segment
+                    else resolved["timeline"]
+                ),
+                "timeline_enabled": bool(resolved.get("timeline_enabled")),
+                "input_mode": resolved["input_mode"],
+                "target_model": resolved["target_model"],
+                "subject_kind": resolved.get("subject_kind", "person_or_auto"),
+                "camera": "镜头与机位见 description" if not english else "camera and framing are in description",
+                "spatial_anchors": anchors,
+                "lighting_baseline": anchors.get("光影氛围", []),
+                "audio_schema": resolved["audio_schema"],
+                "overall_soundscape": audio_fields["overall_soundscape"],
+                "dialogue": audio_fields["dialogue"],
+                "sound_effects": audio_fields["sound_effects"],
+                "non_diegetic_music": audio_fields["non_diegetic_music"],
+                "continuity_handoff": (
+                    "承接上一镜头的主体、场景、道具、光影和镜头轴线，并把本镜结束状态交给下一镜头。"
+                    if not english
+                    else "Inherit the subject, location, prop, lighting, and camera axis from the previous shot and hand this ending state to the next shot."
+                ),
+                "description": paragraph,
+            }
+        )
+    return result
+
+
 def _valid_storyboard_paragraph(paragraph: str, *, english: bool) -> bool:
     label_pattern = _STORYBOARD_LABEL_EN if english else _STORYBOARD_LABEL_ZH
     if not label_pattern.match(paragraph):
@@ -647,7 +1007,12 @@ def _valid_storyboard_paragraph(paragraph: str, *, english: bool) -> bool:
     return any(marker in lowered for marker in camera_markers)
 
 
-def is_natural_video_prompt(text: str, *, language: str = "纯中文") -> bool:
+def is_natural_video_prompt(
+    text: str,
+    *,
+    language: str = "纯中文",
+    allow_timeline: bool = False,
+) -> bool:
     """Validate an unbounded natural-language storyboard with one causal story arc."""
 
     prompt = str(text or "").strip()
@@ -655,7 +1020,7 @@ def is_natural_video_prompt(text: str, *, language: str = "纯中文") -> bool:
     if (
         not prompt
         or any(marker in prompt.casefold() for marker in _META_MARKERS)
-        or _DURATION_EXPRESSION_PATTERN.search(prompt)
+        or (not allow_timeline and _DURATION_EXPRESSION_PATTERN.search(prompt))
     ):
         return False
     if mode == "英文提示词+中文说明":
@@ -663,8 +1028,8 @@ def is_natural_video_prompt(text: str, *, language: str = "纯中文") -> bool:
         return bool(
             marker
             and re.search(r"[\u4e00-\u9fff]", chinese)
-            and is_natural_video_prompt(chinese.strip(), language="纯中文")
-            and is_natural_video_prompt(english.strip(), language="纯英文")
+            and is_natural_video_prompt(chinese.strip(), language="纯中文", allow_timeline=allow_timeline)
+            and is_natural_video_prompt(english.strip(), language="纯英文", allow_timeline=allow_timeline)
         )
     enumeration_limit = max(18, len(prompt) // 40)
     if prompt.count("、") > enumeration_limit or len(re.findall(r"(?:^|[，,])[^。.!?]{0,18}(?:[，,]|$)", prompt)) > 48:
@@ -672,6 +1037,33 @@ def is_natural_video_prompt(text: str, *, language: str = "纯中文") -> bool:
     if mode == "纯英文":
         lowered = prompt.casefold()
         paragraphs = _storyboard_paragraphs(prompt)
+        timeline_valid = (
+            not allow_timeline
+            or len(re.findall(r"\b\d+(?:\.\d+)?\s*-\s*\d+(?:\.\d+)?\s*s\b", prompt, flags=re.IGNORECASE))
+            >= len(paragraphs)
+        )
+        if len(paragraphs) == 1:
+            first_match = _STORYBOARD_LABEL_EN.match(paragraphs[0])
+            first_phase = storyboard_phase_token(first_match.group("title")) if first_match else None
+            return (
+                not re.search(r"[\u4e00-\u9fff]", prompt)
+                and first_phase == "action"
+                and _has_contiguous_storyboard_numbers(paragraphs, english=True)
+                and all(_valid_storyboard_paragraph(paragraph, english=True) for paragraph in paragraphs)
+                and any(marker in lowered for marker in ("action", "respond", "moves", "acts"))
+                and any(marker in lowered for marker in ("environment", "light", "sound", "camera"))
+                and timeline_valid
+            )
+        if len(paragraphs) == 3:
+            return (
+                not re.search(r"[\u4e00-\u9fff]", prompt)
+                and _has_contiguous_storyboard_numbers(paragraphs, english=True)
+                and _has_ordered_storyboard_phases(paragraphs, english=True)
+                and all(_valid_storyboard_paragraph(paragraph, english=True) for paragraph in paragraphs)
+                and all(marker in lowered for marker in ("setup", "action", "resolution"))
+                and any(marker in lowered for marker in ("when", "because", "causes", "consequence"))
+                and timeline_valid
+            )
         return (
             not re.search(r"[\u4e00-\u9fff]", prompt)
             and len(paragraphs) >= VIDEO_PROMPT_MIN_STORYBOARD_PARAGRAPHS
@@ -680,9 +1072,37 @@ def is_natural_video_prompt(text: str, *, language: str = "纯中文") -> bool:
             and all(_valid_storyboard_paragraph(paragraph, english=True) for paragraph in paragraphs)
             and all(marker in lowered for marker in ("setup", "trigger", "action", "resolution"))
             and any(marker in lowered for marker in ("when", "because", "causes", "consequence"))
+            and timeline_valid
         )
     body = prompt.split("中文说明：", 1)[-1] if mode == "英文提示词+中文说明" else prompt
     paragraphs = _storyboard_paragraphs(body)
+    timeline_valid = (
+        not allow_timeline
+        or len(re.findall(r"\d+(?:\.\d+)?\s*[-到至]\s*\d+(?:\.\d+)?\s*(?:秒|s)", body, flags=re.IGNORECASE))
+        >= len(paragraphs)
+    )
+    if len(paragraphs) == 1:
+        first_match = _STORYBOARD_LABEL_ZH.match(paragraphs[0])
+        first_phase = storyboard_phase_token(first_match.group("title")) if first_match else None
+        return (
+            not re.search(r"[A-Za-z]", body)
+            and first_phase == "action"
+            and _has_contiguous_storyboard_numbers(paragraphs, english=False)
+            and all(_valid_storyboard_paragraph(paragraph, english=False) for paragraph in paragraphs)
+            and any(marker in body for marker in ("行动", "回应", "移动", "动作"))
+            and any(marker in body for marker in ("环境", "光", "声音", "镜头"))
+            and timeline_valid
+        )
+    if len(paragraphs) == 3:
+        return (
+            not re.search(r"[A-Za-z]", body)
+            and _has_contiguous_storyboard_numbers(paragraphs, english=False)
+            and _has_ordered_storyboard_phases(paragraphs, english=False)
+            and all(_valid_storyboard_paragraph(paragraph, english=False) for paragraph in paragraphs)
+            and all(marker in body for marker in ("建立", "行动", "收束"))
+            and any(marker in body for marker in ("因为", "带来", "随即", "结果"))
+            and timeline_valid
+        )
     return (
         len(paragraphs) >= VIDEO_PROMPT_MIN_STORYBOARD_PARAGRAPHS
         and _has_contiguous_storyboard_numbers(paragraphs, english=False)
@@ -691,6 +1111,7 @@ def is_natural_video_prompt(text: str, *, language: str = "纯中文") -> bool:
         and all(marker in body for marker in ("建立", "触发", "行动", "收束"))
         and any(marker in body for marker in ("因为", "带来", "随即", "结果"))
         and any(marker in body for marker in ("环境", "光", "声音"))
+        and timeline_valid
     )
 
 
@@ -706,7 +1127,11 @@ def build_video_prompt(
     groups = _normalized_groups(selected, custom_tags, settings, include_preferences=True)
     language = str(settings.get("提示词语言", "纯中文") or "纯中文").strip()
     if language in {"纯英文", "英文提示词+中文说明"}:
-        english = _build_english_video_prompt(settings, primary_prompt=primary_prompt)
+        english = _build_english_video_prompt(
+            settings,
+            primary_prompt=primary_prompt,
+            groups=groups,
+        )
         if language == "纯英文":
             return english
         chinese = _build_chinese_video_prompt(groups, settings, primary_prompt=primary_prompt)
@@ -719,10 +1144,18 @@ __all__ = [
     "VIDEO_PROMPT_MAX_CHARS_ZH",
     "VIDEO_PROMPT_MIN_CHARS_ZH",
     "VIDEO_PROMPT_MIN_STORYBOARD_PARAGRAPHS",
+    "VIDEO_PROMPT_TARGET_MODEL_OPTIONS",
+    "VIDEO_PROMPT_INPUT_MODE_OPTIONS",
+    "VIDEO_PROMPT_SHOT_COUNT_OPTIONS",
+    "VIDEO_PROMPT_MODEL_PROFILES",
     "VIDEO_PROMPT_MODEL_SYSTEM_TEMPLATE",
     "VIDEO_PROMPT_SKILL_VERSION",
+    "VIDEO_PROMPT_TIMELINE_SEGMENTS",
     "build_video_prompt",
+    "build_video_storyboard_metadata",
     "is_natural_video_prompt",
+    "resolve_video_prompt_profile",
+    "resolve_video_shot_count",
     "video_prompt_anchor_roles",
     "video_prompt_required_anchors",
 ]

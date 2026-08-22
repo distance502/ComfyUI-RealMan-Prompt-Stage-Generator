@@ -43,8 +43,8 @@ flowchart LR
 
 | 功能 | 说明 |
 | --- | --- |
-| 自然语言图像提示词 | 输出有主体关系、空间层次、光线方向和材质反馈的完整正文 |
-| 连续视频分镜 | 默认建立场景、事件触发、行动、升级和收束，每段带镜头结构 |
+| 自然语言图像提示词 | 输出有主体关系、空间层次、光线方向和材质反馈的完整正文；可选择通用、Flux、SDXL、Qwen Image、Krea 2 或 Midjourney 目标 Profile |
+| 连续视频分镜 | 默认建立场景、事件触发、行动、升级和收束，每段带镜头结构；可切换 1/3/5/7 段镜头与可选时间轴 |
 | 智能随机 | 在允许变化的范围内重写主体、场景、镜头或细节，不破坏锁定锚点 |
 | 场景关系图 | 检查人物、服装、动作、承重点、道具、地点、光线和机位是否一致 |
 | 标签 Skill | 模板风格和用户标签都会进入对应 Skill，保留用户明确选择 |
@@ -63,6 +63,8 @@ flowchart LR
 ![模型来源与 API 服务商](docs/images/model-providers.png)
 
 API 面板内置 OpenAI compatible、OpenAI、OpenRouter、DeepSeek、通义千问 DashScope、Kimi、硅基流动、火山方舟、智谱、Groq、Together、Fireworks、Mistral、Perplexity、Claude、Gemini、Ollama、LM Studio 和自定义服务。
+
+图像提示词目标模型可选择 `通用`、`Flux`、`SDXL`、`Qwen Image`、`Krea 2`、`Midjourney` 或 `自定义`。每个 Profile 都会在 JSON 的 `image_prompt_contract` 中记录推荐组织顺序、正向语言合同、负面词通道和参数策略。Krea 2 使用主体优先的自然语言描述，重点保留镜头、空间、材质和光影关系，不把平台参数写入正向正文。
 
 地址可以填写服务商 `base_url`，也可以填写完整端点。节点会按服务商识别 OpenAI Chat Completions、Responses、Anthropic Messages、Gemini、DashScope 和 Ollama 原生格式，避免把一种协议的路径拼到另一种服务商地址上。
 
@@ -103,6 +105,12 @@ env:DASHSCOPE_API_KEY
 ## 视频剧情分镜
 
 视频输出不是在图像提示词后追加“运镜”。它会生成连续编号的自然语言分镜，并在每段中说明景别或机位、摄影机运动、人物动作、环境反馈和前后镜头关系。
+
+视频提示词目标模型支持 `通用`、`H3`、`Wan`、`LTX`、`Seedance` 和 `自定义`；输入模式支持 `T2V`、`I2V`、`FL2V`、`L2V`、`Ref2V`。正文继续使用自然语言，JSON 额外提供 `video_prompt_profile` 和 `video_storyboard`，记录镜头编号、阶段、空间锚点、连续性交接、音频策略和目标输入模式。`视频提示词镜头段数` 可选单镜头、短动作、标准剧情或长剧情；打开 `视频提示词启用时间轴` 后，非通用 Profile 会在标题和 JSON 中写入连续时间段，默认关闭时不会污染旧工作流。
+
+每个 `video_storyboard` 镜头还拆出 `overall_soundscape`、`dialogue`、`sound_effects` 和 `non_diegetic_music` 四个音频字段，JSON 顶层的 `video_audio` 同步提供首镜头音频合同。图像负面词保留原有 `推荐负面词` 字符串，同时在 JSON 中提供 `negative_core`（重复主体、额外头部、分屏、文字水印、身体结构和布局护栏）与 `negative_optional`（风格、画质和细节抑制词），下游可以先使用核心组再按预算追加可选组。
+
+`model_channel_diagnostics` 会分别记录 `image`、`smart_text` 和 `video` 通道的模型尝试、采纳、回退、实际来源和错误列表。模型失败或候选不合格时，通道状态会明确标记为 `skill_fallback`，不会把图像、智能文本和视频的回退结果混在一起。
 
 系统会检查主体、服装、主场景和关键道具的连续性。新增人物、换装、换景、道具出现或承重点变化必须有明确动作与因果；合理的转场、变身、跳跃、飞行、水下悬停和失重主题仍可正常生成。提示词字数不设硬性上限。
 

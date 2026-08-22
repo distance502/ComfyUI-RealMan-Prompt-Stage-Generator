@@ -96,6 +96,23 @@ def _model_skill_pipeline_label(settings: dict[str, Any]) -> str:
     return f"Skill前置 + 本地模型后置润色{f'（{model_name}）' if model_name else ''}（含视频提示词）"
 
 
+def _model_channel_diagnostics_summary(settings: dict[str, Any]) -> str:
+    diagnostics = settings.get("模型通道诊断")
+    if not isinstance(diagnostics, dict) or not diagnostics:
+        return "未记录"
+    labels = {"image": "图像", "smart_text": "智能文本", "video": "视频"}
+    parts: list[str] = []
+    for channel in ("image", "smart_text", "video"):
+        details = diagnostics.get(channel)
+        if not isinstance(details, dict):
+            continue
+        status = str(details.get("status", "unrecorded") or "unrecorded")
+        attempts = int(details.get("attempts", 0) or 0)
+        fallbacks = int(details.get("fallbacks", 0) or 0)
+        parts.append(f"{labels[channel]}={status}({attempts}次/{fallbacks}回退)")
+    return " | ".join(parts) or "未记录"
+
+
 def _safe_model_api_base_url(raw_url: Any) -> str:
     text = str(raw_url or "").strip()
     if not text or any(char.isspace() for char in text):
@@ -199,6 +216,7 @@ def build_selected_tags_text(
             f"{' / 已智能纠正' if settings.get('内置模型自动修复说明') else ''}",
             f"模型调用状态：{settings.get('模型调用状态', '未记录')}",
             f"模型调用Skill：{settings.get('模型调用Skill名称', '') or '未启用'} / {settings.get('模型调用Skill状态', '') or '未记录'} / {settings.get('模型调用Skill通道', '') or '未记录'}",
+            f"模型通道诊断：{_model_channel_diagnostics_summary(settings)}",
             f"视频提示词模型状态：{settings.get('视频提示词模型状态', '未记录')}",
             f"图片反推状态：{settings.get('图片反推状态', '未启用')}",
             f"模型与Skill链路：{_model_skill_pipeline_label(settings)}",
@@ -251,13 +269,33 @@ def build_json_payload(
     model_source_effective = _normalize_model_source_label(
         settings.get("模型来源实际", model_source) or model_source
     )
+    video_storyboard = list(settings.get("视频提示词分镜结构", []) or [])
+    first_video_shot = video_storyboard[0] if video_storyboard and isinstance(video_storyboard[0], dict) else {}
+    video_audio = {
+        key: str(first_video_shot.get(key, "") or "")
+        for key in ("overall_soundscape", "dialogue", "sound_effects", "non_diegetic_music")
+    }
+    image_profile = settings.get("图像提示词目标模型Profile", {})
+    image_prompt_contract = {
+        key: image_profile.get(key)
+        for key in ("prompt_order", "positive_contract", "negative_contract", "parameter_policy")
+    } if isinstance(image_profile, dict) else {}
     return {
         "full_text": full_text,
         "prompt_text": prompt_only,
         "prompt_list": prompt_list,
         "prompt_collection": "\n\n".join(prompt_list),
+        "image_prompt_target_model": str(
+            settings.get("图像提示词目标模型有效", settings.get("图像提示词目标模型", "通用"))
+            or "通用"
+        ),
+        "image_prompt_target_profile": dict(settings.get("图像提示词目标模型Profile", {}) or {}),
+        "image_prompt_contract": image_prompt_contract,
         "smart_text_prompt": str(smart_text_prompt or ""),
         "video_prompt": str(video_prompt or ""),
+        "video_prompt_profile": dict(settings.get("视频提示词Profile", {}) or {}),
+        "video_storyboard": video_storyboard,
+        "video_audio": video_audio,
         "video_prompt_skill_status": str(settings.get("视频提示词Skill状态", "") or ""),
         "video_prompt_skill_version": str(settings.get("视频提示词Skill版本", "") or ""),
         "video_prompt_model_status": str(settings.get("视频提示词模型状态", "") or ""),
@@ -324,6 +362,11 @@ def build_json_payload(
         "image_reverse_error": str(settings.get("图片反推错误", "") or ""),
         "model_call_errors": [str(item) for item in settings.get("模型调用错误", []) if str(item).strip()],
         "model_skill_pipeline": _model_skill_pipeline_label(settings),
+        "model_channel_diagnostics": {
+            str(channel): dict(details)
+            for channel, details in (settings.get("模型通道诊断", {}) or {}).items()
+            if isinstance(details, dict)
+        },
         "model_api_provider": model_api_provider,
         "model_api_base_url": model_api_base_url,
         "model_api_model": model_api_model,
@@ -358,6 +401,10 @@ def build_json_payload(
         "negative_prompt_recommendation": negative_prompt,
         "negative_prompt_display": display_negative_prompt,
         "negative_prompt_language": str(settings["提示词语言"]),
+        # Keep the legacy joined negative string above, while exposing a
+        # priority-aware contract for downstream image nodes.
+        "negative_core": list(settings.get("负面词核心", []) or []),
+        "negative_optional": list(settings.get("负面词可选", []) or []),
     }
 
 

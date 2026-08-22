@@ -3893,6 +3893,81 @@ _NEGATIVE_ONLY_POSITIVE_FRAGMENT_KEYS = {
     "no low-resolution artifacts",
 }
 
+# Target-model guidance is metadata only; the default prompt remains model-agnostic.
+IMAGE_PROMPT_TARGET_PROFILES: dict[str, dict[str, Any]] = {
+    "通用": {
+        "label_zh": "通用自然语言图像提示词",
+        "label_en": "general natural-language image prompt",
+        "guidance": "subject-first natural language with spatial, material, lighting, and composition relations",
+        "prompt_order": ["subject", "action", "scene", "composition", "lighting", "material", "style", "quality"],
+        "positive_contract": "visible_facts_only",
+        "negative_contract": "structural_errors_in_negative_channel",
+        "parameter_policy": "omit_platform_parameters",
+    },
+    "Flux": {
+        "label_zh": "Flux 自然语言提示词",
+        "label_en": "Flux natural-language prompt",
+        "guidance": "front-load the subject and concrete visual relations; avoid platform parameters",
+        "prompt_order": ["subject", "action", "scene", "camera", "lighting", "material", "style"],
+        "positive_contract": "concrete_natural_language",
+        "negative_contract": "structural_errors_in_negative_channel",
+        "parameter_policy": "omit_platform_parameters",
+    },
+    "SDXL": {
+        "label_zh": "SDXL 自然语言提示词",
+        "label_en": "SDXL natural-language prompt",
+        "guidance": "keep subject, composition, style, and quality cues explicit and visually grounded",
+        "prompt_order": ["subject", "composition", "scene", "style", "lighting", "quality"],
+        "positive_contract": "explicit_visual_cues",
+        "negative_contract": "structural_errors_in_negative_channel",
+        "parameter_policy": "omit_platform_parameters",
+    },
+    "Qwen Image": {
+        "label_zh": "Qwen Image 自然语言提示词",
+        "label_en": "Qwen Image natural-language prompt",
+        "guidance": "use complete sentences and explicit spatial relationships rather than tag-only syntax",
+        "prompt_order": ["subject", "relation", "scene", "action", "lighting", "style", "quality"],
+        "positive_contract": "complete_sentences",
+        "negative_contract": "structural_errors_in_negative_channel",
+        "parameter_policy": "omit_platform_parameters",
+    },
+    "Krea 2": {
+        "label_zh": "Krea 2 自然语言提示词",
+        "label_en": "Krea 2 natural-language prompt",
+        "guidance": "use a concise subject-first cinematic description with concrete camera, environment, material, and light cues",
+        "prompt_order": ["subject", "camera", "environment", "action", "material", "lighting", "mood"],
+        "positive_contract": "concise_cinematic_natural_language",
+        "negative_contract": "structural_errors_in_negative_channel",
+        "parameter_policy": "omit_platform_parameters",
+    },
+    "Midjourney": {
+        "label_zh": "Midjourney 自然语言提示词",
+        "label_en": "Midjourney natural-language prompt",
+        "guidance": "keep the visual direction concrete and omit platform parameters from the prompt body",
+        "prompt_order": ["subject", "scene", "composition", "lighting", "style", "material"],
+        "positive_contract": "concrete_visual_direction",
+        "negative_contract": "structural_errors_in_negative_channel",
+        "parameter_policy": "omit_platform_parameters",
+    },
+    "自定义": {
+        "label_zh": "自定义图像提示词",
+        "label_en": "custom image prompt",
+        "guidance": "preserve the selected creative spine and write only visible positive facts",
+        "prompt_order": ["subject", "scene", "action", "composition", "lighting", "style", "quality"],
+        "positive_contract": "selected_creative_spine_only",
+        "negative_contract": "structural_errors_in_negative_channel",
+        "parameter_policy": "omit_unknown_parameters",
+    },
+}
+
+
+def resolve_image_prompt_target_profile(settings: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Resolve the selected image target without changing the prompt contract."""
+
+    target = str((settings or {}).get("图像提示词目标模型", "通用") or "通用").strip()
+    profile = IMAGE_PROMPT_TARGET_PROFILES.get(target, IMAGE_PROMPT_TARGET_PROFILES["通用"])
+    return {"target": target if target in IMAGE_PROMPT_TARGET_PROFILES else "通用", **profile}
+
 
 def _localize_prompt_fragments(fragments: list[str], settings: dict[str, Any]) -> list[str]:
     positive_fragments: list[str] = []
@@ -4279,14 +4354,14 @@ def _expand_english_prompt_locally(
     sections.append("The overall creative direction stays cohesive, with every visual element connected through one consistent camera distance, color palette, material language, and narrative atmosphere.")
     if quality:
         if non_person:
-            sections.append("The final image has clean focus hierarchy, stable geometry, coherent material layering, consistent perspective, controlled background detail, no unwanted text, no watermark, and no low-resolution artifacts.")
+            sections.append("The final image has clean focus hierarchy, stable geometry, coherent material layering, consistent perspective, controlled background detail, clean surfaces, and high-resolution edge and texture detail.")
         else:
-            sections.append("The final image has clean focus hierarchy, natural anatomy, stable hands, coherent fabric folds, controlled background detail, no unwanted text, no watermark, and no low-resolution artifacts.")
+            sections.append("The final image has clean focus hierarchy, natural anatomy, stable hands, coherent fabric folds, controlled background detail, clean surfaces, and high-resolution skin, material, and edge detail.")
     else:
         if non_person:
-            sections.append("The final image has clean focus hierarchy, stable geometry, coherent material layering, consistent perspective, controlled background detail, no unwanted text, no watermark, and no low-resolution artifacts.")
+            sections.append("The final image has clean focus hierarchy, stable geometry, coherent material layering, consistent perspective, controlled background detail, clean surfaces, and high-resolution edge and texture detail.")
         else:
-            sections.append("The final image has clean focus hierarchy, natural anatomy, stable hands, coherent fabric folds, controlled background detail, no extra fingers, no unwanted text, no watermark, and no low-resolution artifacts.")
+            sections.append("The final image has clean focus hierarchy, natural anatomy, stable hands, coherent fabric folds, controlled background detail, clean surfaces, accurate hand structure, and high-resolution skin, material, and edge detail.")
     return " ".join(section.strip() for section in sections if section.strip())
 
 
@@ -4370,14 +4445,14 @@ def _expand_chinese_prompt_locally(
         clauses.append(f"自定义补充自然融入同一个场景：{custom}，并服务同一条视觉主线")
     if quality:
         if non_person:
-            clauses.append(f"最终画质强调{quality}，焦点层级清晰，几何结构稳定，透视一致，材质纹理真实，边缘干净，背景克制，无文字、水印、logo、低清伪影、随机人像或无关肢体")
+            clauses.append(f"最终画质强调{quality}，焦点层级清晰，几何结构稳定，透视一致，材质纹理真实，边缘干净，背景克制，表面保持干净，细节与纹理达到高分辨率完成度")
         else:
-            clauses.append(f"最终画质强调{quality}，焦点层级清晰，解剖结构自然，手指数量稳定，皮肤与材质纹理真实，背景干净，无文字、水印、logo、低清伪影和多余肢体")
+            clauses.append(f"最终画质强调{quality}，焦点层级清晰，解剖结构自然，手指数量稳定，皮肤与材质纹理真实，背景干净，表面保持干净，细节与纹理达到高分辨率完成度")
     else:
         if non_person:
-            clauses.append("最终画质强调焦点层级清晰、几何结构稳定、透视一致、材质纹理真实、边缘干净、背景克制，无文字、水印、logo、低清伪影、随机人像或无关肢体")
+            clauses.append("最终画质强调焦点层级清晰、几何结构稳定、透视一致、材质纹理真实、边缘干净、背景克制、表面保持干净、细节与纹理达到高分辨率完成度")
         else:
-            clauses.append("最终画质强调焦点层级清晰、解剖结构自然、手指数量稳定、皮肤与材质纹理真实、背景干净，无文字、水印、logo、低清伪影和多余肢体")
+            clauses.append("最终画质强调焦点层级清晰、解剖结构自然、手指数量稳定、皮肤与材质纹理真实、背景干净、表面保持干净、细节与纹理达到高分辨率完成度")
     detail_text = "；".join(clause.strip("，,;； ") for clause in clauses if clause.strip())
     detail_text = detail_text.replace("，", "、").replace(",", "、")
     return f"{anchor_text}；{detail_text}" if detail_text else anchor_text
@@ -5592,6 +5667,9 @@ def build_prompt_list(
     infer_subject_type: Callable[[list[str], str], str],
     infer_output_structure: Callable[[str, str], str],
 ) -> list[str]:
+    target_profile = resolve_image_prompt_target_profile(settings)
+    settings["图像提示词目标模型有效"] = target_profile["target"]
+    settings["图像提示词目标模型Profile"] = dict(target_profile)
     selected = OrderedDict(
         (str(group), [_clean_fragment(value) for value in values if _clean_fragment(value)])
         for group, values in selected.items()
@@ -5811,10 +5889,10 @@ def format_sections(prompt_list: list[str], selected_text: str, settings: dict[s
     for index, prompt in enumerate(prompt_list, start=1):
         if english_full_text:
             sections.append(
-                f"### Prompt {index}\n> {prompt}\n\n#### Tag Analysis\nSelected source tags are available in the node tag output and JSON payload.\n\n#### Suitable Models\nStable Diffusion, ComfyUI, Flux, Midjourney"
+                f"### Prompt {index}\n> {prompt}\n\n#### Tag Analysis\nSelected source tags are available in the node tag output and JSON payload.\n\n#### Suitable Models\nStable Diffusion, ComfyUI, Flux, Qwen Image, Krea 2, Midjourney"
             )
         else:
             sections.append(
-                f"### 提示词 {index}\n> {prompt}\n\n#### 标签解析\n使用标签：{selected_text}\n\n#### 适用模型\nStable Diffusion、ComfyUI、Flux、Midjourney"
+                f"### 提示词 {index}\n> {prompt}\n\n#### 标签解析\n使用标签：{selected_text}\n\n#### 适用模型\nStable Diffusion、ComfyUI、Flux、Qwen Image、Krea 2、Midjourney"
             )
     return "\n\n".join(sections), "\n\n".join(prompt_list)
