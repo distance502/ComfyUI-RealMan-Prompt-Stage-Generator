@@ -11,7 +11,7 @@ import os
 import pathlib
 import re
 import time
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 try:
     from .model_call_skill import ModelCallSkill
@@ -2214,6 +2214,15 @@ def _resolve_system_prompt(settings: dict[str, Any]) -> str:
             )
         video_prompt = str(settings.get("视频提示词模型系统提示", "") or "").strip()
         if video_prompt:
+            video_profile = settings.get("视频提示词Profile")
+            if isinstance(video_profile, Mapping):
+                video_prompt += (
+                    "\n\nTarget video profile: "
+                    f"{video_profile.get('target_model', '通用')}; input mode: "
+                    f"{video_profile.get('input_mode', 'T2V')}; continuity contract: "
+                    f"{video_profile.get('continuity', 'subject_scene_prop_lighting_axis')}; "
+                    f"audio schema: {video_profile.get('audio_schema', 'inline_natural_language')}."
+                )
             language = _prompt_language_mode(settings)
             if language == "纯中文":
                 video_prompt += "\n\n最终使用中文自然语言分段输出，每段都是可拍摄分镜；不限制字数。"
@@ -2221,6 +2230,18 @@ def _resolve_system_prompt(settings: dict[str, Any]) -> str:
                 video_prompt += "\n\nOutput natural English storyboard paragraphs; every paragraph must be a shootable shot. There is no word limit."
             else:
                 video_prompt += "\n\n英文分镜正文后必须保留“中文说明：”以及完整中文分镜故事；两部分均不限制字数。"
+            if isinstance(video_profile, Mapping) and video_profile.get("timeline_enabled"):
+                video_prompt += (
+                    "\n\n时间轴已启用：每个分镜标题必须保留连续、互不重叠的时间段，"
+                    "中文使用“0-2秒”格式，英文使用“0-2s”格式；时间段只用于镜头编排，"
+                    "不要把时间轴写成参数列表或脱离自然语言正文。"
+                )
+            if isinstance(video_profile, Mapping):
+                shot_count = int(video_profile.get("shot_count", 5) or 5)
+                if shot_count == 1:
+                    video_prompt += "\n\n镜头段数合同：本次是单镜头模式，只输出恰好一段行动镜头，不能扩展成多段分镜。"
+                elif shot_count in {3, 5, 7}:
+                    video_prompt += f"\n\n镜头段数合同：本次只输出恰好 {shot_count} 段连续分镜，保持底稿的编号与阶段顺序。"
             if _uses_incremental_refinement(settings):
                 video_prompt += (
                     "\n\n输入已经是 Skill 校验过的故事基线。只补充或修正同一故事中的分镜细节，"
@@ -4205,12 +4226,36 @@ def _skill_context_for_model(settings: dict[str, Any]) -> str:
     if model_fallback_note:
         extra_lines.append(f"模型回退状态：{model_fallback_note}")
     extra_context = ("\n" + "\n".join(extra_lines)) if extra_lines else ""
+    image_target_profile = settings.get("图像提示词目标模型Profile")
+    image_target_guidance = (
+        str(image_target_profile.get("guidance", "")).strip()
+        if isinstance(image_target_profile, Mapping)
+        else ""
+    )
+    image_target_order = (
+        image_target_profile.get("prompt_order", [])
+        if isinstance(image_target_profile, Mapping)
+        else []
+    )
+    if not isinstance(image_target_order, (list, tuple)):
+        image_target_order = []
+    image_target_order_text = ", ".join(
+        str(item).strip() for item in image_target_order if str(item).strip()
+    )
+    image_target_line = (
+        f"图像目标模型提示词策略：{image_target_guidance}；"
+        f"组织顺序：{image_target_order_text}；"
+        if image_target_guidance
+        else ""
+    )
     return (
         "Skill前置上下文：以下正文已经过 Qwen TE Skill 引擎、标签库、随机运行时、标签块编排、NSFW 工作台和智能文本匹配链路整理；"
         "你是后置润色层，只能扩写与连贯化，不得推翻 Skill 已经收敛出的主体、风格、景别、服装、场景、动作、光影和语言。\n"
         f"模型来源：{model_source}；"
         f"模型实际来源：{model_source_effective}；"
         f"提示词语言：{settings.get('提示词语言', '纯中文')}；"
+        f"图像提示词目标模型：{settings.get('图像提示词目标模型有效', settings.get('图像提示词目标模型', '通用'))}；"
+        f"{image_target_line}"
         f"详细度：{settings.get('详细度', '标准')}；"
         f"输出模式：{settings.get('输出模式', '完整结果')}；"
         f"模板风格：{settings.get('模板风格', '自动')}；"
@@ -4278,12 +4323,23 @@ def _compose_model_user_prompt(prompt: str, settings: dict[str, Any]) -> str:
         anchors = [str(item).strip() for item in settings.get("视频提示词必保留锚点", []) if str(item).strip()]
         anchor_text = "、".join(dict.fromkeys(anchors)) or "无额外锚点"
         spine = str(settings.get("全局创作主线摘要", "") or "").strip() or "按视频 Skill 底稿为准"
+        video_profile = settings.get("视频提示词Profile")
+        shot_count = int(
+            settings.get("视频提示词镜头段数有效", 0)
+            or (video_profile.get("shot_count", 5) if isinstance(video_profile, Mapping) else 5)
+            or 5
+        )
+        timeline_instruction = (
+            "时间轴已启用；保留每段连续的 0-2秒、2-4秒等时间段，并把它们放在对应分镜标题中。\n"
+            if bool(settings.get("视频提示词时间轴启用", False))
+            else "正文不要写具体秒数或时长参数。\n"
+        )
         return repair_instruction + (
             "视频 Skill 已先生成一份可直接使用的多段分镜故事底稿。你只能沿这条故事主线润色，不能另起无关剧情。\n"
             f"必须原样保留的主体、场景、动作等锚点：{anchor_text}\n"
             f"全局创作主线摘要：{spine}\n"
             f"{environment_line}"
-            "请按时间顺序输出至少三段分镜，每段用完整自然语言写清镜头、动作、环境反馈和承接关系；所有分镜必须组成同一个有开端、触发、行动、升级和结尾的故事。不得写具体秒数或时长参数，不限制字数。\n"
+            f"请按时间顺序输出恰好 {shot_count} 段分镜，每段用完整自然语言写清镜头、动作、环境反馈和承接关系；所有分镜必须组成同一个有开端、触发、行动、升级和结尾的故事。不限制字数。\n{timeline_instruction}"
             "只输出最终分镜正文，不输出分析、规则解释、标签列表或 Markdown。\n\n"
             f"视频 Skill 底稿：\n{str(prompt or '').strip()}"
         )
@@ -5005,6 +5061,20 @@ def maybe_model_refine_video(
     prepared, recovered = _prepare_model_response_text(raw_text)
     candidate = _repair_common_video_fragment_errors(_postprocess_video_prompt_text(prepared))
     language = str(settings.get("提示词语言", "纯中文") or "纯中文")
+    video_profile = settings.get("视频提示词Profile")
+    allow_timeline = bool(
+        settings.get("视频提示词时间轴启用", False)
+        or (video_profile.get("timeline_enabled", False) if isinstance(video_profile, Mapping) else False)
+    )
+
+    def validate_video(text: str) -> bool:
+        try:
+            return bool(validator(text, language=language, allow_timeline=allow_timeline))
+        except TypeError:
+            # Keep compatibility with third-party validators using the old
+            # language-only signature.
+            return bool(validator(text, language=language))
+
     anchors = [str(item).strip() for item in settings.get("视频提示词必保留锚点", []) if str(item).strip()]
     anchor_roles = settings.get("视频提示词锚点角色")
     missing = [anchor for anchor in anchors if anchor not in candidate]
@@ -5014,7 +5084,7 @@ def maybe_model_refine_video(
         video_settings.get("智能场景关系图"),
         output_kind="video",
     )
-    candidate_structure_valid = bool(validator(candidate, language=language))
+    candidate_structure_valid = validate_video(candidate)
     continuity_reason = (
         _video_story_continuity_violation(candidate, anchor_roles, language=language)
         if candidate_structure_valid
@@ -5068,7 +5138,7 @@ def maybe_model_refine_video(
             video_settings.get("智能场景关系图"),
             output_kind="video",
         )
-        blended_structure_valid = bool(validator(blended_prompt, language=language))
+        blended_structure_valid = validate_video(blended_prompt)
         blended_continuity_reason = (
             _video_story_continuity_violation(blended_prompt, anchor_roles, language=language)
             if blended_structure_valid
@@ -5133,7 +5203,7 @@ def maybe_model_refine_video(
                 video_settings.get("智能场景关系图"),
                 output_kind="video",
             )
-            repaired_structure_valid = bool(validator(repaired_candidate, language=language))
+            repaired_structure_valid = validate_video(repaired_candidate)
             repaired_continuity_reason = (
                 _video_story_continuity_violation(
                     repaired_candidate,

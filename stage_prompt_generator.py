@@ -148,6 +148,7 @@ from .prompt_rule_config import (
 )
 from .stage_prompt.negative_builder import (
     build_negative_prompt_from_state as _build_negative_prompt_from_state_impl,
+    classify_negative_prompt as _classify_negative_prompt_impl,
 )
 from .stage_prompt.nsfw_mapper import (
     map_nsfw_workspace_to_stage_state as _map_nsfw_workspace_to_stage_state_impl,
@@ -236,12 +237,17 @@ from .stage_prompt.tag_block_composer import (
     summarize_tag_block_payload as _summarize_tag_block_payload_impl,
 )
 from .stage_prompt.video_prompt_skill import (
+    VIDEO_PROMPT_INPUT_MODE_OPTIONS as _VIDEO_PROMPT_INPUT_MODE_OPTIONS,
     VIDEO_PROMPT_MODEL_SYSTEM_TEMPLATE as _VIDEO_PROMPT_MODEL_SYSTEM_TEMPLATE,
+    VIDEO_PROMPT_SHOT_COUNT_OPTIONS as _VIDEO_PROMPT_SHOT_COUNT_OPTIONS,
+    VIDEO_PROMPT_TARGET_MODEL_OPTIONS as _VIDEO_PROMPT_TARGET_MODEL_OPTIONS,
     VIDEO_PROMPT_SKILL_VERSION as _VIDEO_PROMPT_SKILL_VERSION,
     build_video_prompt as _build_video_prompt_impl,
+    build_video_storyboard_metadata as _build_video_storyboard_metadata_impl,
     is_natural_video_prompt as _is_natural_video_prompt_impl,
     video_prompt_anchor_roles as _video_prompt_anchor_roles_impl,
     video_prompt_required_anchors as _video_prompt_required_anchors_impl,
+    resolve_video_prompt_profile as _resolve_video_prompt_profile_impl,
 )
 
 NODE_CLASS_MAPPINGS: dict[str, Any] = {}
@@ -811,6 +817,10 @@ _RUNTIME_RANDOM_HISTORY_GENERIC_SUBJECTS = {
     *EXPANDED_THEME_POOL_OPTIONS,
 ]
 提示词语言选项 = ["纯中文", "英文提示词+中文说明", "纯英文"]
+图像提示词目标模型选项 = ["通用", "Flux", "SDXL", "Qwen Image", "Krea 2", "Midjourney", "自定义"]
+视频提示词目标模型选项 = list(_VIDEO_PROMPT_TARGET_MODEL_OPTIONS)
+视频提示词输入模式选项 = list(_VIDEO_PROMPT_INPUT_MODE_OPTIONS)
+视频提示词镜头段数选项 = list(_VIDEO_PROMPT_SHOT_COUNT_OPTIONS)
 详细度选项 = ["简洁", "标准", "详细"]
 输出模式选项 = ["完整结果", "仅提示词优先"]
 标签反推模式选项 = ["自动平衡", "成人向成熟"]
@@ -891,6 +901,11 @@ SETTING_DEFAULTS = {
     "随机排除标签": "",
     "生成数量": 3,
     "提示词语言": "纯中文",
+    "图像提示词目标模型": "通用",
+    "视频提示词目标模型": "通用",
+    "视频提示词输入模式": "T2V",
+    "视频提示词启用时间轴": False,
+    "视频提示词镜头段数": "自动",
     "详细度": "标准",
     "输出模式": "完整结果",
     "标签反推模式": "自动平衡",
@@ -916,6 +931,7 @@ SETTING_DEFAULTS = {
     "模型调用采纳次数": 0,
     "模型活动回退数量": 0,
     "模型调用错误": [],
+    "模型通道诊断": {},
     "模型调用Skill名称": "",
     "模型调用Skill版本": "",
     "模型调用Skill状态": "",
@@ -5119,6 +5135,64 @@ def _merge_model_runtime_state(target: dict[str, Any], source: dict[str, Any]) -
         target[key] = list(value) if isinstance(value, list) else value
 
 
+def _record_model_channel_diagnostic(
+    settings: dict[str, Any],
+    channel: str,
+    *,
+    output_count: int,
+    attempts_before: int,
+    success_before: int,
+    failure_before: int,
+    adopted_before: int,
+    fallback_before: int,
+    status: str,
+    skill_status: str = "",
+    errors_before: list[str] | tuple[str, ...] | None = None,
+) -> None:
+    """Persist per-output-channel model/Skill accounting without changing legacy counters."""
+
+    diagnostics = settings.get("模型通道诊断")
+    if not isinstance(diagnostics, dict):
+        diagnostics = {}
+    current_attempts = max(0, int(settings.get("模型调用尝试次数", 0) or 0))
+    current_success = max(0, int(settings.get("模型调用成功次数", 0) or 0))
+    current_failure = max(0, int(settings.get("模型调用失败次数", 0) or 0))
+    current_adopted = max(0, int(settings.get("模型调用采纳次数", 0) or 0))
+    current_fallback = max(0, int(settings.get("模型活动回退数量", 0) or 0))
+    current_errors = [
+        str(item).strip()
+        for item in settings.get("模型调用错误", [])
+        if str(item).strip()
+    ]
+    previous_errors = [str(item).strip() for item in (errors_before or []) if str(item).strip()]
+    if previous_errors:
+        remaining_errors = list(current_errors)
+        for previous_error in previous_errors:
+            try:
+                remaining_errors.remove(previous_error)
+            except ValueError:
+                # The global error list is capped; a rotated item is not a
+                # new error for this channel.
+                continue
+        channel_errors = remaining_errors
+    else:
+        channel_errors = current_errors
+    diagnostics[str(channel)] = {
+        "output_count": max(0, int(output_count or 0)),
+        "attempts": max(0, current_attempts - int(attempts_before or 0)),
+        "successes": max(0, current_success - int(success_before or 0)),
+        "failures": max(0, current_failure - int(failure_before or 0)),
+        "adopted": max(0, current_adopted - int(adopted_before or 0)),
+        "fallbacks": max(0, current_fallback - int(fallback_before or 0)),
+        "status": str(status or "unrecorded"),
+        "skill_status": str(skill_status or ""),
+        "model_source": str(settings.get("模型来源", "仅Skill") or "仅Skill"),
+        "model_source_effective": str(settings.get("模型来源实际", "仅Skill") or "仅Skill"),
+        "errors": channel_errors[-4:],
+    }
+    settings["模型通道诊断"] = diagnostics
+
+
 def _apply_character_sheet_to_settings(
     settings: dict[str, Any],
     selected: OrderedDict[str, list[str]],
@@ -5808,6 +5882,17 @@ def _run_stage_impl(
         )
         natural_contract_fallback_list = list(prompt_list)
     raw_prompt_list = list(prompt_list)
+    image_model_counters_before = {
+        key: max(0, int(settings.get(key, 0) or 0))
+        for key in (
+            "模型调用尝试次数",
+            "模型调用成功次数",
+            "模型调用失败次数",
+            "模型调用采纳次数",
+            "模型活动回退数量",
+        )
+    }
+    image_model_errors_before = list(settings.get("模型调用错误", []) or [])
     model_prompt_list = _maybe_model_refine_batch_impl(
         model,
         prompt_list,
@@ -5851,6 +5936,28 @@ def _run_stage_impl(
             output_count=len(raw_prompt_list),
             reason="模型候选在最终稳定化、批内差异或连续生成避重校验中被恢复为 Skill 结果。",
         )
+    _record_model_channel_diagnostic(
+        settings,
+        "image",
+        output_count=len(raw_prompt_list),
+        attempts_before=image_model_counters_before["模型调用尝试次数"],
+        success_before=image_model_counters_before["模型调用成功次数"],
+        failure_before=image_model_counters_before["模型调用失败次数"],
+        adopted_before=image_model_counters_before["模型调用采纳次数"],
+        fallback_before=image_model_counters_before["模型活动回退数量"],
+        status=(
+            "model_adopted"
+            if any(str(candidate).strip() != str(original).strip() for candidate, original in zip(model_prompt_list, raw_prompt_list))
+            and not postprocess_fallback_count
+            else "skill_fallback"
+            if postprocess_fallback_count or (model is None and str(settings.get("模型来源", "仅Skill") or "仅Skill") != "仅Skill")
+            else "skill_only"
+            if model is None
+            else "model_unchanged"
+        ),
+        skill_status="generated_and_validated",
+        errors_before=image_model_errors_before,
+    )
     _update_prompt_history(cache_key, prompt_list)
     profile_markers = [
         *list(settings.get("随机主题池档案标记", []) or []),
@@ -5876,6 +5983,9 @@ def _run_stage_impl(
     negative_prompt = _build_negative_prompt(selected, custom_tags, settings)
     if nsfw_output is not None:
         negative_prompt = _merge_nsfw_negative_prompt(negative_prompt, nsfw_output.get("negative"), settings)
+    negative_layers = _classify_negative_prompt_impl(negative_prompt)
+    settings["负面词核心"] = list(negative_layers.get("negative_core", []))
+    settings["负面词可选"] = list(negative_layers.get("negative_optional", []))
     lock_tag_whitelist = _parse_tags(settings["锁定标签白名单"])
     random_exclude_tags = _parse_tags(settings["随机排除标签"])
     selected_tags_text = _build_selected_tags_text_impl(
@@ -5895,6 +6005,18 @@ def _run_stage_impl(
         format_grouped_summary=_format_grouped_summary_impl,
     )
     smart_text_prompt = ""
+    smart_model_fallback_used = False
+    smart_model_counters_before = {
+        key: max(0, int(settings.get(key, 0) or 0))
+        for key in (
+            "模型调用尝试次数",
+            "模型调用成功次数",
+            "模型调用失败次数",
+            "模型调用采纳次数",
+            "模型活动回退数量",
+        )
+    }
+    smart_model_errors_before = list(settings.get("模型调用错误", []) or [])
     if smart_text_enabled:
         smart_seed = _build_smart_text_seed_impl(
             user_text=smart_text_input,
@@ -5989,6 +6111,35 @@ def _run_stage_impl(
             )
     else:
         smart_text_prompt = primary_prompt
+    _record_model_channel_diagnostic(
+        settings,
+        "smart_text",
+        output_count=1,
+        attempts_before=smart_model_counters_before["模型调用尝试次数"],
+        success_before=smart_model_counters_before["模型调用成功次数"],
+        failure_before=smart_model_counters_before["模型调用失败次数"],
+        adopted_before=smart_model_counters_before["模型调用采纳次数"],
+        fallback_before=smart_model_counters_before["模型活动回退数量"],
+        status=(
+            "disabled_skill"
+            if not smart_text_enabled
+            else "skill_fallback"
+            if model is None and str(settings.get("模型来源", "仅Skill") or "仅Skill") != "仅Skill"
+            else "skill_fallback"
+            if smart_model_fallback_used
+            else "model_adopted"
+            if smart_text_prompt and smart_text_prompt != primary_prompt
+            else "model_unchanged"
+        ),
+        skill_status="natural_language_validated",
+        errors_before=smart_model_errors_before,
+    )
+    video_profile = _resolve_video_prompt_profile_impl(settings)
+    settings["视频提示词目标模型有效"] = str(video_profile.get("target_model", "通用"))
+    settings["视频提示词输入模式有效"] = str(video_profile.get("input_mode", "T2V"))
+    settings["视频提示词时间轴启用"] = bool(video_profile.get("timeline_enabled", False))
+    settings["视频提示词镜头段数有效"] = int(video_profile.get("shot_count", 5) or 5)
+    settings["视频提示词Profile"] = dict(video_profile)
     video_prompt = _build_video_prompt_impl(
         selected,
         custom_tags,
@@ -5997,8 +6148,10 @@ def _run_stage_impl(
     )
     video_model_success_before = max(0, int(settings.get("模型调用成功次数", 0) or 0))
     video_model_failure_before = max(0, int(settings.get("模型调用失败次数", 0) or 0))
+    video_model_adopted_before = max(0, int(settings.get("模型调用采纳次数", 0) or 0))
     video_model_fallback_before = max(0, int(settings.get("模型活动回退数量", 0) or 0))
     video_model_skip_before = max(0, int(settings.get("模型智能跳过次数", 0) or 0))
+    video_model_errors_before = list(settings.get("模型调用错误", []) or [])
     settings["视频提示词必保留锚点"] = _video_prompt_required_anchors_impl(
         selected,
         custom_tags,
@@ -6020,6 +6173,7 @@ def _run_stage_impl(
         clean_think_text=_清洗think块文本,
         validator=_is_natural_video_prompt_impl,
     )
+    video_model_candidate_adopted = refined_video_prompt != video_prompt
     _merge_model_runtime_state(settings, video_model_settings)
     if model is None:
         if video_model_failure_before:
@@ -6053,16 +6207,50 @@ def _run_stage_impl(
     if _is_natural_video_prompt_impl(
         deduped_video_prompt,
         language=str(settings.get("提示词语言", "纯中文") or "纯中文"),
+        allow_timeline=bool(video_profile.get("timeline_enabled", False)),
     ) and not deduped_video_missing_anchors:
         video_prompt = deduped_video_prompt
     else:
         video_prompt = pre_dedupe_video_prompt
         _merge_inference_notes(settings, ["视频提示词避重候选未通过自然语言合同，已保留本轮有效视频正文。"])
-    if _is_natural_video_prompt_impl(video_prompt, language=str(settings.get("提示词语言", "纯中文") or "纯中文")):
+    if _is_natural_video_prompt_impl(
+        video_prompt,
+        language=str(settings.get("提示词语言", "纯中文") or "纯中文"),
+        allow_timeline=bool(video_profile.get("timeline_enabled", False)),
+    ):
         settings["视频提示词Skill状态"] = "已生成"
     else:
         settings["视频提示词Skill状态"] = "生成结果未通过自然语言校验"
     settings["视频提示词Skill版本"] = _VIDEO_PROMPT_SKILL_VERSION
+    settings["视频提示词分镜结构"] = _build_video_storyboard_metadata_impl(
+        video_prompt,
+        settings,
+        selected=selected,
+        custom_tags=custom_tags,
+    )
+    _record_model_channel_diagnostic(
+        settings,
+        "video",
+        output_count=1,
+        attempts_before=video_model_success_before + video_model_failure_before,
+        success_before=video_model_success_before,
+        failure_before=video_model_failure_before,
+        adopted_before=video_model_adopted_before,
+        fallback_before=video_model_fallback_before,
+        status=(
+            "skill_only"
+            if model is None and str(settings.get("模型来源", "仅Skill") or "仅Skill") == "仅Skill"
+            else "skill_fallback"
+            if model is None
+            else "model_adopted"
+            if video_model_candidate_adopted and settings.get("视频提示词模型状态") == "已采用模型润色"
+            else "skill_fallback"
+            if "保留 Skill" in str(settings.get("视频提示词模型状态", ""))
+            else "model_unchanged"
+        ),
+        skill_status=str(settings.get("视频提示词Skill状态", "") or ""),
+        errors_before=video_model_errors_before,
+    )
     selected_tags_text = _build_selected_tags_text_impl(
         template_style=template_style,
         subject_type=subject_type,
@@ -6112,6 +6300,8 @@ def _run_stage_impl(
         json_payload["tag_block_composer_summary"] = settings.get("标签块编排摘要", "")
     json_payload["smart_text_prompt"] = smart_text_prompt
     json_payload["video_prompt"] = video_prompt
+    json_payload["video_prompt_profile"] = dict(settings.get("视频提示词Profile", {}) or {})
+    json_payload["video_storyboard"] = list(settings.get("视频提示词分镜结构", []) or [])
     json_payload["smart_text_enabled"] = bool(smart_text_enabled)
     json_payload["smart_text_input"] = smart_text_input
     json_payload["danbooru_general_tags"] = list(danbooru_general_tags)
@@ -7488,6 +7678,41 @@ class QwenTE阶段式提示词生成器:
         required["随机排除标签"] = ("STRING", {"default": "", "multiline": False})
         required["生成数量"] = ("INT", {"default": 3, "min": 1, "max": 20, "step": 1})
         required["提示词语言"] = (提示词语言选项, {"default": "纯中文"})
+        required["图像提示词目标模型"] = (
+            图像提示词目标模型选项,
+            {
+                "default": "通用",
+                "tooltip": "选择下游图像模型的提示词偏好。通用保持兼容；Krea 2 使用自然语言主体、空间、材质和光影描述，不写平台参数。",
+            },
+        )
+        required["视频提示词目标模型"] = (
+            视频提示词目标模型选项,
+            {
+                "default": "通用",
+                "tooltip": "视频输出 Profile。通用保持自然语言兼容；H3、LTX、Seedance 等 Profile 会在 JSON 中提供对应时间轴、音频和连续性策略。",
+            },
+        )
+        required["视频提示词输入模式"] = (
+            视频提示词输入模式选项,
+            {
+                "default": "T2V",
+                "tooltip": "视频输入类型：T2V 文生视频、I2V 图生视频、FL2V 首尾帧、L2V 末帧引导、Ref2V 参考视频。",
+            },
+        )
+        required["视频提示词启用时间轴"] = (
+            "BOOLEAN",
+            {
+                "default": False,
+                "tooltip": "仅对支持时间轴的 H3/LTX/Seedance 等视频 Profile 生效；关闭时正文保持无秒数的自然语言，JSON 仍提供连续分镜结构。",
+            },
+        )
+        required["视频提示词镜头段数"] = (
+            视频提示词镜头段数选项,
+            {
+                "default": "自动",
+                "tooltip": "镜头段数：单镜头=1、短动作=3、标准剧情=5、长剧情=7；自动根据任务意图选择，默认保持五段故事结构。",
+            },
+        )
         required["详细度"] = (详细度选项, {"default": "标准"})
         required["输出模式"] = (输出模式选项, {"default": "完整结果"})
         required["标签反推模式"] = (标签反推模式选项, {"default": "自动平衡"})

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from typing import Any, Callable
+import re
 
 try:
     from .narrative import (
@@ -61,6 +62,53 @@ _TEMPLATE_NEGATIVE_BASE_STYLE = {
     "奇幻概念设计": "CG感",
     "史诗奇幻海报": "CG感",
 }
+
+# Structural guardrails should survive downstream truncation before aesthetic
+# suppressors do.  Matching is intentionally language-agnostic so the same
+# JSON contract works for Chinese and English prompt channels.
+_NEGATIVE_CORE_PATTERNS = (
+    re.compile(
+        r"duplicate|clone|repeated|extra\s+(?:head|face|person|body|finger)|\bdouble\b|"
+        r"same\s+(?:person|face)|split[- ]?screen|diptych|triptych|collage|storyboard|"
+        r"comic\s+panel|contact\s+sheet|tiling|picture[- ]?in[- ]?picture|multi[- ]?scene|"
+        r"text|watermark|logo|lettering|caption|subtitle|inscription|rune|"
+        r"deformed|bad\s+anatomy|missing\s+(?:limb|arm|leg|hand|head)|extra\s+(?:limb|arm|leg|finger)|"
+        r"重复|复制|克隆|同一人物|重复脸|重复头部|额外头部|额外肢体|多余手指|手指错误|"
+        r"分屏|拼贴|故事板|漫画分格|联系表|平铺|画中画|多场景|文字|水印|logo|字样|铭文|符文|"
+        r"畸形|解剖错误|身体结构错误|缺失(?:手臂|腿|肢体|头部)|额外(?:手臂|腿|肢体)",
+        flags=re.IGNORECASE,
+    ),
+)
+
+
+def classify_negative_prompt(negative_prompt: str) -> dict[str, list[str]]:
+    """Split a legacy negative string into structural core and optional terms.
+
+    The returned terms preserve their original order and spelling.  This is a
+    metadata-only operation; callers can continue passing the unchanged joined
+    string to existing image nodes.
+    """
+
+    source = str(negative_prompt or "").strip()
+    if not source:
+        return {"negative_core": [], "negative_optional": []}
+    terms = [part.strip() for part in re.split(r"[、,，;；\n]+", source) if part.strip()]
+    core: list[str] = []
+    optional: list[str] = []
+    seen_core: set[str] = set()
+    seen_optional: set[str] = set()
+    for term in terms:
+        key = re.sub(r"\s+", "", term).casefold()
+        if not key:
+            continue
+        is_core = any(pattern.search(term) for pattern in _NEGATIVE_CORE_PATTERNS)
+        bucket = core if is_core else optional
+        seen = seen_core if is_core else seen_optional
+        if key in seen:
+            continue
+        seen.add(key)
+        bucket.append(term)
+    return {"negative_core": core, "negative_optional": optional}
 
 
 def _localize_negative_terms(terms: list[str], *, use_english: bool) -> list[str]:

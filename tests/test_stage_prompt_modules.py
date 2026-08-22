@@ -544,6 +544,105 @@ class TestStagePromptIntelligence(unittest.TestCase):
         self.assertIn("雨伞", result[7])
         self.assertIn("证据", result[2])
 
+    def test_model_channel_diagnostics_keep_errors_in_their_own_channel(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        settings = {
+            "模型来源": "API接口",
+            "模型来源实际": "API接口",
+            "模型调用错误": [],
+            "模型通道诊断": {},
+            "模型调用尝试次数": 0,
+            "模型调用成功次数": 0,
+            "模型调用失败次数": 0,
+            "模型调用采纳次数": 0,
+            "模型活动回退数量": 0,
+        }
+
+        settings.update(
+            {
+                "模型调用尝试次数": 1,
+                "模型调用失败次数": 1,
+                "模型活动回退数量": 1,
+                "模型调用错误": ["image transport failure"],
+            }
+        )
+        module._record_model_channel_diagnostic(
+            settings,
+            "image",
+            output_count=1,
+            attempts_before=0,
+            success_before=0,
+            failure_before=0,
+            adopted_before=0,
+            fallback_before=0,
+            status="skill_fallback",
+            errors_before=[],
+        )
+        image_errors = list(settings["模型通道诊断"]["image"]["errors"])
+
+        smart_errors_before = list(settings["模型调用错误"])
+        settings.update(
+            {
+                "模型调用尝试次数": 2,
+                "模型调用失败次数": 2,
+                "模型活动回退数量": 2,
+                "模型调用错误": ["image transport failure", "smart text failure"],
+            }
+        )
+        module._record_model_channel_diagnostic(
+            settings,
+            "smart_text",
+            output_count=1,
+            attempts_before=1,
+            success_before=0,
+            failure_before=1,
+            adopted_before=0,
+            fallback_before=1,
+            status="skill_fallback",
+            errors_before=smart_errors_before,
+        )
+
+        self.assertEqual(image_errors, ["image transport failure"])
+        self.assertEqual(
+            settings["模型通道诊断"]["smart_text"]["errors"],
+            ["smart text failure"],
+        )
+        self.assertEqual(
+            settings["模型通道诊断"]["image"]["errors"],
+            image_errors,
+        )
+
+    def test_full_stage_records_skill_fallback_for_unavailable_api_channels(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        result = module._run_stage(
+            None,
+            **{
+                "unique_id": "model-channel-diagnostics-api-unavailable",
+                "模型来源": "API接口",
+                "模型来源实际": "API接口",
+                "模型调用基础来源": "API接口",
+                "主体标签1": "成年女性侦探",
+                "场景背景标签1": "雨夜街头",
+                "智能文本匹配": True,
+                "智能文本输入": "她在雨夜街头寻找遗失的旧信封。",
+                "运行时随机标签": False,
+                "生成数量": 1,
+                "提示词语言": "纯中文",
+                "seed": 149,
+            },
+        )
+
+        payload = json.loads(result[3])
+        diagnostics = payload["model_channel_diagnostics"]
+        self.assertEqual(set(diagnostics), {"image", "smart_text", "video"})
+        for channel in ("image", "smart_text", "video"):
+            with self.subTest(channel=channel):
+                self.assertEqual(diagnostics[channel]["status"], "skill_fallback")
+                self.assertEqual(diagnostics[channel]["output_count"], 1)
+        self.assertTrue(result[1])
+        self.assertTrue(result[7])
+        self.assertIn("雨夜街头", result[7])
+
     def test_missing_action_prop_merges_in_full_stage_without_rewriting_selected_tags(self) -> None:
         module = load_stage_prompt_generator_for_integration_test()
         result = module._run_stage(
@@ -30529,6 +30628,54 @@ class TestStagePromptModules(unittest.TestCase):
             video_prompt_skill.is_natural_video_prompt(prompt.replace("\n\n", " "), language="纯中文")
         )
 
+    def test_video_shot_count_and_optional_timeline_are_structured_without_changing_default(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["成年女性侦探"],
+                "场景背景": ["雨夜旧车站"],
+                "动作姿态": ["转身追查线索"],
+                "服装造型": ["深色长风衣"],
+                "道具世界观": ["旧信封"],
+                "画面风格": ["电影写实"],
+                "光影氛围": ["列车灯逆光"],
+                "构图视角": ["中景"],
+            }
+        )
+        base = {"提示词语言": "纯中文", "主体类型解析结果": "人物角色", "模板风格": "电影写实"}
+        for mode, expected in (("单镜头", 1), ("短动作", 3), ("标准剧情", 5), ("长剧情", 7)):
+            settings = {**base, "视频提示词镜头段数": mode}
+            prompt = video_prompt_skill.build_video_prompt(selected, [], settings)
+            metadata = video_prompt_skill.build_video_storyboard_metadata(
+                prompt, settings, selected=selected, custom_tags=[]
+            )
+            self.assertEqual([item["number"] for item in metadata], list(range(1, expected + 1)))
+            self.assertTrue(video_prompt_skill.is_natural_video_prompt(prompt, language="纯中文"))
+
+        timeline_settings = {
+            **base,
+            "视频提示词目标模型": "H3",
+            "视频提示词启用时间轴": True,
+            "视频提示词镜头段数": "标准剧情",
+        }
+        timeline_prompt = video_prompt_skill.build_video_prompt(selected, [], timeline_settings)
+        timeline_metadata = video_prompt_skill.build_video_storyboard_metadata(
+            timeline_prompt, timeline_settings, selected=selected, custom_tags=[]
+        )
+        self.assertTrue(video_prompt_skill.is_natural_video_prompt(timeline_prompt, language="纯中文", allow_timeline=True))
+        self.assertEqual([item["time_axis"] for item in timeline_metadata], ["0-2s", "2-4s", "4-6s", "6-7s", "7-8s"])
+        self.assertTrue(all(item["timeline_enabled"] for item in timeline_metadata))
+        self.assertFalse(video_prompt_skill.resolve_video_prompt_profile({"视频提示词启用时间轴": True})["timeline_enabled"])
+
+    def test_negative_prompt_layers_keep_structural_terms_first(self) -> None:
+        layers = negative_builder.classify_negative_prompt(
+            "重复人物、额外头部、分屏构图、文字水印、低清、过度锐化"
+        )
+        self.assertEqual(
+            layers["negative_core"],
+            ["重复人物", "额外头部", "分屏构图", "文字水印"],
+        )
+        self.assertEqual(layers["negative_optional"], ["低清", "过度锐化"])
+
     def test_video_prompt_validation_requires_unique_contiguous_ordered_shot_numbers(self) -> None:
         selected = OrderedDict(
             {
@@ -31452,6 +31599,119 @@ class TestStagePromptModules(unittest.TestCase):
         bilingual_english, bilingual_chinese = bilingual.split("中文说明：", 1)
         self.assertEqual(len([part for part in bilingual_english.split("\n\n") if part.strip()]), 5)
         self.assertEqual(len([part for part in bilingual_chinese.split("\n\n") if part.strip()]), 5)
+
+    def test_english_video_prompt_preserves_explicit_ascii_anchor_groups(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["female adventurer"],
+                "场景背景": ["dungeon ruins"],
+                "动作姿态": ["holding a torch"],
+                "服装造型": ["leather armor"],
+                "道具世界观": ["torch"],
+                "画面风格": ["dark comic"],
+                "光影氛围": ["cold mist side light"],
+                "构图视角": ["full body wide shot"],
+            }
+        )
+        prompt = video_prompt_skill.build_video_prompt(
+            selected,
+            [],
+            {"提示词语言": "纯英文", "主体类型解析结果": "人物角色", "seed": 7},
+            primary_prompt="A female adventurer in dungeon ruins.",
+        )
+        self.assertTrue(video_prompt_skill.is_natural_video_prompt(prompt, language="纯英文"))
+        for anchor in (
+            "female adventurer",
+            "dungeon ruins",
+            "holding a torch",
+            "leather armor",
+            "torch",
+            "dark comic",
+            "cold mist side light",
+            "full body wide shot",
+        ):
+            self.assertIn(anchor, prompt)
+
+    def test_image_prompt_target_profile_supports_krea2_and_legacy_default(self) -> None:
+        krea = prompt_builder.resolve_image_prompt_target_profile({"图像提示词目标模型": "Krea 2"})
+        default = prompt_builder.resolve_image_prompt_target_profile({})
+        self.assertEqual(krea["target"], "Krea 2")
+        self.assertIn("subject-first", krea["guidance"])
+        self.assertEqual(krea["parameter_policy"], "omit_platform_parameters")
+        self.assertEqual(krea["prompt_order"][:3], ["subject", "camera", "environment"])
+        self.assertEqual(krea["negative_contract"], "structural_errors_in_negative_channel")
+        self.assertEqual(default["target"], "通用")
+
+    def test_video_profile_and_storyboard_metadata_are_model_aware(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["female adventurer"],
+                "场景背景": ["dungeon ruins"],
+                "动作姿态": ["holding a torch"],
+                "道具世界观": ["torch"],
+            }
+        )
+        settings = {
+            "提示词语言": "纯英文",
+            "视频提示词目标模型": "H3",
+            "视频提示词输入模式": "I2V",
+            "主体类型解析结果": "人物角色",
+            "seed": 12,
+        }
+        profile = video_prompt_skill.resolve_video_prompt_profile(settings)
+        prompt = video_prompt_skill.build_video_prompt(
+            selected,
+            [],
+            settings,
+            primary_prompt="A female adventurer in dungeon ruins.",
+        )
+        metadata = video_prompt_skill.build_video_storyboard_metadata(
+            prompt,
+            settings,
+            selected=selected,
+        )
+        self.assertEqual(profile["target_model"], "H3")
+        self.assertEqual(profile["input_mode"], "I2V")
+        self.assertEqual(profile["audio_schema"], "overall_soundscape_dialogue_music")
+        self.assertEqual(len(metadata), 5)
+        self.assertEqual(metadata[0]["shot_id"], "S01")
+        self.assertEqual(metadata[0]["target_model"], "H3")
+        self.assertEqual(metadata[0]["input_mode"], "I2V")
+        self.assertIn("主体", metadata[0]["spatial_anchors"])
+
+    def test_non_person_video_does_not_invent_outfit_language(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["漂浮的机械探测器"],
+                "场景背景": ["地下实验室"],
+                "动作姿态": ["沿轨道缓慢转向"],
+                "道具世界观": ["红色警示灯"],
+                "画面风格": ["硬表面科幻"],
+                "光影氛围": ["冷色顶光"],
+                "构图视角": ["全景全身"],
+            }
+        )
+        settings = {
+            "提示词语言": "纯英文",
+            "主体类型解析结果": "非人物主体",
+            "视频提示词目标模型": "LTX",
+            "视频提示词输入模式": "T2V",
+        }
+        prompt = video_prompt_skill.build_video_prompt(
+            selected,
+            [],
+            settings,
+            primary_prompt="A floating mechanical probe turns slowly along a rail in an underground laboratory.",
+        )
+        self.assertTrue(video_prompt_skill.is_natural_video_prompt(prompt, language="纯英文"))
+        self.assertNotIn("established outfit", prompt)
+        metadata = video_prompt_skill.build_video_storyboard_metadata(
+            prompt,
+            settings,
+            selected=selected,
+            custom_tags=[],
+        )
+        self.assertEqual(metadata[0]["subject_kind"], "non_person")
 
     def test_video_model_refiner_adopts_valid_local_or_api_candidate(self) -> None:
         selected = OrderedDict(
