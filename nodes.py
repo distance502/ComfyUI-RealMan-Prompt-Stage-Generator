@@ -286,6 +286,100 @@ def _本地模型格式(value: object) -> str:
     return "gguf" if os.path.splitext(normalized)[1].lower() == ".gguf" else "transformers"
 
 
+def _推断本地模型系列(value: object) -> str:
+    """Infer a loader family only when the model name is unambiguous."""
+
+    text = str(value or "").strip().lower().replace("\\", "/")
+    compact = re.sub(r"[^a-z0-9.]+", "", text)
+    if not compact:
+        return ""
+    if (
+        "qwen3.8" in text
+        or "qwen3_8" in text
+        or re.search(r"(?:^|[/_.-])qwen38(?:[/_.-]|vl|$)", text)
+    ):
+        return "Qwen3.8-VL"
+    # Qwen3.6 uses the Qwen3.5 llama.cpp architecture/handler family.
+    if (
+        "qwen3.5" in text
+        or "qwen3_5" in text
+        or "qwen3.6" in text
+        or "qwen3_6" in text
+        or re.search(r"(?:^|[/_.-])qwen3[56](?:[/_.-]|vl|$)", text)
+        or re.search(r"(?:^|[/_.-])3[._]5mmproj", text)
+    ):
+        return "Qwen3.5-VL"
+    if re.search(r"qwen3(?:[-_]vl|[-_]\d+[bma]|$)", text) or "qwen3vl" in compact:
+        return "Qwen3-VL"
+    if "gemma4" in compact or re.search(r"gemma[._-]*4(?:[^0-9]|$)", text):
+        return "Gemma4"
+    if "deepseek" in text:
+        return "DeepSeek"
+    if "mistral" in text or "mixtral" in text:
+        return "Mistral"
+    if "llama" in text:
+        return "Llama"
+    return ""
+
+
+def _推断qwen3模型版本(value: object) -> str:
+    """Return an explicit Qwen3.x revision without confusing parameter sizes."""
+
+    text = str(value or "").strip().lower().replace("\\", "/")
+    if "qwen3.8" in text or "qwen3_8" in text or re.search(r"(?:^|[/_.-])qwen38(?:[/_.-]|vl|$)", text):
+        return "3.8"
+    if "qwen3.6" in text or "qwen3_6" in text or re.search(r"(?:^|[/_.-])qwen36(?:[/_.-]|vl|$)", text):
+        return "3.6"
+    if (
+        "qwen3.5" in text
+        or "qwen3_5" in text
+        or re.search(r"(?:^|[/_.-])qwen35(?:[/_.-]|vl|$)", text)
+        or re.search(r"(?:^|[/_.-])3[._]5mmproj", text)
+    ):
+        return "3.5"
+    return ""
+
+
+def _规范化本地模型配置(config: dict) -> dict:
+    """Resolve obvious family choices and reject cross-family vision pairs."""
+
+    resolved = dict(config or {})
+    resolved.pop("family_auto_note", None)
+    requested = str(resolved.get("family") or "通用GGUF").strip() or "通用GGUF"
+    model_name = str(resolved.get("model") or "").strip()
+    mmproj_name = str(resolved.get("mmproj") or "无").strip()
+    model_family = _推断本地模型系列(model_name)
+    mmproj_family = "" if mmproj_name in {"", "无"} else _推断本地模型系列(mmproj_name)
+    if model_family and mmproj_family and model_family != mmproj_family:
+        raise RuntimeError(
+            "主模型与视觉投影 mmproj 属于不同模型家族："
+            f"主模型识别为 {model_family}，mmproj 识别为 {mmproj_family}。"
+            "请选择与主模型同版本的 mmproj，纯文本调用则把视觉投影设为“无”。"
+        )
+    model_revision = _推断qwen3模型版本(model_name)
+    mmproj_revision = "" if mmproj_name in {"", "无"} else _推断qwen3模型版本(mmproj_name)
+    if model_revision and mmproj_revision and model_revision != mmproj_revision:
+        raise RuntimeError(
+            "主模型与视觉投影 mmproj 属于不同 Qwen3 版本："
+            f"主模型为 Qwen3.{model_revision.split('.', 1)[1]}，"
+            f"mmproj 为 Qwen3.{mmproj_revision.split('.', 1)[1]}。"
+            "Qwen3.5 与 Qwen3.6 虽共用兼容 handler，但视觉投影不可互换。"
+        )
+
+    inferred = model_family or mmproj_family
+    effective = inferred or requested
+    resolved["family"] = effective
+    if inferred and requested != inferred:
+        resolved["family_auto_note"] = (
+            f"本地模型智能识别：根据主模型/mmproj 将模型系列从“{requested}”纠正为“{inferred}”。"
+        )
+    elif inferred == "Qwen3.5-VL" and re.search(r"qwen3[._]6|qwen36", model_name, re.IGNORECASE):
+        resolved["family_auto_note"] = (
+            "本地模型智能识别：Qwen3.6 使用当前 llama.cpp 的 Qwen3.5 兼容家族与模型内嵌聊天模板。"
+        )
+    return resolved
+
+
 def _解析本地模型路径(value: object) -> tuple[str, str]:
     normalized = _规范化模型相对路径(value)
     if not normalized:
@@ -1611,6 +1705,17 @@ class _QwenModel:
     chat_handler: object | None = None
 
 
+def _本地模型支持视觉输入(model: object) -> bool:
+    llm = getattr(model, "llm", None)
+    return bool(
+        getattr(model, "chat_handler", None) is not None
+        or (
+            bool(getattr(llm, "_qwen_te_transformers", False))
+            and bool(getattr(llm, "supports_images", False))
+        )
+    )
+
+
 def _更新模型存储记录(storage, model: _QwenModel | None) -> None:
     storage.model = model
     storage_key = str(getattr(storage, "storage_key", "") or "").strip().lower()
@@ -1650,6 +1755,7 @@ class _QwenStorage:
     @classmethod
     @_锁定模型存储操作
     def load(cls, config: dict, *, force_reload: bool = False) -> _QwenModel:
+        config = _规范化本地模型配置(config)
         if not force_reload and cls.model and cls.model.settings == config:
             return cls.model
 
@@ -1766,9 +1872,19 @@ class _QwenStorage:
         try:
             llm = Llama(**llama_kwargs)
         except ValueError as exc:
+            if family == "Gemma4":
+                detail = (
+                    "当前环境能加载其他 GGUF，但无法加载该 Gemma4 文件；"
+                    "这通常不是路径错误，而是当前 llama-cpp-python / llama.cpp 二进制"
+                    "对该 Gemma4 GGUF 架构不兼容。"
+                )
+            else:
+                detail = (
+                    "请核对模型文件完整性、模型系列、mmproj 版本、上下文/KV 参数，"
+                    "并确认当前 llama-cpp-python 支持该 GGUF 架构。"
+                )
             raise RuntimeError(
-                "Gemma4 模型加载失败。当前环境能加载其他 GGUF，但无法加载该 Gemma4 文件；"
-                "这通常不是路径错误，而是当前 llama-cpp-python / llama.cpp 二进制对该 Gemma4 GGUF 架构不兼容。"
+                f"{family} 模型加载失败。{detail}"
                 f"\n模型文件：{model_path}"
                 f"\n原始错误：{exc}"
             ) from exc
@@ -1967,7 +2083,7 @@ class QwenTE模型加载器:
 
         return {
             "required": {
-                "模型系列": (TE通用模型系列选项, {"default": "Qwen3.5-VL", "tooltip": "同一加载器自动支持 GGUF 和 Hugging Face 原始模型目录（config.json + safetensors/bin）；Qwen3.8 会优先使用专用视觉 handler，缺失时回退到模型自带模板。"}),
+                "模型系列": (TE通用模型系列选项, {"default": "Qwen3.5-VL", "tooltip": "同一加载器自动支持 GGUF 和 Hugging Face 原始模型目录；明确的文件名会自动纠正模型家族，Qwen3.6 使用 Qwen3.5 兼容路径。"}),
                 "主模型": (model_list, {"tooltip": "选择 GGUF 文件，或选择包含 config.json 与权重的原始模型目录；模型放到 ComfyUI/models/LLM/。"}),
                 "视觉投影mmproj": (mmproj_list, {"default": "无", "tooltip": "多模态需要 mmproj；纯文本可选“无”。"}),
                 "启用思考": ("BOOLEAN", {"default": False, "tooltip": "Qwen/Gemma 思考开关；通用 GGUF 纯文本模型通常可保持关闭。"}),
@@ -2130,6 +2246,14 @@ class QwenTE图像推理:
         total_images = int(图片.shape[0]) if 图片 is not None else 0
         if 输入模式 in ("图片", "逐帧", "视频") and total_images == 0:
             raise ValueError("未检测到图片输入。")
+        if 输入模式 in ("图片", "逐帧", "视频"):
+            if not _本地模型支持视觉输入(qwen模型):
+                family = str(getattr(qwen模型, "settings", {}).get("family", "当前系列") or "当前系列")
+                raise RuntimeError(
+                    f"{family} 本地模型当前只具备文本能力，未加载可用的视觉处理器。"
+                    "请匹配该主模型版本的 mmproj 并安装含对应视觉 handler 的 llama-cpp-python；"
+                    "原始模型则需提供可加载的视觉 processor。"
+                )
         最多帧数 = max(2, min(_MAX_MULTIFRAME_INFERENCE_FRAMES, int(最多帧数)))
         最大边长 = max(128, min(_MAX_IMAGE_INFERENCE_EDGE, int(最大边长)))
         if 输入模式 == "逐帧" and total_images > _MAX_MULTIFRAME_INFERENCE_FRAMES:

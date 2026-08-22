@@ -195,6 +195,8 @@ def build_selected_tags_text(
             f"用户标签Skill：{int(settings.get('用户标签Skill标签数', 0) or 0)} 个当前标签 / {len(dict(settings.get('用户标签Skill', {}) or {}).get('protected_tags', []) or [])} 个显式保护锚点",
             f"模型来源：{model_source}",
             f"模型实际来源：{model_source_effective}",
+            f"本地模型解析：{settings.get('内置模型系列有效', '') or '未触发'}"
+            f"{' / 已智能纠正' if settings.get('内置模型自动修复说明') else ''}",
             f"模型调用状态：{settings.get('模型调用状态', '未记录')}",
             f"模型调用Skill：{settings.get('模型调用Skill名称', '') or '未启用'} / {settings.get('模型调用Skill状态', '') or '未记录'} / {settings.get('模型调用Skill通道', '') or '未记录'}",
             f"视频提示词模型状态：{settings.get('视频提示词模型状态', '未记录')}",
@@ -300,6 +302,8 @@ def build_json_payload(
         "targeted_repair_type": str(settings.get("智能定向修复最近类型", "") or ""),
         "model_source": model_source,
         "model_source_effective": model_source_effective,
+        "local_model_family_effective": str(settings.get("内置模型系列有效", "") or ""),
+        "local_model_auto_repair_note": str(settings.get("内置模型自动修复说明", "") or ""),
         "model_fallback_note": str(settings.get("模型回退说明", "") or ""),
         "model_call_status": str(settings.get("模型调用状态", "") or ""),
         "model_call_skill_name": str(settings.get("模型调用Skill名称", "") or ""),

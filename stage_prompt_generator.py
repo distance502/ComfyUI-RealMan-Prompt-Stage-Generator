@@ -2430,7 +2430,13 @@ def _加载内置阶段模型(kwargs: dict[str, Any]) -> Any:
     config = _解析内置模型配置(kwargs)
     if not config["model"] or str(config["model"]).startswith("（请把模型放到"):
         raise RuntimeError("未选择内置主模型。请点击节点底部“模型”按钮选择 models/LLM 里的模型。")
-    return _内置QwenStorage.load(config)
+    model = _内置QwenStorage.load(config)
+    effective_settings = getattr(model, "settings", {})
+    if isinstance(effective_settings, dict):
+        kwargs["内置模型系列有效"] = str(effective_settings.get("family") or config["family"])
+        if effective_settings.get("family_auto_note"):
+            kwargs["内置模型自动修复说明"] = str(effective_settings["family_auto_note"])
+    return model
 
 
 def _加载阶段模型(kwargs: dict[str, Any]) -> Any:
@@ -2511,6 +2517,8 @@ def _安全加载阶段模型(settings: dict[str, Any]) -> Any:
     settings["模型调用状态"] = "已加载，等待调用"
     if settings.get("API地址自动修复说明"):
         _append_runtime_note(settings, str(settings["API地址自动修复说明"]))
+    if settings.get("内置模型自动修复说明"):
+        _append_runtime_note(settings, str(settings["内置模型自动修复说明"]))
     return model
 
 
@@ -4980,6 +4988,25 @@ def _reverse_reference_image(model: Any, image: Any, settings: dict[str, Any]) -
         return ""
     if model is None or not hasattr(model, "llm"):
         raise RuntimeError("图片反推需要可用的视觉模型。请先在“模型”按钮里选择支持视觉的模型和 mmproj，或连接 qwen模型。")
+    llm = getattr(model, "llm", None)
+    managed_local = bool(
+        isinstance(getattr(llm, "_qwen_te_settings", None), dict)
+        or getattr(llm, "_qwen_te_transformers", False)
+    )
+    if managed_local:
+        supports_images = bool(
+            getattr(model, "chat_handler", None) is not None
+            or (
+                bool(getattr(llm, "_qwen_te_transformers", False))
+                and bool(getattr(llm, "supports_images", False))
+            )
+        )
+        if not supports_images:
+            family = str(getattr(model, "settings", {}).get("family", "当前系列") or "当前系列")
+            raise RuntimeError(
+                f"图片反推不可用：{family} 本地模型当前只有文本能力，没有可用视觉 handler/processor。"
+                "请匹配主模型版本的 mmproj，或改用支持图像输入的原始视觉模型/API。"
+            )
     data_urls = _批量帧索引转data_url(image, [0], int(settings.get("图片反推最大边长", 960) or 960))
     image_url = data_urls.get(0, "")
     if not image_url:
@@ -7555,6 +7582,12 @@ class QwenTE阶段式提示词生成器:
             settings["模型活动回退数量"] = 0
             settings["模型调用采纳次数"] = 0
             settings["模型调用错误"] = []
+            model_settings = getattr(qwen模型, "settings", {})
+            if isinstance(model_settings, dict):
+                settings["内置模型系列有效"] = str(model_settings.get("family") or "")
+                if model_settings.get("family_auto_note"):
+                    settings["内置模型自动修复说明"] = str(model_settings["family_auto_note"])
+                    _append_runtime_note(settings, settings["内置模型自动修复说明"])
         outputs = _run_stage(qwen模型, **settings)
         cache_namespace = _extract_cache_namespace_from_extra_pnginfo(
             settings.get("extra_pnginfo"),

@@ -13696,6 +13696,97 @@ class TestStagePromptModules(unittest.TestCase):
                 )
             )
 
+    def test_local_model_family_is_inferred_and_qwen36_uses_qwen35_compatibility(self) -> None:
+        module, _fake_llama, _runtime = load_nodes_for_storage_test(pathlib.Path("."))
+        cases = (
+            ("Qwen3.5-4B-Q4_K_M.gguf", "Qwen3.5-VL"),
+            ("Qwen3.6-35B-A3B-IQ2_M.gguf", "Qwen3.5-VL"),
+            ("Qwen3.8-4B-Q4_K_M.gguf", "Qwen3.8-VL"),
+            ("Qwen3-8B-Q4_K_M.gguf", "Qwen3-VL"),
+            ("Qwen3-5B-Q4_K_M.gguf", "Qwen3-VL"),
+            ("Llama-4-Scout.gguf", "Llama"),
+            ("DeepSeek-R1.gguf", "DeepSeek"),
+        )
+        for model_name, expected in cases:
+            with self.subTest(model_name=model_name):
+                self.assertEqual(module._推断本地模型系列(model_name), expected)
+        self.assertEqual(module._推断qwen3模型版本("Qwen3.6-35B.gguf"), "3.6")
+        self.assertEqual(module._推断qwen3模型版本("Qwen3-8B.gguf"), "")
+        self.assertEqual(module._推断qwen3模型版本("Qwen3-5B.gguf"), "")
+
+        resolved = module._规范化本地模型配置(
+            {
+                "model": "Qwen3.6-35B-A3B-IQ2_M.gguf",
+                "mmproj": "mmproj-Qwen3.6-35B-A3B-f16.gguf",
+                "family": "通用GGUF",
+            }
+        )
+        self.assertEqual(resolved["family"], "Qwen3.5-VL")
+        self.assertIn("纠正为", resolved["family_auto_note"])
+
+    def test_local_model_rejects_cross_family_mmproj_before_loading(self) -> None:
+        module, fake_llama, _runtime = load_nodes_for_storage_test(pathlib.Path("."))
+        with self.assertRaisesRegex(RuntimeError, "不同模型家族"):
+            module._规范化本地模型配置(
+                {
+                    "model": "Qwen3.5-4B-Q4_K_M.gguf",
+                    "mmproj": "mmproj-Qwen3.8-4B-f16.gguf",
+                    "family": "Qwen3.5-VL",
+                }
+            )
+        self.assertEqual(len(fake_llama.created), 0)
+
+        with self.assertRaisesRegex(RuntimeError, "不同 Qwen3 版本"):
+            module._规范化本地模型配置(
+                {
+                    "model": "Qwen3.5-4B-Q4_K_M.gguf",
+                    "mmproj": "mmproj-Qwen3.6-35B-A3B-f16.gguf",
+                    "family": "Qwen3.5-VL",
+                }
+            )
+
+    def test_local_model_visual_capability_requires_a_real_handler_or_processor(self) -> None:
+        module, _fake_llama, _runtime = load_nodes_for_storage_test(pathlib.Path("."))
+        text_only = types.SimpleNamespace(llm=types.SimpleNamespace(), chat_handler=None)
+        gguf_vision = types.SimpleNamespace(llm=types.SimpleNamespace(), chat_handler=object())
+        raw_text = types.SimpleNamespace(
+            llm=types.SimpleNamespace(_qwen_te_transformers=True, supports_images=False),
+            chat_handler=None,
+        )
+        raw_vision = types.SimpleNamespace(
+            llm=types.SimpleNamespace(_qwen_te_transformers=True, supports_images=True),
+            chat_handler=None,
+        )
+        self.assertFalse(module._本地模型支持视觉输入(text_only))
+        self.assertTrue(module._本地模型支持视觉输入(gguf_vision))
+        self.assertFalse(module._本地模型支持视觉输入(raw_text))
+        self.assertTrue(module._本地模型支持视觉输入(raw_vision))
+
+    def test_non_gemma_local_load_error_reports_the_effective_family(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            models_dir = pathlib.Path(temp_dir)
+            llm_dir = models_dir / "LLM"
+            llm_dir.mkdir()
+            (llm_dir / "DeepSeek-R1-Q4.gguf").touch()
+            module, fake_llama, _runtime = load_nodes_for_storage_test(models_dir)
+
+            class RejectingLlama:
+                def __init__(self, **_kwargs):
+                    raise ValueError("unsupported architecture")
+
+            module.Llama = RejectingLlama
+            with self.assertRaisesRegex(RuntimeError, "DeepSeek 模型加载失败") as raised:
+                module._QwenStorage.load(
+                    {
+                        "model": "DeepSeek-R1-Q4.gguf",
+                        "family": "通用GGUF",
+                        "mmproj": "无",
+                        "think": False,
+                    }
+                )
+            self.assertNotIn("Gemma4 模型加载失败", str(raised.exception))
+            self.assertEqual(len(fake_llama.created), 0)
+
     def test_local_model_advanced_and_custom_parameters_are_normalized_and_filtered(self) -> None:
         module, _fake_llama, _runtime = load_nodes_for_storage_test(pathlib.Path("."))
         module._LLAMA_INIT_PARAMS_CACHE = {
@@ -22411,6 +22502,18 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertTrue(result[1].strip())
         self.assertIn("图片反推回退", result[2])
         self.assertIn("图片反推回退", " | ".join(payload["normalization_notes"]))
+
+    def test_stage_image_reverse_rejects_managed_text_only_local_model_before_encoding(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        text_only_model = types.SimpleNamespace(
+            llm=types.SimpleNamespace(_qwen_te_settings={"family": "Qwen3.8-VL"}),
+            settings={"family": "Qwen3.8-VL"},
+            chat_handler=None,
+        )
+        with mock.patch.object(module, "_批量帧索引转data_url") as encode:
+            with self.assertRaisesRegex(RuntimeError, "只有文本能力"):
+                module._reverse_reference_image(text_only_model, object(), {})
+        encode.assert_not_called()
 
     def test_model_refiner_sends_skill_context_to_chat_model(self) -> None:
         class DummyChatLlm:
