@@ -6,9 +6,23 @@
 | --- | --- |
 | 节点名称 | `真男人提示词阶段生成器` |
 | 节点分类 | `Qwen TE` |
-| 节点标识 | `QwenTE_StagePromptGenerator` |
+| 节点标识 | `RealMan_StagePromptGenerator` |
 
 ![真男人提示词阶段生成器主界面](docs/images/plugin-overview.png)
+
+新建工作流请使用 `RealMan_StagePromptGenerator`。前端仍识别旧的 `QwenTE_StagePromptGenerator` 类型，以便读取旧缓存和提供迁移提示；后端注册表只提供新的英文标识。
+
+## 界面速览
+
+| 主界面与八个输出 | 模型来源与 API 服务商 |
+| --- | --- |
+| ![主界面与输出终端](docs/images/plugin-overview.png) | ![模型来源与 API 配置](docs/images/model-providers.png) |
+
+| 本地模型参数 | 角色设定图 |
+| --- | --- |
+| ![本地模型上下文与性能参数](docs/images/local-model-settings.png) | ![正面、侧面、背面三视图设置](docs/images/character-turnaround.png) |
+
+截图对应当前节点界面。不同 ComfyUI 版本的面板尺寸可能略有差异，但节点标识、输出顺序和模型链路保持一致。
 
 ## 为什么使用它
 

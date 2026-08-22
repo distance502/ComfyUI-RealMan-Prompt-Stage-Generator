@@ -288,7 +288,7 @@ def build_case_prompt_map(case: dict[str, Any], library: dict[str, Any]) -> tupl
     workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
     prompt_map = build_prompt_map(workflow)
     model_loader_id = next((node_id for node_id, payload in prompt_map.items() if payload["class_type"] == "QwenTE_ModelLoader"), None)
-    stage_id = next((node_id for node_id, payload in prompt_map.items() if payload["class_type"] == "QwenTE_StagePromptGenerator"), None)
+    stage_id = next((node_id for node_id, payload in prompt_map.items() if payload["class_type"] == "RealMan_StagePromptGenerator"), None)
     ksampler_id = next((node_id for node_id, payload in prompt_map.items() if payload["class_type"] == "KSampler"), None)
     save_id = next((node_id for node_id, payload in prompt_map.items() if payload["class_type"] == "SaveImage"), None)
     positive_clip_id, negative_clip_id = _resolve_prompt_text_node_ids(prompt_map)

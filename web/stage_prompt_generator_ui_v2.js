@@ -6,8 +6,8 @@ window.__QWEN_TE_STAGE_MAIN_UI_LOADED__ = true;
 window.__QWEN_TE_STAGE_MAIN_UI__ = true;
 
 const EXTENSION_NAME = "QwenTE.StagePromptGeneratorUI";
-const TARGET_NODE_CLASSES = new Set(["QwenTE_StagePromptGenerator", "QwenTE_UniversalStagePromptGenerator"]);
-const TARGET_NODE_CLASS = "QwenTE_StagePromptGenerator";
+const TARGET_NODE_CLASSES = new Set(["RealMan_StagePromptGenerator", "QwenTE_StagePromptGenerator", "QwenTE_UniversalStagePromptGenerator"]);
+const TARGET_NODE_CLASS = "RealMan_StagePromptGenerator";
 const STAGE_DISPLAY_NAME_MARKERS = ["阶段式提示词生成器", "真男人提示词阶段生成器"];
 const STAGE_WIDGET_SIGNATURE_NAMES = ["qwen模型", "模板风格", "首条正向提示词"];
 const STAGE_OUTPUT_SIGNATURE_GROUPS = new Map([

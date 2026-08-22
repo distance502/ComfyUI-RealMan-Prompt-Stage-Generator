@@ -486,6 +486,7 @@ test("stage node detection rejects generic single outputs and preserves legacy s
 	assert.equal(exports.isStagePromptNode({ type: "OtherNode", outputs: [{ name: "正向提示词合集" }] }), false);
 	assert.equal(exports.isStagePromptNode({ type: "OtherNode", outputs: [{ name: "JSON结果" }, { name: "JSON" }, { name: "JSON结果" }] }), false);
 	assert.equal(exports.isStagePromptNode({ type: "QwenTE_StagePromptGenerator", outputs: [] }), true);
+	assert.equal(exports.isStagePromptNode({ type: "RealMan_StagePromptGenerator", outputs: [] }), true);
 	assert.equal(exports.isStagePromptNode({ title: "Qwen TE 阶段式提示词生成器", outputs: [] }), true);
 	assert.equal(exports.isStagePromptNode({
 		type: "LegacyStageNode",

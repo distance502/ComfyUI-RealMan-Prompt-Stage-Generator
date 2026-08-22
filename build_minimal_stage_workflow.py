@@ -142,7 +142,7 @@ def main() -> int:
     workflow = json.loads(SOURCE_WORKFLOW.read_text(encoding="utf-8"))
     workflow = 旁路清理节点工作流(workflow)
     save_nodes = _find_nodes_by_type(workflow, "SaveImage")
-    stage_nodes = _find_nodes_by_type(workflow, "QwenTE_StagePromptGenerator")
+    stage_nodes = _find_nodes_by_type(workflow, "RealMan_StagePromptGenerator")
     if not save_nodes or not stage_nodes:
         raise RuntimeError("Bridge workflow missing SaveImage or stage node")
 

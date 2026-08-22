@@ -165,8 +165,8 @@ def probe_plugin_entry() -> tuple[bool, str]:
     try:
         spec.loader.exec_module(module)
         node_map = getattr(module, "NODE_CLASS_MAPPINGS", {})
-        if "QwenTE_StagePromptGenerator" not in node_map:
-            return False, "插件入口已导入，但没有注册 QwenTE_StagePromptGenerator。"
+        if "RealMan_StagePromptGenerator" not in node_map:
+            return False, "插件入口已导入，但没有注册 RealMan_StagePromptGenerator。"
         names = ", ".join(sorted(node_map.keys()))
         return True, f"插件入口导入成功，已注册节点: {names}"
     except Exception:

@@ -166,7 +166,7 @@ class TestDependencyProbe(unittest.TestCase):
                     "import sys\n"
                     "if 'qwen_te_dependency_probe_pkg.child' in sys.modules:\n"
                     "    raise RuntimeError('preexisting alias child leaked into probe')\n"
-                    "NODE_CLASS_MAPPINGS = {'QwenTE_StagePromptGenerator': object}\n",
+                    "NODE_CLASS_MAPPINGS = {'RealMan_StagePromptGenerator': object}\n",
                     encoding="utf-8",
                 )
                 with mock.patch.object(dependency_probe, "NODE_DIR", plugin_dir):

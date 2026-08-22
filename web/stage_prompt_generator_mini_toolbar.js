@@ -3,6 +3,7 @@ import { app } from "../../scripts/app.js";
 const MINI_TOOLBAR_MODULE_URL = import.meta.url;
 
 const TARGET_NODE_CLASSES = new Set([
+	"RealMan_StagePromptGenerator",
 	"QwenTE_StagePromptGenerator",
 	"QwenTE_UniversalStagePromptGenerator",
 ]);

@@ -32,7 +32,7 @@
 
 ### 1. 后端保留单节点
 
-继续使用当前 `QwenTE_StagePromptGenerator / QwenTE_UniversalStagePromptGenerator`。
+继续使用当前 `RealMan_StagePromptGenerator / QwenTE_UniversalStagePromptGenerator`；旧 `QwenTE_StagePromptGenerator` 仅作为前端缓存识别兼容名。
 
 新增一层 `nsfw_workspace` 状态模型，但不新增一套平行节点类型。
 

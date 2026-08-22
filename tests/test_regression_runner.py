@@ -187,9 +187,9 @@ class TestRegressionRunner(unittest.TestCase):
 
     def test_build_stage_workflow_uses_available_model_loader_options(self) -> None:
         def fake_get_json(url: str) -> dict[str, object]:
-            if url.endswith("/object_info/QwenTE_StagePromptGenerator"):
+            if url.endswith("/object_info/RealMan_StagePromptGenerator"):
                 return {
-                    "QwenTE_StagePromptGenerator": {
+                    "RealMan_StagePromptGenerator": {
                         "input": {
                             "required": {
                                 "qwen模型": ["QWENLLAMA", {}],
