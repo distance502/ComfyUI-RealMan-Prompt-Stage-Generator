@@ -1520,7 +1520,11 @@ def _原始模型消息(messages: list[dict]) -> tuple[list[dict], list[Image.Im
                 except Exception as exc:
                     raise ValueError(f"原始模型输入图片无法解码：{exc}") from exc
                 images.append(image)
-                parts.append({"type": "image", "image": image})
+                # Transformers chat templates expect a media marker here;
+                # the decoded PIL objects are supplied separately to the
+                # processor below. Passing the object into the template makes
+                # some Qwen/VL processors stringify it and lose the image cue.
+                parts.append({"type": "image"})
             else:
                 parts.append({"type": "text", "text": "[图片]"})
         normalized.append({"role": role, "content": parts})
@@ -1548,6 +1552,28 @@ class _TransformersChatAdapter:
 
     @property
     def device(self):
+        # Accelerate may place the input embedding on a different device than
+        # the first parameter. Prefer the embedding device when a device map
+        # is available, then fall back to the first real model parameter.
+        device_map = getattr(self.model, "hf_device_map", None)
+        if isinstance(device_map, dict):
+            preferred_keys = (
+                "model.embed_tokens",
+                "language_model.embed_tokens",
+                "transformer.wte",
+                "embed_tokens",
+                "model",
+                "transformer",
+            )
+            values = [device_map.get(key) for key in preferred_keys]
+            values.extend(device_map.values())
+            for value in values:
+                if value in (None, "cpu", "disk", "meta"):
+                    continue
+                try:
+                    return torch.device(value)
+                except Exception:
+                    continue
         try:
             return next(self.model.parameters()).device
         except Exception:
@@ -1570,6 +1596,159 @@ class _TransformersChatAdapter:
             except Exception:
                 pass
 
+    def _context_length(self) -> int:
+        """Return a usable context size without exceeding model metadata."""
+
+        try:
+            configured = int(self.settings.get("n_ctx", 8192) or 8192)
+        except (TypeError, ValueError, OverflowError):
+            configured = 8192
+        configured = max(2, configured)
+        model_config = getattr(self.model, "config", None)
+        metadata_limits = []
+        for name in ("max_position_embeddings", "max_seq_len", "max_sequence_length", "seq_length"):
+            try:
+                value = int(getattr(model_config, name, 0) or 0)
+            except (TypeError, ValueError, OverflowError):
+                value = 0
+            if value >= 2:
+                metadata_limits.append(value)
+        return max(2, min([configured, *metadata_limits] if metadata_limits else [configured]))
+
+    @staticmethod
+    def _template_with_image_objects(messages, images):
+        """Build the legacy HF message shape that embeds PIL images."""
+
+        image_index = 0
+        converted = []
+        for message in messages:
+            item = dict(message)
+            content = message.get("content")
+            if isinstance(content, list):
+                parts = []
+                for part in content:
+                    part = dict(part) if isinstance(part, dict) else {"type": "text", "text": str(part)}
+                    if part.get("type") == "image" and image_index < len(images):
+                        part["image"] = images[image_index]
+                        image_index += 1
+                    parts.append(part)
+                item["content"] = parts
+            converted.append(item)
+        return converted
+
+    @staticmethod
+    def _readable_prompt(messages) -> str:
+        lines = []
+        for item in messages:
+            content = item.get("content", "")
+            if isinstance(content, list):
+                chunks = []
+                for part in content:
+                    if isinstance(part, dict) and part.get("type") == "text":
+                        chunks.append(str(part.get("text", "") or ""))
+                    elif isinstance(part, dict) and part.get("type") == "image":
+                        chunks.append("[图片]")
+                    else:
+                        chunks.append(str(part))
+                content = "".join(chunks)
+            lines.append(f"{item.get('role', 'user')}: {content}")
+        return "\n".join(lines) + "\nassistant:"
+
+    @staticmethod
+    def _token_ids(value):
+        if torch is not None and isinstance(value, torch.Tensor):
+            if value.ndim == 1 and value.numel() > 0:
+                return value.to(dtype=torch.long).unsqueeze(0)
+            if value.ndim == 2 and value.shape[0] == 1:
+                return value.to(dtype=torch.long)
+            return None
+        if isinstance(value, (list, tuple)) and value and all(isinstance(item, int) for item in value):
+            return torch.tensor([list(value)], dtype=torch.long)
+        return None
+
+    def _apply_chat_template(self, messages, images):
+        processor = self.processor if images else self.tokenizer
+        apply_template = getattr(processor, "apply_chat_template", None)
+        if not callable(apply_template):
+            apply_template = getattr(self.tokenizer, "apply_chat_template", None)
+        if not callable(apply_template):
+            return self._readable_prompt(messages)
+
+        candidates = [messages]
+        if images:
+            candidates.append(self._template_with_image_objects(messages, images))
+        errors = []
+        for candidate in candidates:
+            for kwargs in (
+                {"tokenize": False, "add_generation_prompt": True},
+                {"tokenize": False},
+                {},
+            ):
+                try:
+                    prompt = apply_template(candidate, **kwargs)
+                    if prompt is not None:
+                        return prompt
+                except (TypeError, ValueError, KeyError, AttributeError) as exc:
+                    errors.append(f"{type(exc).__name__}: {exc}")
+        detail = errors[-1] if errors else "未返回提示词"
+        raise RuntimeError(f"原始模型聊天模板无法处理当前消息：{detail}")
+
+    @staticmethod
+    def _as_mapping(encoded):
+        if hasattr(encoded, "items"):
+            return dict(encoded.items())
+        if isinstance(encoded, dict):
+            return dict(encoded)
+        raise RuntimeError("原始模型 tokenizer/processor 返回了不支持的输入类型。")
+
+    @staticmethod
+    def _truncate_token_inputs(encoded, max_length: int):
+        """Bound token-shaped fields when an older encoder ignores truncation."""
+
+        for key in ("input_ids", "attention_mask", "token_type_ids", "position_ids"):
+            value = encoded.get(key)
+            if isinstance(value, torch.Tensor) and value.ndim >= 2 and value.shape[-1] > max_length:
+                encoded[key] = value[..., -max_length:]
+        return encoded
+
+    def _encode_text(self, prompt, max_length: int):
+        token_ids = self._token_ids(prompt)
+        if token_ids is not None:
+            if token_ids.shape[-1] > max_length:
+                token_ids = token_ids[:, -max_length:]
+            return {"input_ids": token_ids, "attention_mask": torch.ones_like(token_ids)}
+        tokenizer = self.tokenizer
+        errors = []
+        for kwargs in (
+            {"return_tensors": "pt", "truncation": True, "max_length": max_length},
+            {"return_tensors": "pt", "truncation": True},
+            {"return_tensors": "pt"},
+        ):
+            try:
+                encoded = self._as_mapping(tokenizer(prompt, **kwargs))
+                return self._truncate_token_inputs(encoded, max_length)
+            except (TypeError, ValueError, KeyError, AttributeError) as exc:
+                errors.append(f"{type(exc).__name__}: {exc}")
+        detail = errors[-1] if errors else "未返回输入"
+        raise RuntimeError(f"原始模型 tokenizer 无法编码提示词：{detail}")
+
+    def _encode_multimodal(self, processor, prompt, images, max_length: int):
+        errors = []
+        attempts = (
+            {"text": [prompt], "images": images, "return_tensors": "pt", "padding": True, "truncation": True, "max_length": max_length},
+            {"text": [prompt], "images": images, "return_tensors": "pt", "truncation": True, "max_length": max_length},
+            {"text": [prompt], "images": images, "return_tensors": "pt"},
+            {"text": prompt, "images": images, "return_tensors": "pt"},
+        )
+        for kwargs in attempts:
+            try:
+                encoded = self._as_mapping(processor(**kwargs))
+                return self._truncate_token_inputs(encoded, max_length)
+            except (TypeError, ValueError, KeyError, AttributeError) as exc:
+                errors.append(f"{type(exc).__name__}: {exc}")
+        detail = errors[-1] if errors else "未返回输入"
+        raise RuntimeError(f"原始模型视觉 processor 无法编码图片：{detail}")
+
     def _prompt_and_inputs(self, messages, max_length: int):
         normalized, images = _原始模型消息(messages)
         if images and not self.supports_images:
@@ -1577,31 +1756,11 @@ class _TransformersChatAdapter:
         processor = self.processor if images else self.tokenizer
         if processor is None:
             raise RuntimeError("原始模型缺少 tokenizer/processor。")
-        template_messages = normalized
-        apply_template = getattr(processor, "apply_chat_template", None)
-        if not callable(apply_template):
-            apply_template = getattr(self.tokenizer, "apply_chat_template", None)
-        if callable(apply_template):
-            prompt = apply_template(template_messages, tokenize=False, add_generation_prompt=True)
-        else:
-            prompt = "\n".join(f"{item['role']}: {item['content']}" for item in normalized)
-            prompt += "\nassistant:"
+        prompt = self._apply_chat_template(normalized, images)
         if images:
-            encoded = processor(
-                text=[prompt],
-                images=images,
-                return_tensors="pt",
-                padding=True,
-                truncation=True,
-                max_length=max_length,
-            )
+            encoded = self._encode_multimodal(processor, prompt, images, max_length)
         else:
-            encoded = self.tokenizer(
-                prompt,
-                return_tensors="pt",
-                truncation=True,
-                max_length=max_length,
-            )
+            encoded = self._encode_text(prompt, max_length)
         return encoded
 
     def create_chat_completion(self, messages, max_tokens=512, temperature=0.7, top_p=0.9, top_k=20,
@@ -1610,13 +1769,21 @@ class _TransformersChatAdapter:
         if self.model is None:
             raise RuntimeError("原始模型已经卸载，请重新加载模型。")
         max_tokens = max(1, min(int(max_tokens or 512), 32768))
-        context_length = max(256, int(self.settings.get("n_ctx", 8192) or 8192))
-        input_limit = max(1, context_length - max_tokens)
+        context_length = self._context_length()
+        # Reserve room for generation without truncating the complete prompt
+        # to one token when max_tokens is larger than the selected context.
+        input_limit = max(1, context_length - 1)
         encoded = self._prompt_and_inputs(messages, input_limit)
         model_device = self.device
         moved = {}
         for key, value in encoded.items():
             moved[key] = value.to(model_device) if hasattr(value, "to") else value
+        input_ids = moved.get("input_ids")
+        if input_ids is None or not hasattr(input_ids, "shape"):
+            raise RuntimeError("原始模型 tokenizer/processor 未返回 input_ids。")
+        prompt_tokens = int(input_ids.shape[-1]) if input_ids is not None and hasattr(input_ids, "shape") else 0
+        if prompt_tokens:
+            max_tokens = min(max_tokens, max(1, context_length - prompt_tokens))
         if seed not in (None, 0):
             torch.manual_seed(int(seed) & 0xFFFFFFFF)
             if torch.cuda.is_available():
@@ -1640,10 +1807,23 @@ class _TransformersChatAdapter:
             generation["eos_token_id"] = eos_token_id
         with torch.inference_mode():
             output = self.model.generate(**moved, **generation)
-        input_ids = moved.get("input_ids")
-        prompt_tokens = int(input_ids.shape[-1]) if input_ids is not None else 0
-        generated = output[:, prompt_tokens:] if prompt_tokens else output
-        text = self.tokenizer.batch_decode(generated, skip_special_tokens=True)[0].strip()
+        if hasattr(output, "sequences"):
+            output = output.sequences
+        if isinstance(output, (tuple, list)):
+            output = output[0] if output else None
+        if output is None:
+            raise RuntimeError("原始模型生成未返回 token 序列。")
+        if getattr(output, "ndim", 0) == 1:
+            output = output.unsqueeze(0)
+        generated = output[:, prompt_tokens:] if prompt_tokens and output.shape[-1] > prompt_tokens else output
+        decoder = getattr(self.tokenizer, "batch_decode", None)
+        if not callable(decoder):
+            decoder = getattr(self.processor, "batch_decode", None)
+        if not callable(decoder):
+            raise RuntimeError("原始模型缺少 batch_decode 解码器。")
+        decoded = decoder(generated, skip_special_tokens=True)
+        decoded_text = decoded[0] if isinstance(decoded, (list, tuple)) else decoded
+        text = str(decoded_text or "").strip()
         for marker in stop or []:
             marker = str(marker or "")
             if marker and marker in text:
