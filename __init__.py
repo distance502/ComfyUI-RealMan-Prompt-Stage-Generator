@@ -514,11 +514,11 @@ def _构建SearXNG搜索URL(query: str, *, limit: int) -> tuple[str, str]:
     return url, _在线搜索URL主机(url)
 
 NODE_CLASS_MAPPINGS = {
-    "QwenTE_StagePromptGenerator": QwenTE阶段式提示词生成器,
+    "RealMan_StagePromptGenerator": QwenTE阶段式提示词生成器,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "QwenTE_StagePromptGenerator": "真男人提示词阶段生成器",
+    "RealMan_StagePromptGenerator": "真男人提示词阶段生成器",
 }
 
 

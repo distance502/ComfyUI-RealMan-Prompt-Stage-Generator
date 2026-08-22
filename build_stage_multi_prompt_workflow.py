@@ -196,7 +196,7 @@ def main() -> int:
     workflow = json.loads(SOURCE_WORKFLOW.read_text(encoding="utf-8"))
     workflow = 旁路清理节点工作流(workflow)
 
-    stage_node = _find_node(workflow, "QwenTE_StagePromptGenerator")
+    stage_node = _find_node(workflow, "RealMan_StagePromptGenerator")
     positive_clip = _find_node(workflow, "CLIPTextEncode")
     negative_clip_candidates = _find_nodes(workflow, "CLIPTextEncode")
     ksampler = _find_node(workflow, "KSampler")

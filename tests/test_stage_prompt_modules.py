@@ -14373,7 +14373,7 @@ class TestStagePromptModules(unittest.TestCase):
 
     def test_plugin_init_survives_missing_quality_audit_dependencies(self) -> None:
         module = load_plugin_init_for_integration_test(failing_imports={"cv2", "rapidocr_onnxruntime"})
-        self.assertIn("QwenTE_StagePromptGenerator", module.NODE_CLASS_MAPPINGS)
+        self.assertIn("RealMan_StagePromptGenerator", module.NODE_CLASS_MAPPINGS)
 
     def test_plugin_does_not_register_browser_routes(self) -> None:
         module = load_plugin_init_for_integration_test(failing_imports={"cv2", "rapidocr_onnxruntime"})
@@ -14684,9 +14684,9 @@ class TestStagePromptModules(unittest.TestCase):
         module = load_plugin_init_for_integration_test(
             failing_imports={"cv2", "rapidocr_onnxruntime", "llama_cpp", "numpy", "PIL", "comfy.model_management"}
         )
-        self.assertEqual(set(module.NODE_CLASS_MAPPINGS.keys()), {"QwenTE_StagePromptGenerator"})
-        self.assertEqual(set(module.NODE_DISPLAY_NAME_MAPPINGS.keys()), {"QwenTE_StagePromptGenerator"})
-        self.assertEqual(module.NODE_DISPLAY_NAME_MAPPINGS["QwenTE_StagePromptGenerator"], "真男人提示词阶段生成器")
+        self.assertEqual(set(module.NODE_CLASS_MAPPINGS.keys()), {"RealMan_StagePromptGenerator"})
+        self.assertEqual(set(module.NODE_DISPLAY_NAME_MAPPINGS.keys()), {"RealMan_StagePromptGenerator"})
+        self.assertEqual(module.NODE_DISPLAY_NAME_MAPPINGS["RealMan_StagePromptGenerator"], "真男人提示词阶段生成器")
 
     def test_stage_generator_loads_without_model_node_dependencies(self) -> None:
         module = load_stage_prompt_generator_for_integration_test(nodes_available=False)

@@ -1,6 +1,7 @@
 import { app } from "../../scripts/app.js";
 
 const TARGET_NODE_CLASSES = new Set([
+	"RealMan_StagePromptGenerator",
 	"QwenTE_StagePromptGenerator",
 	"QwenTE_UniversalStagePromptGenerator",
 ]);

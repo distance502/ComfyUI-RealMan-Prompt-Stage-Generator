@@ -111,7 +111,7 @@ def main() -> int:
     stage_node_id = _next_id(workflow["nodes"])
     stage_node = {
         "id": stage_node_id,
-        "type": "QwenTE_StagePromptGenerator",
+        "type": "RealMan_StagePromptGenerator",
         "pos": [
             float(model_loader.get("pos", [0, 0])[0] + 440),
             float(model_loader.get("pos", [0, 0])[1] - 220),
@@ -129,13 +129,13 @@ def main() -> int:
             {"name": "推荐负面词", "type": "STRING", "links": []},
             {"name": "正向提示词合集", "type": "STRING", "links": []},
         ],
-        "properties": {"Node name for S&R": "QwenTE_StagePromptGenerator"},
+        "properties": {"Node name for S&R": "RealMan_StagePromptGenerator"},
         "widgets_values": [],
     }
     workflow["nodes"].append(stage_node)
     workflow["last_node_id"] = max(int(workflow.get("last_node_id", 0)), int(stage_node_id))
 
-    stage_info = _get_json("http://127.0.0.1:8188/object_info/QwenTE_StagePromptGenerator")["QwenTE_StagePromptGenerator"]
+    stage_info = _get_json("http://127.0.0.1:8188/object_info/RealMan_StagePromptGenerator")["RealMan_StagePromptGenerator"]
     required_inputs = stage_info["input"]["required"]
     stage_inputs = []
     widget_values = []
