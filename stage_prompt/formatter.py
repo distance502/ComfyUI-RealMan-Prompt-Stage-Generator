@@ -101,6 +101,16 @@ def _model_channel_diagnostics_summary(settings: dict[str, Any]) -> str:
     if not isinstance(diagnostics, dict) or not diagnostics:
         return "未记录"
     labels = {"image": "图像", "smart_text": "智能文本", "video": "视频"}
+    status_labels = {
+        "skill_only": "仅Skill",
+        "disabled_skill": "未启用",
+        "model_adopted": "模型已采用",
+        "model_unchanged": "模型无有效变化",
+        "model_partial_fallback": "模型部分采用",
+        "model_skipped": "智能保护跳过",
+        "skill_fallback": "Skill回退",
+        "unrecorded": "未记录",
+    }
     parts: list[str] = []
     for channel in ("image", "smart_text", "video"):
         details = diagnostics.get(channel)
@@ -109,7 +119,11 @@ def _model_channel_diagnostics_summary(settings: dict[str, Any]) -> str:
         status = str(details.get("status", "unrecorded") or "unrecorded")
         attempts = int(details.get("attempts", 0) or 0)
         fallbacks = int(details.get("fallbacks", 0) or 0)
-        parts.append(f"{labels[channel]}={status}({attempts}次/{fallbacks}回退)")
+        skips = int(details.get("skips", 0) or 0)
+        activity = f"{attempts}次/{fallbacks}回退"
+        if skips:
+            activity += f"/{skips}跳过"
+        parts.append(f"{labels[channel]}={status_labels.get(status, status)}({activity})")
     return " | ".join(parts) or "未记录"
 
 
@@ -278,7 +292,17 @@ def build_json_payload(
     image_profile = settings.get("图像提示词目标模型Profile", {})
     image_prompt_contract = {
         key: image_profile.get(key)
-        for key in ("prompt_order", "positive_contract", "negative_contract", "parameter_policy")
+        for key in (
+            "prompt_order",
+            "base_prompt_order",
+            "layout_mode",
+            "layout_priority",
+            "narrative_mode",
+            "positive_contract",
+            "negative_contract",
+            "parameter_policy",
+        )
+        if key in image_profile
     } if isinstance(image_profile, dict) else {}
     return {
         "full_text": full_text,

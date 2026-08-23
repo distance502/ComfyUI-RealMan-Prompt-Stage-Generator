@@ -506,6 +506,16 @@ GLOBAL_NARRATIVE_MODEL_CONTRACT = f"""
 """.strip()
 
 
+MULTI_VIEW_MODEL_CONTRACT = """
+角色设定图自然语言合同：
+- 正文必须先完整写明画面结构，再描述角色。标准三视图的第一优先级固定为横向 1:1:1 等宽的正面 0 度、单个 90 度标准侧面和背面 180 度三幅全身；三栏人物等高，共用头顶线、脚底基线、镜头高度和正交投影。
+- 三栏是同一角色的并列设计校对视图，不是连续剧情、不同动作阶段或三个独立人物。身份、正脸、体型、发型、服装、配色、材质、道具侧位与磨损痕迹必须逐项对应。
+- 动作标签只转译为便于比较轮廓的统一中性站姿、手势和重心依据；场景只转译为共用地面、简洁背景和尺度参照；光线在三栏保持同一方向、色温、软硬度和曝光。
+- 正面负责清晰正脸与服装前部，侧面负责鼻颌轮廓、身体厚度和侧缝，背面负责后脑、背部结构和衣装收口。使用连续自然语言写出可见设计事实，不编造事件触发、情绪转折、镜头推进或电影定格。
+- 用户标签与 Skill 底稿仍是硬锚点。模型只能补充跨视图能够同步成立的结构、材质和制作细节，不得更换角色、服装、道具、风格或布局，也不得把平台参数写入正向正文。
+""".strip()
+
+
 _NARRATIVE_ARCS: tuple[dict[str, str], ...] = (
     {
         "id": "arrival_discovery",
@@ -992,6 +1002,7 @@ def _render_chinese(
     residual = _anchor(anchors, "residual")
     quality = _anchor(anchors, "quality", "高细节、清晰对焦与稳定结构")
     support = _anchor(anchors, "support")
+    image_target = _anchor(anchors, "image_target", "通用")
     layout_clause = visual_layout_contract(layout_mode, english=False)
 
     style_clause = f"，以{style}作为统一媒介语言" if style else ""
@@ -1003,10 +1014,107 @@ def _render_chinese(
     elif adult_mode and not non_person:
         adult_clause = "；主体年龄明确为成年，成熟私密氛围通过情境、视线和材质表达"
 
-    anchor_sentence = (
-        f"{lead}，画面以{subject}为{'非人物主题的' if non_person else ''}叙事中心{style_clause}。故事发生在{scene}，"
-        f"构图采用{composition}，全部视觉锚点服从同一时刻{adult_clause}。{layout_clause}"
-    )
+    if layout_mode == VISUAL_LAYOUT_MULTI_VIEW:
+        target_view_openings = {
+            "Flux": (
+                f"同一{subject}在三栏中保持统一身份，{action}只作为可比较的中性姿态参考；{scene}保持为简洁统一背景，"
+                f"{composition}服从等高全身取景，{lighting}在各栏方向和强度一致，{outfit}与{style or lead}保持连续。"
+            ),
+            "SDXL": (
+                f"三栏共同锁定同一{subject}和{composition}，{scene}只提供统一背景；{style or lead}定义媒介语言，"
+                f"{lighting}保持一致，最终细节服从{quality}。"
+            ),
+            "Qwen Image": (
+                f"三栏只展示同一{subject}，并让{scene}与{props}保持固定空间关系；{action}被统一为便于比较轮廓的中性姿态，"
+                f"{lighting}、{style or lead}与{quality}共同维持跨视图一致性。"
+            ),
+            "Krea 2": (
+                f"同一{subject}是三栏的第一视觉重点，{composition}只决定每栏的完整取景，{scene}压低为统一背景；"
+                f"{action}被转译为三栏一致的中性姿态，{outfit}的材质在{lighting}下清楚可辨，整体保持{style or lead}的氛围。"
+            ),
+            "Midjourney": (
+                f"同一{subject}占据三栏中心，{scene}保持克制，{composition}服从正交等高展示；{lighting}组织统一明暗，"
+                f"{style or lead}统一视觉方向，{outfit}提供稳定轮廓与材质依据。"
+            ),
+            "自定义": (
+                f"三栏共同展示同一{subject}，{scene}、{action}与{composition}都转化为一致的角色展示条件，"
+                f"{lighting}和{style or lead}只服务已选设计主线。"
+            ),
+        }
+        target_view_opening = target_view_openings.get(
+            image_target,
+            (
+                f"三栏共同展示同一{subject}，{composition}保持完整全身取景，{scene}作为统一背景；"
+                f"{action}转化为一致的中性姿态，{outfit}、{lighting}与{style or lead}在各栏完全对应。"
+            ),
+        )
+        anchor_sentence = (
+            f"{layout_clause}{target_view_opening}成片采用{lead}{style_clause}{adult_clause}。"
+        )
+        design_sentence = (
+            f"角色设计围绕{outfit}展开，{props}固定在相同身体侧与相同握持位置；发型、脸型、五官比例、体型、"
+            f"服装结构、配色、材质接缝和磨损痕迹从正面贯通到侧面与背面。{action}只保留为三栏一致的重心、手势和站姿依据。"
+        )
+        presentation_sentence = (
+            f"{scene}在三栏中使用同一地面、同一纯净背景和同一尺度参照，{composition}不引入透视夸张或英雄角度。"
+            f"{lighting}对每栏采用相同方向、色温、软硬度和曝光，使脸部、{outfit}与{props}的明暗关系可直接比较"
+            f"{'；' + support if support else ''}。"
+        )
+        detail_bits = []
+        if custom:
+            detail_bits.append(f"用户补充的{custom}落实到三个视图的同一结构位置")
+        if residual:
+            detail_bits.append(f"其余细节{residual}只补充身份或材质依据")
+        detail_prefix = "；".join(detail_bits)
+        detail_sentence = (
+            (detail_prefix + "。" if detail_prefix else "")
+            + f"正面完整说明正脸与服装前部，90度侧面说明鼻颌轮廓、身体厚度和服装侧缝，背面说明后脑、背部结构和衣装收口；"
+            f"最终保持{quality}、自然解剖、清楚手部、准确肢体数量、干净轮廓和一致比例。"
+        )
+        closing_sentence = (
+            "三栏作为同一角色的并列设计校对视图，身份信息、造型语言和材质逻辑逐项对应，能够直接用于后续角色建模与连续画面制作。"
+        )
+        sections = [anchor_sentence, design_sentence, presentation_sentence, detail_sentence, closing_sentence]
+        if _clean(detail_level) in {"简洁", "短"}:
+            sections = [anchor_sentence, design_sentence, detail_sentence]
+        return _fit_chinese_narrative_sections(sections, [])
+
+    target_openings = {
+        "Flux": (
+            f"{subject}正以{action}处于{scene}，镜头采用{composition}；{lighting}沿动作方向塑造形体，"
+            f"{outfit}提供可见材质依据，整体以{style or lead}保持统一媒介。"
+        ),
+        "SDXL": (
+            f"画面首先锁定{subject}与{composition}，主体位于{scene}；{style or lead}定义视觉语言，"
+            f"{lighting}建立层次，最终画质保持{quality}。"
+        ),
+        "Qwen Image": (
+            f"{subject}是唯一叙事中心，主体与{scene}、{props}保持明确空间关系，并以{action}回应当前事件。"
+            f"{lighting}解释这一关系，{style or lead}与{quality}共同约束最终画面。"
+        ),
+        "Krea 2": (
+            f"{subject}是第一视觉重点，镜头以{composition}在{scene}中建立清楚空间；主体以{action}形成唯一动作，"
+            f"{outfit}的材质细节在{lighting}下清楚可见，整体保持{style or lead}的氛围。"
+        ),
+        "Midjourney": (
+            f"{subject}位于{scene}并成为构图中心，镜头采用{composition}；{lighting}组织明暗，"
+            f"{style or lead}统一视觉方向，{outfit}提供具体材质与轮廓。"
+        ),
+        "自定义": (
+            f"{subject}位于{scene}并以{action}呈现，镜头采用{composition}，{lighting}与{style or lead}"
+            f"只服务当前已选创作主线。"
+        ),
+    }
+    target_opening = target_openings.get(image_target, "")
+    if target_opening:
+        anchor_sentence = (
+            f"{target_opening}成片采用{lead}{style_clause}，全部视觉锚点服从同一时刻{adult_clause}。{layout_clause}"
+        )
+    else:
+        anchor_sentence = (
+            f"{lead}，画面以{subject}为{'非人物主题的' if non_person else ''}叙事中心{style_clause}。故事发生在{scene}，"
+            f"构图采用{composition}，全部视觉锚点服从同一时刻{adult_clause}。{layout_clause}"
+        )
     story_sentence = (
         f"{_anchor(plan, 'opening_zh')}；{_anchor(plan, 'motive_zh')}。这些前因凝结为当前动作留下的可见证据。"
         f"当前镜头准确截取回应瞬间：{props}已成线索，{_anchor(plan, 'trigger_zh')}，"
@@ -1151,6 +1259,7 @@ def _render_english(
     residual = _anchor(anchors, "residual")
     quality = _anchor(anchors, "quality", "high detail, clean focus, and stable structure")
     support = _anchor(anchors, "support")
+    image_target = _anchor(anchors, "image_target", "通用")
     layout_clause = visual_layout_contract(layout_mode, english=True)
 
     style_clause = f", unified by {style}" if style else ""
@@ -1162,10 +1271,111 @@ def _render_english(
     elif adult_mode and not non_person:
         adult_clause = " The subject is unambiguously adult, with maturity expressed through context, gaze, and materials."
 
-    anchor_sentence = (
-        f"{lead} is centered on {subject}{style_clause}. The event takes place in {scene}, using {composition}; "
-        f"the selected visual anchors belong to one continuous moment instead of a chain of keywords.{adult_clause} {layout_clause}"
-    )
+    if layout_mode == VISUAL_LAYOUT_MULTI_VIEW:
+        target_view_openings = {
+            "Flux": (
+                f"Across all three columns, {subject} keeps one continuous identity, while {action} serves only as a comparable neutral-pose reference. "
+                f"{scene} remains a restrained shared background, {composition} obeys equal-height full-body framing, {lighting} stays consistent, "
+                f"and {outfit} preserves the material language of {style or lead}."
+            ),
+            "SDXL": (
+                f"The three columns lock {subject} into {composition} against one restrained version of {scene}. {style or lead} defines the medium, "
+                f"{lighting} remains consistent, and the finish preserves {quality}."
+            ),
+            "Qwen Image": (
+                f"The three columns show only {subject}, with a fixed spatial relationship to {scene} and {props}. {action} is normalized into a neutral comparison pose; "
+                f"{lighting}, {style or lead}, and {quality} preserve cross-view consistency."
+            ),
+            "Krea 2": (
+                f"{subject} is the first visual read across all three columns. {composition} controls complete framing while {scene} recedes into one shared background; "
+                f"{action} is translated into the same neutral pose, {outfit} stays materially legible under {lighting}, and {style or lead} holds the atmosphere together."
+            ),
+            "Midjourney": (
+                f"{subject} occupies the center of all three columns against a restrained {scene}, with {composition} converted to orthographic equal-height display. "
+                f"{lighting} organizes consistent values, {style or lead} unifies the visual direction, and {outfit} preserves one stable silhouette and material basis."
+            ),
+            "自定义": (
+                f"The three columns present {subject} under one shared display condition; {scene}, {action}, and {composition} are normalized for direct comparison, "
+                f"while {lighting} and {style or lead} serve only the selected design spine."
+            ),
+        }
+        target_view_opening = target_view_openings.get(
+            image_target,
+            (
+                f"The three columns present {subject} at equal full-body scale through {composition}, with {scene} as one shared background. "
+                f"{action} becomes a consistent neutral pose, while {outfit}, {lighting}, and {style or lead} correspond across every view."
+            ),
+        )
+        anchor_sentence = (
+            f"{layout_clause} {target_view_opening} The result keeps {lead}{style_clause}.{adult_clause}"
+        )
+        design_sentence = (
+            f"The character design develops around {outfit}, with {props} fixed to the same body side and grip position. Hairstyle, face shape, facial proportions, "
+            f"body build, garment construction, palette, seams, materials, and wear continue accurately from front to side to back. "
+            f"{action} contributes only a shared center of gravity, hand position, and stance reference."
+        )
+        presentation_sentence = (
+            f"{scene} uses one ground plane, one clean background, and one scale reference across the three columns; {composition} introduces no perspective exaggeration or hero angle. "
+            f"{lighting} keeps the same direction, color temperature, softness, and exposure so the face, {outfit}, and {props} can be compared directly."
+            f"{' ' + support + '.' if support else ''}"
+        )
+        detail_parts = []
+        if custom:
+            detail_parts.append(f"The user detail {custom} occupies the same structural location in all three views")
+        if residual:
+            detail_parts.append(f"Remaining cues such as {residual} provide identity or material evidence only")
+        detail_prefix = ". ".join(detail_parts)
+        detail_sentence = (
+            (detail_prefix + ". " if detail_prefix else "")
+            + "The front view fully explains the frontal face and garment front, the 90-degree side view explains the nose-jaw contour, body depth, and side seams, "
+            f"and the back view explains the rear head, back construction, and garment closure. The finish preserves {quality}, natural anatomy, readable hands, "
+            "accurate limb count, clean silhouettes, and matching proportions."
+        )
+        closing_sentence = (
+            "The three columns function as parallel design-reference views of the same character, with identity, styling, and material logic aligned item by item for downstream modeling and continuous-scene production."
+        )
+        sections = [anchor_sentence, design_sentence, presentation_sentence, detail_sentence, closing_sentence]
+        if _clean(detail_level) in {"简洁", "短"}:
+            sections = [anchor_sentence, design_sentence, detail_sentence]
+        return " ".join(section.strip() for section in sections if section.strip())
+
+    target_openings = {
+        "Flux": (
+            f"{subject} performs {action} in {scene}, framed through {composition}. {lighting} shapes the action, "
+            f"{outfit} supplies concrete material evidence, and {style or lead} keeps the medium coherent."
+        ),
+        "SDXL": (
+            f"The image first locks {subject} into {composition} within {scene}. {style or lead} defines the visual language, "
+            f"{lighting} builds depth, and the finish preserves {quality}."
+        ),
+        "Qwen Image": (
+            f"{subject} is the sole narrative center, with an explicit spatial relationship to {scene} and {props}. "
+            f"The subject answers the event through {action}; {lighting}, {style or lead}, and {quality} keep that relationship visible."
+        ),
+        "Krea 2": (
+            f"{subject} is the first visual read. The camera uses {composition} to establish clear space in {scene}; "
+            f"the subject performs one action, {action}, while {outfit} remains materially legible under {lighting} in a {style or lead} atmosphere."
+        ),
+        "Midjourney": (
+            f"{subject} occupies the compositional center of {scene}, framed through {composition}. {lighting} organizes the values, "
+            f"{style or lead} unifies the visual direction, and {outfit} gives the silhouette a concrete material basis."
+        ),
+        "自定义": (
+            f"{subject} appears in {scene} through {action}, framed with {composition}; {lighting} and {style or lead} "
+            "serve only the selected creative spine."
+        ),
+    }
+    target_opening = target_openings.get(image_target, "")
+    if target_opening:
+        anchor_sentence = (
+            f"{target_opening} The result keeps {lead}{style_clause}, and all selected visual anchors belong to one continuous moment."
+            f"{adult_clause} {layout_clause}"
+        )
+    else:
+        anchor_sentence = (
+            f"{lead} is centered on {subject}{style_clause}. The event takes place in {scene}, using {composition}; "
+            f"the selected visual anchors belong to one continuous moment instead of a chain of keywords.{adult_clause} {layout_clause}"
+        )
     story_sentence = (
         f"The story background combines {_anchor(plan, 'opening_en')} with {_anchor(plan, 'motive_en')}, compressing both into visible evidence inside the present action. "
         f"The camera captures the most informative response instant: {props} is already a concrete clue when {_anchor(plan, 'trigger_en')}. "

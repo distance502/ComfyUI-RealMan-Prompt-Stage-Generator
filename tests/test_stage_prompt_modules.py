@@ -612,6 +612,82 @@ class TestStagePromptIntelligence(unittest.TestCase):
             image_errors,
         )
 
+    def test_model_channel_diagnostics_resolve_skill_partial_and_guarded_states(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+
+        skill_settings = {
+            "模型来源": "仅Skill",
+            "模型来源实际": "仅Skill",
+            "模型通道诊断": {},
+        }
+        module._record_model_channel_diagnostic(
+            skill_settings,
+            "smart_text",
+            output_count=1,
+            attempts_before=0,
+            success_before=0,
+            failure_before=0,
+            adopted_before=0,
+            fallback_before=0,
+            model_available=False,
+            output_changed=True,
+        )
+        self.assertEqual(
+            skill_settings["模型通道诊断"]["smart_text"]["status"],
+            "skill_only",
+        )
+
+        partial_settings = {
+            "模型来源": "API接口",
+            "模型来源实际": "API接口（部分回退）",
+            "模型调用尝试次数": 1,
+            "模型调用成功次数": 1,
+            "模型调用失败次数": 0,
+            "模型调用采纳次数": 1,
+            "模型活动回退数量": 1,
+            "模型通道诊断": {},
+        }
+        module._record_model_channel_diagnostic(
+            partial_settings,
+            "image",
+            output_count=2,
+            attempts_before=0,
+            success_before=0,
+            failure_before=0,
+            adopted_before=0,
+            fallback_before=0,
+            model_available=True,
+            output_changed=True,
+        )
+        partial = partial_settings["模型通道诊断"]["image"]
+        self.assertEqual(partial["status"], "model_partial_fallback")
+        self.assertEqual(partial["adopted"], 1)
+        self.assertEqual(partial["fallbacks"], 1)
+
+        guarded_settings = {
+            "模型来源": "本地模型",
+            "模型来源实际": "本地模型",
+            "模型智能跳过次数": 1,
+            "模型智能跳过原因": "强语义冲突",
+            "模型通道诊断": {},
+        }
+        module._record_model_channel_diagnostic(
+            guarded_settings,
+            "video",
+            output_count=1,
+            attempts_before=0,
+            success_before=0,
+            failure_before=0,
+            adopted_before=0,
+            fallback_before=0,
+            skip_before=0,
+            model_available=True,
+        )
+        guarded = guarded_settings["模型通道诊断"]["video"]
+        self.assertEqual(guarded["status"], "model_skipped")
+        self.assertEqual(guarded["skips"], 1)
+        self.assertEqual(guarded["skip_reason"], "强语义冲突")
+
     def test_full_stage_records_skill_fallback_for_unavailable_api_channels(self) -> None:
         module = load_stage_prompt_generator_for_integration_test()
         result = module._run_stage(
@@ -639,6 +715,7 @@ class TestStagePromptIntelligence(unittest.TestCase):
             with self.subTest(channel=channel):
                 self.assertEqual(diagnostics[channel]["status"], "skill_fallback")
                 self.assertEqual(diagnostics[channel]["output_count"], 1)
+        self.assertEqual(payload["video_prompt_model_status"], "模型不可用，保留 Skill 结果")
         self.assertTrue(result[1])
         self.assertTrue(result[7])
         self.assertIn("雨夜街头", result[7])
@@ -731,6 +808,12 @@ class TestStagePromptIntelligence(unittest.TestCase):
         self.assertEqual(payload["model_call_attempt_count"], 0)
         self.assertEqual(payload["video_prompt_model_status"], "智能保护跳过模型，保留 Skill 结果")
         self.assertIn("智能保护", payload["model_skill_pipeline"])
+        diagnostics = payload["model_channel_diagnostics"]
+        self.assertEqual(diagnostics["image"]["status"], "model_skipped")
+        self.assertEqual(diagnostics["smart_text"]["status"], "disabled_skill")
+        self.assertEqual(diagnostics["video"]["status"], "model_skipped")
+        self.assertGreaterEqual(diagnostics["image"]["skips"], 1)
+        self.assertGreaterEqual(diagnostics["video"]["skips"], 1)
 
     def test_soft_scene_conflicts_remove_only_random_derived_side(self) -> None:
         explicit_scene = OrderedDict(
@@ -24698,6 +24781,121 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertIn("--profile", settings["系统提示词覆盖"])
         self.assertIn("不要锁死素材库风格", settings["系统提示词覆盖"])
 
+    def test_smart_text_character_sheet_uses_layout_specific_seed_system_and_fallback(self) -> None:
+        primary = (
+            narrative.visual_layout_contract(narrative.VISUAL_LAYOUT_MULTI_VIEW)
+            + "三栏共同展示同一成年女性侦探，深色长风衣、长发、旧信封、中性灰背景与柔和顶侧光逐项一致。"
+        )
+        settings = {
+            "提示词语言": "纯中文",
+            "主体类型": "人物角色",
+            "主体类型解析结果": "人物角色",
+            "画面结构模式解析结果": narrative.VISUAL_LAYOUT_MULTI_VIEW,
+            "标签反推模式": "自动平衡",
+            "全局创作主线摘要": "成年女性侦探；深色长风衣；中性灰摄影棚",
+            "智能编排摘要": "任务 standard_visual_story",
+            "最近提示词指纹": ["雨夜追逐，最后镜头定格"],
+        }
+        seed = smart_text.build_smart_text_seed(
+            user_text="在三栏同一位置补充银色金属扣件",
+            primary_prompt=primary,
+            selected_tags_text="主体：成年女性侦探\n服装造型：深色长风衣",
+            settings=settings,
+        )
+        self.assertIn("全局角色设计主线", seed)
+        self.assertIn("成人设计素材", seed)
+        self.assertIn("三视图动态变化转换", seed)
+        self.assertIn("最近三视图避重", seed)
+        self.assertIn("1:1:1横向等宽", seed)
+        self.assertNotIn("写清处境、人物动机、事件触发", seed)
+        self.assertNotIn("语气像具有剧情的电影剧照说明", seed)
+        self.assertNotIn("雨夜追逐，最后镜头定格", seed)
+
+        model_settings = smart_text.build_smart_text_settings(settings)
+        system_prompt = model_settings["系统提示词覆盖"]
+        self.assertIn("角色设定图 Smart Prompt Skill", system_prompt)
+        self.assertIn("角色设定图自然语言合同", system_prompt)
+        self.assertNotIn("全局剧情与自然语言合同", system_prompt)
+        self.assertNotIn("事件触发 → 主体回应", system_prompt)
+
+        fallback = smart_text.fallback_smart_text(
+            user_text="银色金属扣件",
+            primary_prompt=primary,
+            language="纯中文",
+            layout_mode=narrative.VISUAL_LAYOUT_MULTI_VIEW,
+        )
+        self.assertTrue(
+            narrative.prompt_preserves_visual_layout(fallback, narrative.VISUAL_LAYOUT_MULTI_VIEW),
+            fallback,
+        )
+        self.assertIn("银色金属扣件", fallback)
+        self.assertIn("同一结构位置", fallback)
+        self.assertNotIn("补充动机", fallback)
+        self.assertNotIn("下一步动作", fallback)
+
+        cleaned = smart_text.sanitize_smart_text_prompt(
+            text="CG感",
+            user_text="银色金属扣件",
+            primary_prompt=primary,
+            language="纯中文",
+            layout_mode=narrative.VISUAL_LAYOUT_MULTI_VIEW,
+        )
+        self.assertTrue(
+            narrative.prompt_preserves_visual_layout(cleaned, narrative.VISUAL_LAYOUT_MULTI_VIEW),
+            cleaned,
+        )
+        self.assertIn("银色金属扣件", cleaned)
+
+        english_primary = (
+            narrative.visual_layout_contract(narrative.VISUAL_LAYOUT_MULTI_VIEW, english=True)
+            + " The same adult woman detective keeps one dark trench coat, long hair, old envelope, neutral background, and soft overhead side light."
+        )
+        english_fallback = smart_text.fallback_smart_text(
+            user_text="silver metal fasteners",
+            primary_prompt=english_primary,
+            language="纯英文",
+            layout_mode=narrative.VISUAL_LAYOUT_MULTI_VIEW,
+        )
+        self.assertTrue(
+            narrative.prompt_preserves_visual_layout(english_fallback, narrative.VISUAL_LAYOUT_MULTI_VIEW),
+            english_fallback,
+        )
+        self.assertIn("silver metal fasteners", english_fallback)
+        self.assertNotIn("motivates the next movement", english_fallback)
+
+    def test_stage_character_sheet_smart_text_stays_in_design_mode(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        result = module._run_stage(
+            None,
+            **{
+                "unique_id": "character-sheet-smart-text-design-mode",
+                "模型来源": "仅Skill",
+                "智能文本匹配": True,
+                "智能文本输入": "银色扣件固定在长风衣右侧，三个视图保持一致",
+                "模板风格": "CG感",
+                "主体标签1": "角色设定图",
+                "主体标签2": "成年女性侦探",
+                "服装造型标签1": "深色长风衣",
+                "场景背景标签1": "中性灰摄影棚",
+                "构图视角标签1": "角色三视图",
+                "构图视角标签2": "正面视图",
+                "构图视角标签3": "侧面视图",
+                "构图视角标签4": "背面视图",
+                "运行时随机标签": False,
+                "生成数量": 1,
+                "提示词语言": "纯中文",
+                "seed": 165,
+            },
+        )
+        smart_prompt = result[6]
+        self.assertTrue(
+            narrative.prompt_preserves_visual_layout(smart_prompt, narrative.VISUAL_LAYOUT_MULTI_VIEW),
+            smart_prompt,
+        )
+        self.assertIn("银色扣件", smart_prompt)
+        for forbidden in ("补充动机", "下一步动作", "情绪转折", "镜头最终定格", "电影剧照"):
+            self.assertNotIn(forbidden, smart_prompt)
+
     def test_smart_text_fallback_writes_natural_prompt_not_tag_chain(self) -> None:
         text = smart_text.fallback_smart_text(
             user_text="自然写实图像，傲娇，书店女孩，动漫，国风美学，水彩线稿，环境遮挡，透明高跟凉鞋，地下通道，能量刀，欲感，月夜森林，霓虹夜色，近景，面部聚焦，镜头近距离，持物待发，站姿挺拔，双手负后，高细节，低保真，光束尘埃，标准，True，脸部表情与妆发细节优先，面部作为第一视觉中心，面部与主体关系清晰",
@@ -24779,10 +24977,21 @@ class TestStagePromptModules(unittest.TestCase):
         )
         self.assertNotEqual(text, "CG感")
         self.assertIn("电影级CG", text)
-        self.assertIn("画面以", text)
-        self.assertIn("镜头采用", text)
+        self.assertIn("标准三视图从左到右为正面0度", text)
+        self.assertIn("横向三栏等宽且1:1:1均衡布局", text)
+        self.assertIn("人物等高", text)
+        self.assertIn("同一头顶线与脚底基线", text)
+        self.assertIn("正交投影", text)
+        self.assertIn("成年女性", text)
+        self.assertIn("长发", text)
+        self.assertIn("粉色汉服", text)
         self.assertIn("高细节", text)
-        self.assertIn("镜头采用", text)
+        self.assertTrue(
+            narrative.prompt_preserves_visual_layout(text, narrative.VISUAL_LAYOUT_MULTI_VIEW),
+            text,
+        )
+        self.assertNotIn("下一步动作", text)
+        self.assertNotIn("镜头最终定格", text)
         self.assertNotIn("True", text)
         self.assertGreater(len(text), 40)
 
@@ -30125,6 +30334,20 @@ class TestStagePromptModules(unittest.TestCase):
             self.assertIn("每位人物都有唯一完整的身体", system_prompt)
             self.assertIn("每位人物都有唯一完整的身体", model_context)
 
+        sheet_settings = {
+            "提示词语言": "纯中文",
+            "主体类型": "人物角色",
+            "主体类型解析结果": "人物角色",
+            "画面结构模式解析结果": narrative.VISUAL_LAYOUT_MULTI_VIEW,
+        }
+        for source in ("本地GGUF", "本地Transformers", "API接口"):
+            system_prompt = model_refiner._resolve_system_prompt(
+                {**sheet_settings, "模型来源": source}
+            )
+            self.assertIn("角色设定图自然语言合同", system_prompt)
+            self.assertIn("横向 1:1:1 等宽", system_prompt)
+            self.assertNotIn("处境与动机、事件触发", system_prompt)
+
         smart_settings = dict(base_settings)
         seed = smart_text.build_smart_text_seed(
             user_text="成年情侣在爵士酒廊交换视线",
@@ -30773,6 +30996,115 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertNotIn("标签解析", prompt)
         self.assertNotIn("Thinking Process", prompt)
         self.assertLessEqual(prompt.count("、"), 10)
+
+    def test_character_sheet_projection_keeps_facts_but_removes_layout_from_video(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["角色设定图", "成年女性侦探"],
+                "画面风格": ["电影级CG"],
+                "场景背景": ["中性灰摄影棚", "雨夜旧车站"],
+                "动作姿态": ["中性自然站姿", "手持旧信封"],
+                "服装造型": ["深色长风衣"],
+                "道具世界观": ["旧信封"],
+                "光影氛围": ["青蓝列车逆光"],
+                "构图视角": ["角色三视图", "正面视图", "侧面视图", "背面视图"],
+                "自定义补充": ["黑色短发", "黄铜纽扣"],
+            }
+        )
+        settings = {
+            "提示词语言": "纯中文",
+            "主体类型解析结果": "人物角色",
+            "画面结构模式解析结果": narrative.VISUAL_LAYOUT_MULTI_VIEW,
+            "模板风格": "电影级CG",
+            "seed": 12,
+        }
+        primary = (
+            "标准三视图从左到右为正面0度、单个90度标准侧面、背面180度三幅全身，"
+            "横向三栏等宽且1:1:1均衡布局。人物等高，共用头顶线和脚底基线，正交投影。"
+        )
+        prompt = video_prompt_skill.build_video_prompt(selected, [], settings, primary_prompt=primary)
+        self.assertTrue(video_prompt_skill.is_natural_video_prompt(
+            prompt,
+            language="纯中文",
+            layout_mode=narrative.VISUAL_LAYOUT_MULTI_VIEW,
+        ))
+        self.assertFalse(video_prompt_skill.video_prompt_has_layout_contamination(prompt), prompt)
+        for anchor in ("成年女性侦探", "雨夜旧车站", "深色长风衣", "旧信封", "黄铜纽扣"):
+            self.assertIn(anchor, prompt)
+        for forbidden in ("角色设定图", "角色三视图", "正面视图", "侧面视图", "背面视图", "三栏", "正交投影", "1:1:1", "中性灰摄影棚"):
+            self.assertNotIn(forbidden, prompt)
+        anchors = video_prompt_skill.video_prompt_required_anchors(selected, [], settings)
+        self.assertEqual(anchors[:5], ["成年女性侦探", "雨夜旧车站", "手持旧信封", "深色长风衣", "旧信封"])
+        roles = video_prompt_skill.video_prompt_anchor_roles(selected, [], settings)
+        self.assertNotIn("角色设定图", str(roles))
+        metadata = video_prompt_skill.build_video_storyboard_metadata(
+            prompt,
+            settings,
+            selected=selected,
+        )
+        self.assertFalse(video_prompt_skill.video_prompt_has_layout_contamination(str(metadata)))
+        self.assertIn("成年女性侦探", str(metadata[0]["spatial_anchors"]))
+
+    def test_character_sheet_projection_supports_english_and_model_context(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["character sheet", "female detective"],
+                "场景背景": ["neutral gray studio", "rainy old station"],
+                "动作姿态": ["neutral standing pose", "holding an old envelope"],
+                "服装造型": ["dark long coat"],
+                "道具世界观": ["old envelope"],
+                "画面风格": ["cinematic CG"],
+                "光影氛围": ["blue train backlight"],
+                "构图视角": ["character turnaround", "front view", "side view", "back view"],
+            }
+        )
+        settings = {
+            "提示词语言": "纯英文",
+            "主体类型解析结果": "人物角色",
+            "画面结构模式解析结果": narrative.VISUAL_LAYOUT_MULTI_VIEW,
+            "seed": 21,
+        }
+        prompt = video_prompt_skill.build_video_prompt(
+            selected,
+            [],
+            settings,
+            primary_prompt="front at 0 degrees, one true side profile at 90 degrees, back at 180 degrees, three equal-width columns, orthographic projection.",
+        )
+        self.assertTrue(video_prompt_skill.is_natural_video_prompt(
+            prompt,
+            language="纯英文",
+            layout_mode=narrative.VISUAL_LAYOUT_MULTI_VIEW,
+        ))
+        self.assertFalse(video_prompt_skill.video_prompt_has_layout_contamination(prompt), prompt)
+        for forbidden in ("character sheet", "character turnaround", "front view", "side view", "back view", "three equal-width columns", "orthographic projection", "neutral gray studio"):
+            self.assertNotIn(forbidden, prompt.casefold())
+        projected = video_prompt_skill.project_video_story_settings(selected, [], settings)
+        self.assertEqual(projected["画面结构模式解析结果"], narrative.VISUAL_LAYOUT_SINGLE_PERSON)
+        self.assertEqual(projected["视频提示词来源画面结构模式"], narrative.VISUAL_LAYOUT_MULTI_VIEW)
+        self.assertEqual(projected["全局剧情规划"], [])
+        self.assertNotIn("character sheet", str(projected["全局创作主线合同"]).casefold())
+        inferred_projected = video_prompt_skill.project_video_story_settings(
+            selected,
+            [],
+            {"提示词语言": "纯英文", "主体类型解析结果": "人物角色"},
+        )
+        self.assertEqual(inferred_projected["视频提示词来源画面结构模式"], narrative.VISUAL_LAYOUT_MULTI_VIEW)
+        stale_projected = video_prompt_skill.project_video_story_settings(
+            selected,
+            [],
+            {
+                "提示词语言": "纯英文",
+                "主体类型解析结果": "人物角色",
+                "画面结构模式解析结果": narrative.VISUAL_LAYOUT_SINGLE_PERSON,
+            },
+        )
+        self.assertEqual(stale_projected["视频提示词来源画面结构模式"], narrative.VISUAL_LAYOUT_MULTI_VIEW)
+        contaminated = prompt.replace("Shot 1", "Shot 1 (character turnaround)", 1)
+        self.assertFalse(video_prompt_skill.is_natural_video_prompt(
+            contaminated,
+            language="纯英文",
+            layout_mode=narrative.VISUAL_LAYOUT_MULTI_VIEW,
+        ))
 
     def test_video_prompt_validation_has_no_length_ceiling_and_rejects_one_paragraph(self) -> None:
         prompt = video_prompt_skill.build_video_prompt(
@@ -31796,13 +32128,432 @@ class TestStagePromptModules(unittest.TestCase):
 
     def test_image_prompt_target_profile_supports_krea2_and_legacy_default(self) -> None:
         krea = prompt_builder.resolve_image_prompt_target_profile({"图像提示词目标模型": "Krea 2"})
+        krea_sheet = prompt_builder.resolve_image_prompt_target_profile(
+            {
+                "图像提示词目标模型": "Krea 2",
+                "画面结构模式解析结果": narrative.VISUAL_LAYOUT_MULTI_VIEW,
+            }
+        )
         default = prompt_builder.resolve_image_prompt_target_profile({})
         self.assertEqual(krea["target"], "Krea 2")
         self.assertIn("subject-first", krea["guidance"])
         self.assertEqual(krea["parameter_policy"], "omit_platform_parameters")
         self.assertEqual(krea["prompt_order"][:3], ["subject", "camera", "environment"])
+        self.assertEqual(krea["layout_priority"], "profile_default")
+        self.assertEqual(krea_sheet["prompt_order"][:4], ["layout_contract", "subject", "camera", "environment"])
+        self.assertEqual(krea_sheet["base_prompt_order"], krea["prompt_order"])
+        self.assertEqual(krea_sheet["layout_priority"], "hard_first")
+        self.assertEqual(krea_sheet["narrative_mode"], "parallel_design_reference")
+        self.assertIn("three-view layout contract", krea_sheet["guidance"])
         self.assertEqual(krea["negative_contract"], "structural_errors_in_negative_channel")
         self.assertEqual(default["target"], "通用")
+
+    def test_krea2_image_profile_reorders_the_skill_opening_in_both_languages(self) -> None:
+        self.assertEqual(prompt_builder._english_subject_phrase("woman"), "a woman")
+        self.assertEqual(prompt_builder._english_subject_phrase("adult woman"), "an adult woman")
+
+        def build(selected, language):
+            settings = {
+                "模板风格": "真实感",
+                "主体类型": "人物角色",
+                "案例输出结构": "案例长段版",
+                "标签反推模式": "自动平衡",
+                "生成数量": 1,
+                "额外要求": "",
+                "提示词语言": language,
+                "图像提示词目标模型": "Krea 2",
+            }
+            result = prompt_builder.build_prompt_list(
+                selected,
+                [],
+                settings,
+                scene_group="",
+                identity="",
+                style_track="",
+                recent_tracks=[],
+                uniq=uniq,
+                infer_template_style=lambda tags, explicit: explicit,
+                infer_subject_type=lambda tags, explicit: explicit,
+                infer_output_structure=lambda subject, explicit: explicit,
+            )[0]
+            self.assertEqual(settings["图像提示词目标模型有效"], "Krea 2")
+            return result
+
+        chinese = build(
+            OrderedDict(
+                {
+                    "主体": ["成年女性侦探"],
+                    "场景背景": ["雨夜旧车站"],
+                    "动作姿态": ["停步回望"],
+                    "服装造型": ["深色长风衣"],
+                    "光影氛围": ["青蓝霓虹逆光"],
+                    "构图视角": ["中景"],
+                    "画面风格": ["电影写实"],
+                }
+            ),
+            "纯中文",
+        )
+        chinese_opening = chinese.split("。", 1)[0]
+        self.assertTrue(chinese_opening.startswith("成年女性侦探是第一视觉重点"))
+        self.assertLess(chinese_opening.index("中景"), chinese_opening.index("雨夜旧车站"))
+        self.assertLess(chinese_opening.index("雨夜旧车站"), chinese_opening.index("停步回望"))
+        self.assertLess(chinese_opening.index("停步回望"), chinese_opening.index("深色长风衣"))
+        self.assertLess(chinese_opening.index("深色长风衣"), chinese_opening.index("青蓝霓虹逆光"))
+
+        english = build(
+            OrderedDict(
+                {
+                    "主体": ["female adventurer"],
+                    "场景背景": ["dungeon ruins"],
+                    "动作姿态": ["holding a torch"],
+                    "服装造型": ["leather armor"],
+                    "光影氛围": ["cold mist side light"],
+                    "构图视角": ["medium shot"],
+                    "画面风格": ["cinematic realism"],
+                }
+            ),
+            "纯英文",
+        )
+        english_opening = english.split(".", 1)[0].casefold()
+        self.assertTrue(english_opening.startswith("a female adventurer is the first visual read"))
+        self.assertNotIn("--", english)
+
+    def test_all_image_target_profiles_apply_distinct_opening_order_without_losing_anchors(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["成年女性侦探"],
+                "场景背景": ["雨夜旧车站"],
+                "动作姿态": ["停步回望"],
+                "服装造型": ["深色长风衣"],
+                "道具世界观": ["旧信封"],
+                "光影氛围": ["青蓝霓虹逆光"],
+                "构图视角": ["中景"],
+                "画面风格": ["电影写实"],
+                "技术画质": ["高细节"],
+            }
+        )
+        expected_orders = {
+            "Flux": ["成年女性侦探", "停步回望", "雨夜旧车站", "中景", "青蓝霓虹逆光", "深色长风衣", "电影写实"],
+            "SDXL": ["成年女性侦探", "中景", "雨夜旧车站", "电影写实", "青蓝霓虹逆光", "高细节"],
+            "Qwen Image": ["成年女性侦探", "雨夜旧车站", "旧信封", "停步回望", "青蓝霓虹逆光", "电影写实", "高细节"],
+            "Krea 2": ["成年女性侦探", "中景", "雨夜旧车站", "停步回望", "深色长风衣", "青蓝霓虹逆光", "电影写实"],
+            "Midjourney": ["成年女性侦探", "雨夜旧车站", "中景", "青蓝霓虹逆光", "电影写实", "深色长风衣"],
+            "自定义": ["成年女性侦探", "雨夜旧车站", "停步回望", "中景", "青蓝霓虹逆光", "电影写实"],
+        }
+        openings: set[str] = set()
+        for target, expected in expected_orders.items():
+            with self.subTest(target=target):
+                settings = {
+                    "模板风格": "真实感",
+                    "主体类型": "人物角色",
+                    "案例输出结构": "案例长段版",
+                    "标签反推模式": "自动平衡",
+                    "生成数量": 1,
+                    "额外要求": "",
+                    "提示词语言": "纯中文",
+                    "图像提示词目标模型": target,
+                }
+                prompt = prompt_builder.build_prompt_list(
+                    selected,
+                    [],
+                    settings,
+                    scene_group="",
+                    identity="",
+                    style_track="",
+                    recent_tracks=[],
+                    uniq=uniq,
+                    infer_template_style=lambda tags, explicit: explicit,
+                    infer_subject_type=lambda tags, explicit: explicit,
+                    infer_output_structure=lambda subject, explicit: explicit,
+                )[0]
+                opening = prompt.split("成片采用", 1)[0]
+                for token in expected:
+                    self.assertIn(token, opening, opening)
+                positions = [opening.index(token) for token in expected]
+                self.assertEqual(positions, sorted(positions))
+                for anchor in collect_all_tags(selected, []):
+                    self.assertIn(anchor, prompt)
+                self.assertNotIn("--", prompt)
+                openings.add(opening)
+        self.assertEqual(len(openings), len(expected_orders))
+
+    def test_stage_krea2_profile_applies_to_image_skill_without_polluting_video(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        result = module._run_stage(
+            None,
+            **{
+                "unique_id": "image-target-krea2-stage-contract",
+                "模型来源": "仅Skill",
+                "图像提示词目标模型": "Krea 2",
+                "模板风格": "真实感",
+                "主体标签1": "成年女性侦探",
+                "场景背景标签1": "雨夜旧车站",
+                "动作姿态标签1": "停步回望",
+                "服装造型标签1": "深色长风衣",
+                "光影氛围标签1": "青蓝霓虹逆光",
+                "构图视角标签1": "中景",
+                "运行时随机标签": False,
+                "生成数量": 1,
+                "提示词语言": "纯中文",
+                "seed": 163,
+            },
+        )
+        prompt = result[1]
+        opening = prompt.split("。", 1)[0]
+        self.assertTrue(opening.startswith("成年女性侦探是第一视觉重点"))
+        self.assertLess(opening.index("中景"), opening.index("雨夜旧车站"))
+        self.assertLess(opening.index("雨夜旧车站"), opening.index("停步回望"))
+        self.assertLess(opening.index("停步回望"), opening.index("深色长风衣"))
+        self.assertLess(opening.index("深色长风衣"), opening.index("青蓝霓虹逆光"))
+
+        payload = json.loads(result[3])
+        self.assertEqual(payload["image_prompt_target_model"], "Krea 2")
+        self.assertEqual(
+            payload["image_prompt_contract"]["prompt_order"][:6],
+            ["subject", "camera", "environment", "action", "material", "lighting"],
+        )
+        self.assertTrue(result[7].startswith("分镜一"))
+        self.assertNotIn("Krea 2", result[7])
+
+    def test_image_target_profiles_keep_character_sheet_contract_ahead_of_profile_order(self) -> None:
+        def build(target: str, language: str, selected: OrderedDict[str, list[str]]) -> str:
+            settings = {
+                "模板风格": "CG感",
+                "主体类型": "人物角色",
+                "案例输出结构": "案例长段版",
+                "标签反推模式": "自动平衡",
+                "运行时随机标签": False,
+                "生成数量": 1,
+                "额外要求": "",
+                "提示词语言": language,
+                "图像提示词目标模型": target,
+            }
+            prompt = prompt_builder.build_prompt_list(
+                selected,
+                [],
+                settings,
+                scene_group="",
+                identity="",
+                style_track="",
+                recent_tracks=[],
+                uniq=uniq,
+                infer_template_style=lambda _tags, explicit: explicit,
+                infer_subject_type=lambda _tags, explicit: explicit,
+                infer_output_structure=lambda _subject, explicit: explicit,
+            )[0]
+            self.assertEqual(settings["画面结构模式解析结果"], narrative.VISUAL_LAYOUT_MULTI_VIEW)
+            profile = settings["图像提示词目标模型Profile"]
+            self.assertEqual(profile["prompt_order"][0], "layout_contract")
+            self.assertEqual(profile["layout_priority"], "hard_first")
+            self.assertEqual(profile["narrative_mode"], "parallel_design_reference")
+            self.assertEqual(settings["全局剧情规划"], [])
+            self.assertTrue(
+                narrative.prompt_preserves_visual_layout(prompt, narrative.VISUAL_LAYOUT_MULTI_VIEW),
+                prompt,
+            )
+            return prompt
+
+        chinese = build(
+            "Krea 2",
+            "纯中文",
+            OrderedDict(
+                {
+                    "主体": ["角色设定图", "成年女性侦探"],
+                    "画面风格": ["电影级CG"],
+                    "场景背景": ["中性灰摄影棚"],
+                    "动作姿态": ["手持旧信封"],
+                    "服装造型": ["深色长风衣"],
+                    "光影氛围": ["柔和顶侧光"],
+                    "构图视角": ["角色三视图", "正面视图", "侧面视图", "背面视图"],
+                }
+            ),
+        )
+        self.assertTrue(chinese.startswith("标准三视图从左到右为正面0度"), chinese)
+        contract_end = chinese.index("其他多视图按指定数量均分")
+        profile_start = chinese.index("同一角色设定图、成年女性侦探是三栏的第一视觉重点")
+        self.assertLess(contract_end, profile_start)
+        ordered = [
+            "角色设定图、成年女性侦探",
+            "角色三视图、正面视图",
+            "中性灰摄影棚",
+            "手持旧信封",
+            "深色长风衣",
+            "柔和顶侧光",
+            "电影级CG",
+        ]
+        positions = [chinese.index(token, profile_start) for token in ordered]
+        self.assertEqual(positions, sorted(positions))
+        for anchor in ("角色三视图", "正面视图", "侧面视图", "背面视图"):
+            self.assertIn(anchor, chinese)
+        for forbidden in ("形成唯一动作", "全部视觉锚点服从同一时刻", "决定性瞬间", "这个唯一定格"):
+            self.assertNotIn(forbidden, chinese)
+
+        english = build(
+            "Flux",
+            "纯英文",
+            OrderedDict(
+                {
+                    "主体": ["character sheet", "female adventurer"],
+                    "画面风格": ["cinematic CG"],
+                    "场景背景": ["neutral gray studio"],
+                    "动作姿态": ["holding an old map"],
+                    "服装造型": ["leather armor"],
+                    "光影氛围": ["soft overhead side light"],
+                    "构图视角": ["character turnaround", "front view", "side view", "back view"],
+                }
+            ),
+        )
+        self.assertTrue(english.startswith("Honor the explicitly selected character-sheet"), english)
+        contract_end = english.index("distributes every view evenly")
+        profile_start = english.index("Across all three columns")
+        self.assertLess(contract_end, profile_start)
+        for required in (
+            "front at 0 degrees",
+            "one true side profile at 90 degrees",
+            "back at 180 degrees",
+            "three equal-width columns",
+            "1:1:1 layout",
+            "one shared head line and ground baseline",
+        ):
+            self.assertIn(required, english)
+        for forbidden in ("performs one action", "one continuous moment", "one decisive exposure", "single held instant"):
+            self.assertNotIn(forbidden, english)
+
+    def test_character_sheet_json_contract_and_model_candidate_use_design_validation(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        result = module._run_stage(
+            None,
+            **{
+                "unique_id": "image-target-krea2-character-sheet-contract",
+                "模型来源": "仅Skill",
+                "图像提示词目标模型": "Krea 2",
+                "模板风格": "CG感",
+                "主体标签1": "角色设定图",
+                "主体标签2": "成年女性侦探",
+                "场景背景标签1": "中性灰摄影棚",
+                "动作姿态标签1": "手持旧信封",
+                "服装造型标签1": "深色长风衣",
+                "光影氛围标签1": "柔和顶侧光",
+                "构图视角标签1": "角色三视图",
+                "构图视角标签2": "正面视图",
+                "构图视角标签3": "侧面视图",
+                "构图视角标签4": "背面视图",
+                "运行时随机标签": False,
+                "生成数量": 1,
+                "提示词语言": "纯中文",
+                "seed": 164,
+            },
+        )
+        prompt = result[1]
+        payload = json.loads(result[3])
+        contract = payload["image_prompt_contract"]
+        self.assertEqual(contract["prompt_order"][:4], ["layout_contract", "subject", "camera", "environment"])
+        self.assertEqual(contract["base_prompt_order"][:3], ["subject", "camera", "environment"])
+        self.assertEqual(contract["layout_mode"], narrative.VISUAL_LAYOUT_MULTI_VIEW)
+        self.assertEqual(contract["layout_priority"], "hard_first")
+        self.assertEqual(contract["narrative_mode"], "parallel_design_reference")
+
+        validation_settings = {
+            "提示词语言": "纯中文",
+            "画面结构模式解析结果": narrative.VISUAL_LAYOUT_MULTI_VIEW,
+            "全局叙事合同启用": True,
+        }
+        candidate = prompt + " 三栏的金属扣件保持相同尺寸、表面磨损和固定位置，便于逐视图核对材质连续性。"
+        self.assertTrue(model_refiner._looks_like_narrative_prompt(candidate, validation_settings))
+        adopted, status, reason = model_refiner._resolve_model_prompt_candidate(
+            prompt,
+            candidate,
+            validation_settings,
+        )
+        self.assertNotEqual(adopted, prompt)
+        self.assertIn("三栏的金属扣件保持相同尺寸、表面磨损和固定位置", adopted)
+        self.assertIn(status, {"direct", "cleaned"})
+        self.assertEqual(reason, "")
+
+    def test_character_sheet_model_context_and_batch_requests_exclude_story_constraints(self) -> None:
+        base_settings = {
+            "提示词语言": "纯中文",
+            "模型来源": "API接口",
+            "画面结构模式解析结果": narrative.VISUAL_LAYOUT_MULTI_VIEW,
+            "全局剧情规划": ["事件触发=警报响起；情绪转折=由平静转为惊慌；结尾状态=冲出房间"],
+            "智能编排摘要": "任务 standard_visual_story；要求电影定格",
+            "智能关系补全摘要": "旧信封来自手持动作",
+            "最近提示词指纹": ["雨夜追逐与镜头推进"],
+            "智能场景关系图": {
+                "hard_anchors": {
+                    "主体": ["成年女性侦探"],
+                    "服装造型": ["深色长风衣"],
+                },
+                "depth_of_field_constraint": {
+                    "required_value": "shallow",
+                    "required_label": "浅景深",
+                },
+                "perspective_layout_constraint": {
+                    "required_value": "three_point",
+                    "required_label": "三点透视",
+                },
+                "motion_rendering_constraint": {
+                    "required_value": "motion_blur",
+                    "required_label": "运动模糊",
+                },
+            },
+            "图像提示词目标模型": "Krea 2",
+            "图像提示词目标模型有效": "Krea 2",
+            "图像提示词目标模型Profile": prompt_builder.resolve_image_prompt_target_profile(
+                {
+                    "图像提示词目标模型": "Krea 2",
+                    "画面结构模式解析结果": narrative.VISUAL_LAYOUT_MULTI_VIEW,
+                }
+            ),
+        }
+        context = model_refiner._skill_context_for_model(dict(base_settings))
+        self.assertIn("智能编排已切换为角色设定图", context)
+        self.assertIn("智能关系图三视图转换", context)
+        self.assertIn("道具关系三视图转换", context)
+        self.assertIn("三视图非锁死策略", context)
+        self.assertIn("最近三视图避重档案", context)
+        self.assertIn("主体=成年女性侦探", context)
+        self.assertNotIn("事件触发=警报响起", context)
+        self.assertNotIn("智能景深", context)
+        self.assertNotIn("智能透视消失点结构", context)
+        self.assertNotIn("智能运动呈现", context)
+        self.assertNotIn("任务 standard_visual_story", context)
+
+        prompt = narrative.visual_layout_contract(narrative.VISUAL_LAYOUT_MULTI_VIEW) + "同一成年女性侦探保持深色长风衣和统一材质。"
+        normal_batch = model_refiner._compose_batch_prompt([prompt, prompt], dict(base_settings))
+        self.assertIn("第1条三视图设计锚点", normal_batch)
+        self.assertNotIn("第1条剧情规划", normal_batch)
+        self.assertNotIn("事件触发=警报响起", normal_batch)
+
+        incremental_settings = {
+            **base_settings,
+            "智能模型策略": {"mode": "incremental_blend"},
+        }
+        incremental_user = model_refiner._compose_model_user_prompt(
+            prompt,
+            dict(incremental_settings),
+        )
+        self.assertIn("自然语言三视图设计细节", incremental_user)
+        self.assertIn("正面、90度侧面和背面", incremental_user)
+        self.assertNotIn("只扩写同一场景内的动作因果", incremental_user)
+
+        incremental_batch = model_refiner._compose_batch_prompt(
+            [prompt, prompt],
+            dict(incremental_settings),
+        )
+        self.assertIn("自然语言三视图设计细节", incremental_batch)
+        self.assertNotIn("动作因果、材质、空间或光影变化", incremental_batch)
+
+        qwen_settings = {
+            **base_settings,
+            "模型来源": "本地Transformers",
+            "模型调用基础来源": "本地Transformers",
+            "模型名称": "Qwen3.8-4B",
+        }
+        qwen_user = model_refiner._compose_model_user_prompt(prompt, qwen_settings)
+        self.assertIn("角色三视图设计增量润色", qwen_user)
+        self.assertIn("跨视图一致的结构、材质、接缝、配色或统一光线", qwen_user)
+        self.assertNotIn("图像提示词增量润色", qwen_user)
 
     def test_video_profile_and_storyboard_metadata_are_model_aware(self) -> None:
         selected = OrderedDict(
@@ -32240,10 +32991,17 @@ class TestStagePromptModules(unittest.TestCase):
         payload = json.loads(result[3])
         self.assertEqual(payload["video_prompt"], video_prompt)
         self.assertEqual(payload["video_prompt_skill_status"], "已生成")
-        self.assertEqual(payload["video_prompt_skill_version"], "video-prompt-skill-v11")
+        self.assertEqual(payload["video_prompt_skill_version"], "video-prompt-skill-v12")
         self.assertEqual(payload["video_prompt_model_status"], "未调用（仅Skill）")
         self.assertEqual(payload["video_prompt_model_source"], "仅Skill")
         self.assertGreaterEqual(payload["video_prompt_required_anchor_count"], 1)
+        diagnostics = payload["model_channel_diagnostics"]
+        self.assertEqual(
+            {channel: details["status"] for channel, details in diagnostics.items()},
+            {"image": "skill_only", "smart_text": "skill_only", "video": "skill_only"},
+        )
+        self.assertTrue(all(details["attempts"] == 0 for details in diagnostics.values()))
+        self.assertTrue(all(details["skips"] == 0 for details in diagnostics.values()))
         cache = module.获取阶段节点输出缓存(node_id)
         self.assertEqual(cache["video_prompt"], video_prompt)
         self.assertEqual(cache["outputs"][7], video_prompt)

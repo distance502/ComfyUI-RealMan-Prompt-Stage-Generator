@@ -30,6 +30,7 @@ except Exception:  # pragma: no cover - direct module loading in focused tests
 try:
     from .narrative import (
         GLOBAL_NARRATIVE_MODEL_CONTRACT,
+        MULTI_VIEW_MODEL_CONTRACT,
         prompt_preserves_visual_layout,
         resolve_visual_layout_mode,
         storyboard_number_token,
@@ -44,6 +45,7 @@ try:
 except Exception:  # pragma: no cover - exercised by direct import tests
     from stage_prompt_narrative_test import (  # type: ignore
         GLOBAL_NARRATIVE_MODEL_CONTRACT,
+        MULTI_VIEW_MODEL_CONTRACT,
         prompt_preserves_visual_layout,
         resolve_visual_layout_mode,
         storyboard_number_token,
@@ -340,6 +342,16 @@ _QWEN35_LOCAL_IMAGE_INCREMENTAL_SYSTEM = """
 你是 Qwen TE 的 Qwen3.5 本地图像提示词增量润色器。输入已经是 Skill 生成并通过自然语言、剧情、场景和画面结构合同校验的成品底稿，不要重写整篇。
 
 只输出 2-4 句可以直接融入原底稿的自然语言新增细节，不设字数限制。新增内容必须是镜头可见的动作因果、材质变化、空间反馈或光影变化，并严格沿用底稿中的主体、服装、场景、动作、道具、媒介风格和构图。不得引入底稿之外的人物、地点、服装、道具或世界观。不要输出分析、标题、标签列表、规则复述、负面词、Markdown 或占位符，也不要复述整份底稿。
+""".strip()
+_MULTI_VIEW_IMAGE_REFINER_SYSTEM = f"""
+你是 Qwen TE 的角色设定图后置润色器。输入已经是 Skill 生成并通过三视图结构校验的自然语言底稿。只输出最终正向提示词正文，不输出分析、标题、标签列表、负面词、平台参数、Markdown 或规则复述；正文不限制字数。
+
+{MULTI_VIEW_MODEL_CONTRACT}
+""".strip()
+_QWEN_LOCAL_MULTI_VIEW_INCREMENTAL_SYSTEM = f"""
+你是 Qwen TE 的本地角色设定图增量润色器。输入已经是 Skill 生成并通过三视图结构校验的成品底稿，不要重写整篇。只输出 2-4 句可以直接融入原底稿的自然语言设计细节；新增内容必须能够同时应用于正面、90 度侧面和背面，只补充身份一致性、结构、材质、接缝、配色、统一光线或制作细节。不得引入事件推进、不同动作阶段、新人物、新服装、新道具、新场景或平台参数。
+
+{MULTI_VIEW_MODEL_CONTRACT}
 """.strip()
 _QWEN35_LOCAL_VIDEO_INCREMENTAL_SYSTEM = """
 你是 Qwen TE 的视频提示词后置导演，也是 Qwen3.5 本地增量润色器。输入已经是 Skill 生成并通过分镜故事合同校验的多段视频底稿，不要重写整篇。
@@ -2054,6 +2066,8 @@ def _resolve_model_prompt_candidate(
         blended = _validated_model_blend(original_prompt, cleaned, settings, layout_mode=layout_mode)
         if blended != str(original_prompt or "").strip():
             return blended, "blended", ""
+        if layout_mode == "multi_view":
+            return original_prompt, "rejected", "模型正文可读，但缺少完整自然语言三视图设计合同。"
         return original_prompt, "rejected", "模型正文可读，但缺少完整自然语言剧情链。"
     original_units = _split_prompt_sentences(original_prompt)
     candidate_units = _split_prompt_sentences(cleaned)
@@ -2061,7 +2075,8 @@ def _resolve_model_prompt_candidate(
         blended = _validated_model_blend(original_prompt, cleaned, settings, layout_mode=layout_mode)
         if blended != str(original_prompt or "").strip():
             return blended, "blended", ""
-        return original_prompt, "rejected", "模型正文虽可读，但压缩了 Skill 剧情骨架且无法安全融合。"
+        skeleton = "三视图设计骨架" if layout_mode == "multi_view" else "剧情骨架"
+        return original_prompt, "rejected", f"模型正文虽可读，但压缩了 Skill {skeleton}且无法安全融合。"
     return cleaned, ("cleaned" if recovered else "direct"), ""
 
 
@@ -2248,23 +2263,29 @@ def _resolve_system_prompt(settings: dict[str, Any]) -> str:
                     "不得替换主体、场景、服装、动作目标、道具、世界观或结尾。"
                 )
             return video_prompt
+    layout_mode = resolve_visual_layout_mode(settings=settings)
+    english_layout = _prompt_language_mode(settings) in {"纯英文", "英文提示词+中文说明"}
+    layout_contract = visual_layout_contract(layout_mode, english=english_layout)
     if _uses_qwen35_local_incremental_refinement(settings) and not str(settings.get("系统提示词覆盖") or "").strip():
-        layout_mode = resolve_visual_layout_mode(settings=settings)
-        layout_contract = visual_layout_contract(
-            layout_mode,
-            english=_prompt_language_mode(settings) in {"纯英文", "英文提示词+中文说明"},
+        incremental_system = (
+            _QWEN_LOCAL_MULTI_VIEW_INCREMENTAL_SYSTEM
+            if layout_mode == "multi_view"
+            else _QWEN35_LOCAL_IMAGE_INCREMENTAL_SYSTEM.replace(
+                "Qwen3.5",
+                _qwen_local_incremental_label(settings),
+            )
         )
         return (
-            f"{_QWEN35_LOCAL_IMAGE_INCREMENTAL_SYSTEM.replace('Qwen3.5', _qwen_local_incremental_label(settings))}\n\n"
-            f"当前画面结构硬约束：{layout_contract}\n最终只输出中文自然语言新增句子。"
+            f"{incremental_system}\n\n当前画面结构硬约束：{layout_contract}"
+            f"{_language_instruction(settings)}"
         )
-    base_prompt = str(settings.get("系统提示词覆盖") or _DEFAULT_IMAGE_REFINER_SYSTEM)
-    narrative_contract = "" if GLOBAL_NARRATIVE_MODEL_CONTRACT in base_prompt else f"\n\n{GLOBAL_NARRATIVE_MODEL_CONTRACT}"
-    layout_mode = resolve_visual_layout_mode(settings=settings)
-    layout_contract = visual_layout_contract(
-        layout_mode,
-        english=_prompt_language_mode(settings) in {"纯英文", "英文提示词+中文说明"},
-    )
+    custom_system_prompt = str(settings.get("系统提示词覆盖") or "").strip()
+    if layout_mode == "multi_view":
+        base_prompt = custom_system_prompt or _MULTI_VIEW_IMAGE_REFINER_SYSTEM
+        narrative_contract = "" if MULTI_VIEW_MODEL_CONTRACT in base_prompt else f"\n\n{MULTI_VIEW_MODEL_CONTRACT}"
+    else:
+        base_prompt = custom_system_prompt or _DEFAULT_IMAGE_REFINER_SYSTEM
+        narrative_contract = "" if GLOBAL_NARRATIVE_MODEL_CONTRACT in base_prompt else f"\n\n{GLOBAL_NARRATIVE_MODEL_CONTRACT}"
     incremental_contract = ""
     if _uses_incremental_refinement(settings):
         incremental_contract = (
@@ -2514,12 +2535,50 @@ def _requires_narrative_contract(settings: dict[str, Any]) -> bool:
     return bool(settings.get("全局剧情规划")) or bool(settings.get("全局叙事合同启用", False))
 
 
+_MULTI_VIEW_DESIGN_MARKER_GROUPS_ZH = (
+    ("同一角色", "同一身份", "共享同一身份", "跨视图一致"),
+    ("正面", "正脸", "0度"),
+    ("90度", "标准侧面", "侧面"),
+    ("背面", "180度", "后脑"),
+    ("1:1:1", "三栏等宽", "等宽"),
+    ("等高", "头顶线", "脚底基线", "正交投影"),
+    ("服装", "材质", "配色", "发型", "脸型"),
+    ("光线", "曝光", "色温", "背景", "地面"),
+)
+_MULTI_VIEW_DESIGN_MARKER_GROUPS_EN = (
+    ("same character", "continuous identity", "matching face", "cross-view consistency"),
+    ("front", "frontal face", "0 degrees"),
+    ("90 degrees", "side profile", "side view"),
+    ("back", "180 degrees", "rear head"),
+    ("1:1:1", "equal-width columns", "three equal-width columns"),
+    ("identical character height", "head line", "ground baseline", "orthographic"),
+    ("wardrobe", "garment", "material", "palette", "hairstyle", "face shape"),
+    ("lighting", "exposure", "color temperature", "background", "ground plane"),
+)
+
+
 def _looks_like_narrative_prompt(text: str, settings: dict[str, Any]) -> bool:
-    if not _requires_narrative_contract(settings):
-        return True
     body = str(text or "").split("中文说明：", 1)[0].strip()
     if not body:
         return False
+    layout_mode = str(settings.get("画面结构模式解析结果", "") or "").strip()
+    if layout_mode == "multi_view":
+        if not prompt_preserves_visual_layout(body, layout_mode):
+            return False
+        if _CJK_PATTERN.search(body):
+            hits = sum(
+                any(marker in body for marker in group)
+                for group in _MULTI_VIEW_DESIGN_MARKER_GROUPS_ZH
+            )
+        else:
+            lowered = body.casefold()
+            hits = sum(
+                any(marker in lowered for marker in group)
+                for group in _MULTI_VIEW_DESIGN_MARKER_GROUPS_EN
+            )
+        return hits >= 6
+    if not _requires_narrative_contract(settings):
+        return True
     if _CJK_PATTERN.search(body):
         hits = sum(any(marker in body for marker in group) for group in _NARRATIVE_MARKER_GROUPS_ZH)
         return hits >= 5
@@ -3870,6 +3929,9 @@ def _skill_context_for_model(settings: dict[str, Any]) -> str:
         active_modes.append("常规标签与模板")
 
     layout_mode = resolve_visual_layout_mode(settings=settings)
+    multi_view_mode = layout_mode == "multi_view"
+    if multi_view_mode and "角色设定图" not in active_modes:
+        active_modes.insert(0, "角色设定图")
     layout_policy = visual_layout_contract(
         layout_mode,
         english=str(settings.get("提示词语言", "纯中文") or "纯中文").strip() in {"纯英文", "英文提示词+中文说明"},
@@ -3888,7 +3950,11 @@ def _skill_context_for_model(settings: dict[str, Any]) -> str:
         extra_lines.append(f"当前激活素材摘要：{post_context}")
     if nsfw_context:
         extra_lines.append(f"NSFW 工作台素材：{nsfw_context}")
-    if isinstance(nsfw_result_contract, dict) and bool(nsfw_result_contract.get("enabled", False)):
+    if (
+        not multi_view_mode
+        and isinstance(nsfw_result_contract, dict)
+        and bool(nsfw_result_contract.get("enabled", False))
+    ):
         result_text = str(nsfw_result_contract.get("text", "") or "").strip()
         contact_points = "、".join(
             str(item).strip()
@@ -3923,12 +3989,31 @@ def _skill_context_for_model(settings: dict[str, Any]) -> str:
             + "\n这些规则同时约束图像、智能文本和视频；用户显式标签是事实锚点，模板 Skill 只决定媒介表现，"
             "不得把 Skill 说明本身写进最终正文。"
         )
-    if intelligence_summary:
+    if intelligence_summary and multi_view_mode:
+        extra_lines.append(
+            "智能编排已切换为角色设定图：只继承其中的主体身份、媒介、服装、材质、配色和光线事实；"
+            "普通视觉故事任务、动作推进、景深、透视镜头与结尾状态不进入三视图正文。"
+        )
+    elif intelligence_summary:
         extra_lines.append(
             "智能编排：" + intelligence_summary
             + "。任务类型和模型策略已经确定，不得在润色时改换任务。"
         )
-    if isinstance(scene_graph, dict):
+    if isinstance(scene_graph, dict) and multi_view_mode:
+        hard_anchors = scene_graph.get("hard_anchors")
+        anchor_text = ""
+        if isinstance(hard_anchors, dict):
+            anchor_text = "；".join(
+                f"{group}={'、'.join(str(item) for item in values if str(item).strip())}"
+                for group, values in hard_anchors.items()
+                if isinstance(values, list) and values
+            )
+        extra_lines.append(
+            "智能关系图三视图转换：场景、动作、道具、光线和构图关系只作为三个并列视图共同遵守的设计事实；"
+            "景深、焦段透视、运动模糊、镜头滚转、屏幕运动方向、单点或多点透视和动作阶段不进入正交三视图。"
+            + (f"硬锚点：{anchor_text}。" if anchor_text else "")
+        )
+    elif isinstance(scene_graph, dict):
         presence_constraint = dict(scene_graph.get("context_subject_presence_constraint", {}) or {})
         if presence_constraint:
             required_label = str(presence_constraint.get("required_label", "") or "").strip()
@@ -4193,28 +4278,48 @@ def _skill_context_for_model(settings: dict[str, Any]) -> str:
         extra_lines.append(
             f"本次软偏好应用：{applied_preference_summary}。它只填充原本为空的维度，优先级低于全部显式输入和锁定项。"
         )
-    if relation_hint_summary:
+    if relation_hint_summary and multi_view_mode:
+        extra_lines.append(
+            f"道具关系三视图转换：{relation_hint_summary}。只保留道具所属角色、身体侧位、握持点和材质关系，"
+            "三个视图必须逐项对应，不扩展动作因果或新世界观。"
+        )
+    elif relation_hint_summary:
         extra_lines.append(
             f"动作关系软补全：{relation_hint_summary}。这些道具由明确动作推导，只服务当前动作，不得扩展成新的世界观。"
         )
     if dynamic_strategy:
         extra_lines.append(f"Skill动态变化策略：{dynamic_strategy}")
-    if narrative_plans:
+    if narrative_plans and not multi_view_mode:
         extra_lines.append(
             "本次全局剧情规划：" + " | ".join(narrative_plans[:20])
             + "。必须保留每条规划中的事件、情绪转折、空间动线与结尾状态，但要把它们写成自然正文，不能复述规划字段名。"
         )
-    extra_lines.append(
-        "全局非锁死策略：当前标签、NSFW 工作台、智能文本和标签块只提供本次素材锚点；"
-        "不要把历史输出、示例、默认词或上一轮随机档案当成固定模板。若某个维度没有被用户明确选择，"
-        "可以按当前主风格补入新的合理细节；若已经明确选择，则保留它并优先变化其他未锁定维度。"
-    )
+    if multi_view_mode:
+        extra_lines.append(
+            "三视图非锁死策略：用户明确的身份、脸部、体型、发型、服装、道具、配色和材质保持不变；"
+            "未指定部分只可补充能够在正面、90度侧面和背面同时成立的接缝、结构、表面与统一光线细节，"
+            "不得借扩写改变角色或制造不同动作阶段。"
+        )
+    else:
+        extra_lines.append(
+            "全局非锁死策略：当前标签、NSFW 工作台、智能文本和标签块只提供本次素材锚点；"
+            "不要把历史输出、示例、默认词或上一轮随机档案当成固定模板。若某个维度没有被用户明确选择，"
+            "可以按当前主风格补入新的合理细节；若已经明确选择，则保留它并优先变化其他未锁定维度。"
+        )
     character_sheet_policy = str(settings.get("角色设定图内部策略", "") or "").strip()
     if character_sheet_policy:
         extra_lines.append(f"角色设定图策略：{character_sheet_policy}")
     if diversity_markers:
         extra_lines.append(f"本次差异档案：{'、'.join(dict.fromkeys(diversity_markers[:12]))}")
-    if recent_prompt_fingerprints:
+    if recent_prompt_fingerprints and multi_view_mode:
+        recent_summary = _summarize_recent_prompt_history(recent_prompt_fingerprints)
+        extra_lines.append(
+            "最近三视图避重档案："
+            + (recent_summary or "；".join(dict.fromkeys(recent_prompt_fingerprints[:4])))
+            + "。历史只用于避让；必须保持本条已锁定角色在三栏内部完全一致，只能变化未锁定的服装结构、材质处理、"
+            "配色比例、统一光线或背景呈现，不能用改变视角数量、动作阶段或身份来制造差异。"
+        )
+    elif recent_prompt_fingerprints:
         recent_summary = _summarize_recent_prompt_history(recent_prompt_fingerprints)
         extra_lines.append(
             "最近输出避重档案："
@@ -4275,22 +4380,30 @@ def _skill_context_for_model(settings: dict[str, Any]) -> str:
 
 
 def _compose_model_user_prompt(prompt: str, settings: dict[str, Any]) -> str:
-    repair_instruction = ""
-    if bool(settings.get("模型输出修复请求", False)):
-        repair_reason = str(settings.get("智能定向修复原因", "") or "").strip()
-        repair_focus = str(settings.get("智能定向修复指令", "") or "").strip()
-        reason_line = f"上一次失败的具体原因：{repair_reason}\n" if repair_reason else ""
-        repair_instruction = (
-            f"{reason_line}本次唯一修复目标：{repair_focus or '只修复校验指出的问题。'}"
-            "其他已经正确的主体、服装、动作、场景、道具、光影和剧情不得改写。"
-            "不得复述任务、解释规则或输出思考过程。\n"
-        )
     output_kind = (
         "video"
         if str(settings.get("模型任务", "") or "").strip() == "视频提示词"
         else "image"
     )
-    environment_context = _compact_environment_context_for_model(
+    multi_view_mode = (
+        output_kind == "image"
+        and resolve_visual_layout_mode(settings=settings) == "multi_view"
+    )
+    repair_instruction = ""
+    if bool(settings.get("模型输出修复请求", False)):
+        repair_reason = str(settings.get("智能定向修复原因", "") or "").strip()
+        repair_focus = str(settings.get("智能定向修复指令", "") or "").strip()
+        reason_line = f"上一次失败的具体原因：{repair_reason}\n" if repair_reason else ""
+        protected_content = (
+            "其他已经正确的三视图布局、身份、脸部、体型、发型、服装、道具侧位、材质、配色和统一光线不得改写。"
+            if multi_view_mode
+            else "其他已经正确的主体、服装、动作、场景、道具、光影和剧情不得改写。"
+        )
+        repair_instruction = (
+            f"{reason_line}本次唯一修复目标：{repair_focus or '只修复校验指出的问题。'}"
+            f"{protected_content}不得复述任务、解释规则或输出思考过程。\n"
+        )
+    environment_context = "" if multi_view_mode else _compact_environment_context_for_model(
         settings.get("智能场景关系图"),
         output_kind=output_kind,
     )
@@ -4306,17 +4419,32 @@ def _compose_model_user_prompt(prompt: str, settings: dict[str, Any]) -> str:
             for item in settings.get("视频提示词必保留锚点", [])
             if str(item).strip()
         ]
-        task_name = "视频分镜剧情增量润色" if str(settings.get("模型任务", "") or "").strip() == "视频提示词" else "图像提示词增量润色"
+        task_name = (
+            "视频分镜剧情增量润色"
+            if output_kind == "video"
+            else ("角色三视图设计增量润色" if multi_view_mode else "图像提示词增量润色")
+        )
+        retry_action = (
+            "这次立即给出 2-4 句跨视图一致的自然语言设计细节，不要分析或重写全文。\n"
+            if multi_view_mode
+            else "这次立即给出 2-4 句自然语言新增细节，不要分析或重写全文。\n"
+        )
         retry_note = (
-            "上一次输出不可用。\n" + repair_instruction + "这次立即给出 2-4 句自然语言新增细节，不要分析或重写全文。\n"
+            "上一次输出不可用。\n" + repair_instruction + retry_action
             if bool(settings.get("模型输出修复请求", False))
+            else ""
+        )
+        task_constraint = (
+            "新增句子必须同时适用于正面、90度侧面和背面，只补充跨视图一致的结构、材质、接缝、配色或统一光线；"
+            "不要加入剧情、动作阶段或透视镜头。\n"
+            if multi_view_mode
             else ""
         )
         anchor_line = f"必须保留的原文锚点：{'、'.join(dict.fromkeys(anchors))}\n" if anchors else ""
         spine_line = f"全局创作主线：{contract_summary}\n" if contract_summary else ""
         return (
             f"{retry_note}任务：{task_name}。只返回可插入底稿的新增句子。\n"
-            f"{spine_line}{anchor_line}{environment_line}"
+            f"{task_constraint}{spine_line}{anchor_line}{environment_line}"
             f"Skill 已校验底稿：\n{str(prompt or '').strip()}"
         )
     if str(settings.get("模型任务", "") or "").strip() == "视频提示词":
@@ -4345,7 +4473,19 @@ def _compose_model_user_prompt(prompt: str, settings: dict[str, Any]) -> str:
         )
     if _uses_incremental_refinement(settings):
         language = _prompt_language_mode(settings)
-        if language == "纯英文":
+        if multi_view_mode and language == "纯英文":
+            instruction = (
+                "Return only natural-language character-turnaround details that apply identically to the front, 90-degree side, and back views. "
+                "Preserve the 1:1:1 layout, identity, face, body build, hairstyle, wardrobe, prop side, materials, palette, and uniform lighting; "
+                "do not introduce story progression, action stages, perspective shots, or another setting."
+            )
+        elif multi_view_mode:
+            instruction = (
+                "只输出可安全融入 Skill 底稿的自然语言三视图设计细节。保留1:1:1布局、身份、正脸、体型、发型、服装、"
+                "道具侧位、材质、配色和统一光线；新增内容必须同时适用于正面、90度侧面和背面，不得加入剧情推进、"
+                "不同动作阶段、透视镜头或另一套场景。"
+            )
+        elif language == "纯英文":
             instruction = (
                 "Return only natural-language additions that can be merged into the validated Skill draft. "
                 "Preserve every subject, outfit, action, scene, prop, composition, and style anchor; do not introduce another setting or world family."
@@ -4376,25 +4516,38 @@ def _prompt_signature(prompt: str, *, limit: int = 14) -> str:
 
 
 def _compose_batch_prompt(prompts: list[str], settings: dict[str, Any]) -> str:
+    layout_mode = resolve_visual_layout_mode(settings=settings)
+    multi_view_mode = layout_mode == "multi_view"
     if _uses_qwen35_local_incremental_refinement(settings) or _uses_incremental_refinement(settings):
         contract_summary = str(settings.get("全局创作主线摘要", "") or "").strip()
         if not contract_summary:
             contract_summary = summarize_global_creative_spine_contract(settings.get("全局创作主线合同"))
         spine_line = f"共同创作主线：{contract_summary}\n" if contract_summary else ""
-        environment_context = _compact_environment_context_for_model(
+        environment_context = "" if multi_view_mode else _compact_environment_context_for_model(
             settings.get("智能场景关系图")
         )
         environment_line = (
             f"{environment_context}\n" if environment_context else ""
         )
-        detail_contract = (
-            "2-4 句中文新增细节"
-            if _uses_qwen35_local_incremental_refinement(settings)
-            else "自然语言新增细节"
-        )
+        if multi_view_mode:
+            detail_contract = "2-4 句自然语言三视图设计细节"
+            detail_guidance = (
+                "每份结果只补充能够在正面、90度侧面和背面同步成立的身份一致性、结构、材质、接缝、配色或统一光线细节，"
+                "不重写全文，不增加动作阶段、剧情、透视镜头或其他世界族"
+            )
+        else:
+            detail_contract = (
+                "2-4 句中文新增细节"
+                if _uses_qwen35_local_incremental_refinement(settings)
+                else "自然语言新增细节"
+            )
+            detail_guidance = (
+                "每份结果只补充同一场景内可见的动作因果、材质、空间或光影变化，"
+                "不重写全文，不引入其他世界族"
+            )
         return (
             f"请按原顺序为以下 {len(prompts)} 份 Skill 已校验底稿分别输出 {detail_contract}。\n"
-            f"{spine_line}{environment_line}每份结果只补充同一场景内可见的动作因果、材质、空间或光影变化，不重写全文，不引入其他世界族，不输出分析、标题或标签列表。\n"
+            f"{spine_line}{environment_line}{detail_guidance}，不输出分析、标题或标签列表。\n"
             f"结果之间只使用 `{_BATCH_SEPARATOR}` 分隔，不要添加序号或其他前后缀。\n\n"
             + f"\n{_BATCH_SEPARATOR}\n".join(prompts)
         )
@@ -4402,21 +4555,37 @@ def _compose_batch_prompt(prompts: list[str], settings: dict[str, Any]) -> str:
     narrative_plans = [str(item).strip() for item in settings.get("全局剧情规划", []) if str(item).strip()]
     for index, prompt in enumerate(prompts, start=1):
         signature = _prompt_signature(prompt)
-        narrative_plan = narrative_plans[index - 1] if index - 1 < len(narrative_plans) else "沿本条正文提炼独立事件"
-        diversity_lines.append(
-            f"第{index}条差异锚点：{signature or '按该条输入自行提炼'}。"
-            f"第{index}条剧情规划：{narrative_plan}。"
-            "输出时围绕本条锚点与剧情规划重组主体、场景、服装、动作目的、环境响应、镜头时机、光影和色彩，并至少保留四个叙事维度与其他条不同，不要复制其他条的主线。"
+        if multi_view_mode:
+            diversity_lines.append(
+                f"第{index}条三视图设计锚点：{signature or '按该条输入自行提炼'}。"
+                "先完整保留该条1:1:1正面、90度侧面、背面布局及锁定身份，再仅从未锁定的服装结构、材质、"
+                "配色、统一光线或背景细节建立与其他条的差异；同一条内部三个视图不得产生差异身份或动作阶段。"
+            )
+        else:
+            narrative_plan = narrative_plans[index - 1] if index - 1 < len(narrative_plans) else "沿本条正文提炼独立事件"
+            diversity_lines.append(
+                f"第{index}条差异锚点：{signature or '按该条输入自行提炼'}。"
+                f"第{index}条剧情规划：{narrative_plan}。"
+                "输出时围绕本条锚点与剧情规划重组主体、场景、服装、动作目的、环境响应、镜头时机、光影和色彩，并至少保留四个叙事维度与其他条不同，不要复制其他条的主线。"
+            )
+    mode_guidance = (
+        "每组必须先保留完整三视图布局与本条角色设计事实，再保持各组之间的设计差异；"
+        "不要把三栏改写成剧情阶段、透视镜头或不同角色。"
+        if multi_view_mode
+        else (
+            "每组必须保留输入之间的差异，不要把多组内容合并或改写成几乎相同的句子。"
+            "如果某条来自运行时随机、标签块编排、NSFW 工作台或智能文本，只能沿本条已经形成的主线补足，"
+            "不要套用上一条的主体、场景、服装、动作或配色。"
         )
+    )
     return (
         _skill_context_for_model(settings)
         + "\\n\\n"
         + _batch_language_instruction(settings)
         + f"请按原顺序整理以下 {len(prompts)} 组图像提示词。"
         f"每组输出一条单行成品提示词，必须使用 `{_BATCH_SEPARATOR}` 作为唯一分隔符。"
-        "每组必须保留输入之间的差异，不要把多组内容合并或改写成几乎相同的句子。"
-        "如果某条来自运行时随机、标签块编排、NSFW 工作台或智能文本，只能沿本条已经形成的主线补足，不要套用上一条的主体、场景、服装、动作或配色。"
-        "不要输出标题、序号、解释、Markdown、额外前后缀。任何分析步骤、任务拆解、重复灌水词都视为失败。\n"
+        + mode_guidance
+        + "不要输出标题、序号、解释、Markdown、额外前后缀。任何分析步骤、任务拆解、重复灌水词都视为失败。\n"
         + "\n差异化合同：\n"
         + "\n".join(diversity_lines)
         + "\n\n待整理提示词：\n"
@@ -5068,12 +5237,29 @@ def maybe_model_refine_video(
     )
 
     def validate_video(text: str) -> bool:
+        layout_mode = str(
+            settings.get(
+                "视频提示词来源画面结构模式",
+                settings.get("画面结构模式解析结果", ""),
+            )
+            or ""
+        ).strip()
         try:
-            return bool(validator(text, language=language, allow_timeline=allow_timeline))
+            return bool(
+                validator(
+                    text,
+                    language=language,
+                    allow_timeline=allow_timeline,
+                    layout_mode=layout_mode,
+                )
+            )
         except TypeError:
-            # Keep compatibility with third-party validators using the old
-            # language-only signature.
-            return bool(validator(text, language=language))
+            try:
+                return bool(validator(text, language=language, allow_timeline=allow_timeline))
+            except TypeError:
+                # Keep compatibility with third-party validators using the old
+                # language-only signature.
+                return bool(validator(text, language=language))
 
     anchors = [str(item).strip() for item in settings.get("视频提示词必保留锚点", []) if str(item).strip()]
     anchor_roles = settings.get("视频提示词锚点角色")
