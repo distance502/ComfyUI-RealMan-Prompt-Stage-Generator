@@ -1300,6 +1300,13 @@ def _normalize_api_base_url(base_url: Any, *, provider: str, kind: str) -> str:
             endpoint_path.endswith("/chat/completions")
             or endpoint_path.endswith("/responses")
             or endpoint_path.endswith("/api/chat")
+            # A custom provider may be given a complete native endpoint. Keep
+            # it intact so _resolve_api_endpoint_kind can switch the request
+            # body to the matching protocol instead of appending an OpenAI
+            # path to it.
+            or endpoint_path.endswith("/messages")
+            or endpoint_path.endswith(":generatecontent")
+            or endpoint_path.endswith("/generatecontent")
         ):
             normalized = trimmed
         else:
@@ -1348,6 +1355,13 @@ def _resolve_api_endpoint_kind(kind: str, url: str) -> str:
         return normalized_kind
     if path.endswith("/api/chat"):
         return "ollama"
+    # Full native endpoints are unambiguous even when the provider selector is
+    # still on the generic OpenAI-compatible option. This is important for
+    # custom gateways and reverse proxies exposing Anthropic/Gemini routes.
+    if path.endswith("/messages"):
+        return "anthropic"
+    if path.endswith(":generatecontent") or path.endswith("/generatecontent"):
+        return "gemini"
     return "openai_responses" if path.endswith("/responses") else "openai"
 
 
@@ -1488,6 +1502,17 @@ def _gemini_parts(content: Any) -> list[dict[str, Any]]:
                 media_type, data = _data_url_to_media_source(url)
                 parts.append({"inline_data": {"mime_type": media_type, "data": data}})
     return parts or [{"text": str(content or "")}]
+
+
+def _gemini_request_url(base_url: str, model: str) -> str:
+    """Build a Gemini native endpoint without duplicating a full endpoint."""
+
+    normalized = str(base_url or "").rstrip("/")
+    path = str(urllib.parse.urlsplit(normalized).path or "").rstrip("/").casefold()
+    if path.endswith(":generatecontent") or path.endswith("/generatecontent"):
+        return normalized
+    encoded_model = urllib.parse.quote(str(model or "").strip(), safe="")
+    return f"{normalized}/models/{encoded_model}:generateContent"
 
 
 _API_RESPONSE_MAX_BYTES = 16 * 1024 * 1024
@@ -2043,6 +2068,12 @@ _API_PARAMETER_COMPATIBILITY_MARKERS = (
     "extra inputs are not permitted",
     "extra_forbidden",
     "invalid parameter",
+    "unknown field",
+    "unknown name",
+    "not allowed",
+    "not permitted",
+    "cannot both be specified",
+    "mutually exclusive",
     "不支持参数",
     "参数不支持",
     "未知参数",
@@ -2127,6 +2158,109 @@ def _post_dashscope_json_with_compatibility_retry(
         if compatible_payload == payload:
             raise
         return _http_post_json(url, compatible_payload, headers, timeout)
+
+
+def _post_anthropic_json_with_compatibility_retry(
+    url: str,
+    payload: dict[str, Any],
+    headers: dict[str, str],
+    timeout: float,
+) -> dict[str, Any]:
+    """Retry Anthropic Messages once when a gateway rejects optional fields."""
+
+    try:
+        return _http_post_json(url, payload, headers, timeout)
+    except _ModelAPIHTTPError as exc:
+        error_text = f"{exc.reason} {exc.detail}".casefold()
+        if exc.status not in {400, 422} or not any(
+            marker in error_text for marker in _API_PARAMETER_COMPATIBILITY_MARKERS
+        ):
+            raise
+        compatible_payload = dict(payload)
+        field_aliases = {
+            "temperature": "temperature",
+            "top_p": "top_p",
+            "topp": "top_p",
+            "top_k": "top_k",
+            "topk": "top_k",
+            "stop_sequences": "stop_sequences",
+            "stopsequences": "stop_sequences",
+        }
+        mutually_exclusive_sampling = (
+            ("cannot both" in error_text or "mutually exclusive" in error_text)
+            and "temperature" in error_text
+            and ("top_p" in error_text or "topp" in error_text)
+        )
+        for marker, field in field_aliases.items():
+            if marker in error_text:
+                if mutually_exclusive_sampling and field == "temperature":
+                    continue
+                compatible_payload.pop(field, None)
+        if compatible_payload == payload:
+            raise
+        return _http_post_json(url, compatible_payload, headers, timeout)
+
+
+def _post_gemini_json_with_compatibility_retry(
+    url: str,
+    payload: dict[str, Any],
+    headers: dict[str, str],
+    timeout: float,
+) -> dict[str, Any]:
+    """Retry Gemini native generation once when optional config is rejected."""
+
+    try:
+        return _http_post_json(url, payload, headers, timeout)
+    except _ModelAPIHTTPError as exc:
+        error_text = f"{exc.reason} {exc.detail}".casefold()
+        if exc.status not in {400, 422} or not any(
+            marker in error_text for marker in _API_PARAMETER_COMPATIBILITY_MARKERS
+        ):
+            raise
+        compatible_payload = dict(payload)
+        generation_config = dict(compatible_payload.get("generationConfig") or {})
+        field_aliases = {
+            "temperature": "temperature",
+            "topp": "topP",
+            "top_p": "topP",
+            "topk": "topK",
+            "top_k": "topK",
+            "stopsequences": "stopSequences",
+            "stop_sequences": "stopSequences",
+            "frequency_penalty": "frequencyPenalty",
+            "frequencypenalty": "frequencyPenalty",
+            "presence_penalty": "presencePenalty",
+            "presencepenalty": "presencePenalty",
+            "seed": "seed",
+        }
+        for marker, field in field_aliases.items():
+            if marker in error_text:
+                generation_config.pop(field, None)
+        compatible_payload["generationConfig"] = generation_config
+        if compatible_payload == payload:
+            raise
+        return _http_post_json(url, compatible_payload, headers, timeout)
+
+
+def _gemini_response_text(response: dict[str, Any]) -> str:
+    """Extract visible Gemini text while excluding thought-only parts."""
+
+    candidates = response.get("candidates") or []
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        content = candidate.get("content") if isinstance(candidate.get("content"), dict) else {}
+        parts = content.get("parts") if isinstance(content.get("parts"), list) else []
+        visible: list[str] = []
+        for part in parts:
+            if not isinstance(part, dict) or part.get("thought") is True:
+                continue
+            text = str(part.get("text") or "").strip()
+            if text:
+                visible.append(text)
+        if visible:
+            return "\n".join(visible).strip()
+    return ""
 
 
 class _TEAPIChatModel:
@@ -2254,7 +2388,12 @@ class _TEAPIChatModel:
                 payload["stop_sequences"] = stop_sequences
             if system_text:
                 payload["system"] = system_text
-            response = _http_post_json(str(self.config.get("url")), payload, headers, timeout)
+            response = _post_anthropic_json_with_compatibility_retry(
+                str(self.config.get("url")),
+                payload,
+                headers,
+                timeout,
+            )
             if response.get("error"):
                 _extract_model_response_text_impl(response)
             text = "".join(str(part.get("text") or "") for part in response.get("content", []) if isinstance(part, dict))
@@ -2267,8 +2406,7 @@ class _TEAPIChatModel:
             if not api_key:
                 raise RuntimeError("Gemini 原生 API 需要 API Key。可填写 key 或 env:GEMINI_API_KEY。")
             base_url = str(self.config.get("url") or "").rstrip("/")
-            encoded_model = urllib.parse.quote(model, safe="")
-            url = f"{base_url}/models/{encoded_model}:generateContent"
+            url = _gemini_request_url(base_url, model)
             headers["x-goog-api-key"] = api_key
             system_text, user_messages = _split_system_user_messages(messages)
             contents = [
@@ -2291,7 +2429,7 @@ class _TEAPIChatModel:
                 payload["generationConfig"]["presencePenalty"] = presence_penalty
             if system_text:
                 payload["system_instruction"] = {"parts": [{"text": system_text}]}
-            response = _http_post_json(url, payload, headers, timeout)
+            response = _post_gemini_json_with_compatibility_retry(url, payload, headers, timeout)
             if response.get("error"):
                 _extract_model_response_text_impl(response)
             candidates = response.get("candidates") or []
@@ -2300,8 +2438,7 @@ class _TEAPIChatModel:
                 block_reason = str(feedback.get("blockReason") or "no_candidates")
                 raise RuntimeError(f"Gemini API 未返回候选：blockReason={block_reason}")
             candidate = candidates[0] if isinstance(candidates[0], dict) else {}
-            parts = ((candidate.get("content") or {}).get("parts") or []) if isinstance(candidate.get("content"), dict) else []
-            text = "".join(str(part.get("text") or "") for part in parts if isinstance(part, dict))
+            text = _gemini_response_text(response)
             if not text.strip():
                 finish_reason = str(candidate.get("finishReason") or "empty_content")
                 raise RuntimeError(f"Gemini API 候选没有文本：finishReason={finish_reason}")
@@ -2365,6 +2502,11 @@ class _TEAPIChatModel:
 
 
 def _解析API模型配置(kwargs: dict[str, Any]) -> dict[str, Any]:
+    # Runtime settings can be reused by the node across executions. Remove
+    # old repair/inference notes before resolving the current provider so a
+    # previous API choice cannot contaminate the next diagnostic.
+    kwargs.pop("API地址自动修复说明", None)
+    kwargs.pop("API协议自动识别说明", None)
     provider = str(kwargs.get("API服务商", SETTING_DEFAULTS["API服务商"]) or SETTING_DEFAULTS["API服务商"]).strip()
     preset = _api_provider_preset(provider)
     kind = str(preset.get("kind") or "openai")
@@ -2373,8 +2515,14 @@ def _解析API模型配置(kwargs: dict[str, Any]) -> dict[str, Any]:
     configured_base_url, repair_note = _repair_stale_provider_base_url(provider, configured_base_url)
     if repair_note:
         kwargs["API地址自动修复说明"] = repair_note
+    requested_kind = kind
     url = _normalize_api_base_url(configured_base_url, provider=provider, kind=kind)
     kind = _resolve_api_endpoint_kind(kind, url)
+    if kind != requested_kind:
+        kwargs["API协议自动识别说明"] = (
+            f"检测到完整端点 {_safe_api_request_target(url)}，"
+            f"已将协议从 {requested_kind} 自动切换为 {kind}。"
+        )
     kwargs["API服务商有效"] = provider
     kwargs["API地址有效"] = _normalize_api_config_base_url(configured_base_url)
     kwargs["API模型有效"] = model
@@ -2533,6 +2681,8 @@ def _安全加载阶段模型(settings: dict[str, Any]) -> Any:
     settings["模型调用状态"] = "已加载，等待调用"
     if settings.get("API地址自动修复说明"):
         _append_runtime_note(settings, str(settings["API地址自动修复说明"]))
+    if settings.get("API协议自动识别说明"):
+        _append_runtime_note(settings, str(settings["API协议自动识别说明"]))
     if settings.get("内置模型自动修复说明"):
         _append_runtime_note(settings, str(settings["内置模型自动修复说明"]))
     return model
@@ -7546,7 +7696,7 @@ def 构建状态可视化预览(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 _阶段输入参数说明 = {
-    "内置上下文长度": "内置 GGUF 路线的上下文窗口。默认 8192；越大越占内存/显存，普通提示词生成通常不需要超过 16384。",
+    "内置上下文长度": "内置模型上下文窗口。GGUF 对应 llama.cpp 的 n_ctx；原始 Transformers 会再与 config.json 的模型上限取较小值，并按实际输入自动为输出预留空间。默认 8192；越大越占内存/显存，普通提示词生成通常不需要超过 16384。",
     "内置GPU层数": "内置 GGUF 路线的 GPU 卸载层数。-1=尽可能使用 GPU，0=纯 CPU；显存不足时逐步降低。",
     "内置KV缓存K类型": "本地模型 K 缓存精度。默认 F16 最稳；显存紧张且 llama-cpp-python 支持时可用 q8_0。",
     "内置KV缓存V类型": "本地模型 V 缓存精度。默认 F16 最稳；显存紧张且 llama-cpp-python 支持时可用 q8_0。",
@@ -7560,7 +7710,7 @@ _阶段输入参数说明 = {
     "内置锁定内存": "是否使用 mlock 锁定模型页。仅在系统内存充足且不希望页面换出时开启。",
     "内置RoPE频率基值": "RoPE 频率基值。0 表示遵循模型元数据；除非明确做长上下文实验，否则保持 0。",
     "内置RoPE频率缩放": "RoPE 频率缩放。0 表示遵循模型元数据；错误设置会破坏注意力位置编码。",
-    "内置模型参数JSON": "高级自定义 Llama 参数 JSON。键名必须是当前 llama-cpp-python 的构造参数；模型路径、聊天 handler、chat_format、n_ctx、n_gpu_layers 和 KV 类型等受保护键不会覆盖节点控制。",
+    "内置模型参数JSON": "按后端传递高级参数的 JSON。GGUF 使用当前 llama-cpp-python 构造参数；原始模型使用 transformers 加载参数，例如 torch_dtype、device_map 或 attn_implementation。模型路径、聊天 handler、chat_format、n_ctx、n_gpu_layers 和 KV 类型等受保护键不会覆盖节点控制。",
     "模板风格": "控制整体媒介和视觉风格。自动最通用；明确选风格可提高一致性，但批量变化会相对收敛。",
     "主体类型": "自动判断人物、非人物或场景主体；自动识别不准时再手动指定。",
     "案例输出结构": "控制提示词组织方式。自动会按当前任务选择；长段版适合直接出图，分段版更便于检查和编辑。",
@@ -7632,8 +7782,8 @@ class QwenTE阶段式提示词生成器:
         model_list, mmproj_list = _内置模型文件选项()
         required = OrderedDict()
         required["模型来源"] = (模型来源选项, {"default": "仅Skill", "tooltip": "仅Skill=本地Skill直接生成图像、智能文本和视频提示词；本地模型=Skill先生成可靠底稿，再由外接兼容模型或 models/LLM 中的内置模型后置润色；API接口=Skill底稿交给云端、Ollama、LM Studio 或其他兼容服务润色。旧值本地GGUF会自动迁移。"})
-        required["内置模型系列"] = (_内置模型系列选项, {"default": "Qwen3.5-VL", "tooltip": "本地模型未连接外部输入时，阶段提示词节点会按这里的设置直接加载内置 GGUF；支持 Qwen3、Qwen3.5 和 Qwen3.8。"})
-        required["内置主模型"] = (model_list, {"default": model_list[0], "tooltip": "内置加载路线使用的 GGUF 文件，放到 ComfyUI/models/LLM/；其他模型可连接 qwen模型 输入。"})
+        required["内置模型系列"] = (_内置模型系列选项, {"default": "Qwen3.5-VL", "tooltip": "本地模型未连接外部输入时，阶段提示词节点会按这里的设置直接加载 GGUF 或 Hugging Face 原始模型目录；支持 Qwen3、Qwen3.5 和 Qwen3.8。"})
+        required["内置主模型"] = (model_list, {"default": model_list[0], "tooltip": "内置加载路线使用的 GGUF 文件或包含 config.json 的原始模型目录，放到 ComfyUI/models/LLM/；其他模型也可连接 qwen模型 输入。"})
         required["内置视觉投影mmproj"] = (mmproj_list, {"default": "无", "tooltip": "多模态需要 mmproj；纯文本提示词生成可选“无”。"})
         required["内置启用思考"] = ("BOOLEAN", {"default": False, "tooltip": "Qwen/Gemma 思考开关；提示词生成通常可关闭。"})
         required["内置上下文长度"] = ("INT", {"default": 8192, "min": 1024, "max": 327680, "step": 256})
@@ -7650,7 +7800,7 @@ class QwenTE阶段式提示词生成器:
         required["内置锁定内存"] = ("BOOLEAN", {"default": False, "tooltip": "对应 use_mlock。"})
         required["内置RoPE频率基值"] = ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1000000.0, "step": 1.0, "tooltip": "对应 rope_freq_base；0=模型默认。"})
         required["内置RoPE频率缩放"] = ("FLOAT", {"default": 0.0, "min": 0.0, "max": 100.0, "step": 0.01, "tooltip": "对应 rope_freq_scale；0=模型默认。"})
-        required["内置模型参数JSON"] = ("STRING", {"default": "", "multiline": True, "tooltip": "可选自定义 llama-cpp-python 参数 JSON；不支持或受保护的键会被忽略。"})
+        required["内置模型参数JSON"] = ("STRING", {"default": "", "multiline": True, "tooltip": "可选后端参数 JSON；GGUF 使用 llama-cpp-python，原始模型使用 transformers；不支持或受保护的键会被忽略。"})
         required["API服务商"] = (API服务商选项, {"default": "OpenAI兼容", "tooltip": "大多数云模型和本地服务都支持 OpenAI-compatible /v1/chat/completions；Claude/Gemini 也提供原生适配。"})
         required["API地址"] = ("STRING", {"default": "", "multiline": False, "tooltip": "可填 Base URL，例如 https://api.openai.com/v1；不得包含查询参数或片段。留空时使用服务商预设。"})
         required["API密钥"] = ("STRING", {"default": "env:QWEN_TE_API_KEY", "multiline": False, "tooltip": "推荐 env:环境变量名。环境变量密钥只会发送到服务商预设来源；自定义来源需加入 QWEN_TE_CUSTOM_API_SECRET_ORIGINS。直接填写的 key 会保存在工作流中。"})

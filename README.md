@@ -53,6 +53,12 @@ flowchart LR
 
 用户明确输入、锁定标签和参考图事实拥有更高优先级。模板、主题池和随机标签只补足空缺；模型负责增加可见细节，不允许另起题目。图像、视频、智能文本和批量结果分别校验，避免相互污染。
 
+## 参数快速开始
+
+第一次运行建议保持 `仅Skill / 生成 3 条 / 纯中文 / 标准 / 完整结果 / 平衡收敛`，先确认图像提示词、视频分镜和负面词能够正常输出，再按需启用本地模型或 API。模型接入后仍由 Skill 建立底稿和校验锚点，调用失败时会保留可用结果。
+
+完整默认值、范围、联动规则和常用配置方案见 [使用说明书：参数设置完整手册](使用说明书.md#16-参数设置完整手册)。
+
 ## 核心功能
 
 | 功能 | 说明 |
@@ -80,7 +86,7 @@ API 面板内置 OpenAI compatible、OpenAI、OpenRouter、DeepSeek、通义千�
 
 图像提示词目标模型可选择 `通用`、`Flux`、`SDXL`、`Qwen Image`、`Krea 2`、`Midjourney` 或 `自定义`。每个 Profile 都会在 JSON 的 `image_prompt_contract` 中记录推荐组织顺序、正向语言合同、负面词通道和参数策略。Krea 2 使用主体优先的自然语言描述，重点保留镜头、空间、材质和光影关系，不把平台参数写入正向正文。
 
-地址可以填写服务商 `base_url`，也可以填写完整端点。节点会按服务商识别 OpenAI Chat Completions、Responses、Anthropic Messages、Gemini、DashScope 和 Ollama 原生格式，避免把一种协议的路径拼到另一种服务商地址上。
+地址可以填写服务商 `base_url`，也可以填写完整端点。节点会按服务商识别 OpenAI Chat Completions、Responses、Anthropic Messages、Gemini、DashScope 和 Ollama 原生格式；当选择“自定义”或“OpenAI兼容”并填写完整的 `/messages`、`:generateContent` 或 `/api/chat` 端点时，也会自动切换对应协议，避免把一种协议的路径拼到另一种服务商地址上。自动识别结果会写入运行诊断，旧的协议修复说明不会带入下一次运行。OpenAI、DashScope、Anthropic 和 Gemini 若明确返回某个可选采样参数不受支持，节点会移除该字段后有界重试一次；Gemini 深度思考分片不会进入最终提示词。
 
 推荐使用环境变量保存密钥：
 
@@ -103,6 +109,8 @@ env:DASHSCOPE_API_KEY
 ![本地模型性能参数](docs/images/local-model-settings.png)
 
 可在界面中自定义上下文长度、GPU 层数、KV 缓存精度、批处理、微批处理、推理线程、Flash Attention、KQV 卸载、内存映射、锁定内存和 RoPE 参数。高级 JSON 会按后端过滤不支持的键，并保护模型路径、聊天格式等核心参数。
+
+原始 Transformers 模型会在生成前同时参考节点设置和模型 `config.json` 的上下文上限，自动为输出预留可用 token，避免长提示词触发超出上下文的失败。不同 Transformers 版本的 chat template、tokenizer 和 Vision processor 参数签名也会走有界兼容降级；视觉图片始终作为独立 PIL 输入传给 processor，不会被转成字符串或串入提示词。
 
 ## 角色三视图
 
@@ -137,6 +145,8 @@ env:DASHSCOPE_API_KEY
 ```text
 ComfyUI/custom_nodes/ComfyUI-RealMan-Prompt-Stage-Generator
 ```
+
+如果从 GitHub ZIP 解压，目录可能暂时叫 `ComfyUI-RealMan-Prompt-Stage-Generator-main`；请确保最终只保留一份插件目录，且目录名与上面的路径一致。
 
 然后完整关闭并重新启动 ComfyUI。不要只刷新网页，Python 路由和节点定义只有重启后才会重新加载。
 

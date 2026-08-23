@@ -21164,6 +21164,80 @@ class TestStagePromptModules(unittest.TestCase):
                 self.assertEqual(config["kind"], "anthropic")
                 self.assertEqual(config["url"], expected_url)
 
+    def test_stage_api_infers_native_protocol_from_complete_custom_endpoint(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        anthropic_settings = {
+            "API服务商": "自定义",
+            "API地址": "https://gateway.example.com/anthropic/v1/messages",
+            "API密钥": "gateway-key",
+            "API模型": "claude-sonnet-4-5",
+        }
+        anthropic = module._解析API模型配置(anthropic_settings)
+        self.assertEqual(anthropic["kind"], "anthropic")
+        self.assertEqual(anthropic["url"], "https://gateway.example.com/anthropic/v1/messages")
+        self.assertIn("协议从 openai 自动切换为 anthropic", anthropic_settings["API协议自动识别说明"])
+
+        gemini_settings = {
+            "API服务商": "自定义",
+            "API地址": "https://gateway.example.com/v1beta/models/gemini-2.5-flash:generateContent",
+            "API密钥": "gateway-key",
+            "API模型": "gemini-2.5-flash",
+        }
+        gemini = module._解析API模型配置(gemini_settings)
+        self.assertEqual(gemini["kind"], "gemini")
+        self.assertEqual(
+            gemini["url"],
+            "https://gateway.example.com/v1beta/models/gemini-2.5-flash:generateContent",
+        )
+        self.assertIn("协议从 openai 自动切换为 gemini", gemini_settings["API协议自动识别说明"])
+
+    def test_stage_api_gemini_full_endpoint_is_not_duplicated(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        settings = {
+            "API服务商": "自定义",
+            "API地址": "https://gateway.example.com/v1beta/models/gemini-2.5-flash:generateContent",
+            "API密钥": "gateway-key",
+            "API模型": "gemini-2.5-flash",
+        }
+        model = module._创建API阶段模型(settings)
+        captured: dict[str, Any] = {}
+
+        def fake_http(url, payload, headers, timeout):
+            captured.update(url=url, payload=payload)
+            return {
+                "candidates": [
+                    {"content": {"parts": [{"text": "native gemini output"}]}}
+                ]
+            }
+
+        with mock.patch.object(module, "_http_post_json", side_effect=fake_http):
+            response = model.create_chat_completion(
+                messages=[{"role": "user", "content": "hello"}],
+                max_tokens=64,
+            )
+        self.assertEqual(captured["url"], settings["API地址"])
+        self.assertEqual(module._extract_chat_text(response), "native gemini output")
+        self.assertNotIn("/models/gemini-2.5-flash/models/", captured["url"])
+
+    def test_stage_api_protocol_diagnostic_does_not_leak_across_runs(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        settings = {
+            "API服务商": "自定义",
+            "API地址": "https://gateway.example.com/anthropic/v1/messages",
+            "API密钥": "gateway-key",
+            "API模型": "claude-sonnet-4-5",
+        }
+        first = module._解析API模型配置(settings)
+        self.assertEqual(first["kind"], "anthropic")
+        self.assertIn("API协议自动识别说明", settings)
+
+        settings["API地址"] = "https://gateway.example.com/openai/v1/chat/completions"
+        settings["API模型"] = "gateway-chat-model"
+        second = module._解析API模型配置(settings)
+        self.assertEqual(second["kind"], "openai")
+        self.assertNotIn("API协议自动识别说明", settings)
+        self.assertNotIn("API地址自动修复说明", settings)
+
     def test_stage_api_repairs_stale_foreign_adapter_path_on_known_provider_host(self) -> None:
         module = load_stage_prompt_generator_for_integration_test()
         settings = {
@@ -21294,6 +21368,94 @@ class TestStagePromptModules(unittest.TestCase):
         for optional in ("seed", "frequency_penalty", "presence_penalty"):
             self.assertNotIn(optional, calls[1])
         self.assertEqual(response["choices"][0]["message"]["content"], "compatible retry result")
+
+    def test_anthropic_native_retries_sampling_conflict_without_dropping_required_fields(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        calls: list[dict[str, Any]] = []
+
+        def fake_http(url, payload, headers, timeout):
+            calls.append(dict(payload))
+            if len(calls) == 1:
+                raise module._ModelAPIHTTPError(
+                    400,
+                    "Bad Request",
+                    "temperature and top_p cannot both be specified",
+                )
+            return {"content": [{"type": "text", "text": "anthropic retry result"}]}
+
+        model = module._TEAPIChatModel(
+            {
+                "provider": "Claude Anthropic",
+                "kind": "anthropic",
+                "url": "https://api.anthropic.com/v1/messages",
+                "api_key": "anthropic-key",
+                "model": "claude-haiku-4-5",
+                "timeout": 30,
+            }
+        )
+        with mock.patch.object(module, "_http_post_json", side_effect=fake_http):
+            response = model.create_chat_completion(
+                messages=[{"role": "user", "content": "hello"}],
+                max_tokens=128,
+                temperature=0.6,
+                top_p=0.8,
+            )
+
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[1]["temperature"], 0.6)
+        self.assertNotIn("top_p", calls[1])
+        self.assertEqual(calls[1]["max_tokens"], 128)
+        self.assertEqual(calls[1]["messages"], calls[0]["messages"])
+        self.assertEqual(response["choices"][0]["message"]["content"], "anthropic retry result")
+
+    def test_gemini_native_retries_rejected_option_and_excludes_thought_parts(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        calls: list[dict[str, Any]] = []
+
+        def fake_http(url, payload, headers, timeout):
+            calls.append(json.loads(json.dumps(payload)))
+            if len(calls) == 1:
+                raise module._ModelAPIHTTPError(
+                    400,
+                    "Bad Request",
+                    "Unknown field seed is not allowed",
+                )
+            return {
+                "candidates": [
+                    {
+                        "content": {
+                            "parts": [
+                                {"thought": True, "text": "private reasoning"},
+                                {"text": "gemini visible result"},
+                            ]
+                        }
+                    }
+                ]
+            }
+
+        model = module._TEAPIChatModel(
+            {
+                "provider": "Gemini 原生",
+                "kind": "gemini",
+                "url": "https://generativelanguage.googleapis.com/v1beta",
+                "api_key": "gemini-key",
+                "model": "gemini-2.5-flash",
+                "timeout": 30,
+            }
+        )
+        with mock.patch.object(module, "_http_post_json", side_effect=fake_http):
+            response = model.create_chat_completion(
+                messages=[{"role": "user", "content": "hello"}],
+                max_tokens=129,
+                seed=42,
+            )
+
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0]["generationConfig"]["seed"], 42)
+        self.assertNotIn("seed", calls[1]["generationConfig"])
+        self.assertEqual(calls[1]["generationConfig"]["maxOutputTokens"], 129)
+        self.assertEqual(response["choices"][0]["message"]["content"], "gemini visible result")
+        self.assertNotIn("private reasoning", module._extract_chat_text(response))
 
     def test_stage_api_http_status_and_retry_after_reach_transient_retry_logic(self) -> None:
         module = load_stage_prompt_generator_for_integration_test()
