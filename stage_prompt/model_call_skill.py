@@ -39,15 +39,50 @@ class ModelCallSkill:
         self._chat_completion = chat_completion
 
     @staticmethod
-    def _call_flexible_method(method: Callable[..., Any], *, prompt: str, messages: list[dict[str, str]]) -> Any:
+    def _call_flexible_method(
+        method: Callable[..., Any],
+        *,
+        prompt: str,
+        messages: list[dict[str, str]],
+        params: dict[str, Any] | None = None,
+    ) -> Any:
         try:
             signature = inspect.signature(method)
         except (TypeError, ValueError):
             signature = None
         parameters = signature.parameters if signature is not None else {}
-        if "messages" in parameters:
-            return method(messages=messages)
-        return method(prompt)
+        accepted: dict[str, Any] = {}
+        aliases = {
+            "max_tokens": "max_new_tokens",
+            "repeat_penalty": "repetition_penalty",
+        }
+        for name, value in dict(params or {}).items():
+            candidates = (name, aliases.get(name, ""))
+            for candidate in candidates:
+                parameter = parameters.get(candidate)
+                if parameter is None or parameter.kind in {
+                    inspect.Parameter.POSITIONAL_ONLY,
+                    inspect.Parameter.VAR_POSITIONAL,
+                }:
+                    continue
+                accepted[candidate] = value
+                break
+
+        message_parameter = parameters.get("messages")
+        if message_parameter is not None:
+            if message_parameter.kind == inspect.Parameter.POSITIONAL_ONLY:
+                return method(messages, **accepted)
+            return method(messages=messages, **accepted)
+
+        # Some generation wrappers call the text argument ``contents`` or
+        # ``text`` instead of ``prompt``.  Prefer their explicit name while
+        # retaining the original positional fallback for opaque callables.
+        for argument_name in ("prompt", "contents", "text", "input"):
+            parameter = parameters.get(argument_name)
+            if parameter is None or parameter.kind == inspect.Parameter.POSITIONAL_ONLY:
+                continue
+            return method(**{argument_name: prompt, **accepted})
+        return method(prompt, **accepted)
 
     def _finish(self, response: Any, *, empty_message: str, settings: dict[str, Any], channel: str) -> str:
         text = str(self._extract_text(response) or "").strip()
@@ -82,18 +117,24 @@ class ModelCallSkill:
             {"role": "user", "content": user_prompt},
         ]
         combined_prompt = f"{system_prompt}\n\n{user_prompt}".strip()
+        sampling_params = self._sampling_params(settings, prompt_count)
 
         if callable(getattr(backend, "create_chat_completion", None)):
             response = self._chat_completion(
                 backend,
                 messages=messages,
-                params=self._sampling_params(settings, prompt_count),
+                params=sampling_params,
             )
             return self._finish(response, empty_message="模型 API 返回空文本。", settings=settings, channel="chat_completion")
 
         if callable(getattr(backend, "invoke", None)):
             return self._finish(
-                backend.invoke(combined_prompt),
+                self._call_flexible_method(
+                    backend.invoke,
+                    prompt=combined_prompt,
+                    messages=messages,
+                    params=sampling_params,
+                ),
                 empty_message="模型返回空文本。",
                 settings=settings,
                 channel="invoke",
@@ -101,7 +142,12 @@ class ModelCallSkill:
 
         if callable(getattr(backend, "generate_content", None)):
             return self._finish(
-                backend.generate_content(combined_prompt),
+                self._call_flexible_method(
+                    backend.generate_content,
+                    prompt=combined_prompt,
+                    messages=messages,
+                    params=sampling_params,
+                ),
                 empty_message="模型返回空文本。",
                 settings=settings,
                 channel="generate_content",
@@ -111,7 +157,12 @@ class ModelCallSkill:
             method = getattr(backend, method_name, None)
             if not callable(method):
                 continue
-            response = self._call_flexible_method(method, prompt=combined_prompt, messages=messages)
+            response = self._call_flexible_method(
+                method,
+                prompt=combined_prompt,
+                messages=messages,
+                params=sampling_params,
+            )
             return self._finish(
                 response,
                 empty_message=f"模型 {method_name} 返回空文本。",
@@ -165,7 +216,27 @@ class ModelCallSkill:
                 )
         combined_prompt = "\n\n".join(text_parts).strip()
         if callable(getattr(backend, "invoke", None)):
-            return self._finish(backend.invoke(combined_prompt), empty_message="模型返回空文本。", settings=settings, channel="invoke")
+            return self._finish(
+                self._call_flexible_method(
+                    backend.invoke,
+                    prompt=combined_prompt,
+                    messages=messages,
+                    params=dict(params or {}),
+                ),
+                empty_message="模型返回空文本。",
+                settings=settings,
+                channel="invoke",
+            )
         if callable(getattr(backend, "generate_content", None)):
-            return self._finish(backend.generate_content(combined_prompt), empty_message="模型返回空文本。", settings=settings, channel="generate_content")
+            return self._finish(
+                self._call_flexible_method(
+                    backend.generate_content,
+                    prompt=combined_prompt,
+                    messages=messages,
+                    params=dict(params or {}),
+                ),
+                empty_message="模型返回空文本。",
+                settings=settings,
+                channel="generate_content",
+            )
         raise RuntimeError("当前模型对象不支持带消息列表的模型调用。")

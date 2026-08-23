@@ -21768,6 +21768,18 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertEqual(model_refiner.extract_text({"final_prompt": "json final"}), "json final")
         self.assertEqual(
             model_refiner.extract_text(
+                {"data": {"result": {"choices": [{"message": {"content": "nested gateway final"}}]}}}
+            ),
+            "nested gateway final",
+        )
+        self.assertEqual(
+            model_refiner.extract_text(
+                {"result": {"message": {"content": [{"type": "output_text", "text": "wrapped final"}]}}}
+            ),
+            "wrapped final",
+        )
+        self.assertEqual(
+            model_refiner.extract_text(
                 {
                     "choices": [
                         {"message": {"content": "", "reasoning_content": "analysis only"}},
@@ -22947,6 +22959,52 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertIn("Skill前置上下文", captured["prompt"])
         self.assertIn("模型来源：本地模型", captured["prompt"])
         self.assertIn("待整理提示词正文", captured["prompt"])
+
+    def test_model_refiner_passes_supported_sampling_parameters_to_invoke_backend(self) -> None:
+        captured: dict[str, Any] = {}
+
+        class ParameterizedLlm:
+            def invoke(
+                self,
+                prompt: str,
+                *,
+                temperature: float,
+                top_p: float,
+                top_k: int,
+                max_new_tokens: int,
+                repetition_penalty: float,
+            ) -> str:
+                captured.update(
+                    prompt=prompt,
+                    temperature=temperature,
+                    top_p=top_p,
+                    top_k=top_k,
+                    max_new_tokens=max_new_tokens,
+                    repetition_penalty=repetition_penalty,
+                )
+                return "base prompt refined"
+
+        refined = model_refiner.maybe_model_refine(
+            ParameterizedLlm(),
+            "base prompt",
+            {
+                "系统提示词覆盖": "",
+                "最大生成token": 321,
+                "温度": 0.58,
+                "top_p": 0.83,
+                "top_k": 17,
+                "重复惩罚": 1.14,
+                "模型来源": "本地模型",
+            },
+            chat_completion=lambda *args, **kwargs: None,
+            clean_think_text=lambda text: text,
+        )
+        self.assertEqual(refined, "base prompt refined")
+        self.assertEqual(captured["temperature"], 0.58)
+        self.assertEqual(captured["top_p"], 0.83)
+        self.assertEqual(captured["top_k"], 17)
+        self.assertEqual(captured["max_new_tokens"], 321)
+        self.assertEqual(captured["repetition_penalty"], 1.14)
 
     def test_model_refiner_supports_wrapped_callable_local_pipeline(self) -> None:
         class LocalPipeline:
