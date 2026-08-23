@@ -1542,11 +1542,17 @@ class _TransformersChatAdapter:
         self._model_path = model_path
         self.settings = dict(settings)
         self._qwen_te_transformers = True
+        processor_inputs = {
+            str(item or "").strip().lower()
+            for item in (getattr(processor, "model_input_names", None) or [])
+        }
         self.supports_images = bool(
             processor is not None
             and (
                 getattr(processor, "image_processor", None) is not None
                 or getattr(processor, "feature_extractor", None) is not None
+                or getattr(processor, "image_token", None) is not None
+                or bool(processor_inputs & {"pixel_values", "pixel_values_videos", "image_grid_thw"})
             )
         )
 
@@ -1565,15 +1571,35 @@ class _TransformersChatAdapter:
                 "model",
                 "transformer",
             )
-            values = [device_map.get(key) for key in preferred_keys]
-            values.extend(device_map.values())
-            for value in values:
-                if value in (None, "cpu", "disk", "meta"):
-                    continue
+
+            def resolve_device(value):
+                if value in (None, "disk", "meta"):
+                    return None
                 try:
-                    return torch.device(value)
+                    return torch.device(f"cuda:{value}" if isinstance(value, int) else value)
                 except Exception:
+                    return None
+
+            # If the embedding/root module has an explicit placement, inputs
+            # must start there even when later decoder layers live on a GPU.
+            for key in preferred_keys:
+                if key not in device_map:
                     continue
+                resolved = resolve_device(device_map.get(key))
+                if resolved is not None:
+                    return resolved
+
+            cpu_fallback = None
+            for value in device_map.values():
+                resolved = resolve_device(value)
+                if resolved is None:
+                    continue
+                if resolved.type == "cpu":
+                    cpu_fallback = resolved
+                    continue
+                return resolved
+            if cpu_fallback is not None:
+                return cpu_fallback
         try:
             return next(self.model.parameters()).device
         except Exception:
@@ -1605,14 +1631,36 @@ class _TransformersChatAdapter:
             configured = 8192
         configured = max(2, configured)
         model_config = getattr(self.model, "config", None)
-        metadata_limits = []
-        for name in ("max_position_embeddings", "max_seq_len", "max_sequence_length", "seq_length"):
+        config_candidates = [model_config]
+        for name in ("text_config", "language_config", "llm_config", "decoder"):
+            nested = getattr(model_config, name, None)
+            if nested is not None and not any(nested is item for item in config_candidates):
+                config_candidates.append(nested)
+        get_text_config = getattr(model_config, "get_text_config", None)
+        if callable(get_text_config):
             try:
-                value = int(getattr(model_config, name, 0) or 0)
-            except (TypeError, ValueError, OverflowError):
-                value = 0
-            if value >= 2:
-                metadata_limits.append(value)
+                nested = get_text_config()
+                if nested is not None and not any(nested is item for item in config_candidates):
+                    config_candidates.append(nested)
+            except Exception:
+                pass
+        metadata_limits = []
+        for candidate in config_candidates:
+            for name in ("max_position_embeddings", "max_seq_len", "max_sequence_length", "seq_length"):
+                try:
+                    value = int(getattr(candidate, name, 0) or 0)
+                except (TypeError, ValueError, OverflowError):
+                    value = 0
+                if value >= 2:
+                    metadata_limits.append(value)
+        try:
+            tokenizer_limit = int(getattr(self.tokenizer, "model_max_length", 0) or 0)
+        except (TypeError, ValueError, OverflowError):
+            tokenizer_limit = 0
+        # Transformers uses enormous sentinel integers when no tokenizer
+        # limit is known; only finite, realistic values should constrain us.
+        if 2 <= tokenizer_limit <= 10_000_000:
+            metadata_limits.append(tokenizer_limit)
         return max(2, min([configured, *metadata_limits] if metadata_limits else [configured]))
 
     @staticmethod
@@ -1655,6 +1703,46 @@ class _TransformersChatAdapter:
         return "\n".join(lines) + "\nassistant:"
 
     @staticmethod
+    def _messages_without_system_role(messages):
+        """Fold system instructions into the first user turn for strict templates."""
+
+        system_parts = []
+        remaining = []
+        for message in messages:
+            if str(message.get("role", "") or "").lower() == "system":
+                content = message.get("content", "")
+                if isinstance(content, list):
+                    content = "\n".join(
+                        str(part.get("text", "") or "")
+                        for part in content
+                        if isinstance(part, dict) and part.get("type") == "text"
+                    )
+                if str(content or "").strip():
+                    system_parts.append(str(content).strip())
+                continue
+            remaining.append(dict(message))
+        if not system_parts:
+            return None
+
+        prefix = "系统指令：\n" + "\n".join(system_parts) + "\n\n用户请求：\n"
+        user_index = next(
+            (index for index, item in enumerate(remaining) if str(item.get("role", "")).lower() == "user"),
+            None,
+        )
+        if user_index is None:
+            remaining.insert(0, {"role": "user", "content": prefix.rstrip()})
+            return remaining
+
+        user = dict(remaining[user_index])
+        content = user.get("content", "")
+        if isinstance(content, list):
+            user["content"] = [{"type": "text", "text": prefix}, *content]
+        else:
+            user["content"] = prefix + str(content or "")
+        remaining[user_index] = user
+        return remaining
+
+    @staticmethod
     def _token_ids(value):
         if torch is not None and isinstance(value, torch.Tensor):
             if value.ndim == 1 and value.numel() > 0:
@@ -1675,23 +1763,41 @@ class _TransformersChatAdapter:
             return self._readable_prompt(messages)
 
         candidates = [messages]
+        no_system_messages = self._messages_without_system_role(messages)
+        if no_system_messages is not None:
+            candidates.append(no_system_messages)
         if images:
-            candidates.append(self._template_with_image_objects(messages, images))
+            candidates.extend(
+                self._template_with_image_objects(candidate, images)
+                for candidate in list(candidates)
+            )
         errors = []
-        for candidate in candidates:
-            for kwargs in (
+        template_options = []
+        if "think" in self.settings:
+            template_options.append(
+                {
+                    "tokenize": False,
+                    "add_generation_prompt": True,
+                    "enable_thinking": bool(self.settings.get("think")),
+                }
+            )
+        template_options.extend(
+            (
                 {"tokenize": False, "add_generation_prompt": True},
                 {"tokenize": False},
                 {},
-            ):
+            )
+        )
+        for candidate in candidates:
+            for kwargs in template_options:
                 try:
                     prompt = apply_template(candidate, **kwargs)
                     if prompt is not None:
                         return prompt
                 except (TypeError, ValueError, KeyError, AttributeError) as exc:
                     errors.append(f"{type(exc).__name__}: {exc}")
-        detail = errors[-1] if errors else "未返回提示词"
-        raise RuntimeError(f"原始模型聊天模板无法处理当前消息：{detail}")
+        self._last_template_fallback_reason = errors[-1] if errors else "聊天模板未返回提示词"
+        return self._readable_prompt(no_system_messages or messages)
 
     @staticmethod
     def _as_mapping(encoded):
@@ -1712,6 +1818,10 @@ class _TransformersChatAdapter:
         return encoded
 
     def _encode_text(self, prompt, max_length: int):
+        if isinstance(prompt, dict) or hasattr(prompt, "items"):
+            encoded = self._as_mapping(prompt)
+            if "input_ids" in encoded:
+                return self._truncate_token_inputs(encoded, max_length)
         token_ids = self._token_ids(prompt)
         if token_ids is not None:
             if token_ids.shape[-1] > max_length:
@@ -1733,6 +1843,24 @@ class _TransformersChatAdapter:
         raise RuntimeError(f"原始模型 tokenizer 无法编码提示词：{detail}")
 
     def _encode_multimodal(self, processor, prompt, images, max_length: int):
+        if isinstance(prompt, dict) or hasattr(prompt, "items"):
+            encoded = self._as_mapping(prompt)
+            visual_fields = {
+                "pixel_values",
+                "pixel_values_videos",
+                "image_grid_thw",
+                "video_grid_thw",
+                "cross_attention_mask",
+                "aspect_ratio_ids",
+                "aspect_ratio_mask",
+            }
+            if "input_ids" in encoded and visual_fields.intersection(encoded):
+                return self._truncate_token_inputs(encoded, max_length)
+            token_ids = encoded.get("input_ids")
+            decoder = getattr(self.tokenizer, "batch_decode", None)
+            if token_ids is not None and callable(decoder):
+                decoded = decoder(token_ids, skip_special_tokens=False)
+                prompt = decoded[0] if isinstance(decoded, (list, tuple)) and decoded else decoded
         errors = []
         attempts = (
             {"text": [prompt], "images": images, "return_tensors": "pt", "padding": True, "truncation": True, "max_length": max_length},
@@ -1752,7 +1880,12 @@ class _TransformersChatAdapter:
     def _prompt_and_inputs(self, messages, max_length: int):
         normalized, images = _原始模型消息(messages)
         if images and not self.supports_images:
-            raise RuntimeError("当前原始模型没有视觉处理器，无法处理图片；请使用对应的 Vision 模型目录。")
+            load_errors = getattr(self, "component_load_errors", None) or []
+            detail = f" 原始组件错误：{load_errors[-1]}" if load_errors else ""
+            raise RuntimeError(
+                "当前原始模型没有可用视觉处理器，无法处理图片；"
+                f"请使用对应的 Vision 模型目录并检查 processor 依赖。{detail}"
+            )
         processor = self.processor if images else self.tokenizer
         if processor is None:
             raise RuntimeError("原始模型缺少 tokenizer/processor。")
@@ -1791,7 +1924,10 @@ class _TransformersChatAdapter:
         generation = {
             "max_new_tokens": max_tokens,
             "do_sample": float(temperature or 0.0) > 0.0,
-            "repetition_penalty": float(repetition_penalty if repetition_penalty is not None else repeat_penalty or 1.0),
+            "repetition_penalty": max(
+                0.01,
+                float(repetition_penalty if repetition_penalty is not None else repeat_penalty or 1.0),
+            ),
         }
         if generation["do_sample"]:
             generation["temperature"] = max(0.01, float(temperature))
@@ -1799,8 +1935,18 @@ class _TransformersChatAdapter:
                 generation["top_p"] = max(0.01, min(1.0, float(top_p)))
             if top_k is not None and int(top_k) > 0:
                 generation["top_k"] = int(top_k)
+        generation_config = getattr(self.model, "generation_config", None)
+        model_config = getattr(self.model, "config", None)
         pad_token_id = getattr(self.tokenizer, "pad_token_id", None)
+        if pad_token_id is None:
+            pad_token_id = getattr(generation_config, "pad_token_id", None)
+        if pad_token_id is None:
+            pad_token_id = getattr(model_config, "pad_token_id", None)
         eos_token_id = getattr(self.tokenizer, "eos_token_id", None)
+        if eos_token_id is None:
+            eos_token_id = getattr(generation_config, "eos_token_id", None)
+        if eos_token_id is None:
+            eos_token_id = getattr(model_config, "eos_token_id", None)
         if pad_token_id is not None:
             generation["pad_token_id"] = pad_token_id
         if eos_token_id is not None:
@@ -1815,7 +1961,12 @@ class _TransformersChatAdapter:
             raise RuntimeError("原始模型生成未返回 token 序列。")
         if getattr(output, "ndim", 0) == 1:
             output = output.unsqueeze(0)
-        generated = output[:, prompt_tokens:] if prompt_tokens and output.shape[-1] > prompt_tokens else output
+        is_encoder_decoder = bool(getattr(getattr(self.model, "config", None), "is_encoder_decoder", False))
+        generated = (
+            output[:, prompt_tokens:]
+            if not is_encoder_decoder and prompt_tokens and output.shape[-1] >= prompt_tokens
+            else output
+        )
         decoder = getattr(self.tokenizer, "batch_decode", None)
         if not callable(decoder):
             decoder = getattr(self.processor, "batch_decode", None)
@@ -1824,7 +1975,8 @@ class _TransformersChatAdapter:
         decoded = decoder(generated, skip_special_tokens=True)
         decoded_text = decoded[0] if isinstance(decoded, (list, tuple)) else decoded
         text = str(decoded_text or "").strip()
-        for marker in stop or []:
+        stop_markers = [stop] if isinstance(stop, str) else list(stop or [])
+        for marker in stop_markers:
             marker = str(marker or "")
             if marker and marker in text:
                 text = text.split(marker, 1)[0].rstrip()
@@ -1848,25 +2000,51 @@ def _加载Transformers原始模型(config: dict, model_path: str, storage) -> "
         for key, value in options.items()
         if key in {"trust_remote_code", "revision", "subfolder", "local_files_only"}
     }
+    component_errors = []
+    tokenizer = None
     tokenizer_cls = getattr(_TRANSFORMERS, "AutoTokenizer", None)
-    if tokenizer_cls is None:
-        raise _原始模型依赖错误()
-    tokenizer = tokenizer_cls.from_pretrained(model_root, **tokenizer_options)
+    if tokenizer_cls is not None:
+        try:
+            tokenizer = tokenizer_cls.from_pretrained(model_root, **tokenizer_options)
+        except Exception as exc:
+            component_errors.append(f"AutoTokenizer: {exc}")
     processor = None
     processor_cls = getattr(_TRANSFORMERS, "AutoProcessor", None)
     if processor_cls is not None:
         try:
             processor = processor_cls.from_pretrained(model_root, **tokenizer_options)
-        except Exception:
-            processor = None
+        except Exception as exc:
+            component_errors.append(f"AutoProcessor: {exc}")
+    if tokenizer is None and processor is not None:
+        tokenizer = getattr(processor, "tokenizer", None)
+        if tokenizer is None and callable(processor):
+            tokenizer = processor
+    if tokenizer is None:
+        detail = "；".join(component_errors[-2:]) or "当前 transformers 未提供 AutoTokenizer/AutoProcessor。"
+        raise RuntimeError(f"原始模型缺少可用 tokenizer/processor：{model_root}\n{detail}")
     model = None
     errors = []
-    for class_name in ("AutoModelForImageTextToText", "AutoModelForVision2Seq", "AutoModelForCausalLM"):
+    model_classes = (
+        "AutoModelForImageTextToText",
+        "AutoModelForVision2Seq",
+        "AutoModelForSeq2SeqLM",
+        "AutoModelForCausalLM",
+        "AutoModel",
+    )
+    for class_name in model_classes:
         model_cls = getattr(_TRANSFORMERS, class_name, None)
         if model_cls is None:
             continue
         try:
-            model = model_cls.from_pretrained(model_root, **options)
+            candidate = model_cls.from_pretrained(model_root, **options)
+            if not callable(getattr(candidate, "generate", None)):
+                errors.append(f"{class_name}: 模型未提供 generate()")
+                try:
+                    candidate.to("cpu")
+                except Exception:
+                    pass
+                continue
+            model = candidate
             break
         except Exception as exc:
             errors.append(f"{class_name}: {exc}")
@@ -1874,6 +2052,7 @@ def _加载Transformers原始模型(config: dict, model_path: str, storage) -> "
         detail = "；".join(errors[-3:])
         raise RuntimeError(f"原始模型加载失败：{model_root}\n{detail}")
     adapter = _TransformersChatAdapter(model, tokenizer, processor, model_root, config)
+    adapter.component_load_errors = list(component_errors)
     _标记llm托管元数据(adapter, config, owner_storage=storage)
     return _QwenModel(llm=adapter, settings=dict(config), chat_handler=adapter if adapter.supports_images else None)
 

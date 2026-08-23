@@ -112,6 +112,10 @@ env:DASHSCOPE_API_KEY
 
 原始 Transformers 模型会在生成前同时参考节点设置和模型 `config.json` 的上下文上限，自动为输出预留可用 token，避免长提示词触发超出上下文的失败。不同 Transformers 版本的 chat template、tokenizer 和 Vision processor 参数签名也会走有界兼容降级；视觉图片始终作为独立 PIL 输入传给 processor，不会被转成字符串或串入提示词。
 
+部分 Vision 模型只提供 `AutoProcessor` 内置 tokenizer，节点也可直接加载，不再强制要求独立 `AutoTokenizer`。加载器依次兼容 ImageTextToText、Vision2Seq、Seq2Seq、CausalLM，以及通过 `trust_remote_code` 注册到通用 `AutoModel` 且提供 `generate()` 的仓库。原始 Qwen 模型会把“启用思考”传给支持 `enable_thinking` 的聊天模板，不支持该参数的模型自动回到标准模板调用；encoder-decoder 与普通因果语言模型分别按各自的生成序列格式解码，避免误删回复开头。
+
+多模态上下文上限会继续检查嵌套 `text_config`、`language_config` 和 tokenizer 限制。若模型模板不接受 `system` 角色，系统合同会完整并入首个用户回合；若基础模型完全没有聊天模板，则使用稳定的自然语言 `system/user/assistant` 格式继续生成。Accelerate 混合 CPU/GPU/disk 分层时，输入优先放到词嵌入所在设备。
+
 ## 角色三视图
 
 ![角色设定图设置](docs/images/character-turnaround.png)
