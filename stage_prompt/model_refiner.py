@@ -754,6 +754,11 @@ def _extract_content_text(content: Any, *, _depth: int = 0) -> str:
         for key in (
             "final_prompt", "final", "output_text", "text", "generated_text",
             "content", "completion", "prompt", "parts", "output",
+            # A number of local OpenAI-compatible gateways wrap the normal
+            # response one or more times under data/result/message/choices.
+            # Recurse through those containers so a valid final answer does
+            # not become an empty Skill fallback solely because of packaging.
+            "choices", "candidates", "data", "result", "message", "delta",
         ):
             if key not in content:
                 continue
@@ -795,7 +800,7 @@ def extract_text(response: Any) -> str:
             raise RuntimeError(f"模型 API 返回错误：{reason}")
         for key in (
             "text", "output_text", "generated_text", "response", "answer", "content", "result", "output",
-            "prompt", "final_prompt", "completion",
+            "prompt", "final_prompt", "completion", "data", "message", "delta",
         ):
             text = _extract_content_text(response.get(key))
             if text:
