@@ -84,7 +84,7 @@ flowchart LR
 
 API 面板内置 OpenAI compatible、OpenAI、OpenRouter、DeepSeek、通义千问 DashScope、Kimi、硅基流动、火山方舟、智谱、Groq、Together、Fireworks、Mistral、Perplexity、Claude、Gemini、Ollama、LM Studio 和自定义服务。
 
-图像提示词目标模型可选择 `通用`、`Flux`、`SDXL`、`Qwen Image`、`Krea 2`、`Midjourney` 或 `自定义`。每个 Profile 都会在 JSON 的 `image_prompt_contract` 中记录推荐组织顺序、正向语言合同、负面词通道和参数策略。Krea 2 使用主体优先的自然语言描述，重点保留镜头、空间、材质和光影关系，不把平台参数写入正向正文。
+图像提示词目标模型可选择 `通用`、`Flux`、`SDXL`、`Qwen Image`、`Krea 2`、`Midjourney` 或 `自定义`。每个 Profile 都会实际调整 Skill 正文首段的信息顺序，并在 JSON 的 `image_prompt_contract` 中记录同一份组织顺序、正向语言合同、负面词通道和参数策略；后续剧情、事实锚点和一致性护栏保持共用。Krea 2 使用“主体 → 镜头 → 环境 → 动作 → 材质 → 光影”的自然语言开场，不把平台参数写入正向正文。角色设定图会优先写入 `1:1:1` 正面、90 度侧面、背面三视图合同，再应用目标 Profile 的主体与材质顺序，不会混入普通单图的单动作或电影定格叙事；此时 JSON 会标记 `layout_priority=hard_first` 和 `narrative_mode=parallel_design_reference`，本地模型与 API 也改用三视图设计验收。单条、批量、定向修复与智能文本通道会过滤普通剧情规划、景深、运动模糊和透视镜头要求，只保留跨视图硬锚点；智能文本模型失败或只返回标签时，也会恢复为保留用户设计事实的自然语言三视图 Skill 结果。
 
 地址可以填写服务商 `base_url`，也可以填写完整端点。节点会按服务商识别 OpenAI Chat Completions、Responses、Anthropic Messages、Gemini、DashScope 和 Ollama 原生格式；当选择“自定义”或“OpenAI兼容”并填写完整的 `/messages`、`:generateContent` 或 `/api/chat` 端点时，也会自动切换对应协议，避免把一种协议的路径拼到另一种服务商地址上。自动识别结果会写入运行诊断，旧的协议修复说明不会带入下一次运行。OpenAI、DashScope、Anthropic 和 Gemini 若明确返回某个可选采样参数不受支持，节点会移除该字段后有界重试一次；Gemini 深度思考分片不会进入最终提示词。
 
@@ -112,6 +112,10 @@ env:DASHSCOPE_API_KEY
 
 原始 Transformers 模型会在生成前同时参考节点设置和模型 `config.json` 的上下文上限，自动为输出预留可用 token，避免长提示词触发超出上下文的失败。不同 Transformers 版本的 chat template、tokenizer 和 Vision processor 参数签名也会走有界兼容降级；视觉图片始终作为独立 PIL 输入传给 processor，不会被转成字符串或串入提示词。
 
+部分 Vision 模型只提供 `AutoProcessor` 内置 tokenizer，节点也可直接加载，不再强制要求独立 `AutoTokenizer`。加载器依次兼容 ImageTextToText、Vision2Seq、Seq2Seq、CausalLM，以及通过 `trust_remote_code` 注册到通用 `AutoModel` 且提供 `generate()` 的仓库。原始 Qwen 模型会把“启用思考”传给支持 `enable_thinking` 的聊天模板，不支持该参数的模型自动回到标准模板调用；encoder-decoder 与普通因果语言模型分别按各自的生成序列格式解码，避免误删回复开头。
+
+多模态上下文上限会继续检查嵌套 `text_config`、`language_config` 和 tokenizer 限制。若模型模板不接受 `system` 角色，系统合同会完整并入首个用户回合；若基础模型完全没有聊天模板，则使用稳定的自然语言 `system/user/assistant` 格式继续生成。Accelerate 混合 CPU/GPU/disk 分层时，输入优先放到词嵌入所在设备。
+
 ## 角色三视图
 
 ![角色设定图设置](docs/images/character-turnaround.png)
@@ -132,7 +136,7 @@ env:DASHSCOPE_API_KEY
 
 每个 `video_storyboard` 镜头还拆出 `overall_soundscape`、`dialogue`、`sound_effects` 和 `non_diegetic_music` 四个音频字段，JSON 顶层的 `video_audio` 同步提供首镜头音频合同。图像负面词保留原有 `推荐负面词` 字符串，同时在 JSON 中提供 `negative_core`（重复主体、额外头部、分屏、文字水印、身体结构和布局护栏）与 `negative_optional`（风格、画质和细节抑制词），下游可以先使用核心组再按预算追加可选组。
 
-`model_channel_diagnostics` 会分别记录 `image`、`smart_text` 和 `video` 通道的模型尝试、采纳、回退、实际来源和错误列表。模型失败或候选不合格时，通道状态会明确标记为 `skill_fallback`，不会把图像、智能文本和视频的回退结果混在一起。
+`model_channel_diagnostics` 会分别记录 `image`、`smart_text` 和 `video` 通道的模型尝试、采纳、回退、智能跳过、实际来源和错误列表。仅 Skill、模型采用、批量部分回退、智能保护跳过和完整 Skill 回退都有独立状态；模型失败或候选不合格时会明确标记为 `skill_fallback`，不会把 Skill 生成的变化误算成模型采用，也不会把图像、智能文本和视频的错误混在一起。
 
 系统会检查主体、服装、主场景和关键道具的连续性。新增人物、换装、换景、道具出现或承重点变化必须有明确动作与因果；合理的转场、变身、跳跃、飞行、水下悬停和失重主题仍可正常生成。提示词字数不设硬性上限。
 

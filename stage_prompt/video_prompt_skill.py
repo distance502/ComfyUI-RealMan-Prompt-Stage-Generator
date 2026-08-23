@@ -24,7 +24,7 @@ except Exception:  # pragma: no cover - direct file loading in focused tests
     )
 
 
-VIDEO_PROMPT_SKILL_VERSION = "video-prompt-skill-v11"
+VIDEO_PROMPT_SKILL_VERSION = "video-prompt-skill-v12"
 VIDEO_PROMPT_DURATION_SECONDS = 8
 VIDEO_PROMPT_MIN_CHARS_ZH = 0  # Compatibility export: text length has been unbounded since v4.
 VIDEO_PROMPT_MAX_CHARS_ZH = 0  # Zero means unbounded.
@@ -172,6 +172,7 @@ VIDEO_PROMPT_MODEL_SYSTEM_TEMPLATE = """
 5. 使用连贯自然语言，不堆关键词，不复述规则，不写无法直接拍摄的抽象评价。每段必须是可独立拍摄、又能承接下一段的分镜描述。
 6. 不限制正文总字数、单段字数或英文单词数；长度由剧情和分镜需要决定。正文仍不得写具体秒数或时长参数。
 7. 输入包含动作结果阶段时，必须把结果写成既有动作的因果结果，不得拆成独立标签或无来源事件；结果前后固定接触点、人物数量、镜头轴线与结束状态，不得新增人物、地点、道具、接触关系或跳轴镜头。
+8. 如果底稿由角色设定图或三视图投影而来，只保留角色身份、外观、服装、材质、配色、普通道具、风格与光线事实，并把它们放进一个连续可拍摄的故事。不得重新写入角色设定图、正侧背视图、三栏、1:1:1、等高基线、正交投影、中性棚拍或中性参考站姿。
 """.strip()
 
 _EMPTY_VALUES = {"", "无", "自动", "未启用", "none", "null", "undefined"}
@@ -204,6 +205,98 @@ _CAMERA_MOVES_EN = (
     "moves laterally once along the direction of travel",
     "holds a witness-like distance and advances gently",
 )
+_MULTI_VIEW_CONTAINER_MARKERS = (
+    "多视角角色展示",
+    "角色设定图",
+    "人物设定图",
+    "角色三视图",
+    "标准三视图",
+    "三视图",
+    "character turnaround",
+    "character-sheet",
+    "character sheet",
+    "three-view",
+    "three view",
+    "multi-view character",
+)
+_MULTI_VIEW_STRUCTURE_MARKERS = (
+    "正面、侧面、背面",
+    "正面侧面背面",
+    "正侧背",
+    "90度标准侧面全身",
+    "90度标准侧面",
+    "标准侧面全身",
+    "正面全身",
+    "背面全身",
+    "正面视图",
+    "侧面视图",
+    "背面视图",
+    "正面0度",
+    "背面180度",
+    "横向三栏等宽布局",
+    "横向三栏等宽",
+    "三栏等宽",
+    "三栏人物等高",
+    "人物等高",
+    "同一头顶线",
+    "头顶线",
+    "脚底基线",
+    "地面基线",
+    "统一镜头高度",
+    "正交投影视角",
+    "正交投影",
+    "1:1:1",
+    "front full-body view",
+    "side full-body view",
+    "back full-body view",
+    "front at 0 degrees",
+    "side profile at 90 degrees",
+    "90-degree side profile",
+    "back at 180 degrees",
+    "front view",
+    "side view",
+    "back view",
+    "three equal-width columns",
+    "equal-width columns",
+    "shared head line",
+    "shared foot baseline",
+    "shared ground line",
+    "uniform camera height",
+    "orthographic projection",
+)
+_MULTI_VIEW_DISPLAY_SCENE_MARKERS = (
+    "中性灰摄影棚",
+    "中性摄影棚",
+    "中性棚拍",
+    "白底棚拍",
+    "纯白背景展示",
+    "简单背景",
+    "简洁背景",
+    "纯净背景",
+    "plain background",
+    "simple background",
+    "clean background",
+    "neutral gray studio",
+    "neutral studio",
+    "white studio background",
+    "plain white display background",
+)
+_MULTI_VIEW_REFERENCE_POSE_MARKERS = (
+    "中性自然站姿",
+    "中性站姿",
+    "标准站姿参考",
+    "双臂自然下垂",
+    "neutral natural stance",
+    "neutral standing pose",
+    "standard reference pose",
+    "arms resting at the sides",
+)
+_MULTI_VIEW_STORY_FORBIDDEN_MARKERS = (
+    *_MULTI_VIEW_CONTAINER_MARKERS,
+    *_MULTI_VIEW_STRUCTURE_MARKERS,
+    *_MULTI_VIEW_DISPLAY_SCENE_MARKERS,
+    *_MULTI_VIEW_REFERENCE_POSE_MARKERS,
+)
 
 
 def _clean(value: Any, *, limit: int = 180) -> str:
@@ -234,6 +327,221 @@ def _unique_values(values: Any, *, limit: int = 3) -> list[str]:
         if len(result) >= limit:
             break
     return result
+
+
+def _is_multi_view_story_source(
+    settings: Mapping[str, Any],
+    groups: Mapping[str, Sequence[str]] | None = None,
+) -> bool:
+    if str(settings.get("画面结构模式解析结果", "") or "").strip() == "multi_view":
+        return True
+    if not isinstance(groups, Mapping):
+        return False
+    source = " ".join(
+        str(value)
+        for name in ("主体", "构图视角")
+        for value in (groups.get(name, []) or [])
+    ).casefold()
+    if any(marker.casefold() in source for marker in _MULTI_VIEW_CONTAINER_MARKERS):
+        return True
+    return all(marker in source for marker in ("front view", "side view", "back view")) or all(
+        marker in source for marker in ("正面视图", "侧面视图", "背面视图")
+    )
+
+
+def _remove_multi_view_markers(value: Any) -> str:
+    text = _clean(value, limit=240)
+    for marker in sorted(
+        (*_MULTI_VIEW_CONTAINER_MARKERS, *_MULTI_VIEW_STRUCTURE_MARKERS),
+        key=len,
+        reverse=True,
+    ):
+        text = re.sub(re.escape(marker), " ", text, flags=re.IGNORECASE)
+    text = re.sub(
+        r"(?:从左到右|依次为|三幅(?:主)?视图|三个并列视图|three parallel views|from left to right)",
+        " ",
+        text,
+        flags=re.IGNORECASE,
+    )
+    return re.sub(r"\s+", " ", text).strip(" ，,。；;：:、|/\\-")
+
+
+def _project_multi_view_groups_to_story(
+    groups: Mapping[str, Sequence[str]],
+    settings: Mapping[str, Any],
+) -> dict[str, list[str]]:
+    """Keep character facts while removing static character-sheet layout instructions."""
+
+    projected: dict[str, list[str]] = {}
+    for raw_name, values in groups.items():
+        name = str(raw_name)
+        cleaned_values: list[str] = []
+        seen: set[str] = set()
+        for raw in values or []:
+            fragments = re.split(r"[，,；;。\n|]+", str(raw or ""))
+            for fragment in fragments:
+                lowered = fragment.casefold()
+                if lowered.strip() in {"正面", "侧面", "背面", "front", "side", "back"}:
+                    continue
+                if name == "场景背景" and any(
+                    marker.casefold() in lowered for marker in _MULTI_VIEW_DISPLAY_SCENE_MARKERS
+                ):
+                    continue
+                if name == "动作姿态" and any(
+                    marker.casefold() in lowered for marker in _MULTI_VIEW_REFERENCE_POSE_MARKERS
+                ):
+                    continue
+                value = _remove_multi_view_markers(fragment)
+                if not value:
+                    continue
+                key = re.sub(r"[\s，,。；;：:、]+", "", value).casefold()
+                if not key or key in seen:
+                    continue
+                seen.add(key)
+                cleaned_values.append(value)
+                if len(cleaned_values) >= 4:
+                    break
+            if len(cleaned_values) >= 4:
+                break
+        if cleaned_values:
+            projected[name] = cleaned_values
+
+    subject_type = str(
+        settings.get("主体类型解析结果", settings.get("主体类型", "自动")) or "自动"
+    ).strip()
+    if not projected.get("构图视角"):
+        projected["构图视角"] = ["全景" if subject_type == "非人物主体" else "全景全身"]
+    return projected
+
+
+def project_video_story_settings(
+    selected: Mapping[str, Sequence[Any]] | None,
+    custom_tags: Sequence[Any] | None,
+    settings: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Build model-call settings that describe the projected video story, not its source sheet."""
+
+    projected_settings = dict(settings)
+    raw_selected = selected if isinstance(selected, Mapping) else {}
+    raw_source_detected = _is_multi_view_story_source(settings, raw_selected)
+    raw_groups = _normalized_groups(selected, custom_tags, settings, include_preferences=True)
+    if not raw_source_detected and not _is_multi_view_story_source(settings, raw_groups):
+        return projected_settings
+
+    source_layout = (
+        "multi_view"
+        if raw_source_detected
+        else str(settings.get("画面结构模式解析结果", "") or "multi_view").strip()
+    )
+    subject_type = str(
+        settings.get("主体类型解析结果", settings.get("主体类型", "自动")) or "自动"
+    ).strip()
+    projected_settings["视频提示词来源画面结构模式"] = source_layout
+    projected_settings["画面结构模式解析结果"] = (
+        "single_non_person" if subject_type == "非人物主体" else "single_person"
+    )
+    projected_settings["角色设定图内部策略"] = ""
+    projected_settings["图片反推生成"] = False
+    projected_settings["图片反推状态"] = "未启用"
+    projected_settings["智能文本输入"] = ""
+    projected_settings["额外要求"] = ""
+    projected_settings["全局剧情规划"] = []
+    projected_settings["Skill动态变化策略"] = ""
+    projected_settings["模型后置素材摘要"] = ""
+    projected_settings["标签块编排摘要"] = ""
+    projected_settings["Danbooru通用视觉标签摘要"] = ""
+    projected_settings["最近提示词指纹"] = []
+    projected_settings["随机主题池档案标记"] = []
+    projected_settings["模板风格档案标记"] = []
+    projected_settings["运行时随机档案标记"] = []
+    projected_settings["图像提示词目标模型Profile"] = {}
+    projected_settings["推理纠偏说明"] = [
+        str(note).strip()
+        for note in settings.get("推理纠偏说明", [])
+        if str(note).strip() and not video_prompt_has_layout_contamination(str(note))
+    ]
+    for key in ("提示词Skill摘要", "智能偏好摘要", "智能偏好应用摘要", "智能关系补全摘要"):
+        value = str(settings.get(key, "") or "").strip()
+        projected_settings[key] = "" if video_prompt_has_layout_contamination(value) else value
+
+    projected_contract = {"groups": {name: list(values) for name, values in raw_groups.items()}}
+    projected_settings["全局创作主线合同"] = projected_contract
+    projected_settings["全局创作主线摘要"] = "视频故事投影：" + "；".join(
+        f"{name}={'、'.join(values)}"
+        for name, values in raw_groups.items()
+        if values
+    )
+
+    original_graph = settings.get("智能场景关系图")
+    projected_graph: dict[str, Any] = {}
+    if isinstance(original_graph, Mapping):
+        for key in (
+            "forbidden_world_families",
+            "context_subject_presence_constraint",
+            "context_subject_cardinality_constraint",
+        ):
+            value = original_graph.get(key)
+            if value:
+                projected_graph[key] = value
+    projected_graph["hard_anchors"] = {
+        name: list(values)
+        for name, values in raw_groups.items()
+        if name in {"主体", "场景背景", "动作姿态", "服装造型", "道具世界观", "画面风格", "光影氛围", "自定义补充"}
+        and values
+    }
+    projected_settings["智能场景关系图"] = projected_graph
+    projected_settings["智能编排摘要"] = (
+        "角色设定素材已投影为连续视频故事；模型只沿视频 Skill 底稿补足镜头、动作因果、环境反馈和前后承接。"
+    )
+    return projected_settings
+
+
+def video_prompt_has_layout_contamination(text: str) -> bool:
+    """Return whether a video story still contains static multi-view sheet instructions."""
+
+    source = str(text or "").casefold()
+    return any(marker.casefold() in source for marker in _MULTI_VIEW_STORY_FORBIDDEN_MARKERS)
+
+
+def _video_story_source(
+    groups: Mapping[str, list[str]],
+    settings: Mapping[str, Any],
+    primary_prompt: str,
+) -> str:
+    if not _is_multi_view_story_source(settings, groups):
+        return str(primary_prompt or "")
+    english = str(settings.get("提示词语言", "纯中文") or "纯中文").strip() in {
+        "纯英文",
+        "英文提示词+中文说明",
+    }
+    if english:
+        subject = _english_group_value(groups, "主体") or "the established character"
+        scene = _english_group_value(groups, "场景背景") or "a coherent story location"
+        outfit = _english_group_value(groups, "服装造型")
+        prop = _english_group_value(groups, "道具世界观")
+        details = _english_group_value(groups, "自定义补充")
+        clauses = [f"The story follows {subject}"]
+        if outfit:
+            clauses.append(f"wearing {outfit}")
+        if prop:
+            clauses.append(f"carrying {prop}")
+        clauses.append(f"in {scene}")
+        if details:
+            clauses.append(f"while preserving {details}")
+        return " ".join(clauses) + "."
+    subject = _first(groups, "主体", "同一位成年角色")
+    scene = _first(groups, "场景背景") or "一个连续可拍摄的主场景"
+    outfit = _first(groups, "服装造型")
+    prop = _series(groups, "道具世界观")
+    details = _series(groups, "自定义补充")
+    clauses = [f"故事跟随{subject}进入{scene}"]
+    if outfit:
+        clauses.append(f"角色始终穿着{outfit}")
+    if prop:
+        clauses.append(f"持续携带{prop}")
+    if details:
+        clauses.append(f"外观持续保留{details}")
+    return "，".join(clauses) + "。"
 
 
 def _normalized_groups(
@@ -276,6 +584,8 @@ def _normalized_groups(
                         ])[:5]
                     else:
                         groups[group_name] = cleaned
+    if _is_multi_view_story_source(settings, groups):
+        return _project_multi_view_groups_to_story(groups, settings)
     return groups
 
 
@@ -706,7 +1016,11 @@ def _build_chinese_video_prompt(
     subject = _first(groups, "主体", "非人物主体" if non_person else "画面中的成年人物")
     reference = _subject_reference_zh(subject, non_person)
     style = _first(groups, "画面风格", str(settings.get("模板风格", "电影写实") or "电影写实"))
-    scene = _first(groups, "场景背景") or "当前主场景"
+    scene = _first(
+        groups,
+        "场景背景",
+        "连续可拍摄的主场景" if _is_multi_view_story_source(settings, groups) else "当前主场景",
+    )
     result_contract = _video_result_contract(settings)
     action = _first(groups, "动作姿态") or ("完成一次有明确方向的状态变化" if non_person else "先停下确认线索，再做出一个明确动作")
     outfit = _first(groups, "服装造型")
@@ -719,7 +1033,12 @@ def _build_chinese_video_prompt(
     medium = _clean(style_skill.get("medium"), limit=120)
     rendering = _clean(style_skill.get("rendering"), limit=180)
     video_rules = _clean(style_skill.get("video_rules"), limit=180)
-    brief = _source_brief(settings)
+    multi_view_source = _is_multi_view_story_source(settings, groups)
+    if multi_view_source:
+        medium = _remove_multi_view_markers(medium)
+        rendering = _remove_multi_view_markers(rendering)
+        video_rules = _remove_multi_view_markers(video_rules)
+    brief = "" if multi_view_source else _source_brief(settings)
     seed = int(settings.get("运行时随机有效种子", 0) or settings.get("seed", 0) or 0)
     anchors = {
         "subject": subject,
@@ -759,11 +1078,13 @@ def _build_chinese_video_prompt(
     outfit_clause = f"身穿{outfit}，" if outfit and not non_person else ""
     brief_clause = f"这条故事围绕“{brief}”展开，" if brief else ""
     audio = _audio_zh(scene, action, non_person)
+    details = _series(groups, "自定义补充")
+    details_clause = f"角色外观持续保留{details}，" if details and not non_person else ""
     result_phrases = _video_result_phrases_zh(result_contract) if result_contract else {}
     paragraphs = (
         (
             f"{_timeline_label(1, '建立', settings, english=False)}镜头以{composition}建立{scene}的空间关系，{subject}{outfit_clause}位于画面中心偏前，"
-            f"{props}留在视线能够回到的位置。{brief_clause}{opening}；{motive}。"
+            f"{props}留在视线能够回到的位置。{details_clause}{brief_clause}{opening}；{motive}。"
             f"{style}决定画面的线条、色彩与材质表达；{medium or '当前媒介'}保持统一，{rendering or '材质与光线保持空间关系连续'}。"
             f"{lighting}先把主体与关键线索从背景中分离，{audio}。{result_phrases.get('setup', '')}"
         ),
@@ -817,6 +1138,7 @@ def _english_anchor_sentence(groups: Mapping[str, list[str]] | None) -> str:
         ("画面风格", "the visual style"),
         ("光影氛围", "the lighting"),
         ("构图视角", "the composition"),
+        ("自定义补充", "the appearance details"),
     )
     clauses = [
         f"{label} is {value}"
@@ -938,13 +1260,26 @@ def build_video_storyboard_metadata(
     language = str((settings or {}).get("提示词语言", "纯中文") or "纯中文").strip()
     english = language == "纯英文"
     groups = _normalized_groups(selected, custom_tags, settings or {})
-    anchor_names = ("主体", "场景背景", "动作姿态", "服装造型", "道具世界观", "光影氛围", "构图视角")
+    anchor_names = (
+        "主体",
+        "场景背景",
+        "动作姿态",
+        "服装造型",
+        "道具世界观",
+        "光影氛围",
+        "构图视角",
+        "自定义补充",
+    )
     anchors = {
         name: list(groups.get(name, []))[:4]
         for name in anchor_names
         if groups.get(name)
     }
-    scene = _first(groups, "场景背景") or "当前主场景"
+    scene = _first(
+        groups,
+        "场景背景",
+        "连续可拍摄的主场景" if _is_multi_view_story_source(settings or {}, groups) else "当前主场景",
+    )
     action = _first(groups, "动作姿态") or "当前动作"
     audio_fields = _audio_metadata(scene, action, settings or {}, english=english)
     result: list[dict[str, Any]] = []
@@ -1012,6 +1347,7 @@ def is_natural_video_prompt(
     *,
     language: str = "纯中文",
     allow_timeline: bool = False,
+    layout_mode: str = "",
 ) -> bool:
     """Validate an unbounded natural-language storyboard with one causal story arc."""
 
@@ -1021,6 +1357,10 @@ def is_natural_video_prompt(
         not prompt
         or any(marker in prompt.casefold() for marker in _META_MARKERS)
         or (not allow_timeline and _DURATION_EXPRESSION_PATTERN.search(prompt))
+        or (
+            str(layout_mode or "").strip() == "multi_view"
+            and video_prompt_has_layout_contamination(prompt)
+        )
     ):
         return False
     if mode == "英文提示词+中文说明":
@@ -1028,8 +1368,18 @@ def is_natural_video_prompt(
         return bool(
             marker
             and re.search(r"[\u4e00-\u9fff]", chinese)
-            and is_natural_video_prompt(chinese.strip(), language="纯中文", allow_timeline=allow_timeline)
-            and is_natural_video_prompt(english.strip(), language="纯英文", allow_timeline=allow_timeline)
+            and is_natural_video_prompt(
+                chinese.strip(),
+                language="纯中文",
+                allow_timeline=allow_timeline,
+                layout_mode=layout_mode,
+            )
+            and is_natural_video_prompt(
+                english.strip(),
+                language="纯英文",
+                allow_timeline=allow_timeline,
+                layout_mode=layout_mode,
+            )
         )
     enumeration_limit = max(18, len(prompt) // 40)
     if prompt.count("、") > enumeration_limit or len(re.findall(r"(?:^|[，,])[^。.!?]{0,18}(?:[，,]|$)", prompt)) > 48:
@@ -1126,17 +1476,18 @@ def build_video_prompt(
 
     groups = _normalized_groups(selected, custom_tags, settings, include_preferences=True)
     language = str(settings.get("提示词语言", "纯中文") or "纯中文").strip()
+    story_source = _video_story_source(groups, settings, primary_prompt)
     if language in {"纯英文", "英文提示词+中文说明"}:
         english = _build_english_video_prompt(
             settings,
-            primary_prompt=primary_prompt,
+            primary_prompt=story_source,
             groups=groups,
         )
         if language == "纯英文":
             return english
-        chinese = _build_chinese_video_prompt(groups, settings, primary_prompt=primary_prompt)
+        chinese = _build_chinese_video_prompt(groups, settings, primary_prompt=story_source)
         return f"{english}\n中文说明：{chinese}"
-    return _build_chinese_video_prompt(groups, settings, primary_prompt=primary_prompt)
+    return _build_chinese_video_prompt(groups, settings, primary_prompt=story_source)
 
 
 __all__ = [
@@ -1154,8 +1505,10 @@ __all__ = [
     "build_video_prompt",
     "build_video_storyboard_metadata",
     "is_natural_video_prompt",
+    "project_video_story_settings",
     "resolve_video_prompt_profile",
     "resolve_video_shot_count",
     "video_prompt_anchor_roles",
+    "video_prompt_has_layout_contamination",
     "video_prompt_required_anchors",
 ]

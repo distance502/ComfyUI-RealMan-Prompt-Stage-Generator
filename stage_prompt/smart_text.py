@@ -15,12 +15,16 @@ except ImportError:  # Standalone module tests load skills under this compatibil
 try:
     from .narrative import (
         GLOBAL_NARRATIVE_MODEL_CONTRACT,
+        MULTI_VIEW_MODEL_CONTRACT,
+        prompt_preserves_visual_layout,
         resolve_visual_layout_mode,
         visual_layout_contract,
     )
 except Exception:  # pragma: no cover - standalone module tests
     from stage_prompt_narrative_test import (  # type: ignore
         GLOBAL_NARRATIVE_MODEL_CONTRACT,
+        MULTI_VIEW_MODEL_CONTRACT,
+        prompt_preserves_visual_layout,
         resolve_visual_layout_mode,
         visual_layout_contract,
     )
@@ -55,6 +59,14 @@ SMART_TEXT_SYSTEM_TEMPLATE = """
 输出：杂志感人像，年轻成年女性站在书店玻璃窗前回望，全景全身构图，人物完整入镜，霓虹反光落在面部、发梢与书架玻璃边缘，姿态自然克制，服装线条干净，背景保持轻微虚化但能看出书店层次；画面以面部神情和完整身体比例为视觉中心，柔和高光勾出轮廓，整体干净、细腻、有电影感与封面感。
 """.strip()
 SMART_TEXT_SYSTEM_TEMPLATE = f"{SMART_TEXT_SYSTEM_TEMPLATE}\n\n{GLOBAL_NARRATIVE_MODEL_CONTRACT}"
+
+SMART_TEXT_MULTI_VIEW_SYSTEM_TEMPLATE = f"""
+你是 Qwen TE 节点内置的角色设定图 Smart Prompt Skill。任务是把用户描述、节点标签、参考图可见事实和可用成人设计素材整理成一段可直接出图的自然语言三视图正向提示词。
+
+只输出最终正文，不输出标题、分析、规则、标签列表、Markdown 或平台参数。正文必须先写完整三视图布局，再按同一角色的身份、脸部、体型、发型、服装、道具侧位、配色、材质、统一背景与统一光线展开。用户动作只转译为三个视图一致的中性站姿、手势和重心参考；最近输出只用于避让未锁定设计维度。不要添加事件触发、情绪转折、动作阶段、景深、透视镜头、电影定格或故事结尾。中文和英文均不限制字数。
+
+{MULTI_VIEW_MODEL_CONTRACT}
+""".strip()
 
 _SMART_TEXT_WORD_SPLIT_PATTERN = re.compile(r"[\s,，、;；|/\\]+")
 _CJK_PATTERN = re.compile(r"[\u4e00-\u9fff]")
@@ -1354,12 +1366,14 @@ def build_smart_text_seed(
     language = str(settings.get("提示词语言", "纯中文") or "纯中文")
     adult_mode = str(settings.get("标签反推模式", "") or "").strip() == "成人向成熟"
     non_person = str(settings.get("主体类型解析结果", "") or settings.get("主体类型", "自动") or "自动").strip() == "非人物主体"
-    layout_mode = resolve_visual_layout_mode(
+    configured_layout = str(settings.get("画面结构模式解析结果", "") or "").strip()
+    layout_mode = configured_layout or resolve_visual_layout_mode(
         [user_text, primary_prompt, selected_tags_text],
         settings,
         non_person=non_person,
     )
     settings["画面结构模式解析结果"] = layout_mode
+    multi_view_mode = layout_mode == "multi_view"
     layout_instruction = visual_layout_contract(
         layout_mode,
         english=language in {"纯英文", "英文提示词+中文说明"},
@@ -1377,22 +1391,45 @@ def build_smart_text_seed(
             if str(item).strip()
         )
     )
-    adult_instruction = (
-        "成人成熟模式：已启用。优先吸收 NSFW 成熟写真工作台标签，明确成年主体与成熟氛围，把标签融合成连续成片文案，不要逐条罗列。"
-        if adult_mode
-        else "成人成熟模式：未启用。按普通图像提示词处理，把输入整理成自然连贯的成片描述。"
-    )
+    if multi_view_mode:
+        adult_instruction = (
+            "成人设计素材：已启用。只吸收明确成年身份、体型、服装覆盖、配色、材质和可见造型事实，并让它们在三个视图逐项一致；成人动作结果不进入角色设定图。"
+            if adult_mode
+            else "成人设计素材：未启用。只按当前角色身份和可见设计事实整理三视图。"
+        )
+    else:
+        adult_instruction = (
+            "成人成熟模式：已启用。优先吸收 NSFW 成熟写真工作台标签，明确成年主体与成熟氛围，把标签融合成连续成片文案，不要逐条罗列。"
+            if adult_mode
+            else "成人成熟模式：未启用。按普通图像提示词处理，把输入整理成自然连贯的成片描述。"
+        )
     if language == "纯英文":
         language_instruction = "语言要求：只输出英文自然语言正向提示词，不要包含中文解释；不限制单词数。"
     elif language == "英文提示词+中文说明":
         language_instruction = "语言要求：先输出不限制单词数的英文自然语言正向提示词；末尾追加一小段中文说明，以“中文说明：”开头，说明画面主线。"
     else:
         language_instruction = "语言要求：只输出中文自然语言正向提示词，不限制字数。"
-    output_instruction = (
-        "输出：当前是非人物主体，优先吸收基础提示词和当前主线，写清处境与功能目标、事件触发、主体状态变化、功能或运动回应、局势升级、环境反馈、光影迁移、视觉高潮与最后定格；聚焦物体、机械、建筑、场景或概念设计本身，只补结构、材质、尺度、功能部件和空间关系；正文使用不限制字数的自然语言；不要原样抄写标签，不要锁死风格和景别，不要重复堆同义标签。"
-        if non_person
-        else "输出：优先吸收基础提示词和当前主线，写清处境、人物动机、事件触发、动作回应、局势升级、情绪转折、环境与光线反馈、视觉高潮以及镜头最终定格；正文使用不限制字数的自然语言；默认完整人物入镜，除非用户明确要求近景、特写或半身；不要原样抄写标签，不要锁死风格和景别，不要重复堆同义标签，语气像具有剧情的电影剧照说明，不像标签列表。"
-    )
+    if multi_view_mode:
+        output_instruction = (
+            "输出：先完整保留1:1:1横向等宽的正面0度、单个90度标准侧面、背面180度三幅全身及等高基线，"
+            "再用自然语言说明同一角色的正脸、体型、发型、服装前侧后结构、道具固定侧位、配色、材质、统一中性背景与统一光线；"
+            "用户动作只作为三个视图一致的中性站姿、手势和重心参考。不要写事件触发、情绪转折、动作阶段、景深、透视镜头或电影定格；"
+            "不要原样抄写标签，不限制字数。"
+        )
+        creative_spine_line = f"全局角色设计主线：{creative_spine_context or '由当前基础提示词与最终归一化标签确定'}"
+        nsfw_line = f"成人设计素材摘要：{nsfw_context or '未启用或无工作台标签'}"
+        dynamic_line = f"三视图动态变化转换：{dynamic_strategy or '无；保持当前锁定设计'}"
+        recent_line = "最近三视图避重：只变化未锁定的服装结构、材质处理、配色比例、统一光线或背景呈现；不读取历史剧情与动作阶段。"
+    else:
+        output_instruction = (
+            "输出：当前是非人物主体，优先吸收基础提示词和当前主线，写清处境与功能目标、事件触发、主体状态变化、功能或运动回应、局势升级、环境反馈、光影迁移、视觉高潮与最后定格；聚焦物体、机械、建筑、场景或概念设计本身，只补结构、材质、尺度、功能部件和空间关系；正文使用不限制字数的自然语言；不要原样抄写标签，不要锁死风格和景别，不要重复堆同义标签。"
+            if non_person
+            else "输出：优先吸收基础提示词和当前主线，写清处境、人物动机、事件触发、动作回应、局势升级、情绪转折、环境与光线反馈、视觉高潮以及镜头最终定格；正文使用不限制字数的自然语言；默认完整人物入镜，除非用户明确要求近景、特写或半身；不要原样抄写标签，不要锁死风格和景别，不要重复堆同义标签，语气像具有剧情的电影剧照说明，不像标签列表。"
+        )
+        creative_spine_line = f"全局创作主线：{creative_spine_context or '由当前基础提示词与最终归一化标签确定'}"
+        nsfw_line = f"NSFW工作台摘要：{nsfw_context or '未启用或无工作台标签'}"
+        dynamic_line = f"Skill动态变化策略：{dynamic_strategy or '无'}"
+        recent_line = f"最近输出避重：{recent_context or '无'}"
     return "\n".join(
         [
             f"语言：{language}",
@@ -1404,10 +1441,10 @@ def build_smart_text_seed(
             f"当前轨道：{_normalize_text(style_track)}",
             f"运行时随机：{_normalize_text(runtime_mode)} / {_normalize_text(runtime_intensity)}",
             f"风格隔离：{_normalize_text(isolation_mode)}",
-            f"全局创作主线：{creative_spine_context or '由当前基础提示词与最终归一化标签确定'}",
-            f"NSFW工作台摘要：{nsfw_context or '未启用或无工作台标签'}",
-            f"Skill动态变化策略：{dynamic_strategy or '无'}",
-            f"最近输出避重：{recent_context or '无'}",
+            creative_spine_line,
+            nsfw_line,
+            dynamic_line,
+            recent_line,
             "可用标签素材（只作素材，不要原样抄写）：",
             _normalize_text(selected_tags_text),
             "基础提示词：",
@@ -1419,7 +1456,13 @@ def build_smart_text_seed(
 
 def build_smart_text_settings(settings: dict[str, Any]) -> dict[str, Any]:
     next_settings = dict(settings)
-    next_settings["系统提示词覆盖"] = SMART_TEXT_SYSTEM_TEMPLATE
+    layout_mode = resolve_visual_layout_mode(settings=next_settings)
+    next_settings["画面结构模式解析结果"] = layout_mode
+    next_settings["系统提示词覆盖"] = (
+        SMART_TEXT_MULTI_VIEW_SYSTEM_TEMPLATE
+        if layout_mode == "multi_view"
+        else SMART_TEXT_SYSTEM_TEMPLATE
+    )
     next_settings["最大生成token"] = max(128, min(2600, int(next_settings.get("最大生成token", 1800) or 1800)))
     next_settings["温度"] = min(0.62, max(0.28, float(next_settings.get("温度", 0.48) or 0.48)))
     next_settings["top_p"] = min(0.9, max(0.72, float(next_settings.get("top_p", 0.86) or 0.86)))
@@ -1594,12 +1637,16 @@ def sanitize_smart_text_prompt(
     style_track: str = "",
     subject_type: str = "自动",
     language: str = "纯中文",
+    layout_mode: str = "",
 ) -> str:
     """Clean final smart-text output so model chatter never reaches the prompt slot."""
 
     original_raw = _strip_smart_text_meta(text)
     raw = original_raw
     language_mode = _normalize_smart_text_language(language)
+    resolved_layout = str(layout_mode or "").strip() or resolve_visual_layout_mode(
+        [user_text, primary_prompt]
+    )
     adult = bool(adult_mode) or looks_like_adult_request(f"{user_text} {primary_prompt} {raw}", [])
     original_has_uncertain_minor_terms = any(term in original_raw for term in _SMART_TEXT_UNCERTAIN_MINOR_TERMS)
     original_needs_rewrite = not _matches_smart_text_language(original_raw, language_mode) or (
@@ -1629,6 +1676,7 @@ def sanitize_smart_text_prompt(
             subject_type=subject_type,
             language=language_mode,
             adult_mode=adult,
+            layout_mode=resolved_layout,
         )
     if adult and any(term in raw for term in _SMART_TEXT_UNCERTAIN_MINOR_TERMS):
         raw = _normalize_smart_text_adult_subject_terms(raw, adult=True, language=language_mode)
@@ -1643,6 +1691,7 @@ def sanitize_smart_text_prompt(
             subject_type=subject_type,
             language=language_mode,
             adult_mode=adult,
+            layout_mode=resolved_layout,
         )
         return _soften_explicit_adult_terms(
             _normalize_smart_text_adult_subject_terms(_strip_smart_text_meta(fallback), adult=adult, language=language_mode)
@@ -1655,6 +1704,17 @@ def sanitize_smart_text_prompt(
             subject_type=subject_type,
             language=language_mode,
             adult_mode=adult,
+            layout_mode=resolved_layout,
+        )
+    if resolved_layout == "multi_view" and not prompt_preserves_visual_layout(raw, resolved_layout):
+        return fallback_smart_text(
+            user_text=user_text,
+            primary_prompt=primary_prompt,
+            style_track=style_track,
+            subject_type=subject_type,
+            language=language_mode,
+            adult_mode=adult,
+            layout_mode=resolved_layout,
         )
     return raw
 
@@ -1732,6 +1792,66 @@ def _merge_smart_text_into_rich_narrative(
     return _fit_chinese_smart_narrative(primary, bridge)
 
 
+def _merge_smart_text_into_multi_view_design(
+    *,
+    user_text: str,
+    primary_prompt: str,
+    english: bool = False,
+) -> str:
+    primary = _strip_smart_text_meta(primary_prompt)
+    if english:
+        additions = [
+            fragment.strip()
+            for fragment in re.split(r"[,，;；\n]+", _normalize_text(user_text))
+            if fragment.strip()
+            and fragment.strip().casefold() not in primary.casefold()
+            and fragment.strip().casefold() not in _FALLBACK_NOISE_TERMS
+        ][:6]
+    else:
+        additions = [
+            term
+            for term in _split_prompt_terms(user_text)
+            if term
+            and term.casefold() not in primary.casefold()
+            and term.casefold() not in _FALLBACK_NOISE_TERMS
+        ][:6]
+    if prompt_preserves_visual_layout(primary, "multi_view"):
+        if not additions:
+            return primary
+        if english:
+            visible = "; ".join(term for term in additions if not _CJK_PATTERN.search(term))
+            if not visible:
+                return primary
+            return (
+                f"{primary} The added design intention, {visible}, is applied at the same structural location in the front, "
+                "90-degree side, and back views, preserving one identity, one wardrobe construction, matching materials, and uniform lighting."
+            )
+        visible = "、".join(additions)
+        return (
+            f"{primary}用户补充的{visible}落实到正面、90度侧面和背面的同一结构位置，"
+            "三个视图保持同一身份、服装结构、材质对应、道具侧位与统一光线。"
+        )
+
+    contract = visual_layout_contract("multi_view", english=english)
+    source_terms = [
+        _FALLBACK_STYLE_LABELS.get(term, term)
+        for term in _split_prompt_terms(user_text, primary_prompt)
+        if term and term.casefold() not in _FALLBACK_NOISE_TERMS
+    ]
+    source_terms = list(dict.fromkeys(source_terms))[:24]
+    if english:
+        visible = "; ".join(term for term in source_terms if not _CJK_PATTERN.search(term)) or "the selected character design"
+        return (
+            f"{contract} The three views present {visible} as one continuous identity, with matching face, body build, hairstyle, "
+            "wardrobe construction, palette, materials, prop placement, neutral stance, clean background, and uniform lighting."
+        )
+    visible = "、".join(source_terms) or "当前角色设计"
+    return (
+        f"{contract}三栏共同展示{visible}，正面、90度侧面和背面保持同一身份、正脸、体型、发型、"
+        "服装结构、配色、材质、道具侧位、中性站姿、简洁背景与统一光线。"
+    )
+
+
 def _fallback_smart_text_chinese(
     *,
     user_text: str,
@@ -1739,7 +1859,18 @@ def _fallback_smart_text_chinese(
     style_track: str = "",
     subject_type: str = "自动",
     adult_mode: bool = False,
+    layout_mode: str = "",
 ) -> str:
+    if layout_mode == "multi_view":
+        merged = _merge_smart_text_into_multi_view_design(
+            user_text=user_text,
+            primary_prompt=primary_prompt,
+            english=False,
+        )
+        adult = bool(adult_mode) or looks_like_adult_request(f"{user_text} {primary_prompt}", [])
+        return _soften_explicit_adult_terms(
+            _normalize_adult_subject_terms(merged, adult=adult)
+        )
     rich_narrative = _merge_smart_text_into_rich_narrative(
         user_text=user_text,
         primary_prompt=primary_prompt,
@@ -1892,7 +2023,16 @@ def _fallback_smart_text_english(
     style_track: str = "",
     subject_type: str = "自动",
     adult_mode: bool = False,
+    layout_mode: str = "",
 ) -> str:
+    if layout_mode == "multi_view":
+        merged = _merge_smart_text_into_multi_view_design(
+            user_text=user_text,
+            primary_prompt=primary_prompt,
+            english=True,
+        )
+        adult = bool(adult_mode) or looks_like_adult_request(f"{user_text} {primary_prompt}", [])
+        return _normalize_english_adult_subject_terms(merged, adult=adult)
     rich_narrative = _merge_smart_text_into_rich_narrative(
         user_text=user_text,
         primary_prompt=primary_prompt,
@@ -1935,14 +2075,19 @@ def fallback_smart_text(
     subject_type: str = "自动",
     language: str = "纯中文",
     adult_mode: bool = False,
+    layout_mode: str = "",
 ) -> str:
     language_mode = _normalize_smart_text_language(language)
+    resolved_layout = str(layout_mode or "").strip() or resolve_visual_layout_mode(
+        [user_text, primary_prompt]
+    )
     common = {
         "user_text": user_text,
         "primary_prompt": primary_prompt,
         "style_track": style_track,
         "subject_type": subject_type,
         "adult_mode": adult_mode,
+        "layout_mode": resolved_layout,
     }
     if language_mode == "纯英文":
         return _fallback_smart_text_english(**common)

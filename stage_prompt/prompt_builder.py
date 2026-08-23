@@ -3893,7 +3893,8 @@ _NEGATIVE_ONLY_POSITIVE_FRAGMENT_KEYS = {
     "no low-resolution artifacts",
 }
 
-# Target-model guidance is metadata only; the default prompt remains model-agnostic.
+# Target profiles control the first natural-language paragraph while the rest
+# of the validated creative spine remains shared and model-agnostic.
 IMAGE_PROMPT_TARGET_PROFILES: dict[str, dict[str, Any]] = {
     "通用": {
         "label_zh": "通用自然语言图像提示词",
@@ -3962,11 +3963,31 @@ IMAGE_PROMPT_TARGET_PROFILES: dict[str, dict[str, Any]] = {
 
 
 def resolve_image_prompt_target_profile(settings: Mapping[str, Any] | None) -> dict[str, Any]:
-    """Resolve the selected image target without changing the prompt contract."""
+    """Resolve the target-specific opening order and shared prompt contract."""
 
-    target = str((settings or {}).get("图像提示词目标模型", "通用") or "通用").strip()
+    active_settings = settings or {}
+    target = str(active_settings.get("图像提示词目标模型", "通用") or "通用").strip()
     profile = IMAGE_PROMPT_TARGET_PROFILES.get(target, IMAGE_PROMPT_TARGET_PROFILES["通用"])
-    return {"target": target if target in IMAGE_PROMPT_TARGET_PROFILES else "通用", **profile}
+    resolved = {
+        "target": target if target in IMAGE_PROMPT_TARGET_PROFILES else "通用",
+        **profile,
+        "base_prompt_order": list(profile.get("prompt_order", [])),
+    }
+    layout_mode = str(active_settings.get("画面结构模式解析结果", "") or "").strip()
+    if layout_mode:
+        resolved["layout_mode"] = layout_mode
+    if layout_mode == "multi_view":
+        resolved["prompt_order"] = ["layout_contract", *list(profile.get("prompt_order", []))]
+        resolved["layout_priority"] = "hard_first"
+        resolved["narrative_mode"] = "parallel_design_reference"
+        resolved["guidance"] = (
+            "front-load the complete three-view layout contract, then "
+            + str(profile.get("guidance", "") or "").strip()
+        ).strip()
+    else:
+        resolved["layout_priority"] = "profile_default"
+        resolved["narrative_mode"] = "single_image_visual_story"
+    return resolved
 
 
 def _localize_prompt_fragments(fragments: list[str], settings: dict[str, Any]) -> list[str]:
@@ -4187,12 +4208,38 @@ def _english_subject_phrase(subject: str) -> str:
     lowered = text.casefold()
     if lowered.startswith(("a ", "an ", "the ", "one ")):
         return text
-    if lowered in {"adult woman", "woman", "female subject"}:
-        return f"an {text}"
-    if lowered in {"adult man", "man", "male subject"}:
-        return f"an {text}" if lowered.startswith("adult ") else f"a {text}"
-    if lowered.startswith(("adult ", "elderly ", "elegant ", "young adult ")):
-        return f"an {text}" if text[0].lower() in "aeiou" else f"a {text}"
+    if lowered.startswith(("selected ", "main ", "current ")):
+        return f"the {text}"
+    singular_subject_markers = (
+        "woman",
+        "man",
+        "female",
+        "male",
+        "person",
+        "character",
+        "adventurer",
+        "detective",
+        "warrior",
+        "knight",
+        "mage",
+        "ranger",
+        "traveler",
+        "photographer",
+        "scholar",
+        "robot",
+        "probe",
+        "vehicle",
+        "creature",
+    )
+    if (
+        any(marker in lowered.split() for marker in singular_subject_markers)
+        and not re.search(r"[,;]|\b(?:and|with)\b", lowered)
+    ):
+        first_word = lowered.split()[0]
+        use_an = first_word[:1] in "aeiou" and not first_word.startswith(
+            ("uni", "use", "user", "one")
+        )
+        return f"{'an' if use_an else 'a'} {text}"
     return text
 
 
@@ -4645,20 +4692,26 @@ def _build_concise_chinese_prompt(
         "support": subject_support_narrative_anchor(settings.get("智能场景关系图")),
         "style_track": context.get("style_track", ""),
         "layout_mode": layout_mode,
+        "image_target": str(
+            settings.get("图像提示词目标模型有效", settings.get("图像提示词目标模型", "通用"))
+            or "通用"
+        ),
     }
     recent_history = [
         *list(context.get("recent_tracks", [])),
         *[str(item).strip() for item in settings.get("最近提示词指纹", []) if str(item).strip()],
     ]
-    plan = build_narrative_plan(
-        anchors,
-        output_index=int(context.get("output_index", 0) or 0),
-        output_count=int(context.get("output_count", 1) or 1),
-        recent_history=recent_history,
-        seed=int(settings.get("运行时随机有效种子", 0) or settings.get("seed", 0) or 0),
-    )
-    narrative_plans = settings.setdefault("全局剧情规划", [])
-    narrative_plans.append(summarize_narrative_plan(plan))
+    plan: Mapping[str, Any] = {}
+    if layout_mode != "multi_view":
+        plan = build_narrative_plan(
+            anchors,
+            output_index=int(context.get("output_index", 0) or 0),
+            output_count=int(context.get("output_count", 1) or 1),
+            recent_history=recent_history,
+            seed=int(settings.get("运行时随机有效种子", 0) or settings.get("seed", 0) or 0),
+        )
+        narrative_plans = settings.setdefault("全局剧情规划", [])
+        narrative_plans.append(summarize_narrative_plan(plan))
     return render_narrative_prompt(
         anchors,
         plan,
@@ -4759,20 +4812,26 @@ def _build_concise_english_prompt(
         ),
         "style_track": context.get("style_track", ""),
         "layout_mode": layout_mode,
+        "image_target": str(
+            settings.get("图像提示词目标模型有效", settings.get("图像提示词目标模型", "通用"))
+            or "通用"
+        ),
     }
     recent_history = [
         *list(context.get("recent_tracks", [])),
         *[str(item).strip() for item in settings.get("最近提示词指纹", []) if str(item).strip()],
     ]
-    plan = build_narrative_plan(
-        anchors,
-        output_index=int(context.get("output_index", 0) or 0),
-        output_count=int(context.get("output_count", 1) or 1),
-        recent_history=recent_history,
-        seed=int(settings.get("运行时随机有效种子", 0) or settings.get("seed", 0) or 0),
-    )
-    narrative_plans = settings.setdefault("全局剧情规划", [])
-    narrative_plans.append(summarize_narrative_plan(plan, english=True))
+    plan: Mapping[str, Any] = {}
+    if layout_mode != "multi_view":
+        plan = build_narrative_plan(
+            anchors,
+            output_index=int(context.get("output_index", 0) or 0),
+            output_count=int(context.get("output_count", 1) or 1),
+            recent_history=recent_history,
+            seed=int(settings.get("运行时随机有效种子", 0) or settings.get("seed", 0) or 0),
+        )
+        narrative_plans = settings.setdefault("全局剧情规划", [])
+        narrative_plans.append(summarize_narrative_plan(plan, english=True))
     return render_narrative_prompt(
         anchors,
         plan,
@@ -5667,9 +5726,6 @@ def build_prompt_list(
     infer_subject_type: Callable[[list[str], str], str],
     infer_output_structure: Callable[[str, str], str],
 ) -> list[str]:
-    target_profile = resolve_image_prompt_target_profile(settings)
-    settings["图像提示词目标模型有效"] = target_profile["target"]
-    settings["图像提示词目标模型Profile"] = dict(target_profile)
     selected = OrderedDict(
         (str(group), [_clean_fragment(value) for value in values if _clean_fragment(value)])
         for group, values in selected.items()
@@ -5709,6 +5765,9 @@ def build_prompt_list(
         settings,
         non_person=subject == "非人物主体",
     )
+    target_profile = resolve_image_prompt_target_profile(settings)
+    settings["图像提示词目标模型有效"] = target_profile["target"]
+    settings["图像提示词目标模型Profile"] = dict(target_profile)
     _ = infer_output_structure(subject, str(settings["案例输出结构"]))
     mode = str(settings["标签反推模式"])
     order_map = {

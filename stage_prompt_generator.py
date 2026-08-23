@@ -245,6 +245,7 @@ from .stage_prompt.video_prompt_skill import (
     build_video_prompt as _build_video_prompt_impl,
     build_video_storyboard_metadata as _build_video_storyboard_metadata_impl,
     is_natural_video_prompt as _is_natural_video_prompt_impl,
+    project_video_story_settings as _project_video_story_settings_impl,
     video_prompt_anchor_roles as _video_prompt_anchor_roles_impl,
     video_prompt_required_anchors as _video_prompt_required_anchors_impl,
     resolve_video_prompt_profile as _resolve_video_prompt_profile_impl,
@@ -5295,9 +5296,13 @@ def _record_model_channel_diagnostic(
     failure_before: int,
     adopted_before: int,
     fallback_before: int,
-    status: str,
+    status: str = "",
     skill_status: str = "",
     errors_before: list[str] | tuple[str, ...] | None = None,
+    skip_before: int = 0,
+    enabled: bool = True,
+    model_available: bool | None = None,
+    output_changed: bool = False,
 ) -> None:
     """Persist per-output-channel model/Skill accounting without changing legacy counters."""
 
@@ -5309,6 +5314,13 @@ def _record_model_channel_diagnostic(
     current_failure = max(0, int(settings.get("模型调用失败次数", 0) or 0))
     current_adopted = max(0, int(settings.get("模型调用采纳次数", 0) or 0))
     current_fallback = max(0, int(settings.get("模型活动回退数量", 0) or 0))
+    current_skips = max(0, int(settings.get("模型智能跳过次数", 0) or 0))
+    attempts = max(0, current_attempts - int(attempts_before or 0))
+    successes = max(0, current_success - int(success_before or 0))
+    failures = max(0, current_failure - int(failure_before or 0))
+    adopted = max(0, current_adopted - int(adopted_before or 0))
+    fallbacks = max(0, current_fallback - int(fallback_before or 0))
+    skips = max(0, current_skips - int(skip_before or 0))
     current_errors = [
         str(item).strip()
         for item in settings.get("模型调用错误", [])
@@ -5327,17 +5339,38 @@ def _record_model_channel_diagnostic(
         channel_errors = remaining_errors
     else:
         channel_errors = current_errors
+    configured_source = str(settings.get("模型来源", "仅Skill") or "仅Skill")
+    if status:
+        resolved_status = str(status)
+    elif not enabled:
+        resolved_status = "disabled_skill"
+    elif model_available is False:
+        resolved_status = "skill_only" if configured_source == "仅Skill" else "skill_fallback"
+    elif fallbacks:
+        resolved_status = "model_partial_fallback" if adopted and output_changed else "skill_fallback"
+    elif skips and not attempts:
+        resolved_status = "model_skipped"
+    elif adopted and output_changed:
+        resolved_status = "model_adopted"
+    else:
+        resolved_status = "model_unchanged"
     diagnostics[str(channel)] = {
         "output_count": max(0, int(output_count or 0)),
-        "attempts": max(0, current_attempts - int(attempts_before or 0)),
-        "successes": max(0, current_success - int(success_before or 0)),
-        "failures": max(0, current_failure - int(failure_before or 0)),
-        "adopted": max(0, current_adopted - int(adopted_before or 0)),
-        "fallbacks": max(0, current_fallback - int(fallback_before or 0)),
-        "status": str(status or "unrecorded"),
+        "attempts": attempts,
+        "successes": successes,
+        "failures": failures,
+        "adopted": adopted,
+        "fallbacks": fallbacks,
+        "skips": skips,
+        "status": resolved_status,
         "skill_status": str(skill_status or ""),
-        "model_source": str(settings.get("模型来源", "仅Skill") or "仅Skill"),
+        "model_source": configured_source,
         "model_source_effective": str(settings.get("模型来源实际", "仅Skill") or "仅Skill"),
+        "skip_reason": (
+            str(settings.get("模型智能跳过原因", "") or "").strip()
+            if skips
+            else ""
+        ),
         "errors": channel_errors[-4:],
     }
     settings["模型通道诊断"] = diagnostics
@@ -6040,6 +6073,7 @@ def _run_stage_impl(
             "模型调用失败次数",
             "模型调用采纳次数",
             "模型活动回退数量",
+            "模型智能跳过次数",
         )
     }
     image_model_errors_before = list(settings.get("模型调用错误", []) or [])
@@ -6095,18 +6129,14 @@ def _run_stage_impl(
         failure_before=image_model_counters_before["模型调用失败次数"],
         adopted_before=image_model_counters_before["模型调用采纳次数"],
         fallback_before=image_model_counters_before["模型活动回退数量"],
-        status=(
-            "model_adopted"
-            if any(str(candidate).strip() != str(original).strip() for candidate, original in zip(model_prompt_list, raw_prompt_list))
-            and not postprocess_fallback_count
-            else "skill_fallback"
-            if postprocess_fallback_count or (model is None and str(settings.get("模型来源", "仅Skill") or "仅Skill") != "仅Skill")
-            else "skill_only"
-            if model is None
-            else "model_unchanged"
-        ),
         skill_status="generated_and_validated",
         errors_before=image_model_errors_before,
+        skip_before=image_model_counters_before["模型智能跳过次数"],
+        model_available=model is not None,
+        output_changed=any(
+            str(candidate).strip() != str(original).strip()
+            for candidate, original in zip(prompt_list, raw_prompt_list)
+        ),
     )
     _update_prompt_history(cache_key, prompt_list)
     profile_markers = [
@@ -6164,6 +6194,7 @@ def _run_stage_impl(
             "模型调用失败次数",
             "模型调用采纳次数",
             "模型活动回退数量",
+            "模型智能跳过次数",
         )
     }
     smart_model_errors_before = list(settings.get("模型调用错误", []) or [])
@@ -6207,6 +6238,7 @@ def _run_stage_impl(
             style_track=style_track,
             subject_type=subject_type,
             language=str(settings.get("提示词语言", "纯中文") or "纯中文"),
+            layout_mode=str(settings.get("画面结构模式解析结果", "") or ""),
         )
         if not smart_text_prompt and (smart_model_adopted or smart_model_succeeded):
             smart_model_fallback_used = True
@@ -6217,6 +6249,7 @@ def _run_stage_impl(
             subject_type=subject_type,
             language=str(settings.get("提示词语言", "纯中文") or "纯中文"),
             adult_mode=nsfw_enabled or str(settings.get("标签反推模式", "") or "").strip() == "成人向成熟",
+            layout_mode=str(settings.get("画面结构模式解析结果", "") or ""),
         )
         smart_text_prompt = _sanitize_smart_text_prompt_impl(
             text=smart_text_prompt,
@@ -6226,6 +6259,7 @@ def _run_stage_impl(
             style_track=style_track,
             subject_type=subject_type,
             language=str(settings.get("提示词语言", "纯中文") or "纯中文"),
+            layout_mode=str(settings.get("画面结构模式解析结果", "") or ""),
         ) or primary_prompt
         smart_text_prompt = _stabilize_prompt_output_impl(smart_text_prompt, settings) or primary_prompt
         smart_text_prompt = _enforce_natural_prompt_list_outputs(
@@ -6270,19 +6304,17 @@ def _run_stage_impl(
         failure_before=smart_model_counters_before["模型调用失败次数"],
         adopted_before=smart_model_counters_before["模型调用采纳次数"],
         fallback_before=smart_model_counters_before["模型活动回退数量"],
-        status=(
-            "disabled_skill"
-            if not smart_text_enabled
-            else "skill_fallback"
-            if model is None and str(settings.get("模型来源", "仅Skill") or "仅Skill") != "仅Skill"
-            else "skill_fallback"
-            if smart_model_fallback_used
-            else "model_adopted"
-            if smart_text_prompt and smart_text_prompt != primary_prompt
-            else "model_unchanged"
-        ),
         skill_status="natural_language_validated",
         errors_before=smart_model_errors_before,
+        skip_before=smart_model_counters_before["模型智能跳过次数"],
+        enabled=smart_text_enabled,
+        model_available=model is not None,
+        output_changed=bool(
+            smart_text_enabled
+            and smart_model_adopted
+            and smart_text_prompt
+            and smart_text_prompt != primary_prompt
+        ),
     )
     video_profile = _resolve_video_prompt_profile_impl(settings)
     settings["视频提示词目标模型有效"] = str(video_profile.get("target_model", "通用"))
@@ -6312,7 +6344,11 @@ def _run_stage_impl(
         custom_tags,
         settings,
     )
-    video_model_settings = dict(settings)
+    video_model_settings = _project_video_story_settings_impl(
+        selected,
+        custom_tags,
+        settings,
+    )
     video_model_settings["模型任务"] = "视频提示词"
     video_model_settings["视频提示词模型系统提示"] = _VIDEO_PROMPT_MODEL_SYSTEM_TEMPLATE
     refined_video_prompt = _maybe_model_refine_video_impl(
@@ -6326,8 +6362,8 @@ def _run_stage_impl(
     video_model_candidate_adopted = refined_video_prompt != video_prompt
     _merge_model_runtime_state(settings, video_model_settings)
     if model is None:
-        if video_model_failure_before:
-            settings["视频提示词模型状态"] = "模型加载失败，保留 Skill 结果"
+        if str(settings.get("模型来源", "仅Skill") or "仅Skill") != "仅Skill":
+            settings["视频提示词模型状态"] = "模型不可用，保留 Skill 结果"
         else:
             settings["视频提示词模型状态"] = "未调用（仅Skill）"
     elif refined_video_prompt != video_prompt:
@@ -6358,6 +6394,7 @@ def _run_stage_impl(
         deduped_video_prompt,
         language=str(settings.get("提示词语言", "纯中文") or "纯中文"),
         allow_timeline=bool(video_profile.get("timeline_enabled", False)),
+        layout_mode=str(settings.get("画面结构模式解析结果", "") or ""),
     ) and not deduped_video_missing_anchors:
         video_prompt = deduped_video_prompt
     else:
@@ -6367,6 +6404,7 @@ def _run_stage_impl(
         video_prompt,
         language=str(settings.get("提示词语言", "纯中文") or "纯中文"),
         allow_timeline=bool(video_profile.get("timeline_enabled", False)),
+        layout_mode=str(settings.get("画面结构模式解析结果", "") or ""),
     ):
         settings["视频提示词Skill状态"] = "已生成"
     else:
@@ -6387,19 +6425,14 @@ def _run_stage_impl(
         failure_before=video_model_failure_before,
         adopted_before=video_model_adopted_before,
         fallback_before=video_model_fallback_before,
-        status=(
-            "skill_only"
-            if model is None and str(settings.get("模型来源", "仅Skill") or "仅Skill") == "仅Skill"
-            else "skill_fallback"
-            if model is None
-            else "model_adopted"
-            if video_model_candidate_adopted and settings.get("视频提示词模型状态") == "已采用模型润色"
-            else "skill_fallback"
-            if "保留 Skill" in str(settings.get("视频提示词模型状态", ""))
-            else "model_unchanged"
-        ),
         skill_status=str(settings.get("视频提示词Skill状态", "") or ""),
         errors_before=video_model_errors_before,
+        skip_before=video_model_skip_before,
+        model_available=model is not None,
+        output_changed=bool(
+            video_model_candidate_adopted
+            and settings.get("视频提示词模型状态") == "已采用模型润色"
+        ),
     )
     selected_tags_text = _build_selected_tags_text_impl(
         template_style=template_style,
