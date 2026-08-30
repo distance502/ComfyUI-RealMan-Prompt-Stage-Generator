@@ -1094,9 +1094,53 @@ def _api_provider_preset(provider: str) -> dict[str, Any]:
 
 
 _API_FOREIGN_ADAPTER_PATH_RE = re.compile(
-    r"^/(?:anthropic|claude|gemini|openai|dashscope|ollama|lm[-_]?studio)(?:/(?:v\d+(?:beta)?|api))?$",
+    r"^/(?:anthropic|claude|gemini|openai|dashscope|ollama|lm[-_]?studio)(?:/.*)?$",
     re.IGNORECASE,
 )
+
+_API_PROVIDER_ADAPTERS = {
+    "Claude Anthropic": {"anthropic", "claude"},
+    "Gemini 原生": {"gemini"},
+    "Gemini OpenAI兼容": {"openai"},
+    "通义千问DashScope": {"dashscope"},
+    "Ollama本地": {"ollama"},
+    "LM Studio本地": {"lm-studio", "lm_studio"},
+    # OpenAI-compatible providers expose the standard route directly; an
+    # adapter-prefixed path on their known host is therefore stale.
+}
+
+
+def _api_adapter_prefix(path: str) -> str:
+    first = next((segment for segment in str(path or "").split("/") if segment), "")
+    return first.casefold().replace("_", "-")
+
+
+def _api_endpoint_protocol(path: str) -> str:
+    """Infer a native protocol from a complete endpoint path when possible."""
+
+    normalized = str(path or "").rstrip("/").casefold()
+    if normalized.endswith("/api/chat"):
+        return "ollama"
+    if normalized.endswith("/messages"):
+        return "anthropic"
+    if normalized.endswith("/chat/completions") or normalized.endswith("/responses"):
+        return "openai"
+    if normalized.endswith(":generatecontent") or normalized.endswith("/generatecontent"):
+        return "gemini"
+    if normalized.endswith("/services/aigc/text-generation/generation") or normalized.endswith(
+        "/services/aigc/multimodal-generation/generation"
+    ):
+        return "dashscope"
+    return ""
+
+
+def _api_expected_protocol(provider: str) -> str:
+    return {
+        "Claude Anthropic": "anthropic",
+        "Gemini 原生": "gemini",
+        "通义千问DashScope": "dashscope",
+        "Ollama本地": "ollama",
+    }.get(str(provider or "").strip(), "openai")
 
 
 def _repair_stale_provider_base_url(provider: str, base_url: str) -> tuple[str, str]:
@@ -1147,7 +1191,26 @@ def _repair_stale_provider_base_url(provider: str, base_url: str) -> tuple[str, 
                     "已恢复为该服务商预设 Base URL。"
                 )
 
+    adapter_prefix = _api_adapter_prefix(path)
+    actual_protocol = _api_endpoint_protocol(path)
+    expected_protocol = _api_expected_protocol(provider)
+    # A provider switch can leave a complete endpoint from the previous
+    # protocol behind. Recover only on a known provider origin; arbitrary
+    # custom gateways remain untouched and can intentionally expose another
+    # protocol under their own URL.
+    compatible_mode = provider == "通义千问DashScope" and "/compatible-mode/" in path.casefold()
+    if actual_protocol and actual_protocol != expected_protocol and not compatible_mode:
+        return preset_base_url, (
+            f"检测到服务商“{provider}”地址残留了 {actual_protocol} 协议端点 {path}，"
+            "已恢复为该服务商预设 Base URL。"
+        )
     if not _API_FOREIGN_ADAPTER_PATH_RE.fullmatch(path):
+        return base_url, ""
+    allowed_adapters = {
+        str(item).casefold().replace("_", "-")
+        for item in _API_PROVIDER_ADAPTERS.get(provider, set())
+    }
+    if adapter_prefix in allowed_adapters:
         return base_url, ""
     return preset_base_url, (
         f"检测到服务商“{provider}”地址残留了旧协议路径 {path}，已恢复为该服务商预设 Base URL。"
@@ -1761,6 +1824,198 @@ def _api_error_detail(payload: Any) -> str:
     return str(payload or "").strip()
 
 
+_API_STREAM_TEXT_KEYS = {
+    "text",
+    "output_text",
+    "generated_text",
+    "response",
+    "answer",
+    "completion",
+    "content",
+    "delta",
+}
+
+
+def _append_api_stream_text(previous: Any, current: Any) -> str:
+    """Append a streamed text fragment while tolerating cumulative chunks."""
+
+    left = str(previous or "")
+    right = str(current or "")
+    if not right:
+        return left
+    if not left:
+        return right
+    # A few gateways send the complete prefix on every event instead of a
+    # delta. Avoid turning ``a``, ``ab``, ``abc`` into ``aababc``.
+    if right == left or right.startswith(left):
+        return right
+    if left.endswith(right):
+        return left
+    return left + right
+
+
+def _merge_api_stream_field(previous: Any, current: Any) -> Any:
+    """Merge scalar text and structured content without stringifying blocks."""
+
+    if isinstance(current, str) or current is None:
+        return _append_api_stream_text(previous, current)
+    if isinstance(current, dict):
+        if isinstance(previous, dict):
+            return _merge_api_stream_mapping(previous, current)
+        return deepcopy(current)
+    if isinstance(current, list):
+        if isinstance(previous, list):
+            return [*deepcopy(previous), *deepcopy(current)]
+        return deepcopy(current)
+    return deepcopy(current)
+
+
+def _merge_api_stream_choices(previous: Any, current: Any) -> list[dict[str, Any]]:
+    """Merge OpenAI/DashScope choice deltas without changing their shape."""
+
+    merged = [deepcopy(item) for item in previous if isinstance(item, dict)] if isinstance(previous, list) else []
+    incoming = current if isinstance(current, list) else []
+    for index, source in enumerate(incoming):
+        if not isinstance(source, dict):
+            continue
+        while len(merged) <= index:
+            merged.append({})
+        target = merged[index]
+        for key in ("index", "role", "finish_reason", "finishReason"):
+            if source.get(key) is not None:
+                target[key] = deepcopy(source[key])
+        delta = source.get("delta")
+        message = source.get("message")
+        if isinstance(delta, dict):
+            target_message = target.setdefault("message", {})
+            if not isinstance(target_message, dict):
+                target_message = {}
+                target["message"] = target_message
+            for key, value in delta.items():
+                if key in _API_STREAM_TEXT_KEYS:
+                    target_message[key] = _merge_api_stream_field(target_message.get(key), value)
+                elif value is not None:
+                    target_message[key] = deepcopy(value)
+        if isinstance(message, dict):
+            target_message = target.setdefault("message", {})
+            if not isinstance(target_message, dict):
+                target_message = {}
+                target["message"] = target_message
+            for key, value in message.items():
+                if key in _API_STREAM_TEXT_KEYS:
+                    target_message[key] = _merge_api_stream_field(target_message.get(key), value)
+                elif value is not None:
+                    target_message[key] = deepcopy(value)
+        for key in ("text", "output_text", "generated_text"):
+            if source.get(key) is not None:
+                target[key] = _append_api_stream_text(target.get(key), source[key])
+    return merged
+
+
+def _merge_api_stream_parts(previous: Any, current: Any) -> list[dict[str, Any]]:
+    """Merge Gemini ``content.parts`` text fragments in display order."""
+
+    merged = [deepcopy(item) for item in previous if isinstance(item, dict)] if isinstance(previous, list) else []
+    incoming = current if isinstance(current, list) else []
+    for source in incoming:
+        if not isinstance(source, dict):
+            continue
+        source_text = source.get("text")
+        source_thought = source.get("thought") is True
+        if source_text is not None:
+            target = next(
+                (
+                    item
+                    for item in reversed(merged)
+                    if isinstance(item, dict)
+                    and (item.get("thought") is True) == source_thought
+                    and "text" in item
+                ),
+                None,
+            )
+            if target is not None:
+                target["text"] = _append_api_stream_text(target.get("text"), source_text)
+                continue
+        merged.append(deepcopy(source))
+    return merged
+
+
+def _merge_api_stream_mapping(previous: Any, current: Any) -> dict[str, Any]:
+    """Merge one streamed provider payload while preserving provider fields."""
+
+    merged = deepcopy(previous) if isinstance(previous, dict) else {}
+    if not isinstance(current, dict):
+        return merged
+    for key, value in current.items():
+        if key == "choices":
+            merged[key] = _merge_api_stream_choices(merged.get(key), value)
+        elif key == "candidates":
+            existing = [deepcopy(item) for item in merged.get(key, []) if isinstance(item, dict)]
+            for index, source in enumerate(value if isinstance(value, list) else []):
+                if not isinstance(source, dict):
+                    continue
+                while len(existing) <= index:
+                    existing.append({})
+                target = existing[index]
+                for field in ("index", "finishReason", "safetyRatings"):
+                    if source.get(field) is not None:
+                        target[field] = deepcopy(source[field])
+                source_content = source.get("content")
+                if isinstance(source_content, dict):
+                    target_content = target.setdefault("content", {})
+                    if not isinstance(target_content, dict):
+                        target_content = {}
+                        target["content"] = target_content
+                    if source_content.get("role"):
+                        target_content["role"] = source_content["role"]
+                    if "parts" in source_content:
+                        target_content["parts"] = _merge_api_stream_parts(
+                            target_content.get("parts"), source_content.get("parts")
+                        )
+            merged[key] = existing
+        elif key == "output" and isinstance(value, dict):
+            merged[key] = _merge_api_stream_mapping(merged.get(key), value)
+        elif key in _API_STREAM_TEXT_KEYS:
+            merged[key] = _merge_api_stream_field(merged.get(key), value)
+        elif key not in merged or value is not None:
+            merged[key] = deepcopy(value)
+    return merged
+
+
+def _parse_api_stream_payloads(text: str) -> list[dict[str, Any]]:
+    """Parse SSE or NDJSON bodies into JSON objects, ignoring keep-alives."""
+
+    source = str(text or "").replace("\r\n", "\n").replace("\r", "\n")
+    if not source.strip():
+        return []
+    candidates: list[str] = []
+    has_sse_data = False
+    for line in source.split("\n"):
+        stripped = line.strip()
+        if not stripped or stripped.startswith(":") or stripped.casefold().startswith("event:"):
+            continue
+        if stripped.casefold().startswith("data:"):
+            has_sse_data = True
+            payload = stripped[5:].lstrip()
+            if payload and payload != "[DONE]":
+                candidates.append(payload)
+    if not has_sse_data:
+        candidates = [line.strip() for line in source.split("\n") if line.strip()]
+    payloads: list[dict[str, Any]] = []
+    for candidate in candidates:
+        if candidate == "[DONE]":
+            continue
+        try:
+            decoded = json.loads(candidate)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            continue
+        if isinstance(decoded, dict):
+            payloads.append(decoded)
+        elif isinstance(decoded, list):
+            payloads.extend(item for item in decoded if isinstance(item, dict))
+    return payloads
+
+
 def _decode_api_json(raw: bytes, *, charset: str, label: str) -> dict[str, Any]:
     try:
         text = raw.decode(charset or "utf-8", errors="replace")
@@ -1772,13 +2027,32 @@ def _decode_api_json(raw: bytes, *, charset: str, label: str) -> dict[str, Any]:
     try:
         parsed = json.loads(text)
     except (json.JSONDecodeError, ValueError) as exc:
+        streamed = _parse_api_stream_payloads(text)
+        if streamed:
+            return _merge_api_stream_mapping({}, streamed[0]) if len(streamed) == 1 else _merge_api_stream_payloads(streamed)
         excerpt = re.sub(r"\s+", " ", text).strip()
         if len(excerpt) > 320:
             excerpt = f"{excerpt[:317]}..."
         raise RuntimeError(f"{label}返回的不是有效 JSON：{excerpt or '<空响应>'}") from exc
-    if not isinstance(parsed, dict):
-        raise RuntimeError(f"{label}返回的 JSON 顶层必须是对象，实际为 {type(parsed).__name__}。")
-    return parsed
+    if isinstance(parsed, dict):
+        return parsed
+    if isinstance(parsed, list):
+        payloads = [item for item in parsed if isinstance(item, dict)]
+        if payloads:
+            return _merge_api_stream_payloads(payloads)
+        text_items = [str(item).strip() for item in parsed if isinstance(item, str) and item.strip()]
+        if text_items:
+            return {"text": "\n".join(text_items)}
+    if isinstance(parsed, str) and parsed.strip():
+        return {"text": parsed.strip()}
+    raise RuntimeError(f"{label}返回的 JSON 顶层必须是对象、数组或文本，实际为 {type(parsed).__name__}。")
+
+
+def _merge_api_stream_payloads(payloads: list[dict[str, Any]]) -> dict[str, Any]:
+    merged: dict[str, Any] = {}
+    for payload in payloads:
+        merged = _merge_api_stream_mapping(merged, payload)
+    return merged
 
 
 def _perform_api_http_request(opener: Any, request: urllib.request.Request, timeout: float) -> tuple[bytes, str]:
@@ -2060,7 +2334,11 @@ def _dashscope_response_text(response: dict[str, Any]) -> str:
 
 
 _API_PARAMETER_COMPATIBILITY_MARKERS = (
+    "unsupported",
     "unsupported parameter",
+    "not supported",
+    "does not support",
+    "doesn't support",
     "parameter is not supported",
     "not support parameter",
     "unknown parameter",
@@ -2429,7 +2707,10 @@ class _TEAPIChatModel:
             if abs(presence_penalty) > 1e-9:
                 payload["generationConfig"]["presencePenalty"] = presence_penalty
             if system_text:
-                payload["system_instruction"] = {"parts": [{"text": system_text}]}
+                # Gemini's native REST API uses camelCase for this field;
+                # snake_case is silently ignored by some gateways and rejected
+                # as an unknown field by the official endpoint.
+                payload["systemInstruction"] = {"parts": [{"text": system_text}]}
             response = _post_gemini_json_with_compatibility_retry(url, payload, headers, timeout)
             if response.get("error"):
                 _extract_model_response_text_impl(response)

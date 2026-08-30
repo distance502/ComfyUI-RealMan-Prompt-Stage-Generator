@@ -1586,13 +1586,15 @@ class _TransformersChatAdapter:
                 if key not in device_map:
                     continue
                 resolved = resolve_device(device_map.get(key))
-                if resolved is not None:
+                if resolved is not None and (resolved.type != "cuda" or torch.cuda.is_available()):
                     return resolved
 
             cpu_fallback = None
             for value in device_map.values():
                 resolved = resolve_device(value)
                 if resolved is None:
+                    continue
+                if resolved.type == "cuda" and not torch.cuda.is_available():
                     continue
                 if resolved.type == "cpu":
                     cpu_fallback = resolved
@@ -1631,28 +1633,38 @@ class _TransformersChatAdapter:
             configured = 8192
         configured = max(2, configured)
         model_config = getattr(self.model, "config", None)
-        config_candidates = [model_config]
+        nested_candidates = []
         for name in ("text_config", "language_config", "llm_config", "decoder"):
             nested = getattr(model_config, name, None)
-            if nested is not None and not any(nested is item for item in config_candidates):
-                config_candidates.append(nested)
+            if nested is not None and nested is not model_config and not any(nested is item for item in nested_candidates):
+                nested_candidates.append(nested)
         get_text_config = getattr(model_config, "get_text_config", None)
         if callable(get_text_config):
             try:
                 nested = get_text_config()
-                if nested is not None and not any(nested is item for item in config_candidates):
-                    config_candidates.append(nested)
+                if nested is not None and nested is not model_config and not any(nested is item for item in nested_candidates):
+                    nested_candidates.append(nested)
             except Exception:
                 pass
-        metadata_limits = []
-        for candidate in config_candidates:
-            for name in ("max_position_embeddings", "max_seq_len", "max_sequence_length", "seq_length"):
-                try:
-                    value = int(getattr(candidate, name, 0) or 0)
-                except (TypeError, ValueError, OverflowError):
-                    value = 0
-                if value >= 2:
-                    metadata_limits.append(value)
+        # A multimodal root config can expose a vision encoder limit that is
+        # smaller than the language model window. Prefer explicit text-side
+        # configs whenever they expose a usable limit; only use the root as a
+        # fallback when the nested text config has no usable metadata.
+        def collect_limits(candidates):
+            limits = []
+            for candidate in candidates:
+                for name in ("max_position_embeddings", "max_seq_len", "max_sequence_length", "seq_length"):
+                    try:
+                        value = int(getattr(candidate, name, 0) or 0)
+                    except (TypeError, ValueError, OverflowError):
+                        value = 0
+                    if value >= 2:
+                        limits.append(value)
+            return limits
+
+        metadata_limits = collect_limits(nested_candidates)
+        if not metadata_limits and model_config is not None:
+            metadata_limits = collect_limits([model_config])
         try:
             tokenizer_limit = int(getattr(self.tokenizer, "model_max_length", 0) or 0)
         except (TypeError, ValueError, OverflowError):
@@ -1747,11 +1759,31 @@ class _TransformersChatAdapter:
         if torch is not None and isinstance(value, torch.Tensor):
             if value.ndim == 1 and value.numel() > 0:
                 return value.to(dtype=torch.long).unsqueeze(0)
-            if value.ndim == 2 and value.shape[0] == 1:
+            if value.ndim == 2 and value.shape[0] >= 1:
                 return value.to(dtype=torch.long)
             return None
-        if isinstance(value, (list, tuple)) and value and all(isinstance(item, int) for item in value):
-            return torch.tensor([list(value)], dtype=torch.long)
+        if isinstance(value, np.ndarray):
+            if value.ndim == 1 and value.size:
+                return torch.as_tensor(value, dtype=torch.long).unsqueeze(0)
+            if value.ndim == 2 and value.shape[0] >= 1 and value.shape[1] >= 1:
+                return torch.as_tensor(value, dtype=torch.long)
+            return None
+        if isinstance(value, (list, tuple)) and value:
+            # ``apply_chat_template(tokenize=True)`` returns either one flat
+            # sequence or a batch. Accept numpy scalar integers as well as
+            # Python ints; batched lists are common for processor-backed
+            # models and should not fall through to an unsupported mapping.
+            if all(isinstance(item, (int, np.integer)) for item in value):
+                return torch.tensor([list(value)], dtype=torch.long)
+            if all(isinstance(row, (list, tuple)) and row for row in value):
+                if all(
+                    isinstance(item, (int, np.integer))
+                    for row in value
+                    for item in row
+                ):
+                    widths = {len(row) for row in value}
+                    if len(widths) == 1:
+                        return torch.tensor(value, dtype=torch.long)
         return None
 
     def _apply_chat_template(self, messages, images):
@@ -1792,9 +1824,11 @@ class _TransformersChatAdapter:
             for kwargs in template_options:
                 try:
                     prompt = apply_template(candidate, **kwargs)
+                    if isinstance(prompt, str) and not prompt.strip():
+                        continue
                     if prompt is not None:
                         return prompt
-                except (TypeError, ValueError, KeyError, AttributeError) as exc:
+                except (TypeError, ValueError, KeyError, AttributeError, RuntimeError) as exc:
                     errors.append(f"{type(exc).__name__}: {exc}")
         self._last_template_fallback_reason = errors[-1] if errors else "聊天模板未返回提示词"
         return self._readable_prompt(no_system_messages or messages)
@@ -1802,10 +1836,54 @@ class _TransformersChatAdapter:
     @staticmethod
     def _as_mapping(encoded):
         if hasattr(encoded, "items"):
-            return dict(encoded.items())
-        if isinstance(encoded, dict):
-            return dict(encoded)
-        raise RuntimeError("原始模型 tokenizer/processor 返回了不支持的输入类型。")
+            mapping = dict(encoded.items())
+        elif isinstance(encoded, dict):
+            mapping = dict(encoded)
+        else:
+            token_ids = _TransformersChatAdapter._token_ids(encoded)
+            if token_ids is None:
+                raise RuntimeError("原始模型 tokenizer/processor 返回了不支持的输入类型。")
+            mapping = {"input_ids": token_ids, "attention_mask": torch.ones_like(token_ids)}
+
+        # BatchEncoding normally contains tensors, but lightweight/custom
+        # processors often return NumPy arrays or nested numeric lists.  Move
+        # those values into torch here so generate() receives one consistent
+        # input contract, including visual fields such as pixel_values and
+        # image_grid_thw.
+        normalized = {}
+        token_field_names = {"input_ids", "attention_mask", "token_type_ids", "position_ids"}
+        for key, value in mapping.items():
+            if torch is not None and isinstance(value, torch.Tensor):
+                tensor = value.to(dtype=torch.long) if key in token_field_names else value
+                if key in token_field_names and tensor.ndim == 1 and tensor.numel() > 0:
+                    tensor = tensor.unsqueeze(0)
+                normalized[key] = tensor
+                continue
+            if torch is not None and isinstance(value, np.ndarray):
+                try:
+                    tensor = torch.as_tensor(value, dtype=torch.long if key in token_field_names else None)
+                    if key in token_field_names and tensor.ndim == 1 and tensor.numel() > 0:
+                        tensor = tensor.unsqueeze(0)
+                    normalized[key] = tensor
+                    continue
+                except (TypeError, ValueError):
+                    pass
+            if isinstance(value, (list, tuple)) and value:
+                try:
+                    array = np.asarray(value)
+                    if torch is not None and array.dtype != object and np.issubdtype(array.dtype, np.number):
+                        tensor = torch.as_tensor(
+                            array,
+                            dtype=torch.long if key in token_field_names else None,
+                        )
+                        if key in token_field_names and tensor.ndim == 1 and tensor.numel() > 0:
+                            tensor = tensor.unsqueeze(0)
+                        normalized[key] = tensor
+                        continue
+                except (TypeError, ValueError):
+                    pass
+            normalized[key] = value
+        return normalized
 
     @staticmethod
     def _truncate_token_inputs(encoded, max_length: int):
@@ -1816,6 +1894,61 @@ class _TransformersChatAdapter:
             if isinstance(value, torch.Tensor) and value.ndim >= 2 and value.shape[-1] > max_length:
                 encoded[key] = value[..., -max_length:]
         return encoded
+
+    @staticmethod
+    def _unknown_keyword(error: Exception) -> str | None:
+        message = str(error)
+        patterns = (
+            r"unexpected keyword argument ['\"]([^'\"]+)['\"]",
+            r"got an unexpected keyword argument ['\"]([^'\"]+)['\"]",
+            r"unexpected keyword ['\"]([^'\"]+)['\"]",
+            r"(?:model_kwargs|model kwargs).*?not used by (?:the )?model\s*:\s*[`'\"]?([a-zA-Z_][a-zA-Z0-9_]*)",
+            r"not used by (?:the )?model\s*:\s*[`'\"]?([a-zA-Z_][a-zA-Z0-9_]*)",
+        )
+        for pattern in patterns:
+            matched = re.search(pattern, message, flags=re.IGNORECASE)
+            if matched:
+                return matched.group(1)
+        return None
+
+    def _generate_with_compat(self, model_inputs, generation):
+        """Retry only when a custom model rejects one optional keyword."""
+
+        inputs = dict(model_inputs)
+        options = dict(generation)
+        removed = set()
+        for _attempt in range(8):
+            try:
+                return self.model.generate(**inputs, **options)
+            except (TypeError, ValueError) as exc:
+                keyword = self._unknown_keyword(exc)
+                if not keyword or keyword in removed:
+                    raise
+                if keyword in options:
+                    options.pop(keyword, None)
+                elif keyword in inputs and keyword not in {
+                    # Removing these fields can silently turn a multimodal
+                    # request into a text-only request. Preserve them and let
+                    # the caller fall back to Skill with an actionable error.
+                    "input_ids",
+                    "pixel_values",
+                    "pixel_values_videos",
+                    "video_pixel_values",
+                    "image_grid_thw",
+                    "video_grid_thw",
+                    "cross_attention_mask",
+                    "aspect_ratio_ids",
+                    "aspect_ratio_mask",
+                    "image_sizes",
+                    "pixel_mask",
+                    "input_features",
+                    "audio_values",
+                }:
+                    inputs.pop(keyword, None)
+                else:
+                    raise
+                removed.add(keyword)
+        raise RuntimeError("原始模型 generate 参数兼容重试次数已用尽。")
 
     def _encode_text(self, prompt, max_length: int):
         if isinstance(prompt, dict) or hasattr(prompt, "items"):
@@ -1829,15 +1962,19 @@ class _TransformersChatAdapter:
             return {"input_ids": token_ids, "attention_mask": torch.ones_like(token_ids)}
         tokenizer = self.tokenizer
         errors = []
-        for kwargs in (
-            {"return_tensors": "pt", "truncation": True, "max_length": max_length},
-            {"return_tensors": "pt", "truncation": True},
-            {"return_tensors": "pt"},
-        ):
+        attempts = (
+            lambda: tokenizer(prompt, return_tensors="pt", truncation=True, max_length=max_length),
+            lambda: tokenizer(text=prompt, return_tensors="pt", truncation=True, max_length=max_length),
+            lambda: tokenizer(prompt, return_tensors="pt", truncation=True),
+            lambda: tokenizer(text=prompt, return_tensors="pt", truncation=True),
+            lambda: tokenizer(prompt, return_tensors="pt"),
+            lambda: tokenizer(text=prompt, return_tensors="pt"),
+        )
+        for call in attempts:
             try:
-                encoded = self._as_mapping(tokenizer(prompt, **kwargs))
+                encoded = self._as_mapping(call())
                 return self._truncate_token_inputs(encoded, max_length)
-            except (TypeError, ValueError, KeyError, AttributeError) as exc:
+            except (TypeError, ValueError, KeyError, AttributeError, RuntimeError) as exc:
                 errors.append(f"{type(exc).__name__}: {exc}")
         detail = errors[-1] if errors else "未返回输入"
         raise RuntimeError(f"原始模型 tokenizer 无法编码提示词：{detail}")
@@ -1863,16 +2000,17 @@ class _TransformersChatAdapter:
                 prompt = decoded[0] if isinstance(decoded, (list, tuple)) and decoded else decoded
         errors = []
         attempts = (
-            {"text": [prompt], "images": images, "return_tensors": "pt", "padding": True, "truncation": True, "max_length": max_length},
-            {"text": [prompt], "images": images, "return_tensors": "pt", "truncation": True, "max_length": max_length},
-            {"text": [prompt], "images": images, "return_tensors": "pt"},
-            {"text": prompt, "images": images, "return_tensors": "pt"},
+            lambda: processor(text=[prompt], images=images, return_tensors="pt", padding=True, truncation=True, max_length=max_length),
+            lambda: processor(text=[prompt], images=images, return_tensors="pt", truncation=True, max_length=max_length),
+            lambda: processor(text=[prompt], images=images, return_tensors="pt"),
+            lambda: processor(text=prompt, images=images, return_tensors="pt"),
+            lambda: processor(prompt, images, "pt"),
         )
-        for kwargs in attempts:
+        for call in attempts:
             try:
-                encoded = self._as_mapping(processor(**kwargs))
+                encoded = self._as_mapping(call())
                 return self._truncate_token_inputs(encoded, max_length)
-            except (TypeError, ValueError, KeyError, AttributeError) as exc:
+            except (TypeError, ValueError, KeyError, AttributeError, RuntimeError) as exc:
                 errors.append(f"{type(exc).__name__}: {exc}")
         detail = errors[-1] if errors else "未返回输入"
         raise RuntimeError(f"原始模型视觉 processor 无法编码图片：{detail}")
@@ -1952,13 +2090,23 @@ class _TransformersChatAdapter:
         if eos_token_id is not None:
             generation["eos_token_id"] = eos_token_id
         with torch.inference_mode():
-            output = self.model.generate(**moved, **generation)
+            output = self._generate_with_compat(moved, generation)
         if hasattr(output, "sequences"):
             output = output.sequences
         if isinstance(output, (tuple, list)):
-            output = output[0] if output else None
+            if not output:
+                output = None
+            elif all(isinstance(item, (int, np.integer)) for item in output):
+                output = torch.as_tensor([list(output)])
+            else:
+                output = output[0]
         if output is None:
             raise RuntimeError("原始模型生成未返回 token 序列。")
+        if not isinstance(output, torch.Tensor):
+            try:
+                output = torch.as_tensor(output)
+            except Exception as exc:
+                raise RuntimeError("原始模型生成返回了无法转换为 token 序列的结果。") from exc
         if getattr(output, "ndim", 0) == 1:
             output = output.unsqueeze(0)
         is_encoder_decoder = bool(getattr(getattr(self.model, "config", None), "is_encoder_decoder", False))

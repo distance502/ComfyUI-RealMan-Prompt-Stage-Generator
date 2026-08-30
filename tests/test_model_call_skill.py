@@ -23,6 +23,91 @@ class _EmptyBackend:
         return {"content": ""}
 
 
+class _KwargsBackend:
+    def __init__(self):
+        self.calls = []
+
+    def invoke(self, prompt, **kwargs):
+        self.calls.append((prompt, kwargs))
+        return {"content": "kwargs result"}
+
+
+class _KwargsOnlyBackend:
+    def __init__(self):
+        self.calls = []
+
+    def invoke(self, **kwargs):
+        self.calls.append(kwargs)
+        return {"content": "kwargs-only result"}
+
+
+class _PositionalOnlyBackend:
+    def __init__(self):
+        self.calls = []
+
+    def invoke(self, prompt, /, **kwargs):
+        self.calls.append((prompt, kwargs))
+        return {"content": "positional-only result"}
+
+
+class _PositionalOnlySamplingBackend:
+    def __init__(self):
+        self.calls = []
+
+    def invoke(self, prompt, max_new_tokens, repetition_penalty, /):
+        self.calls.append((prompt, max_new_tokens, repetition_penalty))
+        return {"content": "positional-only sampling result"}
+
+
+class _PromptBeforeOptionalMessagesBackend:
+    def __init__(self):
+        self.calls = []
+
+    def invoke(self, prompt, messages=None, **kwargs):
+        self.calls.append((prompt, messages, kwargs))
+        return {"content": "prompt-first result"}
+
+
+class _QueryBackend:
+    def __init__(self):
+        self.calls = []
+
+    def generate_content(self, query, **kwargs):
+        self.calls.append((query, kwargs))
+        return {"content": "query result"}
+
+
+class _CallableBackend:
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, prompt, **kwargs):
+        self.calls.append((prompt, kwargs))
+        return {"content": "callable result"}
+
+
+class _OpaqueCallableBackend:
+    __signature__ = "opaque"
+
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, prompt, **kwargs):
+        self.calls.append((prompt, kwargs))
+        return {"content": "opaque result"}
+
+
+class _OpaqueFailureBackend:
+    __signature__ = "opaque"
+
+    def __init__(self):
+        self.calls = 0
+
+    def __call__(self, *args, **kwargs):
+        self.calls += 1
+        raise TypeError("internal model failure")
+
+
 class ModelCallSkillTests(unittest.TestCase):
     def _skill(self, calls):
         def extract(response):
@@ -71,6 +156,107 @@ class ModelCallSkillTests(unittest.TestCase):
         self.assertEqual(result, "local result")
         self.assertEqual(calls[0]["messages"], messages)
         self.assertEqual(calls[0]["params"], {"max_tokens": 8})
+
+    def test_invoke_forwards_sampling_params_to_var_keyword_backend(self):
+        skill = self._skill([])
+        backend = _KwargsBackend()
+        settings = {}
+        result = skill.invoke(backend, "kwargs prompt", settings)
+        self.assertEqual(result, "kwargs result")
+        self.assertEqual(backend.calls[0][0], "system contract\n\nkwargs prompt")
+        self.assertEqual(backend.calls[0][1], {"prompt_count": 1})
+
+    def test_invoke_supports_backend_with_only_var_keyword_signature(self):
+        skill = self._skill([])
+        backend = _KwargsOnlyBackend()
+        settings = {}
+        result = skill.invoke(backend, "kwargs-only prompt", settings)
+        self.assertEqual(result, "kwargs-only result")
+        self.assertEqual(
+            backend.calls[0],
+            {"prompt": "system contract\n\nkwargs-only prompt", "prompt_count": 1},
+        )
+
+    def test_invoke_supports_positional_only_prompt_with_kwargs(self):
+        skill = self._skill([])
+        backend = _PositionalOnlyBackend()
+        result = skill.invoke(backend, "positional prompt", {})
+        self.assertEqual(result, "positional-only result")
+        self.assertEqual(
+            backend.calls[0],
+            ("system contract\n\npositional prompt", {"prompt_count": 1}),
+        )
+
+    def test_invoke_maps_sampling_aliases_to_positional_only_parameters(self):
+        skill = self._skill([])
+        skill._sampling_params = lambda _settings, _count: {
+            "max_tokens": 7,
+            "repeat_penalty": 1.2,
+        }
+        backend = _PositionalOnlySamplingBackend()
+        result = skill.invoke(
+            backend,
+            "positional sampling prompt",
+            {},
+        )
+        self.assertEqual(result, "positional-only sampling result")
+        self.assertEqual(
+            backend.calls[0],
+            ("system contract\n\npositional sampling prompt", 7, 1.2),
+        )
+
+    def test_invoke_prefers_required_prompt_before_optional_messages(self):
+        skill = self._skill([])
+        backend = _PromptBeforeOptionalMessagesBackend()
+        result = skill.invoke(backend, "prompt-first", {})
+        self.assertEqual(result, "prompt-first result")
+        self.assertEqual(
+            backend.calls[0],
+            ("system contract\n\nprompt-first", None, {"prompt_count": 1}),
+        )
+
+    def test_invoke_supports_common_query_parameter_name(self):
+        skill = self._skill([])
+        backend = _QueryBackend()
+        result = skill.invoke(backend, "query prompt", {})
+        self.assertEqual(result, "query result")
+        self.assertEqual(
+            backend.calls[0],
+            ("system contract\n\nquery prompt", {"prompt_count": 1}),
+        )
+
+    def test_invoke_messages_supports_complete_and_callable_backends(self):
+        messages = [{"role": "user", "content": "message prompt"}]
+        complete_backend = type(
+            "CompleteBackend",
+            (),
+            {"complete": lambda self, prompt, **kwargs: {"content": f"complete:{prompt}"}},
+        )()
+        skill = self._skill([])
+        self.assertEqual(skill.invoke_messages(complete_backend, messages, {}, params={"prompt_count": 1}), "complete:message prompt")
+
+        callable_backend = _CallableBackend()
+        self.assertEqual(skill.invoke_messages(callable_backend, messages, {}, params={"prompt_count": 1}), "callable result")
+        self.assertEqual(callable_backend.calls[0][1], {"prompt_count": 1})
+
+    def test_invoke_callable_backend_receives_sampling_params(self):
+        backend = _CallableBackend()
+        result = self._skill([]).invoke(backend, "callable prompt", {})
+        self.assertEqual(result, "callable result")
+        self.assertEqual(backend.calls[0][1], {"prompt_count": 1})
+
+    def test_invoke_opaque_callable_retries_with_positional_prompt(self):
+        backend = _OpaqueCallableBackend()
+        result = self._skill([]).invoke(backend, "opaque prompt", {})
+        self.assertEqual(result, "opaque result")
+        self.assertEqual(backend.calls[0][0], "system contract\n\nopaque prompt")
+        self.assertEqual(backend.calls[0][1], {"prompt_count": 1})
+
+    def test_invoke_opaque_callable_does_not_retry_internal_type_error(self):
+        backend = _OpaqueFailureBackend()
+        with self.assertRaisesRegex(TypeError, "internal model failure"):
+            self._skill([]).invoke(backend, "opaque failure", {})
+        self.assertEqual(backend.calls, 1)
 
 
 if __name__ == "__main__":
