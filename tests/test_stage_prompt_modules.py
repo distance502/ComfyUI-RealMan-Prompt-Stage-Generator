@@ -21161,6 +21161,51 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertEqual(captured["body"]["presence_penalty"], 0.15)
         self.assertEqual(captured["body"]["seed"], 1234)
 
+    def test_stage_api_decodes_openai_sse_delta_response(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        raw = (
+            ": keep-alive\n\n"
+            'data: {"choices":[{"delta":{"role":"assistant"}}]}\n\n'
+            'data: {"choices":[{"delta":{"content":"第一段"}}]}\n\n'
+            'data: {"choices":[{"delta":{"content":"，随后推进。"}}]}\n\n'
+            "data: [DONE]\n\n"
+        ).encode("utf-8")
+        response = module._decode_api_json(raw, charset="utf-8", label="模型 API")
+        self.assertEqual(
+            response["choices"][0]["message"]["content"],
+            "第一段，随后推进。",
+        )
+        self.assertEqual(response["choices"][0]["message"]["role"], "assistant")
+
+    def test_stage_api_decodes_dashscope_ndjson_output_chunks(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        raw = (
+            '{"output":{"choices":[{"message":{"content":"镜头建立"}}]}}\n'
+            '{"output":{"choices":[{"message":{"content":"，动作触发并收束。"}}]}}\n'
+        ).encode("utf-8")
+        response = module._decode_api_json(raw, charset="utf-8", label="模型 API")
+        self.assertEqual(
+            module._dashscope_response_text(response),
+            "镜头建立，动作触发并收束。",
+        )
+
+    def test_stage_api_decodes_gemini_ndjson_text_parts(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        raw = (
+            '{"candidates":[{"content":{"parts":[{"text":"建立场景"}]}}]}\n'
+            '{"candidates":[{"content":{"parts":[{"text":"并完成动作因果。"}]}}]}\n'
+        ).encode("utf-8")
+        response = module._decode_api_json(raw, charset="utf-8", label="模型 API")
+        self.assertEqual(
+            module._gemini_response_text(response),
+            "建立场景并完成动作因果。",
+        )
+
+    def test_stage_api_accepts_text_json_envelope(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        response = module._decode_api_json('"直接返回的正文"'.encode("utf-8"), charset="utf-8", label="模型 API")
+        self.assertEqual(response, {"text": "直接返回的正文"})
+
     def test_stage_api_supports_complete_openai_responses_endpoint(self) -> None:
         module = load_stage_prompt_generator_for_integration_test()
         captured: dict[str, Any] = {}
@@ -21333,6 +21378,49 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertEqual(config["url"], "https://api.deepseek.com/chat/completions")
         self.assertIn("残留了旧协议路径", settings["API地址自动修复说明"])
 
+    def test_stage_api_repairs_stale_nested_foreign_adapter_endpoint(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        settings = {
+            "API服务商": "DeepSeek",
+            "API地址": "https://api.deepseek.com/anthropic/chat/completions",
+            "API密钥": "deepseek-test-key",
+            "API模型": "deepseek-chat",
+        }
+        config = module._解析API模型配置(settings)
+        self.assertEqual(config["url"], "https://api.deepseek.com/chat/completions")
+        self.assertIn("残留了旧协议路径", settings["API地址自动修复说明"])
+
+    def test_stage_api_repairs_complete_endpoint_from_previous_protocol(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        cases = (
+            (
+                "Claude Anthropic",
+                "https://api.anthropic.com/v1/chat/completions",
+                "https://api.anthropic.com/v1/messages",
+            ),
+            (
+                "Gemini 原生",
+                "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+                "https://generativelanguage.googleapis.com/v1beta",
+            ),
+            (
+                "Gemini OpenAI兼容",
+                "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+                "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+            ),
+        )
+        for provider, address, expected in cases:
+            with self.subTest(provider=provider):
+                settings = {
+                    "API服务商": provider,
+                    "API地址": address,
+                    "API密钥": "provider-test-key",
+                    "API模型": "provider-test-model",
+                }
+                config = module._解析API模型配置(settings)
+                self.assertEqual(config["url"], expected)
+                self.assertIn("残留了", settings["API地址自动修复说明"])
+
     def test_stage_api_preserves_explicit_custom_path_on_known_provider_host(self) -> None:
         module = load_stage_prompt_generator_for_integration_test()
         settings = {
@@ -21451,6 +21539,44 @@ class TestStagePromptModules(unittest.TestCase):
         for optional in ("seed", "frequency_penalty", "presence_penalty"):
             self.assertNotIn(optional, calls[1])
         self.assertEqual(response["choices"][0]["message"]["content"], "compatible retry result")
+
+    def test_stage_api_recognizes_common_unsupported_parameter_wording(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        calls: list[dict[str, Any]] = []
+
+        def fake_http(_url, payload, _headers, _timeout):
+            calls.append(dict(payload))
+            if len(calls) == 1:
+                raise module._ModelAPIHTTPError(
+                    400,
+                    "Bad Request",
+                    "temperature is not supported with this model",
+                )
+            return {"choices": [{"message": {"content": "wording-compatible result"}}]}
+
+        model = module._TEAPIChatModel(
+            {
+                "provider": "OpenAI兼容",
+                "kind": "openai",
+                "url": "https://api.example.com/v1/chat/completions",
+                "api_key": "test-key",
+                "model": "demo-model",
+                "timeout": 30,
+            }
+        )
+        with mock.patch.object(module, "_http_post_json", side_effect=fake_http):
+            response = model.create_chat_completion(
+                messages=[{"role": "user", "content": "hello"}],
+                max_tokens=128,
+                temperature=0.7,
+                top_p=0.8,
+            )
+
+        self.assertEqual(len(calls), 2)
+        self.assertNotIn("temperature", calls[1])
+        self.assertNotIn("top_p", calls[1])
+        self.assertEqual(calls[1]["max_tokens"], 128)
+        self.assertEqual(response["choices"][0]["message"]["content"], "wording-compatible result")
 
     def test_anthropic_native_retries_sampling_conflict_without_dropping_required_fields(self) -> None:
         module = load_stage_prompt_generator_for_integration_test()
@@ -21759,6 +21885,47 @@ class TestStagePromptModules(unittest.TestCase):
             choices = [Choice()]
 
         self.assertEqual(model_refiner.extract_text(ChoiceResponse()), "object choice final")
+
+        class PydanticTextBlock:
+            type = "output_text"
+            text = "pydantic final"
+
+        class PydanticMessage:
+            content = [PydanticTextBlock()]
+
+        class PydanticChoice:
+            message = PydanticMessage()
+
+        class PydanticResponse:
+            choices = [PydanticChoice()]
+
+        self.assertEqual(model_refiner.extract_text(PydanticResponse()), "pydantic final")
+
+        class DumpedResponse:
+            def model_dump(self):
+                return {
+                    "output": [
+                        {"type": "reasoning", "text": "must stay hidden"},
+                        {"type": "message", "role": "assistant", "content": "dumped final"},
+                    ]
+                }
+
+        self.assertEqual(model_refiner.extract_text(DumpedResponse()), "dumped final")
+
+        class DumpedErrorResponse:
+            def to_dict(self):
+                return {"error": {"message": "dumped token rejected"}}
+
+        with self.assertRaisesRegex(RuntimeError, "dumped token rejected"):
+            model_refiner.extract_text(DumpedErrorResponse())
+
+        class SdkErrorResponse:
+            status_code = 401
+            message = "invalid API key"
+
+        with self.assertRaisesRegex(RuntimeError, "invalid API key"):
+            model_refiner.extract_text(SdkErrorResponse())
+
         self.assertEqual(
             model_refiner.extract_text(
                 [{"generated_text": [{"role": "user", "content": "echo"}, {"role": "assistant", "content": "pipeline output"}]}]
@@ -21999,6 +22166,11 @@ class TestStagePromptModules(unittest.TestCase):
 
         self.assertTrue(str(gemini_call["url"]).endswith("/models/gemini-2.5-flash:generateContent"))
         self.assertEqual(gemini_call["headers"]["x-goog-api-key"], "gemini-key")
+        self.assertEqual(
+            gemini_call["payload"]["systemInstruction"],
+            {"parts": [{"text": "system rule"}]},
+        )
+        self.assertNotIn("system_instruction", gemini_call["payload"])
         self.assertEqual(gemini_call["payload"]["generationConfig"]["topK"], 29)
         self.assertEqual(gemini_call["payload"]["generationConfig"]["seed"], 17)
         self.assertEqual(gemini_call["payload"]["generationConfig"]["stopSequences"], ["STOP"])

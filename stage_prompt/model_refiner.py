@@ -738,9 +738,51 @@ _NON_FINAL_RESPONSE_BLOCK_TYPES = {
 }
 
 
-def _response_block_is_non_final(content: dict[str, Any]) -> bool:
-    block_type = str(content.get("type") or content.get("role") or "").strip().casefold()
+def _response_block_is_non_final(content: Any) -> bool:
+    if isinstance(content, Mapping):
+        block_type = str(content.get("type") or content.get("role") or "").strip().casefold()
+    else:
+        try:
+            block_type = str(
+                getattr(content, "type", None)
+                or getattr(content, "role", None)
+                or ""
+            ).strip().casefold()
+        except Exception:
+            block_type = ""
     return block_type in _NON_FINAL_RESPONSE_BLOCK_TYPES
+
+
+_RESPONSE_CONTENT_KEYS = (
+    "final_prompt", "final", "output_text", "text", "generated_text",
+    "content", "completion", "prompt", "parts", "output",
+    "choices", "candidates", "data", "result", "message", "delta",
+)
+
+
+def _response_object_as_mapping(content: Any) -> Any:
+    """Convert common SDK response objects without stringifying them.
+
+    DashScope/OpenAI/Anthropic client versions often return Pydantic models or
+    lightweight objects instead of dictionaries.  Their useful fields are
+    exposed through ``model_dump`` or ``to_dict``; handling those methods here
+    keeps the extractor independent of any one SDK.
+    """
+
+    for method_name in ("model_dump", "to_dict", "dict"):
+        try:
+            method = getattr(content, method_name, None)
+        except Exception:
+            continue
+        if not callable(method):
+            continue
+        try:
+            value = method()
+        except Exception:
+            continue
+        if isinstance(value, Mapping):
+            return value
+    return None
 
 
 def _extract_content_text(content: Any, *, _depth: int = 0) -> str:
@@ -748,39 +790,52 @@ def _extract_content_text(content: Any, *, _depth: int = 0) -> str:
         return ""
     if isinstance(content, str):
         return content
-    if isinstance(content, dict):
+    if isinstance(content, Mapping):
         if _response_block_is_non_final(content):
             return ""
-        for key in (
-            "final_prompt", "final", "output_text", "text", "generated_text",
-            "content", "completion", "prompt", "parts", "output",
-            # A number of local OpenAI-compatible gateways wrap the normal
-            # response one or more times under data/result/message/choices.
-            # Recurse through those containers so a valid final answer does
-            # not become an empty Skill fallback solely because of packaging.
-            "choices", "candidates", "data", "result", "message", "delta",
-        ):
+        for key in _RESPONSE_CONTENT_KEYS:
             if key not in content:
                 continue
             text = _extract_content_text(content.get(key), _depth=_depth + 1)
             if text:
                 return text
         return ""
-    if not isinstance(content, (list, tuple)):
+    if isinstance(content, (list, tuple)):
+        assistant_blocks = [
+            block
+            for block in content
+            if str(
+                block.get("role") if isinstance(block, Mapping) else getattr(block, "role", None)
+            ).strip().casefold() == "assistant"
+        ]
+        if assistant_blocks:
+            content = assistant_blocks[-1:]
+        parts: list[str] = []
+        for block in content:
+            text = _extract_content_text(block, _depth=_depth + 1).strip()
+            if text:
+                parts.append(text)
+        return "\n".join(parts)
+
+    # SDK content blocks are frequently Pydantic/dataclass objects.  Resolve a
+    # mapping first, then inspect only known response fields so arbitrary model
+    # objects are never converted to noisy repr strings.
+    mapped = _response_object_as_mapping(content)
+    if mapped is not None:
+        return _extract_content_text(mapped, _depth=_depth + 1)
+    if isinstance(content, (str, bytes, bytearray)) or content is None:
         return ""
-    assistant_blocks = [
-        block
-        for block in content
-        if isinstance(block, dict) and str(block.get("role") or "").strip().casefold() == "assistant"
-    ]
-    if assistant_blocks:
-        content = assistant_blocks[-1:]
-    parts: list[str] = []
-    for block in content:
-        text = _extract_content_text(block, _depth=_depth + 1).strip()
+    if _response_block_is_non_final(content):
+        return ""
+    for key in _RESPONSE_CONTENT_KEYS:
+        try:
+            value = getattr(content, key)
+        except Exception:
+            continue
+        text = _extract_content_text(value, _depth=_depth + 1).strip()
         if text:
-            parts.append(text)
-    return "\n".join(parts)
+            return text
+    return ""
 
 
 def extract_text(response: Any) -> str:
@@ -825,6 +880,48 @@ def extract_text(response: Any) -> str:
                 if text:
                     return text
         return ""
+    mapped_response = _response_object_as_mapping(response)
+    if mapped_response is not None:
+        error = mapped_response.get("error") if isinstance(mapped_response, Mapping) else None
+        if error:
+            if isinstance(error, Mapping):
+                reason = error.get("message") or error.get("type") or error.get("code") or "未知 API 错误"
+            else:
+                reason = error
+            raise RuntimeError(f"模型 API 返回错误：{reason}")
+        text = _extract_content_text(mapped_response)
+        if text:
+            return text
+    # Some SDK clients expose errors and status directly on a response object
+    # without a ``model_dump``/``to_dict`` method. Surface those errors instead
+    # of silently treating the object as an empty model completion.
+    try:
+        object_error = getattr(response, "error", None)
+    except Exception:
+        object_error = None
+    if object_error:
+        if isinstance(object_error, Mapping):
+            reason = (
+                object_error.get("message")
+                or object_error.get("type")
+                or object_error.get("code")
+                or "未知 API 错误"
+            )
+        else:
+            reason = str(object_error)
+        raise RuntimeError(f"模型 API 返回错误：{reason}")
+    try:
+        status_code = int(getattr(response, "status_code", 0) or 0)
+    except (TypeError, ValueError, OverflowError):
+        status_code = 0
+    if status_code >= 400:
+        reason = str(
+            getattr(response, "message", None)
+            or getattr(response, "msg", None)
+            or getattr(response, "code", None)
+            or f"HTTP {status_code}"
+        ).strip()
+        raise RuntimeError(f"模型 API 返回错误：{reason}")
     for attribute in (
         "final_prompt", "final", "output_text", "text", "generated_text",
         "content", "response", "answer", "completion", "output",

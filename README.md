@@ -86,7 +86,7 @@ API 面板内置 OpenAI compatible、OpenAI、OpenRouter、DeepSeek、通义千�
 
 图像提示词目标模型可选择 `通用`、`Flux`、`SDXL`、`Qwen Image`、`Krea 2`、`Midjourney` 或 `自定义`。每个 Profile 都会实际调整 Skill 正文首段的信息顺序，并在 JSON 的 `image_prompt_contract` 中记录同一份组织顺序、正向语言合同、负面词通道和参数策略；后续剧情、事实锚点和一致性护栏保持共用。Krea 2 使用“主体 → 镜头 → 环境 → 动作 → 材质 → 光影”的自然语言开场，不把平台参数写入正向正文。角色设定图会优先写入 `1:1:1` 正面、90 度侧面、背面三视图合同，再应用目标 Profile 的主体与材质顺序，不会混入普通单图的单动作或电影定格叙事；此时 JSON 会标记 `layout_priority=hard_first` 和 `narrative_mode=parallel_design_reference`，本地模型与 API 也改用三视图设计验收。单条、批量、定向修复与智能文本通道会过滤普通剧情规划、景深、运动模糊和透视镜头要求，只保留跨视图硬锚点；智能文本模型失败或只返回标签时，也会恢复为保留用户设计事实的自然语言三视图 Skill 结果。
 
-地址可以填写服务商 `base_url`，也可以填写完整端点。节点会按服务商识别 OpenAI Chat Completions、Responses、Anthropic Messages、Gemini、DashScope 和 Ollama 原生格式；当选择“自定义”或“OpenAI兼容”并填写完整的 `/messages`、`:generateContent` 或 `/api/chat` 端点时，也会自动切换对应协议，避免把一种协议的路径拼到另一种服务商地址上。自动识别结果会写入运行诊断，旧的协议修复说明不会带入下一次运行。OpenAI、DashScope、Anthropic 和 Gemini 若明确返回某个可选采样参数不受支持，节点会移除该字段后有界重试一次；Gemini 深度思考分片不会进入最终提示词。
+地址可以填写服务商 `base_url`，也可以填写完整端点。节点会按服务商识别 OpenAI Chat Completions、Responses、Anthropic Messages、Gemini、DashScope 和 Ollama 原生格式；当选择“自定义”或“OpenAI兼容”并填写完整的 `/messages`、`:generateContent` 或 `/api/chat` 端点时，也会自动切换对应协议，避免把一种协议的路径拼到另一种服务商地址上。已知服务商地址若残留其他协议的完整端点（例如 DeepSeek 下的 `/anthropic/chat/completions`），会在发送前恢复为该服务商预设路径；同协议的自定义网关路径仍会保留。自动识别结果会写入运行诊断，旧的协议修复说明不会带入下一次运行。OpenAI、DashScope、Anthropic 和 Gemini 若明确返回某个可选采样参数不受支持，节点会移除该字段后有界重试一次；Gemini 使用官方 `systemInstruction` 字段，深度思考分片不会进入最终提示词。
 
 推荐使用环境变量保存密钥：
 
@@ -115,6 +115,8 @@ env:DASHSCOPE_API_KEY
 部分 Vision 模型只提供 `AutoProcessor` 内置 tokenizer，节点也可直接加载，不再强制要求独立 `AutoTokenizer`。加载器依次兼容 ImageTextToText、Vision2Seq、Seq2Seq、CausalLM，以及通过 `trust_remote_code` 注册到通用 `AutoModel` 且提供 `generate()` 的仓库。原始 Qwen 模型会把“启用思考”传给支持 `enable_thinking` 的聊天模板，不支持该参数的模型自动回到标准模板调用；encoder-decoder 与普通因果语言模型分别按各自的生成序列格式解码，避免误删回复开头。
 
 多模态上下文上限会继续检查嵌套 `text_config`、`language_config` 和 tokenizer 限制。若模型模板不接受 `system` 角色，系统合同会完整并入首个用户回合；若基础模型完全没有聊天模板，则使用稳定的自然语言 `system/user/assistant` 格式继续生成。Accelerate 混合 CPU/GPU/disk 分层时，输入优先放到词嵌入所在设备。
+
+针对自定义 Transformers 仓库，`generate()` 明确报告未知的可选参数时会逐个移除并有界重试；`input_ids`、视觉张量等必需输入不会被删除。输出可为张量、`sequences`、列表、批量列表或元组，节点会统一解码并按模型类型处理停止词，无法兼容时才交给 Skill 回退；嵌套文本配置缺少上下文上限时会回退到根配置，NumPy/列表形式的批量输入也会统一转为张量。第三方 `invoke/generate_content`、`complete/predict/chat` 或仅 `**kwargs`/不可反射签名的包装器都会收到统一的采样参数。API 响应提取同时兼容字典、Pydantic `model_dump()`/`to_dict()` 对象和内容块，并自动排除思考块。
 
 ## 角色三视图
 

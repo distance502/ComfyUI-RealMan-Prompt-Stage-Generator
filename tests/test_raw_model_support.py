@@ -11,6 +11,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import numpy as np
 import torch
 
 
@@ -735,6 +736,7 @@ class RawModelSupportTests(unittest.TestCase):
                 max_position_embeddings = 48
 
             class VisionConfig:
+                max_position_embeddings = 8
                 text_config = TextConfig()
 
             class LimitedTokenizer:
@@ -755,6 +757,36 @@ class RawModelSupportTests(unittest.TestCase):
                 {"n_ctx": 64},
             )
             self.assertEqual(adapter._context_length(), 40)
+
+    def test_transformers_adapter_falls_back_to_root_context_when_nested_metadata_missing(self):
+        with tempfile.TemporaryDirectory() as temp:
+            module = load_nodes(Path(temp))
+
+            class TextConfig:
+                pass
+
+            class MultimodalConfig:
+                max_position_embeddings = 96
+                text_config = TextConfig()
+
+            class LimitedTokenizer:
+                model_max_length = 0
+
+            class TinyModel(torch.nn.Module):
+                config = MultimodalConfig()
+
+                def __init__(self):
+                    super().__init__()
+                    self.anchor = torch.nn.Parameter(torch.zeros(1))
+
+            adapter = module._TransformersChatAdapter(
+                TinyModel(),
+                LimitedTokenizer(),
+                None,
+                "root-context-fallback",
+                {"n_ctx": 128},
+            )
+            self.assertEqual(adapter._context_length(), 96)
 
     def test_transformers_adapter_merges_system_role_for_strict_template(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -888,6 +920,483 @@ class RawModelSupportTests(unittest.TestCase):
                 max_tokens=4,
             )
             self.assertEqual(response["choices"][0]["message"]["content"], "")
+
+    def test_transformers_adapter_retries_unknown_generate_keyword(self):
+        with tempfile.TemporaryDirectory() as temp:
+            module = load_nodes(Path(temp))
+            captured = {"attempts": 0}
+
+            class StrictTokenizer:
+                pad_token_id = 0
+                eos_token_id = 2
+
+                def apply_chat_template(self, _messages, **_kwargs):
+                    return "strict generation prompt"
+
+                def __call__(self, *_args, **_kwargs):
+                    return {
+                        "input_ids": torch.tensor([[1, 2]], dtype=torch.long),
+                        "token_type_ids": torch.tensor([[0, 0]], dtype=torch.long),
+                    }
+
+                def batch_decode(self, _tokens, skip_special_tokens=True):
+                    return ["strict generation output"]
+
+            class StrictModel(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.anchor = torch.nn.Parameter(torch.zeros(1))
+
+                def generate(self, input_ids, **kwargs):
+                    captured["attempts"] += 1
+                    if "token_type_ids" in kwargs:
+                        raise ValueError("The following model_kwargs are not used by the model: token_type_ids")
+                    if "repetition_penalty" in kwargs:
+                        raise TypeError("generate() got an unexpected keyword argument 'repetition_penalty'")
+                    return torch.tensor([[1, 2, 3]], dtype=input_ids.dtype)
+
+            adapter = module._TransformersChatAdapter(
+                StrictModel(),
+                StrictTokenizer(),
+                None,
+                "strict-generation",
+                {"n_ctx": 16},
+            )
+            response = adapter.create_chat_completion(
+                messages=[{"role": "user", "content": "hello"}],
+                max_tokens=4,
+                temperature=0,
+            )
+            self.assertEqual(captured["attempts"], 3)
+            self.assertEqual(response["choices"][0]["message"]["content"], "strict generation output")
+
+    def test_transformers_adapter_does_not_drop_required_visual_inputs_on_retry(self):
+        with tempfile.TemporaryDirectory() as temp:
+            module = load_nodes(Path(temp))
+            image_buffer = io.BytesIO()
+            module.Image.new("RGB", (1, 1), (255, 0, 0)).save(image_buffer, format="PNG")
+            image_url = "data:image/png;base64," + base64.b64encode(image_buffer.getvalue()).decode("ascii")
+
+            class VisionTokenizer:
+                pad_token_id = 0
+                eos_token_id = 2
+
+                def apply_chat_template(self, _messages, **_kwargs):
+                    return "vision prompt"
+
+                def batch_decode(self, _tokens, skip_special_tokens=True):
+                    return ["vision output"]
+
+            class VisionProcessor:
+                image_processor = object()
+
+                def __call__(self, *_args, **_kwargs):
+                    return {
+                        "input_ids": torch.tensor([[1, 2]], dtype=torch.long),
+                        "pixel_values": torch.ones((1, 3, 2, 2)),
+                    }
+
+            class StrictVisionModel(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.anchor = torch.nn.Parameter(torch.zeros(1))
+
+                def generate(self, input_ids, pixel_values, **kwargs):
+                    raise TypeError("generate() got an unexpected keyword argument 'pixel_values'")
+
+            adapter = module._TransformersChatAdapter(
+                StrictVisionModel(),
+                VisionTokenizer(),
+                VisionProcessor(),
+                "strict-vision-generation",
+                {"n_ctx": 16},
+            )
+            with self.assertRaisesRegex(TypeError, "pixel_values"):
+                adapter.create_chat_completion(
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": "hello"},
+                                {"type": "image_url", "image_url": {"url": image_url}},
+                            ],
+                        }
+                    ],
+                    max_tokens=4,
+                )
+
+    def test_transformers_adapter_accepts_batched_tokenized_chat_template(self):
+        with tempfile.TemporaryDirectory() as temp:
+            module = load_nodes(Path(temp))
+
+            class BatchedTokenizer:
+                pad_token_id = 0
+                eos_token_id = 2
+
+                def apply_chat_template(self, _messages, **_kwargs):
+                    return [[11, 12, 13], [21, 22, 23]]
+
+                def batch_decode(self, tokens, skip_special_tokens=True):
+                    self.shape = tuple(tokens.shape)
+                    return ["batched output"]
+
+            class TinyModel(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.anchor = torch.nn.Parameter(torch.zeros(1))
+
+                def generate(self, input_ids, **_kwargs):
+                    return torch.tensor([[11, 12, 13, 14]], dtype=input_ids.dtype)
+
+            tokenizer = BatchedTokenizer()
+            adapter = module._TransformersChatAdapter(
+                TinyModel(),
+                tokenizer,
+                None,
+                "batched-tokenized",
+                {"n_ctx": 16},
+            )
+            response = adapter.create_chat_completion(
+                messages=[{"role": "user", "content": "hello"}],
+                max_tokens=4,
+                temperature=0,
+            )
+            self.assertEqual(tokenizer.shape, (1, 1))
+            self.assertEqual(response["choices"][0]["message"]["content"], "batched output")
+
+    def test_transformers_adapter_accepts_numpy_tokenized_chat_template(self):
+        with tempfile.TemporaryDirectory() as temp:
+            module = load_nodes(Path(temp))
+
+            class NumpyTokenizer:
+                pad_token_id = 0
+                eos_token_id = 2
+
+                def apply_chat_template(self, _messages, **_kwargs):
+                    return np.asarray([31, 32, 33], dtype=np.int32)
+
+                def batch_decode(self, _tokens, skip_special_tokens=True):
+                    return ["numpy output"]
+
+            class TinyModel(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.anchor = torch.nn.Parameter(torch.zeros(1))
+
+                def generate(self, input_ids, **_kwargs):
+                    return torch.tensor([[31, 32, 33, 34]], dtype=input_ids.dtype)
+
+            adapter = module._TransformersChatAdapter(
+                TinyModel(),
+                NumpyTokenizer(),
+                None,
+                "numpy-tokenized",
+                {"n_ctx": 16},
+            )
+            response = adapter.create_chat_completion(
+                messages=[{"role": "user", "content": "hello"}],
+                max_tokens=4,
+                temperature=0,
+            )
+            self.assertEqual(response["choices"][0]["message"]["content"], "numpy output")
+
+    def test_transformers_adapter_skips_unavailable_cuda_device_map(self):
+        with tempfile.TemporaryDirectory() as temp:
+            module = load_nodes(Path(temp))
+
+            class CpuFallbackModel(torch.nn.Module):
+                hf_device_map = {"model.embed_tokens": "cuda:0", "model.layers.0": "cpu"}
+
+                def __init__(self):
+                    super().__init__()
+                    self.anchor = torch.nn.Parameter(torch.zeros(1))
+
+            adapter = module._TransformersChatAdapter(
+                CpuFallbackModel(),
+                object(),
+                None,
+                "cpu-fallback",
+                {"n_ctx": 16},
+            )
+            expected = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
+            self.assertEqual(adapter.device, expected)
+
+    def test_transformers_adapter_converts_list_generation_to_tensor(self):
+        with tempfile.TemporaryDirectory() as temp:
+            module = load_nodes(Path(temp))
+
+            class ListTokenizer:
+                pad_token_id = 0
+                eos_token_id = 2
+
+                def apply_chat_template(self, _messages, **_kwargs):
+                    return "list prompt"
+
+                def __call__(self, *_args, **_kwargs):
+                    return {"input_ids": torch.tensor([[1, 2]], dtype=torch.long)}
+
+                def batch_decode(self, _tokens, skip_special_tokens=True):
+                    self.decoded_shape = tuple(_tokens.shape)
+                    return ["list output"]
+
+            class ListModel(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.anchor = torch.nn.Parameter(torch.zeros(1))
+
+                def generate(self, **_kwargs):
+                    return [1, 2, 3]
+
+            adapter = module._TransformersChatAdapter(
+                ListModel(),
+                ListTokenizer(),
+                None,
+                "list-generation",
+                {"n_ctx": 16},
+            )
+            response = adapter.create_chat_completion(
+                messages=[{"role": "user", "content": "hello"}],
+                max_tokens=4,
+            )
+            self.assertEqual(adapter.tokenizer.decoded_shape, (1, 1))
+            self.assertEqual(response["choices"][0]["message"]["content"], "list output")
+
+    def test_transformers_adapter_normalizes_numpy_processor_inputs(self):
+        with tempfile.TemporaryDirectory() as temp:
+            module = load_nodes(Path(temp))
+            captured = {}
+
+            class ArrayTokenizer:
+                pad_token_id = 0
+                eos_token_id = 2
+
+                def apply_chat_template(self, _messages, **_kwargs):
+                    return "array prompt"
+
+                def __call__(self, *_args, **_kwargs):
+                    return {
+                        "input_ids": np.asarray([[1, 2]], dtype=np.int32),
+                        "attention_mask": [[1, 1]],
+                    }
+
+                def batch_decode(self, tokens, skip_special_tokens=True):
+                    captured["input_type"] = type(tokens).__name__
+                    return ["array output"]
+
+            class ArrayModel(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.anchor = torch.nn.Parameter(torch.zeros(1))
+
+                def generate(self, input_ids, attention_mask, **_kwargs):
+                    captured["input_ids_type"] = type(input_ids).__name__
+                    captured["attention_mask_type"] = type(attention_mask).__name__
+                    captured["input_ids_dtype"] = input_ids.dtype
+                    captured["attention_mask_dtype"] = attention_mask.dtype
+                    return torch.tensor([[1, 2, 3]], dtype=input_ids.dtype)
+
+            adapter = module._TransformersChatAdapter(
+                ArrayModel(),
+                ArrayTokenizer(),
+                None,
+                "array-processor-inputs",
+                {"n_ctx": 16},
+            )
+            response = adapter.create_chat_completion(
+                messages=[{"role": "user", "content": "hello"}],
+                max_tokens=4,
+            )
+            self.assertEqual(captured["input_ids_type"], "Tensor")
+            self.assertEqual(captured["attention_mask_type"], "Tensor")
+            self.assertEqual(captured["input_ids_dtype"], torch.long)
+            self.assertEqual(captured["attention_mask_dtype"], torch.long)
+            self.assertEqual(response["choices"][0]["message"]["content"], "array output")
+
+    def test_transformers_adapter_batches_flat_mapping_token_inputs(self):
+        with tempfile.TemporaryDirectory() as temp:
+            module = load_nodes(Path(temp))
+            captured = {}
+
+            class FlatTokenizer:
+                pad_token_id = 0
+                eos_token_id = 2
+
+                def apply_chat_template(self, _messages, **_kwargs):
+                    return "flat prompt"
+
+                def __call__(self, *_args, **_kwargs):
+                    return {"input_ids": [1, 2, 3], "attention_mask": np.asarray([1, 1, 1], dtype=np.int32)}
+
+                def batch_decode(self, tokens, skip_special_tokens=True):
+                    captured["shape"] = tuple(tokens.shape)
+                    return ["flat output"]
+
+            class FlatModel(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.anchor = torch.nn.Parameter(torch.zeros(1))
+
+                def generate(self, input_ids, attention_mask, **_kwargs):
+                    captured["input_shape"] = tuple(input_ids.shape)
+                    captured["mask_shape"] = tuple(attention_mask.shape)
+                    return torch.tensor([[1, 2, 3, 4]], dtype=input_ids.dtype)
+
+            adapter = module._TransformersChatAdapter(
+                FlatModel(),
+                FlatTokenizer(),
+                None,
+                "flat-mapping-inputs",
+                {"n_ctx": 16},
+            )
+            response = adapter.create_chat_completion(
+                messages=[{"role": "user", "content": "hello"}],
+                max_tokens=4,
+            )
+            self.assertEqual(captured["input_shape"], (1, 3))
+            self.assertEqual(captured["mask_shape"], (1, 3))
+            self.assertEqual(captured["shape"], (1, 1))
+            self.assertEqual(response["choices"][0]["message"]["content"], "flat output")
+
+    def test_transformers_adapter_supports_keyword_only_tokenizer(self):
+        with tempfile.TemporaryDirectory() as temp:
+            module = load_nodes(Path(temp))
+            captured = {}
+
+            class KeywordTokenizer:
+                pad_token_id = 0
+                eos_token_id = 2
+
+                def apply_chat_template(self, _messages, **_kwargs):
+                    return "keyword prompt"
+
+                def __call__(self, *, text, return_tensors, **_kwargs):
+                    captured["text"] = text
+                    captured["return_tensors"] = return_tensors
+                    return {"input_ids": torch.tensor([[1, 2]], dtype=torch.long)}
+
+                def batch_decode(self, _tokens, skip_special_tokens=True):
+                    return ["keyword output"]
+
+            class TinyModel(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.anchor = torch.nn.Parameter(torch.zeros(1))
+
+                def generate(self, **_kwargs):
+                    return torch.tensor([[1, 2, 3]], dtype=torch.long)
+
+            adapter = module._TransformersChatAdapter(
+                TinyModel(),
+                KeywordTokenizer(),
+                None,
+                "keyword-tokenizer",
+                {"n_ctx": 16},
+            )
+            adapter.create_chat_completion(
+                messages=[{"role": "user", "content": "hello"}],
+                max_tokens=4,
+            )
+            self.assertEqual(captured["text"], "keyword prompt")
+            self.assertEqual(captured["return_tensors"], "pt")
+
+    def test_transformers_adapter_uses_natural_prompt_when_template_returns_empty(self):
+        with tempfile.TemporaryDirectory() as temp:
+            module = load_nodes(Path(temp))
+            captured = {}
+
+            class EmptyTemplateTokenizer:
+                pad_token_id = 0
+                eos_token_id = 2
+
+                def apply_chat_template(self, _messages, **_kwargs):
+                    return "   "
+
+                def __call__(self, prompt, **_kwargs):
+                    captured["prompt"] = prompt
+                    return {"input_ids": torch.tensor([[1, 2]], dtype=torch.long)}
+
+                def batch_decode(self, _tokens, skip_special_tokens=True):
+                    return ["empty template output"]
+
+            class TinyModel(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.anchor = torch.nn.Parameter(torch.zeros(1))
+
+                def generate(self, **_kwargs):
+                    return torch.tensor([[1, 2, 3]], dtype=torch.long)
+
+            adapter = module._TransformersChatAdapter(
+                TinyModel(),
+                EmptyTemplateTokenizer(),
+                None,
+                "empty-template",
+                {"n_ctx": 16},
+            )
+            adapter.create_chat_completion(
+                messages=[{"role": "user", "content": "hello"}],
+                max_tokens=4,
+            )
+            self.assertTrue(captured["prompt"].endswith("assistant:"))
+
+    def test_transformers_adapter_supports_positional_vision_processor(self):
+        with tempfile.TemporaryDirectory() as temp:
+            module = load_nodes(Path(temp))
+            image_buffer = io.BytesIO()
+            module.Image.new("RGB", (1, 1), (255, 255, 0)).save(image_buffer, format="PNG")
+            image_url = "data:image/png;base64," + base64.b64encode(image_buffer.getvalue()).decode("ascii")
+            captured = {}
+
+            class VisionTokenizer:
+                pad_token_id = 0
+                eos_token_id = 2
+
+                def apply_chat_template(self, _messages, **_kwargs):
+                    return "positional vision prompt"
+
+                def batch_decode(self, _tokens, skip_special_tokens=True):
+                    return ["positional vision output"]
+
+            class PositionalProcessor(VisionTokenizer):
+                image_processor = object()
+
+                def __call__(self, *args, **kwargs):
+                    if kwargs:
+                        raise TypeError("legacy processor only accepts positional inputs")
+                    text, images, return_tensors = args
+                    captured["text"] = text
+                    captured["images"] = images
+                    return {"input_ids": torch.tensor([[1, 2]], dtype=torch.long)}
+
+            class TinyModel(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.anchor = torch.nn.Parameter(torch.zeros(1))
+
+                def generate(self, **_kwargs):
+                    return torch.tensor([[1, 2, 3]], dtype=torch.long)
+
+            adapter = module._TransformersChatAdapter(
+                TinyModel(),
+                VisionTokenizer(),
+                PositionalProcessor(),
+                "positional-vision",
+                {"n_ctx": 16},
+            )
+            adapter.create_chat_completion(
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": "describe"},
+                            {"type": "image_url", "image_url": {"url": image_url}},
+                        ],
+                    }
+                ],
+                max_tokens=4,
+            )
+            self.assertEqual(captured["text"], "positional vision prompt")
+            self.assertEqual(len(captured["images"]), 1)
 
 
 if __name__ == "__main__":
