@@ -7,6 +7,7 @@ from collections import Counter
 import importlib.util
 import inspect
 import json
+import math
 import os
 import pathlib
 import re
@@ -954,6 +955,10 @@ _NATURAL_PROSE_MARKERS = (
     " centered on ", " situated in ", " unified through ", " the camera uses ",
     " the final image ", " narrative anchors", "visual direction", "without tag-chain phrasing",
 )
+_NATURAL_SINGLE_SENTENCE_MARKERS = (
+    "画面中", "画面内", "站在", "位于", "处于", "穿着", "手持", "呈现", "采用", "保持", "围绕", "缓慢", "最终",
+    " the subject ", " the character ", " stands ", " wearing ", " holds ", " positioned ", " moves ",
+)
 _NATURAL_SENTENCE_PATTERN = re.compile(r".+?(?:[。！？.!?]+|$)", re.DOTALL)
 
 
@@ -964,9 +969,14 @@ def _looks_like_natural_prose_prompt(text: str) -> bool:
     lowered = f" {body.casefold()} "
     marker_hits = sum(1 for marker in _NATURAL_PROSE_MARKERS if marker in lowered)
     terminator_count = len(re.findall(r"[。！？.!?]", body))
-    if re.search(r"[\u4e00-\u9fff]", body):
-        return marker_hits >= 2 or terminator_count >= 2
-    return marker_hits >= 2 or terminator_count >= 2
+    if marker_hits >= 2 or terminator_count >= 2:
+        return True
+    # A complete single sentence is still valid natural prose. Require a
+    # concrete scene/action cue and enough body text so a short tag chain does
+    # not get promoted into the prose path.
+    compact_length = len(re.sub(r"\s+", "", body))
+    single_sentence_hits = sum(1 for marker in _NATURAL_SINGLE_SENTENCE_MARKERS if marker in lowered)
+    return terminator_count >= 1 and compact_length >= 10 and single_sentence_hits >= 1
 
 
 def _dedupe_natural_prompt_units(text: str) -> str:
@@ -1375,6 +1385,8 @@ def _video_increment_phase(text: str) -> str | None:
 
 def _video_increment_target(phase: str | None, shot_count: int) -> int | None:
     count = max(0, int(shot_count))
+    if count == 1 and phase:
+        return 0
     if count < 3 or not phase:
         return None
     if phase == "setup":
@@ -1721,7 +1733,7 @@ def _blend_video_draft_with_storyboard(
 
     original_paragraphs = _video_storyboard_paragraphs(original)
     candidate_paragraphs = _video_storyboard_paragraphs(candidate)
-    if len(original_paragraphs) < 3 or not candidate_paragraphs:
+    if not original_paragraphs or not candidate_paragraphs:
         return reject("视频 Skill 底稿或模型增量缺少可融合的分镜段落。")
     if _looks_like_broken_prompt(candidate) or _looks_like_tag_chain_prompt(candidate):
         return reject("视频模型增量仍是分析、占位符、标签串或不可用正文。")
@@ -1774,6 +1786,14 @@ def _blend_video_draft_with_storyboard(
             if _normalize_for_compare(addition) not in _normalize_for_compare(merged[target]):
                 merged[target] = f"{merged[target].rstrip()} {addition}"
                 placements.append({"shot": target + 1, "phase": phase, "source": "explicit"})
+    elif len(merged) == 1:
+        if len(additions) != 1:
+            return reject("单镜头视频增量只能包含一段正文，不能合并多段分镜。")
+        blend_mode = "single"
+        addition = additions[0][2]
+        if _normalize_for_compare(addition) not in _normalize_for_compare(merged[0]):
+            merged[0] = f"{merged[0].rstrip()} {addition}"
+            placements.append({"shot": 1, "phase": additions[0][1], "source": "single"})
     elif len(candidate_paragraphs) >= 3:
         blend_mode = "ordered"
         for index, (_number, phase, addition) in enumerate(additions):
@@ -1828,6 +1848,7 @@ def _video_blend_placement_summary(diagnostics: Any) -> str:
             detail = {
                 "explicit": "明确编号",
                 "ordered": "顺序对应",
+                "single": "单镜头",
                 "neighbor_or_default": "保守落镜",
             }.get(source, "增量")
         key = (shot, detail)
@@ -5110,6 +5131,7 @@ _TRANSIENT_MODEL_ERROR_MARKERS = (
     "返回空文本",
     "未返回文本",
 )
+_MODEL_RETRY_WAIT_POLL_SECONDS = 0.25
 
 
 def _is_transient_model_error(exc: Exception) -> bool:
@@ -5150,14 +5172,41 @@ def _model_call_timeout_seconds(llm: Any) -> float | None:
     return timeout if 0.0 < timeout < float("inf") else None
 
 
-def _set_model_call_deadline(llm: Any, settings: dict[str, Any]) -> bool:
+def _set_model_call_deadline(
+    llm: Any,
+    settings: dict[str, Any],
+    deadline_monotonic: float | None = None,
+) -> bool:
     """Attach a per-attempt deadline for API adapters without affecting local models."""
 
-    timeout = _model_call_timeout_seconds(llm)
-    if timeout is None:
+    if deadline_monotonic is None:
+        timeout = _model_call_timeout_seconds(llm)
+        if timeout is None:
+            return False
+        deadline_monotonic = time.monotonic() + timeout
+    try:
+        deadline = float(deadline_monotonic)
+    except (TypeError, ValueError, OverflowError):
         return False
-    settings[_MODEL_CALL_DEADLINE_PARAM] = time.monotonic() + timeout
+    if not math.isfinite(deadline):
+        return False
+    settings[_MODEL_CALL_DEADLINE_PARAM] = deadline
     return True
+
+
+def _wait_for_model_retry(seconds: float, deadline_monotonic: float | None = None) -> None:
+    """Wait in short slices so ComfyUI cancellation is observed promptly."""
+
+    remaining = max(0.0, float(seconds or 0.0))
+    while remaining > 0.0:
+        _raise_if_model_call_interrupted()
+        if deadline_monotonic is not None:
+            remaining = min(remaining, deadline_monotonic - time.monotonic())
+            if remaining <= 0.0:
+                raise TimeoutError("模型重试等待超过总截止时间。")
+        delay = min(remaining, _MODEL_RETRY_WAIT_POLL_SECONDS)
+        time.sleep(delay)
+        remaining -= delay
 
 
 def _call_model_text_with_retry(
@@ -5171,9 +5220,13 @@ def _call_model_text_with_retry(
 ) -> str:
     retry_limit = _safe_int_setting(settings, "模型瞬时重试次数", 1, 0, 2)
     retry_index = 0
+    timeout = _model_call_timeout_seconds(llm)
+    overall_deadline = time.monotonic() + timeout if timeout is not None else None
     while True:
         _raise_if_model_call_interrupted()
-        deadline_attached = _set_model_call_deadline(llm, settings)
+        if overall_deadline is not None and time.monotonic() >= overall_deadline:
+            raise TimeoutError("模型请求超过总截止时间。")
+        deadline_attached = _set_model_call_deadline(llm, settings, overall_deadline)
         try:
             text = _call_model_text(
                 llm,
@@ -5205,7 +5258,10 @@ def _call_model_text_with_retry(
                 server_delay = min(5.0, max(0.0, float(getattr(exc, "retry_after", 0.0) or 0.0)))
             except (TypeError, ValueError):
                 server_delay = 0.0
-            time.sleep(max(exponential_delay, server_delay))
+            _wait_for_model_retry(
+                max(exponential_delay, server_delay),
+                overall_deadline,
+            )
         finally:
             if deadline_attached:
                 settings.pop(_MODEL_CALL_DEADLINE_PARAM, None)
