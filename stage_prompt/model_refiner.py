@@ -14,6 +14,11 @@ import time
 from typing import Any, Callable, Mapping
 
 try:
+    import comfy.model_management as _comfy_mm
+except Exception:  # pragma: no cover - focused tests may not load ComfyUI
+    _comfy_mm = None
+
+try:
     from .model_call_skill import ModelCallSkill
 except Exception:  # pragma: no cover - direct module loading in focused tests
     _MODEL_CALL_SKILL_PATH = pathlib.Path(__file__).with_name("model_call_skill.py")
@@ -2757,7 +2762,7 @@ def _is_runtime_diversity_context(settings: dict[str, Any], *, prompt_count: int
 
 def _refiner_sampling_params(settings: dict[str, Any], *, prompt_count: int = 1) -> dict[str, Any]:
     temperature = _safe_float_setting(settings, "温度", 0.75, 0.0, 2.0)
-    top_p = _safe_float_setting(settings, "top_p", 0.9, 0.0, 1.0)
+    top_p = _safe_float_setting(settings, "top_p", 0.9, 0.01, 1.0)
     top_k = _safe_int_setting(settings, "top_k", 40, 0, 200)
     repeat_penalty = _safe_float_setting(settings, "重复惩罚", 1.08, 0.0, 2.0)
     frequency_penalty = _safe_float_setting(settings, "频率惩罚", 0.0, -2.0, 2.0)
@@ -2800,6 +2805,12 @@ def _refiner_sampling_params(settings: dict[str, Any], *, prompt_count: int = 1)
     seed = _safe_int_setting(settings, "seed", 0, 0, 0xFFFFFFFFFFFFFFFF)
     if seed > 0:
         params["seed"] = seed
+    deadline = settings.get(_MODEL_CALL_DEADLINE_PARAM)
+    try:
+        if deadline is not None and float(deadline) > time.monotonic():
+            params[_MODEL_CALL_DEADLINE_PARAM] = float(deadline)
+    except (TypeError, ValueError, OverflowError):
+        pass
     return params
 
 
@@ -5078,6 +5089,7 @@ def _call_model_text(
 
 
 _TRANSIENT_MODEL_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
+_MODEL_CALL_DEADLINE_PARAM = "_qwen_te_deadline_monotonic"
 _TRANSIENT_MODEL_ERROR_MARKERS = (
     "timed out",
     "timeout",
@@ -5120,6 +5132,34 @@ def _is_transient_model_error(exc: Exception) -> bool:
     return any(marker in text for marker in _TRANSIENT_MODEL_ERROR_MARKERS)
 
 
+def _raise_if_model_call_interrupted() -> None:
+    checker = getattr(_comfy_mm, "processing_interrupted", None)
+    if callable(checker) and bool(checker()):
+        error_type = getattr(_comfy_mm, "InterruptProcessingException", RuntimeError)
+        raise error_type()
+
+
+def _model_call_timeout_seconds(llm: Any) -> float | None:
+    config = getattr(llm, "config", None)
+    if not isinstance(config, Mapping):
+        return None
+    try:
+        timeout = float(config.get("timeout", 0) or 0)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return timeout if 0.0 < timeout < float("inf") else None
+
+
+def _set_model_call_deadline(llm: Any, settings: dict[str, Any]) -> bool:
+    """Attach a per-attempt deadline for API adapters without affecting local models."""
+
+    timeout = _model_call_timeout_seconds(llm)
+    if timeout is None:
+        return False
+    settings[_MODEL_CALL_DEADLINE_PARAM] = time.monotonic() + timeout
+    return True
+
+
 def _call_model_text_with_retry(
     llm: Any,
     prompt: str,
@@ -5132,6 +5172,8 @@ def _call_model_text_with_retry(
     retry_limit = _safe_int_setting(settings, "模型瞬时重试次数", 1, 0, 2)
     retry_index = 0
     while True:
+        _raise_if_model_call_interrupted()
+        deadline_attached = _set_model_call_deadline(llm, settings)
         try:
             text = _call_model_text(
                 llm,
@@ -5148,6 +5190,7 @@ def _call_model_text_with_retry(
                 )
             return text
         except Exception as exc:
+            _raise_if_model_call_interrupted()
             if retry_index >= retry_limit or not _is_transient_model_error(exc):
                 raise
             retry_index += 1
@@ -5163,6 +5206,9 @@ def _call_model_text_with_retry(
             except (TypeError, ValueError):
                 server_delay = 0.0
             time.sleep(max(exponential_delay, server_delay))
+        finally:
+            if deadline_attached:
+                settings.pop(_MODEL_CALL_DEADLINE_PARAM, None)
 
 
 def _retry_invalid_model_output(

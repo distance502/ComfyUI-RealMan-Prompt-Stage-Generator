@@ -1752,7 +1752,14 @@ def _set_http_response_timeout(response: Any, timeout: float) -> None:
             return
 
 
-def _read_http_response_limited(response: Any, *, max_bytes: int, timeout: float, label: str) -> bytes:
+def _read_http_response_limited(
+    response: Any,
+    *,
+    max_bytes: int,
+    timeout: float,
+    label: str,
+    deadline_monotonic: float | None = None,
+) -> bytes:
     content_length = None
     try:
         content_length = int(response.headers.get("Content-Length", "") or 0)
@@ -1768,11 +1775,25 @@ def _read_http_response_limited(response: Any, *, max_bytes: int, timeout: float
     if not callable(reader):
         reader = response.read
     while True:
+        _raise_if_comfy_interrupted()
         remaining = deadline - time.monotonic()
+        if deadline_monotonic is not None:
+            remaining = min(remaining, deadline_monotonic - time.monotonic())
         if remaining <= 0:
             raise TimeoutError(f"{label}读取超过总时限。")
-        _set_http_response_timeout(response, remaining)
-        chunk = reader(min(_HTTP_READ_CHUNK_BYTES, max_bytes + 1 - total))
+        _set_http_response_timeout(response, min(remaining, _COOPERATIVE_WAIT_POLL_SECONDS))
+        try:
+            chunk = reader(min(_HTTP_READ_CHUNK_BYTES, max_bytes + 1 - total))
+        except TimeoutError:
+            # A socket read timeout is only a poll boundary; keep the same
+            # response open so cancellation can be observed without waiting
+            # for the full API timeout.
+            _raise_if_comfy_interrupted()
+            if deadline_monotonic is not None and time.monotonic() >= deadline_monotonic:
+                raise TimeoutError(f"{label}读取超过截止时间。")
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"{label}读取超过总时限。")
+            continue
         if not chunk:
             break
         chunks.append(bytes(chunk))
@@ -2055,18 +2076,41 @@ def _merge_api_stream_payloads(payloads: list[dict[str, Any]]) -> dict[str, Any]
     return merged
 
 
-def _perform_api_http_request(opener: Any, request: urllib.request.Request, timeout: float) -> tuple[bytes, str]:
-    with opener.open(request, timeout=timeout) as response:
+def _perform_api_http_request(
+    opener: Any,
+    request: urllib.request.Request,
+    timeout: float,
+    *,
+    deadline_monotonic: float | None = None,
+) -> tuple[bytes, str]:
+    _raise_if_comfy_interrupted()
+    if deadline_monotonic is not None and time.monotonic() >= deadline_monotonic:
+        raise TimeoutError("模型 API 请求超过截止时间。")
+    open_timeout = max(0.1, float(timeout))
+    if deadline_monotonic is not None:
+        open_timeout = min(open_timeout, max(0.1, deadline_monotonic - time.monotonic()))
+    with opener.open(request, timeout=open_timeout) as response:
+        _raise_if_comfy_interrupted()
         raw = _read_http_response_limited(
             response,
             max_bytes=_API_RESPONSE_MAX_BYTES,
-            timeout=timeout,
+            timeout=open_timeout,
             label="模型 API",
+            deadline_monotonic=deadline_monotonic,
         )
+        _raise_if_comfy_interrupted()
         return raw, _http_response_charset(response)
 
 
-def _http_post_json(url: str, payload: dict[str, Any], headers: dict[str, str], timeout: float) -> dict[str, Any]:
+def _http_post_json(
+    url: str,
+    payload: dict[str, Any],
+    headers: dict[str, str],
+    timeout: float,
+    *,
+    deadline_monotonic: float | None = None,
+) -> dict[str, Any]:
+    _raise_if_comfy_interrupted()
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     request_headers = dict(headers or {})
     folded_header_names = {str(name).casefold() for name in request_headers}
@@ -2080,7 +2124,12 @@ def _http_post_json(url: str, payload: dict[str, Any], headers: dict[str, str], 
     try:
         if dead_loopback_proxy:
             try:
-                raw, charset = _perform_api_http_request(_API_DIRECT_HTTP_OPENER, request, timeout)
+                raw, charset = _perform_api_http_request(
+                    _API_DIRECT_HTTP_OPENER,
+                    request,
+                    timeout,
+                    deadline_monotonic=deadline_monotonic,
+                )
             except urllib.error.HTTPError:
                 raise
             except (urllib.error.URLError, TimeoutError, OSError) as direct_error:
@@ -2091,14 +2140,24 @@ def _http_post_json(url: str, payload: dict[str, Any], headers: dict[str, str], 
                 ) from direct_error
         else:
             try:
-                raw, charset = _perform_api_http_request(_API_HTTP_OPENER, request, timeout)
+                raw, charset = _perform_api_http_request(
+                    _API_HTTP_OPENER,
+                    request,
+                    timeout,
+                    deadline_monotonic=deadline_monotonic,
+                )
             except urllib.error.HTTPError:
                 raise
             except (urllib.error.URLError, TimeoutError, OSError) as proxy_error:
                 if not (_is_api_connection_refused(proxy_error) and loopback_proxy):
                     raise
                 try:
-                    raw, charset = _perform_api_http_request(_API_DIRECT_HTTP_OPENER, request, timeout)
+                    raw, charset = _perform_api_http_request(
+                        _API_DIRECT_HTTP_OPENER,
+                        request,
+                        timeout,
+                        deadline_monotonic=deadline_monotonic,
+                    )
                 except urllib.error.HTTPError:
                     raise
                 except (urllib.error.URLError, TimeoutError, OSError) as direct_error:
@@ -2119,6 +2178,7 @@ def _http_post_json(url: str, payload: dict[str, Any], headers: dict[str, str], 
                 max_bytes=_API_RESPONSE_MAX_BYTES,
                 timeout=timeout,
                 label="模型 API 错误",
+                deadline_monotonic=deadline_monotonic,
             )
             charset = _http_response_charset(exc)
             try:
@@ -2149,6 +2209,7 @@ def _http_post_json(url: str, payload: dict[str, Any], headers: dict[str, str], 
         ) from exc
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         raise _api_transport_error(url, exc) from exc
+    _raise_if_comfy_interrupted()
     return _decode_api_json(raw, charset=charset, label="模型 API")
 
 
@@ -2374,6 +2435,27 @@ _API_OPTIONAL_PARAMETER_NAMES = (
 )
 
 
+def _call_http_post_json(
+    url: str,
+    payload: dict[str, Any],
+    headers: dict[str, str],
+    timeout: float,
+    *,
+    deadline_monotonic: float | None = None,
+) -> dict[str, Any]:
+    """Call the transport while keeping legacy test doubles/wrappers compatible."""
+
+    if deadline_monotonic is None:
+        return _http_post_json(url, payload, headers, timeout)
+    return _http_post_json(
+        url,
+        payload,
+        headers,
+        timeout,
+        deadline_monotonic=deadline_monotonic,
+    )
+
+
 def _post_openai_json_with_compatibility_retry(
     url: str,
     payload: dict[str, Any],
@@ -2381,9 +2463,10 @@ def _post_openai_json_with_compatibility_retry(
     timeout: float,
     *,
     responses_api: bool = False,
+    deadline_monotonic: float | None = None,
 ) -> dict[str, Any]:
     try:
-        return _http_post_json(url, payload, headers, timeout)
+        return _call_http_post_json(url, payload, headers, timeout, deadline_monotonic=deadline_monotonic)
     except _ModelAPIHTTPError as exc:
         error_text = f"{exc.reason} {exc.detail}".casefold()
         if exc.status not in {400, 422} or not any(
@@ -2402,7 +2485,7 @@ def _post_openai_json_with_compatibility_retry(
             compatible_payload["max_tokens"] = compatible_payload.pop("max_completion_tokens")
         if compatible_payload == payload:
             raise
-        return _http_post_json(url, compatible_payload, headers, timeout)
+        return _call_http_post_json(url, compatible_payload, headers, timeout, deadline_monotonic=deadline_monotonic)
 
 
 def _post_dashscope_json_with_compatibility_retry(
@@ -2410,9 +2493,11 @@ def _post_dashscope_json_with_compatibility_retry(
     payload: dict[str, Any],
     headers: dict[str, str],
     timeout: float,
+    *,
+    deadline_monotonic: float | None = None,
 ) -> dict[str, Any]:
     try:
-        return _http_post_json(url, payload, headers, timeout)
+        return _call_http_post_json(url, payload, headers, timeout, deadline_monotonic=deadline_monotonic)
     except _ModelAPIHTTPError as exc:
         error_text = f"{exc.reason} {exc.detail}".casefold()
         if exc.status not in {400, 422} or not any(
@@ -2436,7 +2521,55 @@ def _post_dashscope_json_with_compatibility_retry(
         compatible_payload["parameters"] = parameters
         if compatible_payload == payload:
             raise
-        return _http_post_json(url, compatible_payload, headers, timeout)
+        return _call_http_post_json(url, compatible_payload, headers, timeout, deadline_monotonic=deadline_monotonic)
+
+
+def _post_ollama_json_with_compatibility_retry(
+    url: str,
+    payload: dict[str, Any],
+    headers: dict[str, str],
+    timeout: float,
+    *,
+    deadline_monotonic: float | None = None,
+) -> dict[str, Any]:
+    """Retry once when an Ollama-compatible server rejects an optional option."""
+
+    try:
+        return _call_http_post_json(url, payload, headers, timeout, deadline_monotonic=deadline_monotonic)
+    except _ModelAPIHTTPError as exc:
+        error_text = f"{exc.reason} {exc.detail}".casefold()
+        if exc.status not in {400, 422}:
+            raise
+        option_aliases = {
+            "num_predict": "num_predict",
+            "max_tokens": "num_predict",
+            "temperature": "temperature",
+            "top_p": "top_p",
+            "topp": "top_p",
+            "top_k": "top_k",
+            "topk": "top_k",
+            "repeat_penalty": "repeat_penalty",
+            "repetition_penalty": "repeat_penalty",
+            "seed": "seed",
+            "stop": "stop",
+        }
+        options = dict((payload.get("options") or {}) if isinstance(payload, dict) else {})
+        removed: set[str] = set()
+        for marker, field in option_aliases.items():
+            if marker in error_text and field in options:
+                options.pop(field, None)
+                removed.add(field)
+        if not removed:
+            raise
+        compatible_payload = dict(payload)
+        compatible_payload["options"] = options
+        return _call_http_post_json(
+            url,
+            compatible_payload,
+            headers,
+            timeout,
+            deadline_monotonic=deadline_monotonic,
+        )
 
 
 def _post_anthropic_json_with_compatibility_retry(
@@ -2444,11 +2577,13 @@ def _post_anthropic_json_with_compatibility_retry(
     payload: dict[str, Any],
     headers: dict[str, str],
     timeout: float,
+    *,
+    deadline_monotonic: float | None = None,
 ) -> dict[str, Any]:
     """Retry Anthropic Messages once when a gateway rejects optional fields."""
 
     try:
-        return _http_post_json(url, payload, headers, timeout)
+        return _call_http_post_json(url, payload, headers, timeout, deadline_monotonic=deadline_monotonic)
     except _ModelAPIHTTPError as exc:
         error_text = f"{exc.reason} {exc.detail}".casefold()
         if exc.status not in {400, 422} or not any(
@@ -2477,7 +2612,7 @@ def _post_anthropic_json_with_compatibility_retry(
                 compatible_payload.pop(field, None)
         if compatible_payload == payload:
             raise
-        return _http_post_json(url, compatible_payload, headers, timeout)
+        return _call_http_post_json(url, compatible_payload, headers, timeout, deadline_monotonic=deadline_monotonic)
 
 
 def _post_gemini_json_with_compatibility_retry(
@@ -2485,11 +2620,13 @@ def _post_gemini_json_with_compatibility_retry(
     payload: dict[str, Any],
     headers: dict[str, str],
     timeout: float,
+    *,
+    deadline_monotonic: float | None = None,
 ) -> dict[str, Any]:
     """Retry Gemini native generation once when optional config is rejected."""
 
     try:
-        return _http_post_json(url, payload, headers, timeout)
+        return _call_http_post_json(url, payload, headers, timeout, deadline_monotonic=deadline_monotonic)
     except _ModelAPIHTTPError as exc:
         error_text = f"{exc.reason} {exc.detail}".casefold()
         if exc.status not in {400, 422} or not any(
@@ -2518,7 +2655,7 @@ def _post_gemini_json_with_compatibility_retry(
         compatible_payload["generationConfig"] = generation_config
         if compatible_payload == payload:
             raise
-        return _http_post_json(url, compatible_payload, headers, timeout)
+        return _call_http_post_json(url, compatible_payload, headers, timeout, deadline_monotonic=deadline_monotonic)
 
 
 def _gemini_response_text(response: dict[str, Any]) -> str:
@@ -2546,9 +2683,15 @@ class _TEAPIChatModel:
     def __init__(self, config: dict[str, Any]):
         self.config = dict(config)
         self.llm = self
+        self._qwen_te_accepts_deadline = True
         self.model_path = f"api://{self.config.get('provider')}/{self.config.get('model')}"
 
-    def create_chat_completion(self, **kwargs) -> dict[str, Any]:
+    def create_chat_completion(
+        self,
+        *,
+        _qwen_te_deadline_monotonic: float | None = None,
+        **kwargs,
+    ) -> dict[str, Any]:
         provider = str(self.config.get("provider") or "OpenAI兼容")
         kind = str(self.config.get("kind") or "openai")
         model = str(self.config.get("model") or "").strip()
@@ -2558,7 +2701,7 @@ class _TEAPIChatModel:
         messages = list(kwargs.get("messages") or [])
         max_tokens = _safe_int(kwargs.get("max_tokens", 1800), 1800, 1, 8192)
         temperature = _safe_float(kwargs.get("temperature", 0.62), 0.62, 0.0, 2.0)
-        top_p = _safe_float(kwargs.get("top_p", 0.9), 0.9, 0.0, 1.0)
+        top_p = _safe_float(kwargs.get("top_p", 0.9), 0.9, 0.01, 1.0)
         frequency_penalty = _safe_float(kwargs.get("frequency_penalty", 0.0), 0.0, -2.0, 2.0)
         presence_penalty = _safe_float(kwargs.get("presence_penalty", 0.0), 0.0, -2.0, 2.0)
         seed = _safe_int(kwargs.get("seed", 0), 0, 0, 0xFFFFFFFFFFFFFFFF)
@@ -2599,6 +2742,7 @@ class _TEAPIChatModel:
                 },
                 headers,
                 timeout,
+                deadline_monotonic=_qwen_te_deadline_monotonic,
             )
             text = _dashscope_response_text(response)
             if not text:
@@ -2625,7 +2769,7 @@ class _TEAPIChatModel:
                 options["seed"] = seed
             if stop_sequences:
                 options["stop"] = stop_sequences
-            response = _http_post_json(
+            response = _post_ollama_json_with_compatibility_retry(
                 str(self.config.get("url")),
                 {
                     "model": model,
@@ -2635,6 +2779,7 @@ class _TEAPIChatModel:
                 },
                 headers,
                 timeout,
+                deadline_monotonic=_qwen_te_deadline_monotonic,
             )
             if response.get("error"):
                 _extract_model_response_text_impl(response)
@@ -2672,6 +2817,7 @@ class _TEAPIChatModel:
                 payload,
                 headers,
                 timeout,
+                deadline_monotonic=_qwen_te_deadline_monotonic,
             )
             if response.get("error"):
                 _extract_model_response_text_impl(response)
@@ -2711,7 +2857,13 @@ class _TEAPIChatModel:
                 # snake_case is silently ignored by some gateways and rejected
                 # as an unknown field by the official endpoint.
                 payload["systemInstruction"] = {"parts": [{"text": system_text}]}
-            response = _post_gemini_json_with_compatibility_retry(url, payload, headers, timeout)
+            response = _post_gemini_json_with_compatibility_retry(
+                url,
+                payload,
+                headers,
+                timeout,
+                deadline_monotonic=_qwen_te_deadline_monotonic,
+            )
             if response.get("error"):
                 _extract_model_response_text_impl(response)
             candidates = response.get("candidates") or []
@@ -2753,6 +2905,7 @@ class _TEAPIChatModel:
                 headers,
                 timeout,
                 responses_api=True,
+                deadline_monotonic=_qwen_te_deadline_monotonic,
             )
 
         payload = {
@@ -2779,6 +2932,7 @@ class _TEAPIChatModel:
             payload,
             headers,
             timeout,
+            deadline_monotonic=_qwen_te_deadline_monotonic,
         )
         return response
 
@@ -8126,7 +8280,7 @@ class QwenTE阶段式提示词生成器:
                 "min": 5,
                 "max": 600,
                 "step": 1,
-                "tooltip": "连接与响应读取超时。瞬时超时、断连、429 和服务端 5xx 会自动有界重试一次。",
+                "tooltip": "连接与响应读取超时；请求会响应 ComfyUI 中断。瞬时超时、断连、429 和服务端 5xx 会自动有界重试一次。",
             },
         )
         required["API额外请求头"] = ("STRING", {"default": "", "multiline": True, "tooltip": "可选。支持 JSON 或每行 Header: Value，例如 OpenRouter 的 HTTP-Referer / X-Title。"})
@@ -8205,7 +8359,7 @@ class QwenTE阶段式提示词生成器:
         required["系统提示词覆盖"] = ("STRING", {"default": DEFAULT_STAGE_PROMPT_SYSTEM_TEMPLATE, "multiline": True})
         required["最大生成token"] = ("INT", {"default": 1800, "min": 128, "max": 8192, "step": 1})
         required["温度"] = ("FLOAT", {"default": 0.62, "min": 0.0, "max": 2.0, "step": 0.01})
-        required["top_p"] = ("FLOAT", {"default": 0.9, "min": 0.0, "max": 1.0, "step": 0.01})
+        required["top_p"] = ("FLOAT", {"default": 0.9, "min": 0.01, "max": 1.0, "step": 0.01})
         required["top_k"] = ("INT", {"default": 40, "min": 0, "max": 200, "step": 1})
         required["重复惩罚"] = ("FLOAT", {"default": 1.08, "min": 0.5, "max": 2.0, "step": 0.01})
         required["频率惩罚"] = ("FLOAT", {"default": 0.0, "min": 0.0, "max": 2.0, "step": 0.01})

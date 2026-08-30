@@ -821,6 +821,12 @@ def _执行chat_completion(
         if "present_penalty" in kwargs and "present_penalty" not in allowed and "presence_penalty" in allowed:
             kwargs["presence_penalty"] = kwargs.pop("present_penalty")
         kwargs = {k: v for k, v in kwargs.items() if k in allowed}
+        # API adapters expose this private keyword so network reads can share
+        # the same cancellation/deadline contract as local llama inference.
+        if deadline_monotonic is not None and _MODEL_CALL_DEADLINE_PARAM in allowed:
+            kwargs[_MODEL_CALL_DEADLINE_PARAM] = deadline_monotonic
+    elif deadline_monotonic is not None and bool(getattr(llm, "_qwen_te_accepts_deadline", False)):
+        kwargs[_MODEL_CALL_DEADLINE_PARAM] = deadline_monotonic
 
     abort_guard = _安装llama合作中断(llm, deadline_monotonic)
     abort_state = abort_guard[1] if abort_guard is not None else {}
@@ -2680,7 +2686,7 @@ class QwenTE图像推理:
                 "最大边长": ("INT", {"default": 512, "min": 128, "max": 4096, "step": 64, "tooltip": "对输入图片做缩放以提速（取最长边，最高 4096）。"}),
                 "最大生成token": ("INT", {"default": 512, "min": 20, "max": 8192, "step": 1, "tooltip": "默认反推描述用 512 通常足够；需要更长分析再手动调大。"}),
                 "温度": ("FLOAT", {"default": 0.7, "min": 0.0, "max": 2.0, "step": 0.01, "tooltip": "随机性；0.4-0.7 更稳定，0.8-1.0 更多样。"}),
-                "top_p": ("FLOAT", {"default": 0.9, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "核采样范围；通常保持 0.85-0.95。"}),
+                "top_p": ("FLOAT", {"default": 0.9, "min": 0.01, "max": 1.0, "step": 0.01, "tooltip": "核采样范围；必须大于 0，通常保持 0.85-0.95。"}),
                 "top_k": ("INT", {"default": 20, "min": 0, "max": 200, "step": 1, "tooltip": "每步候选词数量；提高会增加变化，0 交由模型默认处理。"}),
                 "重复惩罚": ("FLOAT", {"default": 1.0, "min": 0.5, "max": 2.0, "step": 0.01, "tooltip": "抑制局部复读；出现重复时可尝试 1.05-1.15。"}),
                 "频率惩罚": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 2.0, "step": 0.01, "tooltip": "按出现次数抑制重复；建议从 0.1-0.3 小幅增加。"}),
@@ -2978,7 +2984,7 @@ class Gemma4TE图像推理:
                 "最大边长": ("INT", {"default": 512, "min": 128, "max": 4096, "step": 64, "tooltip": "对输入图片做缩放以提速（取最长边，最高 4096）。"}),
                 "最大生成token": ("INT", {"default": 512, "min": 20, "max": 8192, "step": 1, "tooltip": "Gemma4 官方图片示例使用 512；文本长回复可手动调大。"}),
                 "温度": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 2.0, "step": 0.01, "tooltip": "Gemma4 官方推荐采样配置：temperature=1.0。"}),
-                "top_p": ("FLOAT", {"default": 0.95, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "Gemma4 官方推荐采样配置：top_p=0.95。"}),
+                "top_p": ("FLOAT", {"default": 0.95, "min": 0.01, "max": 1.0, "step": 0.01, "tooltip": "Gemma4 官方推荐采样配置：top_p=0.95；必须大于 0。"}),
                 "top_k": ("INT", {"default": 64, "min": 0, "max": 200, "step": 1, "tooltip": "Gemma4 官方推荐采样配置：top_k=64。"}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff, "step": 1, "control_after_generate": True, "tooltip": "随机种子。可用 ComfyUI 的生成后控制来固定、递增、递减或随机。"}),
                 "输出think块": ("BOOLEAN", {"default": False, "tooltip": "开启=尽量保留 Gemma4 思考文本；关闭=只保留最终答案，并清理通道控制标记。"}),

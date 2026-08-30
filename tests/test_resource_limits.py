@@ -285,6 +285,31 @@ class TestApiResponseLimits(unittest.TestCase):
 
         opener.open.assert_called_once()
 
+    def test_api_response_read_timeout_is_a_cooperative_poll(self) -> None:
+        class TimeoutThenResponse(_BufferedResponse):
+            def __init__(self):
+                super().__init__(b"ok")
+                self.read_calls = 0
+
+            def read1(self, size: int = -1) -> bytes:
+                self.read_calls += 1
+                if self.read_calls == 1:
+                    raise TimeoutError("socket poll")
+                return super().read1(size)
+
+        response = TimeoutThenResponse()
+        with mock.patch.object(self.stage_generator, "_raise_if_comfy_interrupted") as interrupted:
+            result = self.stage_generator._read_http_response_limited(
+                response,
+                max_bytes=8,
+                timeout=1.0,
+                label="测试 API",
+            )
+
+        self.assertEqual(result, b"ok")
+        self.assertEqual(response.read_calls, 3)
+        self.assertEqual(interrupted.call_count, 4)
+
     def test_http_error_body_keeps_the_same_response_limit(self) -> None:
         response = _BufferedResponse(
             b"not-read",

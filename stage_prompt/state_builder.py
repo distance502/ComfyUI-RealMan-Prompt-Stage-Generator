@@ -376,7 +376,9 @@ def build_state_from_kwargs(
     )
     settings["最大生成token"] = safe_int(kwargs.get("最大生成token", 1800), 1800, 128, 8192)
     settings["温度"] = safe_float(kwargs.get("温度", 0.75), 0.75, 0.0, 2.0)
-    settings["top_p"] = safe_float(kwargs.get("top_p", 0.9), 0.9, 0.0, 1.0)
+    # Most hosted APIs require top_p to be strictly greater than zero.
+    # Keep the node input permissive but normalize zero/negative values here.
+    settings["top_p"] = safe_float(kwargs.get("top_p", 0.9), 0.9, 0.01, 1.0)
     settings["top_k"] = safe_int(kwargs.get("top_k", 40), 40, 0, 200)
     settings["重复惩罚"] = safe_float(kwargs.get("重复惩罚", 1.05), 1.05, 0.5, 2.0)
     settings["频率惩罚"] = safe_float(kwargs.get("频率惩罚", 0.0), 0.0, 0.0, 2.0)

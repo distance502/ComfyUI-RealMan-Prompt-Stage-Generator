@@ -21161,6 +21161,86 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertEqual(captured["body"]["presence_penalty"], 0.15)
         self.assertEqual(captured["body"]["seed"], 1234)
 
+    def test_stage_api_http_checks_comfy_interruption_before_transport(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        opener = mock.Mock()
+        class Interrupted(RuntimeError):
+            pass
+
+        with mock.patch.object(module, "_API_HTTP_OPENER", opener), mock.patch.object(
+            module._comfy_mm,
+            "processing_interrupted",
+            return_value=True,
+        ), mock.patch.object(module._comfy_mm, "InterruptProcessingException", Interrupted):
+            with self.assertRaises(Interrupted):
+                module._http_post_json(
+                    "https://api.example.com/v1/chat/completions",
+                    {"model": "demo-model"},
+                    {},
+                    5.0,
+                )
+        opener.open.assert_not_called()
+
+    def test_ollama_api_retries_once_without_rejected_option(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        calls: list[dict[str, Any]] = []
+
+        def fake_http(_url, payload, _headers, _timeout, **_kwargs):
+            calls.append(json.loads(json.dumps(payload)))
+            if len(calls) == 1:
+                raise module._ModelAPIHTTPError(400, "Bad Request", "unknown option top_k")
+            return {"message": {"content": "ollama compatible retry"}, "done": True}
+
+        model = module._TEAPIChatModel(
+            {
+                "provider": "Ollama本地",
+                "kind": "ollama",
+                "url": "http://127.0.0.1:11434/api/chat",
+                "api_key": "",
+                "model": "qwen2.5",
+                "timeout": 30,
+            }
+        )
+        with mock.patch.object(module, "_http_post_json", side_effect=fake_http):
+            response = model.create_chat_completion(
+                messages=[{"role": "user", "content": "hello"}],
+                max_tokens=128,
+                top_k=31,
+                seed=17,
+            )
+
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0]["options"]["top_k"], 31)
+        self.assertNotIn("top_k", calls[1]["options"])
+        self.assertEqual(calls[1]["options"]["seed"], 17)
+        self.assertEqual(response["choices"][0]["message"]["content"], "ollama compatible retry")
+
+    def test_sampling_top_p_zero_is_normalized_for_api_and_skill_paths(self) -> None:
+        module = load_stage_prompt_generator_for_integration_test()
+        model = module._TEAPIChatModel(
+            {
+                "provider": "OpenAI兼容",
+                "kind": "openai",
+                "url": "https://api.example.com/v1/chat/completions",
+                "api_key": "test-key",
+                "model": "demo-model",
+                "timeout": 30,
+            }
+        )
+        captured: dict[str, Any] = {}
+
+        def fake_http(_url, payload, _headers, _timeout):
+            captured.update(payload)
+            return {"choices": [{"message": {"content": "normalized"}}]}
+
+        with mock.patch.object(module, "_http_post_json", side_effect=fake_http):
+            model.create_chat_completion(
+                messages=[{"role": "user", "content": "hello"}],
+                top_p=0,
+            )
+        self.assertEqual(captured["top_p"], 0.01)
+        self.assertEqual(model_refiner._refiner_sampling_params({"top_p": 0})["top_p"], 0.01)
+
     def test_stage_api_decodes_openai_sse_delta_response(self) -> None:
         module = load_stage_prompt_generator_for_integration_test()
         raw = (
@@ -31077,6 +31157,43 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertEqual(settings.get("模型传输重试次数"), 1)
         self.assertEqual(settings.get("模型活动回退数量", 0), 0)
         self.assertTrue(any("已恢复" in note for note in settings.get("推理纠偏说明", [])))
+
+    def test_model_refiner_forwards_api_deadline_without_leaking_runtime_state(self) -> None:
+        captured: dict[str, Any] = {}
+
+        class ApiLikeLLM:
+            config = {"timeout": 12}
+
+            def create_chat_completion(self, **kwargs):
+                captured.update(kwargs)
+                return {"choices": [{"message": {"content": "deadline-aware response"}}]}
+
+        settings = {
+            "提示词语言": "纯中文",
+            "主体类型": "人物角色",
+            "主体类型解析结果": "人物角色",
+            "模型来源": "API接口",
+            "模型调用基础来源": "API接口",
+            "模型瞬时重试次数": 0,
+        }
+        started = time.monotonic()
+        result = model_refiner._call_model_text_with_retry(
+            ApiLikeLLM(),
+            "成年女性在雨夜站台等待。",
+            settings,
+            chat_completion=lambda model, messages, params: model.create_chat_completion(
+                messages=messages,
+                **params,
+            ),
+            clean_think_text=lambda value: value,
+            prompt_count=1,
+        )
+
+        self.assertEqual(result, "deadline-aware response")
+        deadline = float(captured[model_refiner._MODEL_CALL_DEADLINE_PARAM])
+        self.assertGreater(deadline, started)
+        self.assertLessEqual(deadline, started + 12.5)
+        self.assertNotIn(model_refiner._MODEL_CALL_DEADLINE_PARAM, settings)
 
     def test_model_refiner_honors_bounded_api_retry_after(self) -> None:
         class RateLimitError(RuntimeError):
