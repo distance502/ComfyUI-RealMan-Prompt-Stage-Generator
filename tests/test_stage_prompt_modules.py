@@ -30965,6 +30965,11 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertTrue(model_refiner.is_natural_language_prompt(block_result[1]), block_result[1])
         self.assertTrue(model_refiner.is_natural_language_prompt(result[1]), result[1])
 
+    def test_natural_prose_validator_accepts_a_complete_single_sentence(self) -> None:
+        self.assertTrue(model_refiner._looks_like_natural_prose_prompt("画面中，角色站在石门前。"))
+        self.assertTrue(model_refiner._looks_like_natural_prose_prompt("The character stands beside the stone gate."))
+        self.assertFalse(model_refiner._looks_like_natural_prose_prompt("女冒险者、长腿、皮革护甲。"))
+
     def test_model_refiner_blends_usable_short_draft_into_skill_story(self) -> None:
         class DummyLLM:
             def create_chat_completion(self, *args, **kwargs):
@@ -31237,7 +31242,10 @@ class TestStagePromptModules(unittest.TestCase):
             )
 
         self.assertEqual(llm.calls, 2)
-        sleep.assert_called_once_with(1.25)
+        sleep_calls = [float(call.args[0]) for call in sleep.call_args_list]
+        self.assertGreaterEqual(len(sleep_calls), 1)
+        self.assertAlmostEqual(sum(sleep_calls), 1.25, places=6)
+        self.assertTrue(all(0.0 < delay <= model_refiner._MODEL_RETRY_WAIT_POLL_SECONDS for delay in sleep_calls))
         self.assertIn("因此", result)
         self.assertEqual(settings.get("模型传输重试次数"), 1)
 
@@ -31639,6 +31647,28 @@ class TestStagePromptModules(unittest.TestCase):
                     model_refiner._blend_video_draft_with_storyboard(original, candidate),
                     original,
                 )
+
+    def test_video_incremental_blend_supports_single_shot_story(self) -> None:
+        selected = OrderedDict(
+            {
+                "主体": ["女冒险者"],
+                "场景背景": ["地下城遗迹"],
+                "动作姿态": ["举起火炬探路"],
+                "道具世界观": ["火炬"],
+            }
+        )
+        settings = {"提示词语言": "纯中文", "视频提示词镜头段数": "单镜头", "seed": 41}
+        original = video_prompt_skill.build_video_prompt(selected, [], settings)
+        candidate = "分镜一（行动）：镜头继续跟随火炬照亮石门上的刻痕，角色保持警觉。"
+        diagnostics: dict[str, object] = {}
+        blended = model_refiner._blend_video_draft_with_storyboard(
+            original,
+            candidate,
+            diagnostics=diagnostics,
+        )
+        self.assertIn("石门上的刻痕", blended)
+        self.assertEqual(diagnostics.get("status"), "accepted")
+        self.assertEqual(model_refiner._video_blend_placement_summary(diagnostics), "分镜1（行动）")
 
     def test_video_incremental_blend_routes_unnumbered_fragments_by_story_phase(self) -> None:
         original = video_prompt_skill.build_video_prompt(

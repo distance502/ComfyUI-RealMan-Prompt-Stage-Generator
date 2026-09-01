@@ -77,6 +77,24 @@ class _QueryBackend:
         return {"content": "query result"}
 
 
+class _InputsBackend:
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, inputs):
+        self.calls.append(inputs)
+        return {"content": "inputs result"}
+
+
+class _MultimodalPromptBackend:
+    def __init__(self):
+        self.calls = []
+
+    def invoke(self, prompt, images=None):
+        self.calls.append((prompt, images))
+        return {"content": "multimodal result"}
+
+
 class _CallableBackend:
     def __init__(self):
         self.calls = []
@@ -224,6 +242,30 @@ class ModelCallSkillTests(unittest.TestCase):
             backend.calls[0],
             ("system contract\n\nquery prompt", {"prompt_count": 1}),
         )
+
+    def test_invoke_supports_inputs_parameter_name(self):
+        skill = self._skill([])
+        backend = _InputsBackend()
+        result = skill.invoke(backend, "inputs prompt", {})
+        self.assertEqual(result, "inputs result")
+        self.assertEqual(backend.calls, ["system contract\n\ninputs prompt"])
+
+    def test_invoke_messages_forwards_media_to_prompt_backend(self):
+        skill = self._skill([])
+        backend = _MultimodalPromptBackend()
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "describe this"},
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
+                ],
+            }
+        ]
+        result = skill.invoke_messages(backend, messages, {}, params={"prompt_count": 1})
+        self.assertEqual(result, "multimodal result")
+        self.assertEqual(backend.calls[0][0], "describe this")
+        self.assertEqual(backend.calls[0][1], ["data:image/png;base64,abc"])
 
     def test_invoke_messages_supports_complete_and_callable_backends(self):
         messages = [{"role": "user", "content": "message prompt"}]

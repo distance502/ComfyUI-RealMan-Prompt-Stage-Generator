@@ -1548,6 +1548,7 @@ class _TransformersChatAdapter:
         self._model_path = model_path
         self.settings = dict(settings)
         self._qwen_te_transformers = True
+        self._qwen_te_accepts_deadline = True
         processor_inputs = {
             str(item or "").strip().lower()
             for item in (getattr(processor, "model_input_names", None) or [])
@@ -1956,6 +1957,37 @@ class _TransformersChatAdapter:
                 removed.add(keyword)
         raise RuntimeError("原始模型 generate 参数兼容重试次数已用尽。")
 
+    def _generation_stopping_criteria(self, deadline_monotonic: float | None = None):
+        """Create a cooperative Transformers stop hook for cancel/timeout."""
+
+        stopping_base = getattr(_TRANSFORMERS, "StoppingCriteria", None)
+        stopping_list = getattr(_TRANSFORMERS, "StoppingCriteriaList", None)
+        interrupted = getattr(mm, "processing_interrupted", None)
+        if not isinstance(stopping_base, type) or not callable(stopping_list):
+            return None, {}
+        if not callable(interrupted) and deadline_monotonic is None:
+            return None, {}
+        state = {"interrupted": False, "timed_out": False}
+
+        class _GenerationStop(stopping_base):
+            def __call__(self, input_ids, scores, **kwargs):  # noqa: ARG002
+                try:
+                    if deadline_monotonic is not None and time.monotonic() >= deadline_monotonic:
+                        state["timed_out"] = True
+                        return True
+                    if callable(interrupted) and bool(interrupted()):
+                        state["interrupted"] = True
+                        return True
+                except Exception:
+                    # A failing cancellation probe must not corrupt generation.
+                    return False
+                return False
+
+        try:
+            return stopping_list([_GenerationStop()]), state
+        except Exception:
+            return None, {}
+
     def _encode_text(self, prompt, max_length: int):
         if isinstance(prompt, dict) or hasattr(prompt, "items"):
             encoded = self._as_mapping(prompt)
@@ -2042,7 +2074,7 @@ class _TransformersChatAdapter:
 
     def create_chat_completion(self, messages, max_tokens=512, temperature=0.7, top_p=0.9, top_k=20,
                                repeat_penalty=1.0, repetition_penalty=None, seed=None, stop=None,
-                               **_kwargs):
+                               _qwen_te_deadline_monotonic: float | None = None, **_kwargs):
         if self.model is None:
             raise RuntimeError("原始模型已经卸载，请重新加载模型。")
         max_tokens = max(1, min(int(max_tokens or 512), 32768))
@@ -2095,8 +2127,18 @@ class _TransformersChatAdapter:
             generation["pad_token_id"] = pad_token_id
         if eos_token_id is not None:
             generation["eos_token_id"] = eos_token_id
+        stopping_criteria, stop_state = self._generation_stopping_criteria(
+            _qwen_te_deadline_monotonic
+        )
+        if stopping_criteria is not None:
+            generation["stopping_criteria"] = stopping_criteria
         with torch.inference_mode():
             output = self._generate_with_compat(moved, generation)
+        if stop_state.get("timed_out"):
+            raise TimeoutError("原始模型推理超过截止时间，结果已丢弃。")
+        if stop_state.get("interrupted"):
+            error_type = getattr(mm, "InterruptProcessingException", RuntimeError)
+            raise error_type()
         if hasattr(output, "sequences"):
             output = output.sequences
         if isinstance(output, (tuple, list)):

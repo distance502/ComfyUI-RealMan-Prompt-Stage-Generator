@@ -61,8 +61,9 @@ class ModelCallSkill:
         method: Callable[..., Any],
         *,
         prompt: str,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         params: dict[str, Any] | None = None,
+        media: dict[str, Any] | None = None,
     ) -> Any:
         try:
             signature = inspect.signature(method)
@@ -75,6 +76,10 @@ class ModelCallSkill:
             # that reject generation controls. This keeps opaque backends
             # usable without masking a successful first call.
             opaque_params = dict(params or {})
+            if media:
+                opaque_params.update(
+                    {key: value for key, value in media.items() if key in {"images", "image_urls", "media"}}
+                )
             try:
                 return method(messages=messages, **opaque_params)
             except TypeError as first_error:
@@ -117,6 +122,19 @@ class ModelCallSkill:
                 # optional generation controls.
                 if accepts_kwargs:
                     accepted[name] = value
+
+        # Preserve media for common custom visual wrappers while keeping the
+        # normalized text contract for ordinary text-only backends.
+        if media:
+            for argument_name, value in media.items():
+                parameter = parameters.get(argument_name)
+                if parameter is not None and parameter.kind != inspect.Parameter.VAR_POSITIONAL:
+                    if parameter.kind == inspect.Parameter.POSITIONAL_ONLY:
+                        positional_values[argument_name] = value
+                    else:
+                        accepted[argument_name] = value
+                elif accepts_kwargs and argument_name in {"images", "image_urls", "media"}:
+                    accepted.setdefault(argument_name, value)
 
         def call_positional(primary_name: str, primary_value: Any) -> Any:
             """Fill a positional-only prefix without turning optional values into keywords."""
@@ -189,6 +207,7 @@ class ModelCallSkill:
             "contents",
             "text",
             "input",
+            "inputs",
             "context",
             "query",
             "input_text",
@@ -199,9 +218,15 @@ class ModelCallSkill:
             parameter = parameters.get(argument_name)
             if parameter is None:
                 continue
+            argument_value = prompt
+            if argument_name == "inputs" and media and media.get("has_media"):
+                # Multimodal pipelines commonly use ``inputs`` for the
+                # original message list, while text pipelines still receive
+                # the normalized string above.
+                argument_value = messages
             if parameter.kind == inspect.Parameter.POSITIONAL_ONLY:
-                return call_positional(argument_name, prompt)
-            return method(**{argument_name: prompt, **accepted})
+                return call_positional(argument_name, argument_value)
+            return method(**{argument_name: argument_value, **accepted})
         if accepts_kwargs:
             return method(prompt=prompt, **accepted)
         return method(prompt, **accepted)
@@ -331,16 +356,45 @@ class ModelCallSkill:
             return self._finish(response, empty_message="模型 API 返回空文本。", settings=settings, channel="chat_completion")
 
         text_parts: list[str] = []
+        media: dict[str, Any] = {}
+        media_values: list[Any] = []
+        media_parts: list[dict[str, Any]] = []
         for message in messages:
             content = message.get("content") if isinstance(message, dict) else message
             if isinstance(content, str) and content.strip():
                 text_parts.append(content.strip())
             elif isinstance(content, list):
-                text_parts.extend(
-                    str(part.get("text") or "").strip()
-                    for part in content
-                    if isinstance(part, dict) and str(part.get("text") or "").strip()
-                )
+                for part in content:
+                    if not isinstance(part, dict):
+                        continue
+                    text = str(part.get("text") or "").strip()
+                    if text:
+                        text_parts.append(text)
+                    part_type = str(part.get("type") or "").strip().casefold()
+                    if part_type not in {
+                        "image", "image_url", "input_image", "video", "video_url", "audio", "audio_url",
+                    }:
+                        continue
+                    media_parts.append(dict(part))
+                    value = (
+                        part.get("image_url")
+                        or part.get("video_url")
+                        or part.get("audio_url")
+                        or part.get("image")
+                        or part.get("video")
+                        or part.get("audio")
+                    )
+                    if isinstance(value, dict):
+                        value = value.get("url") or value.get("data") or value.get("value")
+                    if value:
+                        media_values.append(value)
+        if media_parts:
+            media = {
+                "images": media_values,
+                "image_urls": media_values,
+                "media": media_parts,
+                "has_media": True,
+            }
         combined_prompt = "\n\n".join(text_parts).strip()
         if callable(getattr(backend, "invoke", None)):
             return self._finish(
@@ -349,6 +403,7 @@ class ModelCallSkill:
                     prompt=combined_prompt,
                     messages=messages,
                     params=dict(params or {}),
+                    media=media,
                 ),
                 empty_message="模型返回空文本。",
                 settings=settings,
@@ -361,6 +416,7 @@ class ModelCallSkill:
                     prompt=combined_prompt,
                     messages=messages,
                     params=dict(params or {}),
+                    media=media,
                 ),
                 empty_message="模型返回空文本。",
                 settings=settings,
@@ -377,6 +433,7 @@ class ModelCallSkill:
                     prompt=combined_prompt,
                     messages=messages,
                     params=dict(params or {}),
+                    media=media,
                 ),
                 empty_message=f"模型 {method_name} 返回空文本。",
                 settings=settings,
@@ -389,6 +446,7 @@ class ModelCallSkill:
                     prompt=combined_prompt,
                     messages=messages,
                     params=dict(params or {}),
+                    media=media,
                 ),
                 empty_message="可调用模型返回空文本。",
                 settings=settings,
