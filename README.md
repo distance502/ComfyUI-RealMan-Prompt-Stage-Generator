@@ -244,7 +244,8 @@ ComfyUI/custom_nodes/ComfyUI-RealMan-Prompt-Stage-Generator
 
 ```powershell
 python -m unittest discover -s tests -p "test_*.py"
-node --test tests/test_stage_prompt_ui_contracts.mjs tests/test_mini_toolbar_contracts.mjs
+$uiTests = (Get-ChildItem tests -Filter "test_*.mjs").FullName
+node --test $uiTests
 python -m py_compile nodes.py stage_prompt_generator.py stage_prompt/formatter.py
 ```
 

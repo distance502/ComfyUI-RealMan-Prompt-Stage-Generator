@@ -10088,20 +10088,22 @@ function clearNodeContinuousRunArtifacts(node, library){
 }
 async function applyPresetStateToNode(node, library, state, options = {}) {
 	const mutationRevision = Math.max(0, Number(options.mutationRevision ?? 0) || 0) || beginNodeStateMutation(node);
-	const nextLibrary = await getFreshLibraryForUi(node, library, { mutationRevision });
-	if (!isNodeStateMutationCurrent(node, mutationRevision)) return { ok: false, queued: false, stale: true, library: nextLibrary };
+	const isCurrent = () => isNodeStateMutationCurrent(node, mutationRevision) && (typeof options.commitGuard !== "function" || options.commitGuard());
+	if (!isCurrent()) return { ok: false, queued: false, stale: true, library };
+	const nextLibrary = await getFreshLibraryForUi(node, library, { mutationRevision, commitGuard: isCurrent });
+	if (!isCurrent()) return { ok: false, queued: false, stale: true, library: nextLibrary };
 	if (node?.[PANEL_KEY]) node[PANEL_KEY].library = nextLibrary;
 	if (!applyNodeState(node, nextLibrary, clonePresetState(state), { recordHistory: true, historySource: "preset-load", mutationRevision })) {
 		return { ok: false, queued: false, stale: true, library: nextLibrary };
 	}
 	if (options.randomizeAfterLoad) {
-		const applied = await buildAndApplyRandomState(node, nextLibrary, { mutationRevision });
+		const applied = await buildAndApplyRandomState(node, nextLibrary, { mutationRevision, commitGuard: isCurrent });
 		if (!applied) return { ok: false, queued: false, stale: true, library: nextLibrary };
 	}
 	if (!options.queue) return { ok: true, queued: false, library: nextLibrary };
-	if (!isNodeStateMutationCurrent(node, mutationRevision)) return { ok: false, queued: false, stale: true, library: nextLibrary };
+	if (!isCurrent()) return { ok: false, queued: false, stale: true, library: nextLibrary };
 	const queued = await queueWorkflowFromNode(node);
-	if (!isNodeStateMutationCurrent(node, mutationRevision)) return { ok: false, queued: false, queueSubmitted: queued, stale: true, library: nextLibrary };
+	if (!isCurrent()) return { ok: false, queued: false, queueSubmitted: queued, stale: true, library: nextLibrary };
 	return { ok: queued, queued, library: nextLibrary };
 }
 async function runNodeContinuousPresetSequence(node, library, selectedPresets, totalRuns, mode = "cycle") {
@@ -10126,7 +10128,7 @@ async function runNodeContinuousPresetSequence(node, library, selectedPresets, t
 		const baselineStamp = getNodeExecutionStamp(node);
 			pushNodeContinuousRunReport(node, library, "提交", `第 ${step + 1}/${totalRuns} 轮：${preset.name}`, { presetName: preset.name, round: step + 1, total: totalRuns, origin: "continuous" });
 		setNodeStatusText(node, `连续测试 ${step + 1}/${totalRuns}：准备提交 ${preset.name}`);
-		const result = await applyPresetStateToNode(node, library, preset.state, { queue: true });
+		const result = await applyPresetStateToNode(node, library, preset.state, { queue: true, commitGuard: () => token === ensureNodeContinuousRuntime(node).token });
 		library = result.library;
 		if (token !== ensureNodeContinuousRuntime(node).token) return false;
 		if (!result.queued) {
@@ -13416,12 +13418,13 @@ async function buildRandomState(node, library, sourceState = null) {
 
 async function buildAndApplyRandomState(node, library, options = {}) {
 	const mutationRevision = Math.max(0, Number(options.mutationRevision ?? 0) || 0) || beginNodeStateMutation(node);
-	if (!isNodeStateMutationCurrent(node, mutationRevision)) return false;
+	const isCurrent = () => isNodeStateMutationCurrent(node, mutationRevision) && (typeof options.commitGuard !== "function" || options.commitGuard());
+	if (!isCurrent()) return false;
 	if (options.recordBefore !== false) {
 		recordNodeHistory(node, collectNodeState(node, library), String(options.beforeHistorySource ?? "before-random"));
 	}
 	const randomState = await buildRandomState(node, library, options.sourceState ?? null);
-	if (!isNodeStateMutationCurrent(node, mutationRevision)) return false;
+	if (!isCurrent()) return false;
 	return applyNodeState(node, library, randomState, {
 		recordHistory: options.recordHistory !== false,
 		historySource: String(options.historySource ?? "random"),
@@ -14292,7 +14295,7 @@ function openPresetManager(node, library) {
 				const baselineStamp = getNodeExecutionStamp(node);
 				statusEl.textContent = `连续测试 ${step + 1}/${totalRuns}：准备提交 ${preset.name}`;
 			pushContinuousRunReport("提交", `第 ${step + 1}/${totalRuns} 轮：${preset.name}`);
-			const queued = await applyPresetToNode(preset, { queue: true });
+			const queued = await applyPresetToNode(preset, { queue: true, commitGuard: () => token === continuousRunToken });
 			if (token !== continuousRunToken) return;
 			if (!queued) {
 				pushContinuousRunReport("失败", `第 ${step + 1}/${totalRuns} 轮：${preset.name} 已载入，但未能自动入队。`);
@@ -14357,7 +14360,8 @@ function openPresetManager(node, library) {
 		};
 	const applyPresetToNode = async (preset, options = {}) => {
 		if (!preset) return false;
-		const result = await applyPresetStateToNode(node, library, preset.state, options);
+		const commitGuard = () => !overlay.__qwenDisposed && (typeof options.commitGuard !== "function" || options.commitGuard());
+		const result = await applyPresetStateToNode(node, library, preset.state, { ...options, commitGuard });
 		library = result.library ?? library;
 		return options.queue ? !!result.queued : !!result.ok;
 	};
