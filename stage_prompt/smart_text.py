@@ -68,6 +68,14 @@ SMART_TEXT_MULTI_VIEW_SYSTEM_TEMPLATE = f"""
 {MULTI_VIEW_MODEL_CONTRACT}
 """.strip()
 
+SMART_TEXT_NON_PERSON_MULTI_VIEW_SYSTEM_TEMPLATE = f"""
+你是 Qwen TE 节点内置的非人物设计图 Smart Prompt Skill。任务是把普通器物、机械或建筑的用户描述、节点标签和参考图可见事实整理成一段可直接出图的自然语言三视图正向提示词。
+
+只输出最终正文，不输出标题、分析、规则、标签列表、Markdown 或平台参数。正文必须先写完整三视图布局，再按同一实体的几何轮廓、尺寸比例、部件数量、连接位置、功能状态、表面处理、配色、材质、统一背景与统一光线展开。固定结构与既定功能状态在三个视图逐项对应；最近输出只用于避让未锁定的结构或材质维度。不要添加事件触发、情绪转折、动作阶段、景深、透视镜头、电影定格或故事结尾。中文和英文均不限制字数。
+
+{visual_layout_contract("multi_view", non_person=True)}
+""".strip()
+
 _SMART_TEXT_WORD_SPLIT_PATTERN = re.compile(r"[\s,，、;；|/\\]+")
 _CJK_PATTERN = re.compile(r"[\u4e00-\u9fff]")
 _SMART_TEXT_ADULT_STRONG_MARKERS = (
@@ -1377,6 +1385,7 @@ def build_smart_text_seed(
     layout_instruction = visual_layout_contract(
         layout_mode,
         english=language in {"纯英文", "英文提示词+中文说明"},
+        non_person=non_person,
     )
     runtime_mode = str(settings.get("运行时随机模式解析结果", "") or settings.get("运行时随机模式", "") or "").strip()
     runtime_intensity = str(settings.get("运行时随机强度", "") or "").strip()
@@ -1395,7 +1404,11 @@ def build_smart_text_seed(
         adult_instruction = (
             "成人设计素材：已启用。只吸收明确成年身份、体型、服装覆盖、配色、材质和可见造型事实，并让它们在三个视图逐项一致；成人动作结果不进入角色设定图。"
             if adult_mode
-            else "成人设计素材：未启用。只按当前角色身份和可见设计事实整理三视图。"
+            else (
+                "设计素材：按当前非人物主体的结构与可见设计事实整理三视图。"
+                if non_person
+                else "成人设计素材：未启用。只按当前角色身份和可见设计事实整理三视图。"
+            )
         )
     else:
         adult_instruction = (
@@ -1410,16 +1423,29 @@ def build_smart_text_seed(
     else:
         language_instruction = "语言要求：只输出中文自然语言正向提示词，不限制字数。"
     if multi_view_mode:
-        output_instruction = (
-            "输出：先完整保留1:1:1横向等宽的正面0度、单个90度标准侧面、背面180度三幅全身及等高基线，"
-            "再用自然语言说明同一角色的正脸、体型、发型、服装前侧后结构、道具固定侧位、配色、材质、统一中性背景与统一光线；"
-            "用户动作只作为三个视图一致的中性站姿、手势和重心参考。不要写事件触发、情绪转折、动作阶段、景深、透视镜头或电影定格；"
-            "不要原样抄写标签，不限制字数。"
-        )
-        creative_spine_line = f"全局角色设计主线：{creative_spine_context or '由当前基础提示词与最终归一化标签确定'}"
-        nsfw_line = f"成人设计素材摘要：{nsfw_context or '未启用或无工作台标签'}"
+        if non_person:
+            output_instruction = (
+                "输出：先完整保留1:1:1横向等宽的正面0度、单个90度标准侧面、背面180度三个完整主体视图及等高基准线，"
+                "再用自然语言说明同一实体的几何轮廓、尺寸比例、部件数量、连接位置、功能状态、配色、材质、统一中性背景与统一光线；"
+                "保持三个视图的结构与既定功能状态一致。不要写事件触发、情绪转折、动作阶段、景深、透视镜头或电影定格；"
+                "不要原样抄写标签，不限制字数。"
+            )
+        else:
+            output_instruction = (
+                "输出：先完整保留1:1:1横向等宽的正面0度、单个90度标准侧面、背面180度三幅全身及等高基线，"
+                "再用自然语言说明同一角色的正脸、体型、发型、服装前侧后结构、道具固定侧位、配色、材质、统一中性背景与统一光线；"
+                "用户动作只作为三个视图一致的中性站姿、手势和重心参考。不要写事件触发、情绪转折、动作阶段、景深、透视镜头或电影定格；"
+                "不要原样抄写标签，不限制字数。"
+            )
+        design_label = "全局实体设计主线" if non_person else "全局角色设计主线"
+        creative_spine_line = f"{design_label}：{creative_spine_context or '由当前基础提示词与最终归一化标签确定'}"
+        nsfw_line = "设计素材范围：当前实体结构、配色、材质与可见功能部件" if non_person else f"成人设计素材摘要：{nsfw_context or '未启用或无工作台标签'}"
         dynamic_line = f"三视图动态变化转换：{dynamic_strategy or '无；保持当前锁定设计'}"
-        recent_line = "最近三视图避重：只变化未锁定的服装结构、材质处理、配色比例、统一光线或背景呈现；不读取历史剧情与动作阶段。"
+        recent_line = (
+            "最近三视图避重：只变化未锁定的结构细节、材质处理、配色比例、统一光线或背景呈现；不读取历史剧情与动作阶段。"
+            if non_person
+            else "最近三视图避重：只变化未锁定的服装结构、材质处理、配色比例、统一光线或背景呈现；不读取历史剧情与动作阶段。"
+        )
     else:
         output_instruction = (
             "输出：当前是非人物主体，优先吸收基础提示词和当前主线，写清处境与功能目标、事件触发、主体状态变化、功能或运动回应、局势升级、环境反馈、光影迁移、视觉高潮与最后定格；聚焦物体、机械、建筑、场景或概念设计本身，只补结构、材质、尺度、功能部件和空间关系；正文使用不限制字数的自然语言；不要原样抄写标签，不要锁死风格和景别，不要重复堆同义标签。"
@@ -1459,7 +1485,11 @@ def build_smart_text_settings(settings: dict[str, Any]) -> dict[str, Any]:
     layout_mode = resolve_visual_layout_mode(settings=next_settings)
     next_settings["画面结构模式解析结果"] = layout_mode
     next_settings["系统提示词覆盖"] = (
-        SMART_TEXT_MULTI_VIEW_SYSTEM_TEMPLATE
+        (
+            SMART_TEXT_NON_PERSON_MULTI_VIEW_SYSTEM_TEMPLATE
+            if str(next_settings.get("主体类型解析结果", "") or next_settings.get("主体类型", "自动") or "自动").strip() == "非人物主体"
+            else SMART_TEXT_MULTI_VIEW_SYSTEM_TEMPLATE
+        )
         if layout_mode == "multi_view"
         else SMART_TEXT_SYSTEM_TEMPLATE
     )
@@ -1706,7 +1736,9 @@ def sanitize_smart_text_prompt(
             adult_mode=adult,
             layout_mode=resolved_layout,
         )
-    if resolved_layout == "multi_view" and not prompt_preserves_visual_layout(raw, resolved_layout):
+    if resolved_layout == "multi_view" and not prompt_preserves_visual_layout(
+        raw, resolved_layout, non_person=str(subject_type or "自动").strip() == "非人物主体"
+    ):
         return fallback_smart_text(
             user_text=user_text,
             primary_prompt=primary_prompt,
@@ -1797,6 +1829,7 @@ def _merge_smart_text_into_multi_view_design(
     user_text: str,
     primary_prompt: str,
     english: bool = False,
+    non_person: bool = False,
 ) -> str:
     primary = _strip_smart_text_meta(primary_prompt)
     if english:
@@ -1815,24 +1848,34 @@ def _merge_smart_text_into_multi_view_design(
             and term.casefold() not in primary.casefold()
             and term.casefold() not in _FALLBACK_NOISE_TERMS
         ][:6]
-    if prompt_preserves_visual_layout(primary, "multi_view"):
+    if prompt_preserves_visual_layout(primary, "multi_view", non_person=non_person):
         if not additions:
             return primary
         if english:
             visible = "; ".join(term for term in additions if not _CJK_PATTERN.search(term))
             if not visible:
                 return primary
+            if non_person:
+                return (
+                    f"{primary} The added design intention, {visible}, is applied at the same structural location in the front, "
+                    "90-degree side, and back views, preserving one physical design, matching components, dimensions, materials, and uniform lighting."
+                )
             return (
                 f"{primary} The added design intention, {visible}, is applied at the same structural location in the front, "
                 "90-degree side, and back views, preserving one identity, one wardrobe construction, matching materials, and uniform lighting."
             )
         visible = "、".join(additions)
+        if non_person:
+            return (
+                f"{primary}。用户补充的{visible}落实到正面、90度侧面和背面的同一结构位置，"
+                "三个视图保持同一实体设计、部件数量、尺寸比例、连接位置、材质对应与统一光线。"
+            )
         return (
             f"{primary}用户补充的{visible}落实到正面、90度侧面和背面的同一结构位置，"
             "三个视图保持同一身份、服装结构、材质对应、道具侧位与统一光线。"
         )
 
-    contract = visual_layout_contract("multi_view", english=english)
+    contract = visual_layout_contract("multi_view", english=english, non_person=non_person)
     source_terms = [
         _FALLBACK_STYLE_LABELS.get(term, term)
         for term in _split_prompt_terms(user_text, primary_prompt)
@@ -1840,12 +1883,27 @@ def _merge_smart_text_into_multi_view_design(
     ]
     source_terms = list(dict.fromkeys(source_terms))[:24]
     if english:
-        visible = "; ".join(term for term in source_terms if not _CJK_PATTERN.search(term)) or "the selected character design"
+        if non_person:
+            # Preserve noun phrases rather than splitting their individual words into tags.
+            source_terms = _english_fallback_fragments(user_text, primary_prompt)
+        visible = "; ".join(term for term in source_terms if not _CJK_PATTERN.search(term)) or (
+            "the selected non-human subject design" if non_person else "the selected character design"
+        )
+        if non_person:
+            return (
+                f"{contract} The three views present {visible} as one physical design, with matching geometry, overall proportions, "
+                "component count, connection points, functional state, surface finish, palette, materials, clean background, and uniform lighting."
+            )
         return (
             f"{contract} The three views present {visible} as one continuous identity, with matching face, body build, hairstyle, "
             "wardrobe construction, palette, materials, prop placement, neutral stance, clean background, and uniform lighting."
         )
-    visible = "、".join(source_terms) or "当前角色设计"
+    visible = "、".join(source_terms) or ("当前非人物主体设计" if non_person else "当前角色设计")
+    if non_person:
+        return (
+            f"{contract}三栏共同展示{visible}，正面、90度侧面和背面保持同一实体设计、几何轮廓、整体比例、"
+            "部件数量、连接位置、既定功能状态、表面处理、配色、材质、简洁背景与统一光线。"
+        )
     return (
         f"{contract}三栏共同展示{visible}，正面、90度侧面和背面保持同一身份、正脸、体型、发型、"
         "服装结构、配色、材质、道具侧位、中性站姿、简洁背景与统一光线。"
@@ -1866,6 +1924,7 @@ def _fallback_smart_text_chinese(
             user_text=user_text,
             primary_prompt=primary_prompt,
             english=False,
+            non_person=str(subject_type or "自动").strip() == "非人物主体",
         )
         adult = bool(adult_mode) or looks_like_adult_request(f"{user_text} {primary_prompt}", [])
         return _soften_explicit_adult_terms(
@@ -2030,6 +2089,7 @@ def _fallback_smart_text_english(
             user_text=user_text,
             primary_prompt=primary_prompt,
             english=True,
+            non_person=str(subject_type or "自动").strip() == "非人物主体",
         )
         adult = bool(adult_mode) or looks_like_adult_request(f"{user_text} {primary_prompt}", [])
         return _normalize_english_adult_subject_terms(merged, adult=adult)

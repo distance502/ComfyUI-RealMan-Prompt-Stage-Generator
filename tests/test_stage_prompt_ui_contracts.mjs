@@ -206,6 +206,11 @@ globalThis.__stagePromptUiTestExports = {
 	getModelRuntimeStatusSummary,
 	getModelApiConfigValidationError,
 	getModelApiEffectiveConfig,
+	getModelApiModelSuggestions,
+	refreshModelApiModelSuggestions,
+	createModelLoaderSelect,
+	refreshModelLoaderSelectOptions,
+	refreshModelLoaderDeck,
 	getModelLoaderSummary,
 	clearPendingModelApiRun,
 	rememberModelApiRuntimeSignature,
@@ -1694,7 +1699,7 @@ test("stage model dialog exposes compact controls without taking over external l
 	assert.equal(source.includes("Claude Anthropic"), true);
 	assert.equal(source.includes("域名根地址会自动补全 /v1/messages"), true);
 	assert.equal(source.includes("Gemini 原生"), true);
-	assert.equal(source.includes('{ value: "通义千问DashScope", label: "通义", baseUrl: "https://dashscope.aliyuncs.com/api/v1", model: "qwen3.7-max"'), true);
+	assert.equal(source.includes('{ value: "通义千问DashScope", label: "通义", baseUrl: "https://dashscope.aliyuncs.com/api/v1", model: "qwen3.8-max"'), true);
 	for (const provider of ["Groq", "Together", "Fireworks", "Perplexity", "Gemini OpenAI兼容", "自定义"]) {
 		assert.equal(source.includes(`value: "${provider}"`), true, `${provider} API provider should be available`);
 	}
@@ -1747,6 +1752,70 @@ test("model API provider switching clears stale address and model values", async
 	assert.equal(node[exports.PANEL_KEY].modelApiRuntimeInvalidated, true);
 });
 
+test("current model suggestions are provider-scoped and never rewrite custom IDs", async () => {
+	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	const list = makeElement("datalist");
+	const customModel = makeElement("input");
+	customModel.value = "my-private-pinned-model";
+	const deck = { apiModelSuggestionList: list, inputs: [customModel] };
+	exports.refreshModelApiModelSuggestions(deck, "通义千问DashScope");
+	assert.equal(list.children.some((item) => item.value === "qwen3.8-max"), true);
+	assert.equal(list.children.some((item) => item.value === "qwen-image-3.0-pro"), false);
+	const firstOption = list.children[0];
+	exports.refreshModelApiModelSuggestions(deck, "通义千问DashScope");
+	assert.equal(list.children[0], firstOption, "unchanged provider must not rebuild options on every keystroke");
+	exports.refreshModelApiModelSuggestions(deck, "DeepSeek");
+	assert.equal(list.children[0].value, "deepseek-flash");
+	assert.equal(list.children.some((item) => item.value === "qwen3.8-max"), false);
+	assert.equal(customModel.value, "my-private-pinned-model");
+	const choices = exports.getModelApiModelSuggestions("DeepSeek");
+	choices.push("not-a-catalog-model");
+	assert.equal(exports.getModelApiModelSuggestions("DeepSeek").includes("not-a-catalog-model"), false);
+	assert.equal(exports.getModelApiModelSuggestions("自定义").length, 0);
+});
+
+test("model selects retain legacy selections omitted from current file scans", async () => {
+	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	const widget = {
+		name: "主模型",
+		value: "qwen-00002-of-00002.gguf",
+		options: { values: ["无", "qwen-00001-of-00002.gguf"] },
+	};
+	const node = { widgets: [widget] };
+	const select = exports.createModelLoaderSelect(node, "主模型", "主模型");
+	assert.equal(select.children.some((option) => option.value === widget.value), true,
+		"saved shard must have a matching option or a real HTML select will display blank");
+	assert.equal(select.value, "qwen-00002-of-00002.gguf");
+	assert.deepEqual(widget.options.values, ["无", "qwen-00001-of-00002.gguf"], "UI must not mutate backend candidates");
+	const firstOption = select.children[0];
+	assert.equal(exports.refreshModelLoaderSelectOptions(select, node), false);
+	assert.equal(select.children[0], firstOption, "unchanged options must not rebuild the open menu");
+	widget.value = "qwen-00001-of-00002.gguf";
+	exports.refreshModelLoaderSelectOptions(select, node);
+	assert.equal(select.value, widget.value);
+	assert.equal(select.children.some((option) => option.value === "qwen-00002-of-00002.gguf"), false,
+		"obsolete legacy options disappear after the user selects a current file");
+});
+
+test("model deck refresh synchronizes changed file and runtime option lists", async () => {
+	const exports = await loadUiExports("http://127.0.0.1:8188/");
+	const model = { name: "主模型", value: "old.gguf", options: { values: ["old.gguf"] } };
+	const flash = { name: "Flash注意力", value: "自动", options: { values: ["自动", "开启"] } };
+	const node = { widgets: [model, flash] };
+	const modelSelect = exports.createModelLoaderSelect(node, "主模型", "主模型");
+	const flashSelect = exports.createModelLoaderSelect(node, "Flash注意力", "Flash 注意力");
+	const deck = { panel: makeElement("div"), selects: [modelSelect], flashSelect };
+	model.options.values = ["new.gguf"];
+	model.value = "new.gguf";
+	flash.options.values = ["自动", "开启", "关闭"];
+	flash.value = "关闭";
+	exports.refreshModelLoaderDeck(deck, node);
+	assert.deepEqual(modelSelect.children.map((option) => option.value), ["new.gguf"]);
+	assert.equal(modelSelect.value, "new.gguf");
+	assert.equal(flashSelect.children.some((option) => option.value === "关闭"), true);
+	assert.equal(flashSelect.value, "关闭");
+});
+
 test("model API provider select changes also apply the matching preset", async () => {
 	const exports = await loadUiExports("http://127.0.0.1:8188/");
 	const node = {
@@ -1765,7 +1834,7 @@ test("model API provider select changes also apply the matching preset", async (
 	exports.setModelLoaderWidgetValue(node, "API服务商", "DeepSeek");
 	assert.equal(node.widgets[1].value, "DeepSeek");
 	assert.equal(node.widgets[2].value, "https://api.deepseek.com");
-	assert.equal(node.widgets[3].value, "deepseek-v4-flash");
+	assert.equal(node.widgets[3].value, "deepseek-flash");
 	assert.equal(node.widgets[4].value, "env:DEEPSEEK_API_KEY");
 	assert.equal(node.widgets[5].value, "");
 });

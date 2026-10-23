@@ -144,6 +144,9 @@ def storyboard_phases_are_ordered(
     return True
 
 _MULTI_VIEW_CONTAINER_MARKERS = (
+    "三视图",
+    "非人物主体三视图",
+    "non-human subject three-view",
     "角色设定图",
     "角色三视图",
     "多视角角色展示",
@@ -380,8 +383,25 @@ def resolve_visual_layout_mode(
     return VISUAL_LAYOUT_SINGLE_NON_PERSON if non_person else VISUAL_LAYOUT_SINGLE_PERSON
 
 
-def visual_layout_contract(mode: str, *, english: bool = False) -> str:
+def visual_layout_contract(mode: str, *, english: bool = False, non_person: bool = False) -> str:
     resolved = str(mode or VISUAL_LAYOUT_SINGLE_PERSON).strip()
+    if resolved == VISUAL_LAYOUT_MULTI_VIEW and non_person:
+        if english:
+            return (
+                "Use a non-human subject three-view design reference. For the standard layout, show the same complete subject "
+                "in exactly three equal-width columns from left to right: front at 0 degrees, one true side profile at 90 degrees, "
+                "and back at 180 degrees, in a balanced 1:1:1 arrangement. Keep identical scale and overall height, one shared "
+                "top extent and base datum, matching camera height, orthographic projection, complete silhouette framing, and equal margins. "
+                "Preserve one physical design with matching geometry, component count, relative dimensions, surfaces, palette, materials, "
+                "connection points, and existing functional state. Any explicitly requested detail belongs in a separate support strip "
+                "without reducing the primary views; an alternative explicitly requested view count is distributed evenly."
+            )
+        return (
+            "非人物主体三视图从左到右为正面视图0度、单个90度标准侧面、背面视图180度，横向三栏等宽且1:1:1均衡布局。"
+            "同一主体等比例、整体等高，共享顶端高度线与底部基准线、统一镜头高度和正交投影，完整轮廓入镜且各栏留白一致。"
+            "各视图对应同一实体设计，几何结构、部件数量、相对尺寸、表面、配色、材质、连接位置和既定功能状态一致；"
+            "要求的细节另置且不改变主视图尺寸，其他明确指定的多视图按请求数量均分。"
+        )
     if english:
         if resolved == VISUAL_LAYOUT_MULTI_VIEW:
             return (
@@ -447,20 +467,27 @@ def prompt_is_positive_layout_safe(text: str, mode: str) -> bool:
     return True
 
 
-def prompt_preserves_visual_layout(text: str, mode: str) -> bool:
+def prompt_preserves_visual_layout(text: str, mode: str, *, non_person: bool | None = None) -> bool:
     source = str(text or "").casefold()
     resolved = str(mode or "").strip()
     if not source or not resolved or not prompt_is_positive_layout_safe(source, resolved):
         return False
     if resolved == VISUAL_LAYOUT_MULTI_VIEW:
-        if any(marker.casefold() in source for marker in _CHARACTER_SHEET_MARKERS):
+        # A known caller's subject type outranks labels supplied by a model.
+        # Legacy callers without subject metadata can recognize our own prose.
+        has_non_person_label = any(
+            marker in source for marker in ("非人物主体三视图", "non-human subject three-view")
+        )
+        non_person_views = bool(non_person) if non_person is not None else has_non_person_label
+        if non_person_views or has_non_person_label or any(marker.casefold() in source for marker in _CHARACTER_SHEET_MARKERS):
             required_groups = (
                 _THREE_VIEW_FRONT_MARKERS,
                 _THREE_VIEW_SIDE_MARKERS,
                 _THREE_VIEW_BACK_MARKERS,
                 _THREE_VIEW_RATIO_MARKERS,
-                _THREE_VIEW_FACE_MARKERS,
             )
+            if not non_person_views:
+                required_groups += (_THREE_VIEW_FACE_MARKERS,)
             return all(any(marker.casefold() in source for marker in group) for group in required_groups)
         return bool(_positive_marker_hits([source], _MULTI_VIEW_CONTAINER_MARKERS)) or len(
             _positive_marker_hits([source], _MULTI_VIEW_ANGLE_MARKERS)
@@ -978,6 +1005,77 @@ def _fit_chinese_narrative_sections(
     return "".join(section.strip() for section in sections if section.strip())
 
 
+def _render_non_person_multi_view(
+    anchors: Mapping[str, Any], *, english: bool, detail_level: str
+) -> str:
+    """Describe the selected object/structure without borrowing character anatomy."""
+
+    subject = _anchor(anchors, "subject", "the selected subject" if english else "当前主体")
+    composition = _anchor(anchors, "composition", "complete-subject framing" if english else "完整主体取景")
+    surface = _anchor(anchors, "outfit", "the selected surface construction" if english else "已选表面与结构")
+    props = _anchor(anchors, "props", "the existing design details" if english else "既有设计细节")
+    scene = _anchor(anchors, "scene", "one neutral background" if english else "统一中性背景")
+    lighting = _anchor(anchors, "lighting", "consistent directional lighting" if english else "方向一致的统一光线")
+    style = _anchor(anchors, "style") or _anchor(anchors, "lead", "a coherent visual medium" if english else "统一视觉媒介")
+    quality = _anchor(anchors, "quality", "clear geometry and material detail" if english else "清晰结构与材质细节")
+    action = _anchor(anchors, "action")
+    support = _anchor(anchors, "support")
+    details = [_anchor(anchors, name) for name in ("custom", "residual") if _anchor(anchors, name)]
+    target = _anchor(anchors, "image_target", "通用")
+    contract = visual_layout_contract(VISUAL_LAYOUT_MULTI_VIEW, english=english, non_person=True)
+    if english:
+        openings = {
+            "FLUX.3": f"{style} defines one medium; the same {subject} appears at equal scale in all three views, with {scene} as a shared setting.",
+            "MOSS Image": f"{composition} places the same {subject} in corresponding positions across the three columns; {surface} and {props} keep the same spatial relationships.",
+        }
+        opening = openings.get(target, f"The three columns show the same {subject} through {composition}, with {style} defining one coherent design language.")
+        design = (
+            f"The design is defined by {surface}; {props} retains the same physical side, connection points, and position relative to the subject. "
+            "Outer contours, component dimensions, surface divisions, material transitions, and existing wear correspond from front to side to back."
+        )
+        if action:
+            design += f" The selected state, {action}, remains one unchanged functional or structural state across the views."
+        presentation = (
+            f"{scene} provides one consistent background and scale reference; {composition} keeps the whole subject visible without perspective exaggeration. "
+            f"{lighting} maintains the same direction, color temperature, softness, and exposure, so {surface} and {props} can be compared directly."
+        )
+        if support:
+            presentation += f" {support}."
+        detail = (
+            (f"The supplied details, {'; '.join(details)}, occupy corresponding structural positions in all views. " if details else "")
+            + "The front view explains the primary construction, the 90-degree side view explains depth and side connections, "
+            f"and the back view explains the rear construction. The result preserves {quality}, accurate component count, clean contours, and consistent proportions."
+        )
+        closing = "The three columns are parallel reference views of one physical design, suitable for checking geometry, assembly, and materials."
+    else:
+        openings = {
+            "FLUX.3": f"{style}统一三栏媒介语言，同一{subject}在各视图保持同等尺度，{scene}作为一致环境。",
+            "MOSS Image": f"{composition}使同一{subject}位于三栏对应位置，{surface}与{props}保持相同空间关系。",
+        }
+        opening = openings.get(target, f"三栏共同以{composition}展示同一{subject}，{style}统一设计语言。")
+        design = (
+            f"主体设计围绕{surface}展开，{props}固定在同一物理侧、连接位置以及相对主体的空间位置；"
+            "外部轮廓、部件尺寸、表面分区、材质过渡与既有磨损从正面贯通到侧面和背面。"
+        )
+        if action:
+            design += f"已选状态{action}在各视图中仅作为同一功能或结构状态保持不变。"
+        presentation = (
+            f"{scene}在三栏提供同一背景和尺度参照，{composition}使主体完整入镜且不引入透视夸张。"
+            f"{lighting}保持相同方向、色温、软硬度与曝光，使{surface}和{props}的明暗关系可直接比较"
+            f"{'；' + support if support else ''}。"
+        )
+        detail = (
+            (f"用户补充的{'、'.join(details)}落实到三个视图的对应结构位置。" if details else "")
+            + f"正面视图完整说明主要构造，90度侧面说明主体厚度与侧部连接，背面视图说明后部构造；"
+            f"最终保持{quality}、准确部件数量、干净轮廓和一致比例。"
+        )
+        closing = "三栏作为同一实体设计的并列校对视图，几何结构、装配关系与材质逻辑逐项对应。"
+    sections = [contract, opening, design, presentation, detail, closing]
+    if _clean(detail_level) in {"简洁", "短"}:
+        sections = [contract, opening, design, detail]
+    return (" " if english else "").join(section.strip() for section in sections if section.strip())
+
+
 def _render_chinese(
     anchors: Mapping[str, Any],
     plan: Mapping[str, Any],
@@ -1003,7 +1101,7 @@ def _render_chinese(
     quality = _anchor(anchors, "quality", "高细节、清晰对焦与稳定结构")
     support = _anchor(anchors, "support")
     image_target = _anchor(anchors, "image_target", "通用")
-    layout_clause = visual_layout_contract(layout_mode, english=False)
+    layout_clause = visual_layout_contract(layout_mode, english=False, non_person=non_person)
 
     style_clause = f"，以{style}作为统一媒介语言" if style else ""
     if style_bridge:
@@ -1015,7 +1113,17 @@ def _render_chinese(
         adult_clause = "；主体年龄明确为成年，成熟私密氛围通过情境、视线和材质表达"
 
     if layout_mode == VISUAL_LAYOUT_MULTI_VIEW:
+        if non_person:
+            return _render_non_person_multi_view(anchors, english=False, detail_level=detail_level)
         target_view_openings = {
+            "FLUX.3": (
+                f"{style or lead}统一三栏的媒介语言；同一{subject}在正面、侧面与背面保持同等尺度，"
+                f"{scene}作为一致背景，{outfit}和{props}保持同一归属与结构，{lighting}方向完全对应。"
+            ),
+            "MOSS Image": (
+                f"{composition}服从三栏等宽、等高的版式，同一{subject}在每栏占据对应位置；"
+                f"{outfit}、{props}与人物的从属关系不变，{scene}和{lighting}共同提供统一的设计参照。"
+            ),
             "Flux": (
                 f"同一{subject}在三栏中保持统一身份，{action}只作为可比较的中性姿态参考；{scene}保持为简洁统一背景，"
                 f"{composition}服从等高全身取景，{lighting}在各栏方向和强度一致，{outfit}与{style or lead}保持连续。"
@@ -1080,6 +1188,14 @@ def _render_chinese(
         return _fit_chinese_narrative_sections(sections, [])
 
     target_openings = {
+        "FLUX.3": (
+            f"画面采用{style or lead}的媒介语言，以{composition}展示处于{scene}的{subject}；"
+            f"主体以{action}与{props}建立可见关系，{lighting}呈现{outfit}的材质与空间层次。"
+        ),
+        "MOSS Image": (
+            f"画面以{composition}呈现{scene}中的{subject}，{props}的位置和归属清楚可辨；"
+            f"主体以{action}回应眼前事件，{outfit}提供可见材质依据，{lighting}、色彩与{style or lead}统一画面。"
+        ),
         "Flux": (
             f"{subject}正以{action}处于{scene}，镜头采用{composition}；{lighting}沿动作方向塑造形体，"
             f"{outfit}提供可见材质依据，整体以{style or lead}保持统一媒介。"
@@ -1260,7 +1376,7 @@ def _render_english(
     quality = _anchor(anchors, "quality", "high detail, clean focus, and stable structure")
     support = _anchor(anchors, "support")
     image_target = _anchor(anchors, "image_target", "通用")
-    layout_clause = visual_layout_contract(layout_mode, english=True)
+    layout_clause = visual_layout_contract(layout_mode, english=True, non_person=non_person)
 
     style_clause = f", unified by {style}" if style else ""
     if style_bridge:
@@ -1272,7 +1388,17 @@ def _render_english(
         adult_clause = " The subject is unambiguously adult, with maturity expressed through context, gaze, and materials."
 
     if layout_mode == VISUAL_LAYOUT_MULTI_VIEW:
+        if non_person:
+            return _render_non_person_multi_view(anchors, english=True, detail_level=detail_level)
         target_view_openings = {
+            "FLUX.3": (
+                f"{style or lead} defines one medium across all three columns. {subject} keeps the same scale in front, side and back views; "
+                f"{scene} remains a shared background, {outfit} and {props} preserve ownership and construction, and {lighting} matches throughout."
+            ),
+            "MOSS Image": (
+                f"{composition} follows an equal-width, equal-height three-column layout, with {subject} in corresponding positions. "
+                f"{outfit} and {props} keep the same relationship to the subject, while {scene} and {lighting} provide one shared design reference."
+            ),
             "Flux": (
                 f"Across all three columns, {subject} keeps one continuous identity, while {action} serves only as a comparable neutral-pose reference. "
                 f"{scene} remains a restrained shared background, {composition} obeys equal-height full-body framing, {lighting} stays consistent, "
@@ -1340,6 +1466,14 @@ def _render_english(
         return " ".join(section.strip() for section in sections if section.strip())
 
     target_openings = {
+        "FLUX.3": (
+            f"The image uses {style or lead}, with {composition} showing {subject} in {scene}. "
+            f"Through {action}, the subject has a visible relationship to {props}; {lighting} reveals the materials of {outfit} and the spatial depth."
+        ),
+        "MOSS Image": (
+            f"The image uses {composition} to show {subject} in {scene}, with the position and ownership of {props} clearly visible. "
+            f"The subject responds through {action}, with {outfit} supplying visible material evidence; {lighting}, color and {style or lead} unify the scene."
+        ),
         "Flux": (
             f"{subject} performs {action} in {scene}, framed through {composition}. {lighting} shapes the action, "
             f"{outfit} supplies concrete material evidence, and {style or lead} keeps the medium coherent."

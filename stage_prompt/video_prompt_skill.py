@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import re
 from collections import OrderedDict
+from copy import deepcopy
 from typing import Any, Mapping, Sequence
 
 try:
@@ -24,12 +25,11 @@ except Exception:  # pragma: no cover - direct file loading in focused tests
     )
 
 
-VIDEO_PROMPT_SKILL_VERSION = "video-prompt-skill-v12"
+VIDEO_PROMPT_SKILL_VERSION = "video-prompt-skill-v13"
 VIDEO_PROMPT_DURATION_SECONDS = 8
 VIDEO_PROMPT_MIN_CHARS_ZH = 0  # Compatibility export: text length has been unbounded since v4.
 VIDEO_PROMPT_MAX_CHARS_ZH = 0  # Zero means unbounded.
 VIDEO_PROMPT_MIN_STORYBOARD_PARAGRAPHS = 3
-VIDEO_PROMPT_TARGET_MODEL_OPTIONS = ("通用", "H3", "Wan", "LTX", "Seedance", "自定义")
 VIDEO_PROMPT_INPUT_MODE_OPTIONS = ("T2V", "I2V", "FL2V", "L2V", "Ref2V")
 VIDEO_PROMPT_SHOT_COUNT_OPTIONS = ("自动", "单镜头", "短动作", "标准剧情", "长剧情")
 VIDEO_PROMPT_MODEL_PROFILES: dict[str, dict[str, Any]] = {
@@ -76,6 +76,30 @@ VIDEO_PROMPT_MODEL_PROFILES: dict[str, dict[str, Any]] = {
         "continuity": "preserve_explicit_creative_spine",
     },
 }
+_VERSIONED_VIDEO_TARGETS = {
+    "FLUX.3 Video": ("通用", ["flux-3-video"], ["T2V", "I2V", "FL2V"], True),
+    "Wan 3.0": ("Wan", ["wan3.0-video", "wan3.0-video-prime"], ["T2V", "I2V", "FL2V", "Ref2V"], True),
+    "Wan 2.7": ("Wan", ["wan2.7-t2v", "wan2.7-i2v", "wan2.7-r2v-2026-06-12"], ["T2V", "I2V", "FL2V", "Ref2V"], True),
+    "LTX 2.5": ("LTX", ["Lightricks/LTX-2.5"], ["T2V", "I2V"], True),
+    "HappyHorse 1.1": ("通用", ["happyhorse-1.1-t2v", "happyhorse-1.1-i2v", "happyhorse-1.1-r2v"], ["T2V", "I2V", "Ref2V"], True),
+    "Veo 3.1": ("通用", ["veo-3.1-generate-preview"], ["T2V", "I2V"], True),
+}
+for _target, (_family, _model_ids, _input_modes, _native_audio) in _VERSIONED_VIDEO_TARGETS.items():
+    VIDEO_PROMPT_MODEL_PROFILES[_target] = {
+        **deepcopy(VIDEO_PROMPT_MODEL_PROFILES[_family]),
+        "target_model": _target,
+        "family": _family,
+        "model_ids": _model_ids,
+        "supported_input_modes": _input_modes,
+        "native_audio": _native_audio,
+        "submission_unit": "per_shot" if _family == "LTX" else "storyboard_or_per_shot",
+        "catalog_checked_on": "2026-10-23",
+        "parameter_policy": "configure_duration_resolution_and_references_downstream",
+        "weight_format_policy": "same_prompt_for_native_and_GGUF_weights; downstream_loader_must_support_architecture",
+    }
+VIDEO_PROMPT_TARGET_MODEL_OPTIONS = (
+    *[name for name in VIDEO_PROMPT_MODEL_PROFILES if name != "自定义"], "自定义"
+)
 VIDEO_PROMPT_TIMELINE_SEGMENTS = (
     (0, 2),
     (2, 4),
@@ -145,10 +169,26 @@ def resolve_video_prompt_profile(settings: Mapping[str, Any] | None) -> dict[str
         source.get("主体类型解析结果", source.get("主体类型", "自动")) or "自动"
     ).strip()
     subject_kind = "non_person" if subject_type == "非人物主体" else "person_or_auto"
+    profile = deepcopy(VIDEO_PROMPT_MODEL_PROFILES[target])
+    supported_modes = profile.get("supported_input_modes")
+    input_mode_supported = input_mode in supported_modes if supported_modes else None
+    input_contracts = {
+        "T2V": "establish the visible subject and scene from text before describing motion",
+        "I2V": "preserve the supplied first frame identity, composition and visible facts; describe subsequent motion",
+        "FL2V": "connect the supplied first and last frames with a continuous plausible transition",
+        "L2V": "converge on the supplied final frame without inventing an unrelated ending",
+        "Ref2V": "preserve supplied reference identities and spatial relations; do not invent missing reference assets",
+    }
     return {
-        **VIDEO_PROMPT_MODEL_PROFILES[target],
+        **profile,
         "target_model": target,
         "input_mode": input_mode,
+        "input_contract": input_contracts[input_mode],
+        "input_mode_supported": input_mode_supported,
+        "compatibility_notes": (
+            [f"{target} 的当前 Profile 未确认 {input_mode}；请核对下游具体型号及输入素材，未自动改写用户选择。"]
+            if input_mode_supported is False else []
+        ),
         "timeline_enabled": timeline_enabled,
         "shot_count": shot_count,
         "shot_count_mode": str(source.get("视频提示词镜头段数", "自动") or "自动"),
@@ -174,6 +214,29 @@ VIDEO_PROMPT_MODEL_SYSTEM_TEMPLATE = """
 7. 输入包含动作结果阶段时，必须把结果写成既有动作的因果结果，不得拆成独立标签或无来源事件；结果前后固定接触点、人物数量、镜头轴线与结束状态，不得新增人物、地点、道具、接触关系或跳轴镜头。
 8. 如果底稿由角色设定图或三视图投影而来，只保留角色身份、外观、服装、材质、配色、普通道具、风格与光线事实，并把它们放进一个连续可拍摄的故事。不得重新写入角色设定图、正侧背视图、三栏、1:1:1、等高基线、正交投影、中性棚拍或中性参考站姿。
 """.strip()
+
+
+def _video_reference_prose(settings: Mapping[str, Any], *, english: bool) -> tuple[str, str]:
+    """Make reference constraints visible in Skill prose, not just metadata."""
+    mode = resolve_video_prompt_profile(settings)["input_mode"]
+    if english:
+        openings = {
+            "I2V": "The opening preserves the identity, appearance, framing and spatial relationships already established in the supplied first frame, and motion continues from that state.",
+            "FL2V": "The story begins with the visible relationships already established in the supplied first frame.",
+            "L2V": "The opening and subsequent action form a traceable causal path toward the supplied final frame.",
+            "Ref2V": "Identity, appearance, prop ownership and spatial proportions remain consistent with the supplied references throughout the camera changes.",
+        }
+        closing = "The camera finally reaches the subject positions, framing and lighting already established in the supplied last frame through one coherent spatial transition."
+    else:
+        openings = {
+            "I2V": "开场沿用输入首帧已确立的主体身份、外观、构图和空间关系，动作从该状态自然延续。",
+            "FL2V": "故事从输入首帧已经确立的可见画面关系起步。",
+            "L2V": "开场与后续动作围绕输入尾帧建立可追踪的因果关系。",
+            "Ref2V": "主体身份、外观、道具归属与空间比例沿用已提供的参考素材，在镜头变化中保持一致。",
+        }
+        closing = "镜头最终落在输入尾帧已确定的主体位置、构图与光照状态，过渡在同一空间中连贯完成。"
+    return openings.get(mode, ""), closing if mode in {"FL2V", "L2V"} else ""
+
 
 _EMPTY_VALUES = {"", "无", "自动", "未启用", "none", "null", "undefined"}
 _META_MARKERS = (
@@ -793,6 +856,8 @@ def _camera_move_en(source_prompt: str, *, seed: int) -> str:
 
 def _audio_zh(scene: str, action: str, non_person: bool) -> str:
     source = f"{scene} {action}"
+    if non_person:
+        return "声音跟随既有结构状态、材质接触和空间回声变化，不额外加入旁白"
     if any(marker in source for marker in ("雨", "暴风", "雷")):
         return "声音以雨点落在地面和衣料上的轻重变化为主，远处环境声保持模糊"
     if any(marker in source for marker in ("海", "沙滩", "海岸", "码头")):
@@ -801,8 +866,6 @@ def _audio_zh(scene: str, action: str, non_person: bool) -> str:
         return "声音只保留风穿过枝叶、脚步触地和远处自然回声"
     if any(marker in source for marker in ("城市", "街", "车站", "地铁", "市场")):
         return "环境声由远处交通、人群底噪和主体近处的脚步组成"
-    if non_person:
-        return "声音跟随结构运转、材质接触和空间回声变化，不额外加入旁白"
     return "声音只保留呼吸、脚步、衣料摩擦和当前空间原本存在的环境声"
 
 
@@ -810,17 +873,18 @@ def _audio_metadata(scene: str, action: str, settings: Mapping[str, Any], *, eng
     """Expose audio channels without inventing dialogue or off-screen events."""
 
     target = resolve_video_prompt_profile(settings).get("target_model", "通用")
+    non_person = str(settings.get("主体类型解析结果") or settings.get("主体类型") or "").strip() == "非人物主体"
     if english:
         return {
             "overall_soundscape": f"natural ambience of {scene}, kept spatially consistent",
             "dialogue": "none unless already present in the source brief",
-            "sound_effects": f"footsteps, material contact, and the direct sound of {action}",
+            "sound_effects": f"{'existing structural changes' if non_person else 'footsteps'}, material contact, and the direct sound of {action}",
             "non_diegetic_music": "restrained score only" if target == "H3" else "N/A",
         }
     return {
         "overall_soundscape": f"{scene}原本存在的环境底噪，保持远近层次连续",
         "dialogue": "除非源文本已有对白，否则不新增对白",
-        "sound_effects": f"脚步、材质接触声以及{action}直接产生的声音",
+        "sound_effects": f"{'既有结构状态变化' if non_person else '脚步'}、材质接触声以及{action}直接产生的声音",
         "non_diegetic_music": "只保留克制的非叙事配乐" if target == "H3" else "无",
     }
 
@@ -841,7 +905,11 @@ def _subject_reference_zh(subject: str, non_person: bool) -> str:
     return "这个人物"
 
 
-def _environment_feedback_zh(scene: str, action: str, reference: str, outfit: str) -> str:
+def _environment_feedback_zh(
+    scene: str, action: str, reference: str, outfit: str, *, non_person: bool = False,
+) -> str:
+    if non_person:
+        return f"{reference}的既有结构状态、接触阴影与表面反光沿同一变化方向依次回应，变化保持在原有空间关系中"
     source = f"{scene} {action}"
     if any(marker in source for marker in ("雨", "暴风", "雷")):
         clothing = "衣摆" if outfit else "身体边缘"
@@ -872,6 +940,31 @@ def _personalize(text: Any, subject: str, scene: str) -> str:
         return ""
     value = value.replace("主体", subject).replace("当前空间", scene)
     return value[0].lower() + value[1:] if value[:1].isascii() else value
+
+
+def _non_person_video_plan(plan: Mapping[str, Any]) -> dict[str, Any]:
+    """Replace human-only stock beats, never the user's explicit visual anchors."""
+
+    result = dict(plan)
+    neutral = {
+        "opening": ("主体在当前空间保持既有结构状态，细微变化开始沿同一方向展开", "The subject holds its existing structural state as a small change begins in the same space"),
+        "motive": ("主体与周边环境的状态差异构成这次变化的可见前提", "The difference between the subject's state and its surroundings establishes the visible cause"),
+        "trigger": ("周边环境的细微变化打破原有平衡", "A small environmental change disrupts the existing balance"),
+        "response": ("主体的既有结构状态对同一变化形成可追踪的回应", "The established structure responds to the same change in a traceable way"),
+        "escalation": ("变化沿既定结构关系逐步传递，结果在原有轮廓与材质上变得更清楚", "The change travels through the established structural relations and becomes clearer on the existing surfaces"),
+        "feedback": ("接触阴影与表面反光共同标出这次变化的方向", "Contact shadows and surface reflections trace the direction of the change"),
+        "climax": ("前后状态的差异在同一结构位置达到最清楚的可见程度", "The difference between the earlier and later states is clearest at the same structural location"),
+        "turn": ("原有结构关系随变化显出新的状态差异", "The same structural relations reveal a visible difference in state"),
+        "ending": ("主体与环境在变化后的状态中逐步稳定，可见结果留在原有空间", "The subject and surroundings settle into the changed state with the consequence visible in the same space"),
+    }
+    human_zh = re.compile(r"人物|表情|手部|手势|呼吸|发丝|衣料|衣摆|服装|视线|脚步|情绪")
+    human_en = re.compile(r"\b(?:gaze|glance|hands?|faces?|facial|hair|clothes?|clothing|garments?|breath(?:ing)?|emotions?|hesitat\w*|fear|relief)\b", re.IGNORECASE)
+    for key, (zh, en) in neutral.items():
+        if human_zh.search(str(result.get(f"{key}_zh", ""))):
+            result[f"{key}_zh"] = zh
+        if human_en.search(str(result.get(f"{key}_en", ""))):
+            result[f"{key}_en"] = en
+    return result
 
 
 def _dedupe_sentences(text: str) -> str:
@@ -987,11 +1080,20 @@ def _adapt_storyboard_paragraphs(
     )
 
 
-def _english_source_clause(primary_prompt: str) -> str:
+def _english_source_clause(primary_prompt: str, *, reference_framing: bool = False) -> str:
     source = re.sub(r"\s+", " ", str(primary_prompt or "")).strip()
     source = re.sub(r"中文说明\s*[:：].*$", "", source, flags=re.DOTALL).strip()
     if not source or re.search(r"[\u4e00-\u9fff]", source):
         return "the established subject in the selected location"
+    if reference_framing:
+        # Keep the English draft's identity/scene/prop facts even when selected
+        # tags are Chinese. Remove only familiar, explicit camera framing
+        # phrases; do not drop a whole subject clause or infer new image facts.
+        shot = r"(?:(?:extreme\s+)?(?:close[- ]up|wide|medium|long|full[- ]body|low[- ]angle|high[- ]angle)\s+)?(?:shot|view|framing|composition)"
+        source = re.sub(rf"^(?:a|an|the)\s+{shot}\s+of\s+", "", source, flags=re.IGNORECASE)
+        source = re.sub(rf"\b(?:in|using)\s+(?:a|an|the)\s+{shot}\b", "", source, flags=re.IGNORECASE)
+        source = re.sub(r"\s+([,;.!?])", r"\1", source)
+        source = re.sub(r"\s+", " ", source).strip(" ,;")
     sentence = re.split(r"(?<=[.!?])\s+", source, maxsplit=1)[0].strip()
     if len(sentence) <= 260:
         return sentence.rstrip(".!?")
@@ -1003,6 +1105,29 @@ def _english_source_clause(primary_prompt: str) -> str:
             break
         result.append(clause)
     return ", ".join(result).rstrip(".!?") or "the established subject in the selected location"
+
+
+def _finalize_video_storyboard(
+    paragraphs: Sequence[str], settings: Mapping[str, Any], *, english: bool,
+) -> str:
+    """Bind references after shot-count projection, including single/long stories."""
+
+    shots = list(_adapt_storyboard_paragraphs(paragraphs, settings, english=english))
+    if not shots:
+        return ""
+    opening, closing = _video_reference_prose(settings, english=english)
+    separator = " " if english else ""
+    if opening:
+        pattern = _STORYBOARD_LABEL_EN if english else _STORYBOARD_LABEL_ZH
+        match = pattern.match(shots[0].strip())
+        if match:
+            first = shots[0].strip()
+            shots[0] = first[:match.end()] + separator + opening + separator + first[match.end():].lstrip()
+    if closing:
+        # In long mode the original resolution becomes the penultimate shot.
+        # The supplied end frame must remain the actual final visible state.
+        shots[-1] = shots[-1].rstrip() + separator + closing
+    return _join_storyboard_paragraphs(shots)
 
 
 def _build_chinese_video_prompt(
@@ -1052,6 +1177,8 @@ def _build_chinese_video_prompt(
         "source": primary_prompt[:600],
     }
     plan = build_narrative_plan(anchors, seed=seed, output_count=1)
+    if non_person:
+        plan = _non_person_video_plan(plan)
     opening = _personalize(plan.get("opening_zh"), reference, scene)
     motive = _personalize(plan.get("motive_zh"), reference, scene)
     trigger = _personalize(plan.get("trigger_zh"), reference, scene)
@@ -1074,23 +1201,54 @@ def _build_chinese_video_prompt(
         climax = "既有动作进入结果阶段，前后空间关系保持不变"
         ending = "动作在原有位置收束，人物姿态、接触关系和可见结果共同形成明确结束状态"
     camera = _camera_move_zh(action, composition, scene, seed=seed).replace("主体", subject)
-    feedback = _environment_feedback_zh(scene, action, reference, outfit)
+    feedback = _environment_feedback_zh(scene, action, reference, outfit, non_person=non_person)
     outfit_clause = f"身穿{outfit}，" if outfit and not non_person else ""
     brief_clause = f"这条故事围绕“{brief}”展开，" if brief else ""
     audio = _audio_zh(scene, action, non_person)
     details = _series(groups, "自定义补充")
     details_clause = f"角色外观持续保留{details}，" if details and not non_person else ""
     result_phrases = _video_result_phrases_zh(result_contract) if result_contract else {}
+    input_mode = resolve_video_prompt_profile(settings)["input_mode"]
+    supplied_first = input_mode in {"I2V", "FL2V"}
+    supplied_last = input_mode in {"FL2V", "L2V"}
+    setup = (
+        f"镜头沿用输入首帧的景别、机位与主体位置，{subject}{outfit_clause}处于{scene}的既有空间关系中，"
+        f"{props}沿用输入素材与底稿中已经确定的归属。"
+        if supplied_first else
+        f"镜头以{composition}建立{scene}的空间关系，{subject}{outfit_clause}位于画面中心偏前，"
+        f"{props}留在视线能够回到的位置。"
+    )
+    resolution = (
+        f"前一分镜的动作与光影变化逐步收束，{reference}与{props}的状态沿同一因果链完成过渡"
+        if supplied_last else
+        f"{ending}；{reference}的{'结构朝向' if non_person else '视线'}、{props}的状态和背景光共同说明前后状态的变化"
+    )
+    focus_relation = f"{reference}的结构朝向、接触点" if non_person else f"{reference}的视线、手部"
+    initial_state = f"{reference}仍保持原有结构状态" if non_person else f"{reference}只是在确认现场"
+    if resolve_video_shot_count(settings) == 1:
+        # One shot needs its own setup and consequence; taking only the middle
+        # paragraph of a five-shot story leaves absent "previous shot" clues.
+        ending_clause = (
+            "动作与环境反馈沿同一因果链逐步收束，镜头保持原有空间轴线。"
+            if supplied_last else f"动作完成后，{feedback}，镜头在可见结果上自然收束。"
+        )
+        paragraph = (
+            f"{_timeline_label(1, '行动', settings, english=False)}{setup}{details_clause}{brief_clause}"
+            f"{style}与{lighting}保持统一，{audio}。镜头在同一连续拍摄中{camera}，"
+            f"{subject}随即{action}，{outfit or '主体外观'}的边缘和接触点跟随重心变化。"
+            f"{props}在动作过程中的归属与空间关系始终清楚，{ending_clause}"
+            f"{result_phrases.get('setup', '')}{result_phrases.get('action', '')}{result_phrases.get('ending', '')}"
+        )
+        return _finalize_video_storyboard((paragraph,), settings, english=False)
     paragraphs = (
         (
-            f"{_timeline_label(1, '建立', settings, english=False)}镜头以{composition}建立{scene}的空间关系，{subject}{outfit_clause}位于画面中心偏前，"
-            f"{props}留在视线能够回到的位置。{details_clause}{brief_clause}{opening}；{motive}。"
+            f"{_timeline_label(1, '建立', settings, english=False)}{setup}{details_clause}{brief_clause}{opening}；{motive}。"
             f"{style}决定画面的线条、色彩与材质表达；{medium or '当前媒介'}保持统一，{rendering or '材质与光线保持空间关系连续'}。"
             f"{lighting}先把主体与关键线索从背景中分离，{audio}。{result_phrases.get('setup', '')}"
         ),
         (
-            f"{_timeline_label(2, '触发', settings, english=False)}镜头从环境关系推进到{reference}的视线、手部与{props}之间，先让观众读懂线索，再发生变化。"
-            f"起初{reference}只是在确认现场，因为{trigger}，原有节奏被打破；焦点短暂落到{props}，随后回到{reference}的反应。"
+            f"{_timeline_label(2, '触发', settings, english=False)}镜头从环境关系推进到{focus_relation}与{props}之间，先让观众读懂线索，再发生变化。"
+            f"起初{initial_state}，因为{trigger}，原有节奏被打破；焦点短暂落到{props}，随后回到{reference}的反应。"
             f"这一分镜承接开场动机，并把问题明确推向下一步行动，光线和环境声先出现细微偏移。"
             f"{result_phrases.get('trace', '')}"
         ),
@@ -1108,12 +1266,12 @@ def _build_chinese_video_prompt(
         ),
         (
             f"{_timeline_label(5, '收束', settings, english=False)}镜头在高潮之后放慢观察，不再引入无关人物或新地点，而是回看{subject}、{props}与环境后果之间的新关系。"
-            f"最后，{ending}；{reference}的视线、{props}的状态和背景光共同说明这次选择已经改变局势。"
-            f"结尾保留清楚结果与开放余韵，使五段分镜组成一条完整剧情，也让下一次行动拥有自然入口。"
+            f"最后，{resolution}。"
+            f"结尾保留清楚结果与开放余韵，使这些分镜组成一条完整剧情，也让下一次行动拥有自然入口。"
             f"全程遵守{video_rules or '同一媒介、空间与主体的连续性'}。{result_phrases.get('ending', '')}"
         ),
     )
-    return _join_storyboard_paragraphs(_adapt_storyboard_paragraphs(paragraphs, settings, english=False))
+    return _finalize_video_storyboard(paragraphs, settings, english=False)
 
 
 def _english_group_value(groups: Mapping[str, list[str]] | None, name: str) -> str:
@@ -1128,12 +1286,15 @@ def _english_group_value(groups: Mapping[str, list[str]] | None, name: str) -> s
     return ""
 
 
-def _english_anchor_sentence(groups: Mapping[str, list[str]] | None) -> str:
+def _english_anchor_sentence(
+    groups: Mapping[str, list[str]] | None, *, include_composition: bool = True,
+    non_person: bool = False,
+) -> str:
     labels = (
         ("主体", "the subject"),
         ("场景背景", "the location"),
         ("动作姿态", "the central action"),
-        ("服装造型", "the outfit"),
+        ("服装造型", "the exterior construction" if non_person else "the outfit"),
         ("道具世界观", "the key prop"),
         ("画面风格", "the visual style"),
         ("光影氛围", "the lighting"),
@@ -1143,6 +1304,7 @@ def _english_anchor_sentence(groups: Mapping[str, list[str]] | None) -> str:
     clauses = [
         f"{label} is {value}"
         for name, label in labels
+        if name != "构图视角" or include_composition
         if (value := _english_group_value(groups, name))
     ]
     if not clauses:
@@ -1157,9 +1319,12 @@ def _build_english_video_prompt(
     groups: Mapping[str, list[str]] | None = None,
 ) -> str:
     seed = int(settings.get("运行时随机有效种子", 0) or settings.get("seed", 0) or 0)
-    source = _english_source_clause(primary_prompt)
-    anchor_sentence = _english_anchor_sentence(groups)
+    input_mode = resolve_video_prompt_profile(settings)["input_mode"]
+    supplied_first = input_mode in {"I2V", "FL2V"}
+    supplied_last = input_mode in {"FL2V", "L2V"}
+    source = _english_source_clause(primary_prompt, reference_framing=supplied_first)
     non_person = str(settings.get("主体类型解析结果", settings.get("主体类型", "")) or "").strip() == "非人物主体"
+    anchor_sentence = _english_anchor_sentence(groups, include_composition=not supplied_first, non_person=non_person)
     subject = _english_group_value(groups, "主体") or "the established subject"
     scene = _english_group_value(groups, "场景背景") or "the established location"
     action = _english_group_value(groups, "动作姿态") or "the established action"
@@ -1169,6 +1334,8 @@ def _build_english_video_prompt(
     lighting = _english_group_value(groups, "光影氛围") or "the established lighting"
     composition = _english_group_value(groups, "构图视角") or "a readable wide composition"
     plan = build_narrative_plan({"source": source}, seed=seed, output_count=1)
+    if non_person:
+        plan = _non_person_video_plan(plan)
     opening = _clean(plan.get("opening_en"), limit=220)
     motive = _clean(plan.get("motive_en"), limit=200)
     trigger = _clean(plan.get("trigger_en"), limit=180)
@@ -1196,15 +1363,42 @@ def _build_english_video_prompt(
     result_phrases = _video_result_phrases_en(result_contract) if result_contract else {}
     focus_object = "the established contact relation" if result_contract else "the key visual clue"
     outfit_clause = f" in {outfit}" if outfit else ""
-    appearance_clause = f"the {outfit} silhouette, " if outfit else "the established surface, "
-    paragraphs = (
-        f"{_timeline_label(1, 'setup', settings, english=True)} The camera opens on {composition} in {scene}, showing {subject}{outfit_clause} with {prop}. {source}. {anchor_sentence} {opening}. {motive}. {style} shapes the medium and material language, while {lighting} and ambient sound establish the location before the conflict begins. {result_phrases.get('setup', '')}",
-        f"{_timeline_label(2, 'trigger', settings, english=True)} The camera moves from {scene} to {subject}'s attention and {prop}. At first the rhythm remains controlled; when {trigger}, that rhythm breaks and the focus returns to {subject}'s reaction. This shot turns the setup into a clear cause that the next action must continue. {result_phrases.get('trace', '')}",
-        f"{_timeline_label(3, 'action', settings, english=True)} The camera {camera} while preserving a readable direction of travel. {subject} responds through {action}; {appearance_clause}contact points, reflections, and spatial sound follow the movement in causal order, so the action grows directly from the preceding clue. {result_phrases.get('action', '')}",
-        f"{_timeline_label(4, 'escalation', settings, english=True)} The camera changes scale to reveal the consequence across foreground, middle ground, and background of {scene}. {escalation}; {feedback}. The emotion shifts as {turn}, and {climax}. {lighting} and sound expand the result without introducing an unrelated storyline. {result_phrases.get('result', '')}",
-        f"{_timeline_label(5, 'resolution', settings, english=True)} The camera settles after the climax and observes the new relationship between {subject}, {prop}, and {scene}. Finally, {ending}. The final image preserves {composition}, makes the consequence readable, and keeps {style} visually consistent while leaving an open emotional aftertone for what happens next. {result_phrases.get('ending', '')}",
+    appearance_clause = f"the silhouette of {outfit}, " if outfit else "the established surface, "
+    setup = (
+        f"The camera continues from the supplied first frame's shot scale, viewpoint and subject positions in {scene}, "
+        f"showing {subject}{outfit_clause} while keeping the established ownership of {prop}. {source}."
+        if supplied_first else
+        f"The camera opens on {composition} in {scene}, showing {subject}{outfit_clause} with {prop}. {source}."
     )
-    return _join_storyboard_paragraphs(_adapt_storyboard_paragraphs(paragraphs, settings, english=True))
+    resolution = (
+        "the established action and its visible consequences settle along the same causal path"
+        if supplied_last else ending
+    )
+    final_image = (
+        f"The visible consequence remains readable and {style} stays visually consistent."
+        if supplied_last or non_person else
+        f"The final image preserves {composition}, makes the consequence readable, and keeps {style} visually consistent while leaving an open emotional aftertone for what happens next."
+    )
+    focus_relation = f"{subject}'s structural orientation" if non_person else f"{subject}'s attention"
+    turning_state = f"The visible state changes as {turn}" if non_person else f"The emotion shifts as {turn}"
+    if resolve_video_shot_count(settings) == 1:
+        paragraph = (
+            f"{_timeline_label(1, 'action', settings, english=True)} {setup} {anchor_sentence} "
+            f"In one continuous take, the camera {camera} while {subject} responds through {action}. "
+            f"The established ownership and spatial relation of {prop} remain readable as {appearance_clause}"
+            f"contact points and shadows follow the movement. {style}, {lighting} and spatial sound stay consistent. "
+            "The action settles into its visible consequence on the same camera axis, without a cut to a different event. "
+            f"{result_phrases.get('setup', '')} {result_phrases.get('action', '')} {result_phrases.get('ending', '')}"
+        )
+        return _finalize_video_storyboard((paragraph,), settings, english=True)
+    paragraphs = (
+        f"{_timeline_label(1, 'setup', settings, english=True)} {setup} {anchor_sentence} {opening}. {motive}. {style} shapes the medium and material language, while {lighting} and ambient sound establish the location before the conflict begins. {result_phrases.get('setup', '')}",
+        f"{_timeline_label(2, 'trigger', settings, english=True)} The camera moves from {scene} to {focus_relation} and {prop}. At first the rhythm remains controlled; when {trigger}, that rhythm breaks and the focus returns to {subject}'s reaction. This shot turns the setup into a clear cause that the next action must continue. {result_phrases.get('trace', '')}",
+        f"{_timeline_label(3, 'action', settings, english=True)} The camera {camera} while preserving a readable direction of travel. {subject} responds through {action}; {appearance_clause}contact points, reflections, and spatial sound follow the movement in causal order, so the action grows directly from the preceding clue. {result_phrases.get('action', '')}",
+        f"{_timeline_label(4, 'escalation', settings, english=True)} The camera changes scale to reveal the consequence across foreground, middle ground, and background of {scene}. {escalation}; {feedback}. {turning_state}, and {climax}. {lighting} and sound expand the result without introducing an unrelated storyline. {result_phrases.get('result', '')}",
+        f"{_timeline_label(5, 'resolution', settings, english=True)} The camera settles after the climax and observes the new relationship between {subject}, {prop}, and {scene}. Finally, {resolution}. {final_image} {result_phrases.get('ending', '')}",
+    )
+    return _finalize_video_storyboard(paragraphs, settings, english=True)
 
 
 _STORYBOARD_LABEL_ZH = re.compile(
@@ -1247,6 +1441,110 @@ def _storyboard_paragraphs(text: str) -> list[str]:
     return paragraphs
 
 
+def _video_reference_boundary_status(text: str, boundary: str, *, english: bool) -> tuple[bool, bool]:
+    """Recognize paraphrased reference contracts, including explicit contradictions."""
+
+    if english:
+        source = r"\b(?:supplied|provided|input|reference|uploaded|given)\b"
+        target = {
+            "first": r"\b(?:first|initial|start(?:ing)?|opening)\s+(?:frame|image)\b",
+            "last": r"\b(?:last|final|end(?:ing)?|target)\s+(?:frame|image)\b",
+            "reference": r"\breferences?\b",
+        }[boundary]
+        action = r"\b(?:preserv\w*|retain\w*|maintain\w*|match\w*|continu\w*|begin\w*|start\w*|follow\w*|align\w*|reach\w*|converg\w*|remain\w*|consistent)\b"
+        negative = r"\b(?:(?:not|never)\s+(?:preserv\w*|retain\w*|maintain\w*|match\w*|follow\w*|align\w*|reach\w*)|ignor\w*|discard\w*|disregard\w*|abandon\w*|replac\w*|deviat\w*)\b"
+        protected = r"\b(?:(?:do|does|will|must|should)\s+not|don't|doesn't|never|without|avoid)\s+(?:ignor\w*|discard\w*|disregard\w*|abandon\w*|replac\w*|deviat\w*)\b"
+    else:
+        source = r"(?:输入|给定|提供|参考|上传|所给)"
+        target = {
+            "first": r"(?:首帧|第一帧|起始帧|初始帧|开场帧)",
+            "last": r"(?:尾帧|最后一帧|末帧|最终帧|结束帧|目标帧)",
+            "reference": r"参考(?:素材|图像|图片|影像|图|视频)?",
+        }[boundary]
+        action = r"(?:沿用|保持|保留|承接|延续|匹配|对齐|遵循|起步|开始|收束|落在|达到|到达|回到|收敛|一致|不(?:改变|改动|替换|偏离))"
+        negative = r"(?:(?:不再|无需|不能|无法|不要|不|未).{0,3}(?:沿用|保持|保留|承接|匹配|对齐|遵循|达到)|忽略|舍弃|丢弃|偏离|替换|抛弃)"
+        protected = r"(?:不再|不要|不能|不得|不应|避免|禁止|不)(?:去)?(?:忽略|舍弃|丢弃|偏离|替换|抛弃)"
+    valid = False
+    conflict = False
+    for clause in re.split(r"[。！？.!?\n]+", str(text or "")):
+        if not re.search(source, clause, re.IGNORECASE) or not re.search(target, clause, re.IGNORECASE):
+            continue
+        # "Do not ignore" preserves a reference; "ignore" or "do not match"
+        # contradicts it. A later contradiction must not be masked by the Skill.
+        checked = re.sub(protected, "", clause, flags=re.IGNORECASE)
+        if re.search(negative, checked, re.IGNORECASE):
+            conflict = True
+        elif re.search(action, clause, re.IGNORECASE):
+            valid = True
+    return valid, conflict
+
+
+def video_prompt_contract_violation(
+    text: str,
+    original: str,
+    settings: Mapping[str, Any],
+    *,
+    language: str,
+) -> str:
+    """Keep resolved shot count and supplied-reference boundaries at adoption."""
+
+    profile = settings.get("视频提示词Profile")
+    profile = profile if isinstance(profile, Mapping) else {}
+    expected_count = None
+    for value in (settings.get("视频提示词镜头段数有效"), profile.get("shot_count")):
+        try:
+            count = int(value)
+        except (TypeError, ValueError):
+            continue
+        if count in (1, 3, 5, 7):
+            expected_count = count
+            break
+    if expected_count is None:
+        expected_count = {"单镜头": 1, "短动作": 3, "标准剧情": 5, "长剧情": 7}.get(
+            str(settings.get("视频提示词镜头段数", "") or "").strip()
+        )
+    if expected_count is None:
+        original_section = str(original or "").partition("中文说明：")[0].strip()
+        original_shots = _storyboard_paragraphs(original_section)
+        if len(original_shots) in (1, 3, 5, 7) and [
+            (_storyboard_paragraph_number(shot, english=True) or _storyboard_paragraph_number(shot, english=False)) for shot in original_shots
+        ] == list(range(1, len(original_shots) + 1)):
+            expected_count = len(original_shots)
+    input_mode = str(settings.get("视频提示词输入模式", profile.get("input_mode", "")) or "").strip()
+    if expected_count is None and input_mode not in {"I2V", "FL2V", "L2V", "Ref2V"}:
+        # Legacy third-party validators may accept an unlabelled prose baseline.
+        return ""
+    sections = [(str(text or "").strip(), language == "纯英文")]
+    if language == "英文提示词+中文说明":
+        english_text, marker, chinese_text = str(text or "").partition("中文说明：")
+        if not marker:
+            return "视频模型候选缺少独立中文说明，无法核验双语分镜合同。"
+        sections = [(english_text.strip(), True), (chinese_text.strip(), False)]
+    required = []
+    if input_mode in {"I2V", "FL2V"}:
+        required.append(("first", 0, "输入首帧"))
+    if input_mode in {"FL2V", "L2V"}:
+        required.append(("last", -1, "输入尾帧"))
+    if input_mode == "Ref2V":
+        required.append(("reference", 0, "已提供参考素材"))
+    for section, english in sections:
+        shots = _storyboard_paragraphs(section)
+        if expected_count is not None and (
+            len(shots) != expected_count
+            or [(_storyboard_paragraph_number(shot, english=True) or _storyboard_paragraph_number(shot, english=False)) for shot in shots] != list(range(1, expected_count + 1))
+        ):
+            return f"视频模型候选未保留配置要求的 {expected_count} 个连续编号分镜。"
+        for boundary, index, label in required:
+            valid, _ = _video_reference_boundary_status(shots[index] if shots else "", boundary, english=english)
+            _, conflict = _video_reference_boundary_status(section, boundary, english=english)
+            if conflict:
+                return f"视频模型候选包含违背{label}的改写，不能覆盖参考素材边界。"
+            if not valid:
+                position = "末镜" if index == -1 else "首镜"
+                return f"视频模型候选的{position}未保留{label}的承接约束。"
+    return ""
+
+
 def build_video_storyboard_metadata(
     prompt: str,
     settings: Mapping[str, Any] | None = None,
@@ -1284,7 +1582,11 @@ def build_video_storyboard_metadata(
     audio_fields = _audio_metadata(scene, action, settings or {}, english=english)
     result: list[dict[str, Any]] = []
     timeline_segments = _timeline_segments_for_count(int(resolved.get("shot_count", 5) or 5))
-    for paragraph in _storyboard_paragraphs(prompt):
+    single_shot = int(resolved.get("shot_count", 5) or 5) == 1
+    metadata_prompt = str(prompt or "")
+    if language == "英文提示词+中文说明" and "中文说明：" in metadata_prompt:
+        metadata_prompt = metadata_prompt.partition("中文说明：")[2].strip()
+    for paragraph in _storyboard_paragraphs(metadata_prompt):
         number = _storyboard_paragraph_number(paragraph, english=english)
         if number is None:
             continue
@@ -1310,6 +1612,9 @@ def build_video_storyboard_metadata(
                 ),
                 "timeline_enabled": bool(resolved.get("timeline_enabled")),
                 "input_mode": resolved["input_mode"],
+                "input_contract": resolved["input_contract"],
+                "submission_unit": resolved.get("submission_unit", "storyboard_or_per_shot"),
+                "input_mode_supported": resolved["input_mode_supported"],
                 "target_model": resolved["target_model"],
                 "subject_kind": resolved.get("subject_kind", "person_or_auto"),
                 "camera": "镜头与机位见 description" if not english else "camera and framing are in description",
@@ -1321,9 +1626,15 @@ def build_video_storyboard_metadata(
                 "sound_effects": audio_fields["sound_effects"],
                 "non_diegetic_music": audio_fields["non_diegetic_music"],
                 "continuity_handoff": (
-                    "承接上一镜头的主体、场景、道具、光影和镜头轴线，并把本镜结束状态交给下一镜头。"
-                    if not english
-                    else "Inherit the subject, location, prop, lighting, and camera axis from the previous shot and hand this ending state to the next shot."
+                    (
+                        "在同一连续镜头内交代主体、场景、道具、光影、动作和可见结果，保持空间关系与镜头轴线连续。"
+                        if not english else
+                        "Establish the subject, location, prop, lighting, action, and visible result within one continuous take, preserving spatial relations and the camera axis."
+                    ) if single_shot else (
+                        "承接上一镜头的主体、场景、道具、光影和镜头轴线，并把本镜结束状态交给下一镜头。"
+                        if not english else
+                        "Inherit the subject, location, prop, lighting, and camera axis from the previous shot and hand this ending state to the next shot."
+                    )
                 ),
                 "description": paragraph,
             }
@@ -1509,6 +1820,7 @@ __all__ = [
     "resolve_video_prompt_profile",
     "resolve_video_shot_count",
     "video_prompt_anchor_roles",
+    "video_prompt_contract_violation",
     "video_prompt_has_layout_contamination",
     "video_prompt_required_anchors",
 ]

@@ -33368,7 +33368,7 @@ class TestStagePromptModules(unittest.TestCase):
         payload = json.loads(result[3])
         self.assertEqual(payload["video_prompt"], video_prompt)
         self.assertEqual(payload["video_prompt_skill_status"], "已生成")
-        self.assertEqual(payload["video_prompt_skill_version"], "video-prompt-skill-v12")
+        self.assertEqual(payload["video_prompt_skill_version"], "video-prompt-skill-v13")
         self.assertEqual(payload["video_prompt_model_status"], "未调用（仅Skill）")
         self.assertEqual(payload["video_prompt_model_source"], "仅Skill")
         self.assertGreaterEqual(payload["video_prompt_required_anchor_count"], 1)
@@ -33383,7 +33383,7 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertEqual(cache["video_prompt"], video_prompt)
         self.assertEqual(cache["outputs"][7], video_prompt)
 
-    def test_video_prompt_strict_dedupe_adds_natural_storyboard_continuation(self) -> None:
+    def test_video_prompt_strict_dedupe_varies_within_existing_storyboard(self) -> None:
         module = load_stage_prompt_generator_for_integration_test()
         module._CACHE.clear()
         selected = OrderedDict(
@@ -33418,8 +33418,9 @@ class TestStagePromptModules(unittest.TestCase):
         self.assertEqual(first, base)
         self.assertNotEqual(second, first)
         self.assertTrue(module._is_natural_video_prompt_impl(second, language="纯中文"))
-        self.assertIn("分镜六（连续避重）", second)
-        self.assertEqual(len(second.split("\n\n")), 6)
+        self.assertNotIn("分镜六", second)
+        self.assertIn("在本镜已有动作内部", second)
+        self.assertEqual(len(second.split("\n\n")), 5)
         self.assertGreater(len(second), len(base))
         self.assertNotIn("画面变化方向", second)
         self.assertIsNone(re.search(r"(?:约|大约)?\s*\d+(?:\.\d+)?\s*秒", second))
@@ -33440,10 +33441,12 @@ class TestStagePromptModules(unittest.TestCase):
 
         self.assertTrue(module._is_natural_video_prompt_impl(varied, language="英文提示词+中文说明"))
         english, chinese = varied.split("中文说明：", 1)
-        self.assertIn("Shot 6 (continuity variation)", english)
-        self.assertIn("分镜六（连续避重）", chinese)
-        self.assertEqual(len([part for part in english.split("\n\n") if part.strip()]), 6)
-        self.assertEqual(len([part for part in chinese.split("\n\n") if part.strip()]), 6)
+        self.assertNotIn("Shot 6", english)
+        self.assertNotIn("分镜六", chinese)
+        self.assertIn("Within this shot's existing action", english)
+        self.assertIn("在本镜已有动作内部", chinese)
+        self.assertEqual(len([part for part in english.split("\n\n") if part.strip()]), 5)
+        self.assertEqual(len([part for part in chinese.split("\n\n") if part.strip()]), 5)
 
     def test_stage_video_prompt_adopts_model_refinement_and_reports_status(self) -> None:
         module = load_stage_prompt_generator_for_integration_test()

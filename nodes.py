@@ -8,6 +8,7 @@ import json
 import math
 import os
 import re
+import struct
 import threading
 import time
 from dataclasses import dataclass
@@ -24,8 +25,10 @@ import comfy.model_management as mm
 _LLAMA_IMPORT_ERROR = None
 
 try:
+    import llama_cpp as _LLAMA_PACKAGE
     from llama_cpp import Llama
 except Exception as exc:
+    _LLAMA_PACKAGE = None
     Llama = None
     _LLAMA_IMPORT_ERROR = exc
 
@@ -33,6 +36,13 @@ try:
     from llama_cpp import llama_cpp as _LLAMA_LOW_LEVEL
 except Exception:
     _LLAMA_LOW_LEVEL = None
+
+try:
+    # Recent builds moved GGML types into _ggml.GGMLType instead of exporting
+    # flat GGML_TYPE_* constants from llama_cpp / llama_cpp.llama_cpp.
+    from llama_cpp import _ggml as _LLAMA_GGML
+except Exception:
+    _LLAMA_GGML = None
 
 try:
     from llama_cpp.llama_tokenizer import LlamaTokenizer
@@ -139,7 +149,7 @@ class _ReentrantLockAdapter:
 默认文本系统提示词 = "将用户输入扩写为可直接生图的高质量提示词，保持主体不变并补足构图、光线、材质和镜头参数。"
 默认KV缓存类型 = "默认(F16)"
 Q8_0缓存类型 = "q8_0"
-KV缓存类型选项 = [默认KV缓存类型, Q8_0缓存类型]
+KV缓存类型选项 = [默认KV缓存类型, Q8_0缓存类型, "q4_0", "q4_1", "q5_0", "q5_1", "bf16"]
 Flash注意力选项 = ["自动", "开启", "关闭"]
 TE通用模型系列选项 = [
     "Qwen3-VL",
@@ -228,6 +238,115 @@ def _确保_llm目录已注册() -> None:
 
 _原始模型权重扩展名 = {".safetensors", ".bin", ".pt", ".pth", ".ckpt"}
 _本地模型选项扩展名 = _原始模型权重扩展名 | {".gguf"}
+_GGUF分片文件模式 = re.compile(r"^(.*)-(\d{5})-of-(\d{5})(\.gguf)$", re.IGNORECASE)
+
+
+def _读取GGUF基本元数据(model_path: str) -> dict[str, object]:
+    """Best-effort bounded header inspection; never decode tensors or require gguf-py.
+
+    Unknown/new GGUF versions and metadata beyond the small header budget are
+    left to the installed runtime. Inspection is not a runtime-support claim.
+    """
+    try:
+        with open(model_path, "rb") as stream:
+            data = stream.read(256 * 1024)
+    except OSError:
+        return {}
+    if len(data) < 24 or data[:4] != b"GGUF":
+        return {}
+    version = struct.unpack_from("<I", data, 4)[0]
+    if version not in (2, 3):
+        return {}
+    count = struct.unpack_from("<Q", data, 16)[0]
+    if count > 100_000:
+        return {}
+    offset = 24
+    result: dict[str, object] = {}
+    wanted = {"general.architecture", "general.name", "general.type", "general.file_type", "split.count"}
+    scalar_formats = {0: "B", 1: "b", 2: "H", 3: "h", 4: "I", 5: "i", 6: "f", 7: "B", 10: "Q", 11: "q", 12: "d"}
+
+    def scalar(fmt: str):
+        nonlocal offset
+        size = struct.calcsize("<" + fmt)
+        if offset + size > len(data):
+            raise ValueError("header budget exhausted")
+        value = struct.unpack_from("<" + fmt, data, offset)[0]
+        offset += size
+        return value
+
+    def string(keep: bool):
+        nonlocal offset
+        length = scalar("Q")
+        if length > len(data) - offset:
+            raise ValueError("truncated string or header budget exhausted")
+        value = data[offset:offset + length].decode("utf-8", errors="replace") if keep else None
+        offset += length
+        return value
+
+    def value(kind: int, keep: bool = False, depth: int = 0):
+        nonlocal offset
+        if kind in scalar_formats:
+            item = scalar(scalar_formats[kind])
+            return item if keep else None
+        if kind == 8:
+            return string(keep)
+        if kind == 9 and depth < 2:
+            element_kind, length = scalar("I"), scalar("Q")
+            if element_kind in scalar_formats:
+                size = struct.calcsize("<" + scalar_formats[element_kind]) * length
+                if size > len(data) - offset:
+                    raise ValueError("array exceeds header budget")
+                offset += size
+            else:
+                if length > len(data) - offset:
+                    raise ValueError("array exceeds header budget")
+                for _ in range(length):
+                    value(element_kind, depth=depth + 1)
+            return None
+        raise ValueError("unknown metadata type")
+
+    try:
+        for _ in range(count):
+            key = string(True)
+            item = value(scalar("I"), key in wanted)
+            if key in wanted and isinstance(item, (str, int, float)):
+                result[key] = item
+    except (ValueError, struct.error, OverflowError):
+        pass
+    return result
+
+
+def _解析GGUF分片路径(model_path: str) -> str:
+    """llama.cpp loads a split set from shard one; validate before unloading."""
+    match = _GGUF分片文件模式.fullmatch(os.path.basename(model_path))
+    if not match:
+        return model_path
+    prefix, index, total, extension = match.groups()
+    part_count = int(total)
+    if not 1 <= int(index) <= part_count <= 4096:
+        raise RuntimeError("GGUF 分片编号无效或分片数量超过 4096。")
+    directory = os.path.dirname(model_path)
+    first = os.path.join(directory, f"{prefix}-00001-of-{total}{extension}")
+    missing = []
+    for number in range(1, part_count + 1):
+        part = os.path.join(directory, f"{prefix}-{number:05d}-of-{total}{extension}")
+        if not os.path.isfile(part):
+            missing.append(os.path.basename(part))
+            if len(missing) == 3:
+                break
+    if missing:
+        raise RuntimeError("GGUF 分片不完整，请把同组全部分片放在同一目录；缺少：" + "、".join(missing))
+    return first
+
+
+def _校验GGUF文本模型元数据(metadata: dict[str, object]) -> None:
+    architecture = str(metadata.get("general.architecture", "")).lower().replace("-", "_")
+    media_architectures = {"flux", "flux2", "flux3", "qwen_image", "qwen_image21", "moss_image", "wan", "wan2", "ltxv", "sd1", "sdxl", "stable_diffusion", "clip"}
+    if architecture in media_architectures or metadata.get("general.type") in {"adapter", "projector"}:
+        raise RuntimeError(
+            f"所选 GGUF 不是可用于提示词润色的文本主模型（架构：{architecture or '未知'}）。"
+            "图像/视频扩散权重请交给下游对应 GGUF 加载器；mmproj 请放入视觉投影选项。"
+        )
 
 
 def _llm根目录() -> str:
@@ -347,8 +466,19 @@ def _规范化本地模型配置(config: dict) -> dict:
     resolved.pop("family_auto_note", None)
     requested = str(resolved.get("family") or "通用GGUF").strip() or "通用GGUF"
     model_name = str(resolved.get("model") or "").strip()
+    metadata = {}
+    if model_name.lower().endswith(".gguf"):
+        relative = _规范化模型相对路径(model_name)
+        if relative:
+            model_path = os.path.join(_llm根目录(), relative.replace("/", os.sep))
+            if os.path.isfile(model_path):
+                first = _解析GGUF分片路径(model_path)
+                model_name = os.path.relpath(first, _llm根目录()).replace("\\", "/")
+                resolved["model"] = model_name
+                metadata = _读取GGUF基本元数据(first)
+                _校验GGUF文本模型元数据(metadata)
     mmproj_name = str(resolved.get("mmproj") or "无").strip()
-    model_family = _推断本地模型系列(model_name)
+    model_family = _推断本地模型系列(metadata.get("general.name")) or _推断本地模型系列(model_name)
     mmproj_family = "" if mmproj_name in {"", "无"} else _推断本地模型系列(mmproj_name)
     if model_family and mmproj_family and model_family != mmproj_family:
         raise RuntimeError(
@@ -356,7 +486,7 @@ def _规范化本地模型配置(config: dict) -> dict:
             f"主模型识别为 {model_family}，mmproj 识别为 {mmproj_family}。"
             "请选择与主模型同版本的 mmproj，纯文本调用则把视觉投影设为“无”。"
         )
-    model_revision = _推断qwen3模型版本(model_name)
+    model_revision = _推断qwen3模型版本(metadata.get("general.name")) or _推断qwen3模型版本(model_name)
     mmproj_revision = "" if mmproj_name in {"", "无"} else _推断qwen3模型版本(mmproj_name)
     if model_revision and mmproj_revision and model_revision != mmproj_revision:
         raise RuntimeError(
@@ -371,7 +501,7 @@ def _规范化本地模型配置(config: dict) -> dict:
     resolved["family"] = effective
     if inferred and requested != inferred:
         resolved["family_auto_note"] = (
-            f"本地模型智能识别：根据主模型/mmproj 将模型系列从“{requested}”纠正为“{inferred}”。"
+            f"本地模型智能识别：根据主模型名称/GGUF 元数据/mmproj 将模型系列从“{requested}”纠正为“{inferred}”。"
         )
     elif inferred == "Qwen3.5-VL" and re.search(r"qwen3[._]6|qwen36", model_name, re.IGNORECASE):
         resolved["family_auto_note"] = (
@@ -392,6 +522,8 @@ def _解析本地模型路径(value: object) -> tuple[str, str]:
             raise RuntimeError(f"原始模型目录缺少 config.json 或权重文件：{full_path}")
         return full_path, "transformers"
     if os.path.splitext(full_path)[1].lower() == ".gguf":
+        full_path = _解析GGUF分片路径(full_path)
+        _校验GGUF文本模型元数据(_读取GGUF基本元数据(full_path))
         return full_path, "gguf"
     if os.path.splitext(full_path)[1].lower() in _原始模型权重扩展名:
         parent = os.path.dirname(full_path)
@@ -427,7 +559,50 @@ def _列出llm文件() -> list[str]:
                 relative = os.path.relpath(os.path.join(root, filename), llm_dir).replace("\\", "/")
                 values.add(relative)
 
+    # Only shard one is a loadable selector entry; old workflows selecting a
+    # continuation shard are normalized on load instead of being abandoned.
+    values = {
+        item for item in values
+        if not (match := _GGUF分片文件模式.fullmatch(os.path.basename(item))) or match.group(2) == "00001"
+    }
     return sorted(values, key=lambda item: (item.lower().count("/"), item.lower()))
+
+
+def _校验主模型下拉选择(value: object) -> bool | str:
+    """Accept a legacy continuation shard only if its first shard is listed."""
+    selected = str(value or "").replace("\\", "/")
+    match = _GGUF分片文件模式.fullmatch(selected)
+    if match:
+        prefix, index, total, extension = match.groups()
+        if not 1 <= int(index) <= int(total) <= 4096:
+            return "GGUF 分片编号无效。"
+        selected = f"{prefix}-00001-of-{total}{extension}"
+    options = [name for name in _列出llm文件() if "mmproj" not in name.lower() and _是本地模型选项(name)]
+    if not options:
+        options = ["（请把模型放到 models/LLM）"]
+    return True if selected in options else "主模型不在当前 models/LLM 列表中；请检查文件并刷新节点选项。"
+
+
+def _本地模型加载配置相同(left: object, right: object) -> bool:
+    """Diagnostic annotations do not change the loaded model or its settings."""
+    if not isinstance(left, dict) or not isinstance(right, dict):
+        return False
+    return (
+        {key: value for key, value in left.items() if key != "family_auto_note"}
+        == {key: value for key, value in right.items() if key != "family_auto_note"}
+    )
+
+
+def _解析本地视觉投影路径(value: object) -> str | None:
+    if value in (None, "", "无"):
+        return None
+    relative = _规范化模型相对路径(value)
+    if not relative:
+        raise ValueError("视觉投影 mmproj 路径为空或超出 ComfyUI/models/LLM 目录。")
+    path = os.path.join(_llm根目录(), relative.replace("/", os.sep))
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"找不到 mmproj 文件：{path}")
+    return path
 
 
 def _图片转base64(image_tensor) -> str:
@@ -1131,6 +1306,27 @@ def _是qwen38系列(*, family: str | None = None, model_name: str | None = None
     return "qwen38" in haystack
 
 
+def _校验GGUF视觉处理器支持(*, family: str, model_name: str | None = None) -> None:
+    """Check availability only; constructing a handler can allocate model memory."""
+    if family == "Qwen3-VL":
+        if Qwen3VLChatHandler is None:
+            raise RuntimeError("当前 llama-cpp-python 不支持 Qwen3VLChatHandler，请更新 llama-cpp-python。")
+    elif family == "Qwen3.5-VL":
+        if Qwen35ChatHandler is None:
+            raise RuntimeError("当前 llama-cpp-python 不支持 Qwen35ChatHandler，请更新 llama-cpp-python。")
+    elif _是qwen38系列(family=family, model_name=model_name):
+        # The existing Qwen3.8 path can fall back to the embedded text template.
+        return
+    elif family == "Gemma4":
+        if Gemma4ChatHandler is None:
+            raise RuntimeError(
+                "当前 llama-cpp-python 不支持 Gemma4ChatHandler，"
+                "因此 Gemma4 只能先做纯文本推理；如果要启用 mmproj / 图像推理，请安装带 Gemma4ChatHandler 的版本。"
+            )
+    else:
+        raise RuntimeError(f"{family} 暂未配置专用视觉 mmproj handler。请把“视觉投影mmproj”设为“无”，按纯文本 GGUF 模型加载。")
+
+
 def _构造qwen38视觉处理器(mmproj_path: str, think: bool):
     """Construct an optional Qwen3.8 handler without making it a dependency.
 
@@ -1335,7 +1531,7 @@ def _同步托管llm实例(llm: object, settings, owner_storage):
         return llm
     if not isinstance(settings, dict):
         raise RuntimeError("托管模型已卸载或切换，且旧模型缺少可用于恢复的配置信息。")
-    if current_llm is not None and getattr(current_model, "settings", None) == settings:
+    if current_llm is not None and _本地模型加载配置相同(getattr(current_model, "settings", None), settings):
         return current_llm
     recovered_llm = _按设置重载托管模型(settings, owner_storage=owner_storage)
     if recovered_llm is None:
@@ -1391,7 +1587,42 @@ def _解析kv缓存类型(value: str | None) -> int | None:
         return None
     if value == Q8_0缓存类型:
         return GGML_TYPE_Q8_0
+    if value in KV缓存类型选项:
+        constant_name = "GGML_TYPE_" + str(value).upper()
+        for runtime in (_LLAMA_LOW_LEVEL, _LLAMA_PACKAGE, _LLAMA_GGML):
+            for namespace in (runtime, getattr(runtime, "GGMLType", None)):
+                constant = getattr(namespace, constant_name, None)
+                if isinstance(constant, int) and not isinstance(constant, bool):
+                    return int(constant)
+        raise RuntimeError(f"当前 llama-cpp-python 未导出 {value} KV 类型；请更新兼容运行时，或改回默认(F16)。权重量化不等于 KV 缓存量化。")
     raise ValueError(f"未知 KV 缓存类型：{value}")
+
+
+def _构造GGUF加载参数(config: dict, model_path: str) -> dict[str, object]:
+    """Prepare and validate pure constructor options before releasing a model."""
+    llama_kwargs = {
+        "model_path": model_path,
+        "n_ctx": int(config.get("n_ctx", 8192)),
+        "n_gpu_layers": int(config.get("n_gpu_layers", -1)),
+        "verbose": False,
+    }
+    _加入llama高级加载参数(llama_kwargs, config)
+    _加入llama自定义参数(llama_kwargs, config)
+    if _llama构造参数是否可用("ctx_checkpoints") is not False:
+        llama_kwargs["ctx_checkpoints"] = 0
+
+    type_k = _解析kv缓存类型(config.get("cache_type_k", 默认KV缓存类型))
+    type_v = _解析kv缓存类型(config.get("cache_type_v", 默认KV缓存类型))
+    wants_custom_kv_type = type_k is not None or type_v is not None
+    supports_type_k = _llama构造参数是否可用("type_k")
+    supports_type_v = _llama构造参数是否可用("type_v")
+    if wants_custom_kv_type and (supports_type_k is False or supports_type_v is False):
+        raise RuntimeError("当前 llama-cpp-python 不支持 type_k/type_v（KV cache 量化），请更新该依赖或改回默认(F16)。")
+    if type_k is not None:
+        llama_kwargs["type_k"] = type_k
+    if type_v is not None:
+        llama_kwargs["type_v"] = type_v
+    return llama_kwargs
 
 
 def _规范化随机种子(seed_value):
@@ -1486,7 +1717,11 @@ def _原始模型加载参数(config: dict) -> dict[str, object]:
         }.get(dtype, "auto")
     options.setdefault("trust_remote_code", True)
     if "device_map" not in options:
-        if int(config.get("n_gpu_layers", -1) or -1) == 0 or not torch.cuda.is_available():
+        try:
+            gpu_layers = int(config.get("n_gpu_layers", -1))
+        except (TypeError, ValueError, OverflowError):
+            gpu_layers = -1
+        if gpu_layers == 0 or not torch.cuda.is_available():
             options["device_map"] = None
         else:
             options["device_map"] = "auto"
@@ -1631,7 +1866,7 @@ class _TransformersChatAdapter:
             except Exception:
                 pass
 
-    def _context_length(self) -> int:
+    def _context_length(self, component: str | None = None) -> int:
         """Return a usable context size without exceeding model metadata."""
 
         try:
@@ -1641,12 +1876,13 @@ class _TransformersChatAdapter:
         configured = max(2, configured)
         model_config = getattr(self.model, "config", None)
         nested_candidates = []
-        for name in ("text_config", "language_config", "llm_config", "decoder"):
+        config_names = (component,) if component else ("text_config", "language_config", "llm_config", "decoder")
+        for name in config_names:
             nested = getattr(model_config, name, None)
             if nested is not None and nested is not model_config and not any(nested is item for item in nested_candidates):
                 nested_candidates.append(nested)
         get_text_config = getattr(model_config, "get_text_config", None)
-        if callable(get_text_config):
+        if component is None and callable(get_text_config):
             try:
                 nested = get_text_config()
                 if nested is not None and nested is not model_config and not any(nested is item for item in nested_candidates):
@@ -1672,13 +1908,29 @@ class _TransformersChatAdapter:
         metadata_limits = collect_limits(nested_candidates)
         if not metadata_limits and model_config is not None:
             metadata_limits = collect_limits([model_config])
+        # Seq2seq models can expose asymmetric source/target limits on the
+        # shared root or on their individual encoder/decoder configs.
+        if component in {"encoder", "decoder"}:
+            side_names = (
+                ("max_source_positions", "max_encoder_position_embeddings")
+                if component == "encoder"
+                else ("max_target_positions", "max_decoder_position_embeddings")
+            )
+            for candidate in [model_config, *nested_candidates]:
+                for name in side_names:
+                    try:
+                        value = int(getattr(candidate, name, 0) or 0)
+                    except (TypeError, ValueError, OverflowError):
+                        value = 0
+                    if value >= 2:
+                        metadata_limits.append(value)
         try:
             tokenizer_limit = int(getattr(self.tokenizer, "model_max_length", 0) or 0)
         except (TypeError, ValueError, OverflowError):
             tokenizer_limit = 0
         # Transformers uses enormous sentinel integers when no tokenizer
         # limit is known; only finite, realistic values should constrain us.
-        if 2 <= tokenizer_limit <= 10_000_000:
+        if component != "decoder" and 2 <= tokenizer_limit <= 10_000_000:
             metadata_limits.append(tokenizer_limit)
         return max(2, min([configured, *metadata_limits] if metadata_limits else [configured]))
 
@@ -1903,6 +2155,22 @@ class _TransformersChatAdapter:
         return encoded
 
     @staticmethod
+    def _validate_multimodal_context(encoded, max_length: int, reserved_output_tokens: int = 1):
+        """Keep media markers and visual tensors intact; never slice them independently."""
+        input_ids = encoded.get("input_ids")
+        if isinstance(input_ids, torch.Tensor) and input_ids.ndim >= 2:
+            prompt_tokens = int(input_ids.shape[-1])
+            if prompt_tokens > max_length:
+                raise ValueError(
+                    f"原始模型视觉输入超出上下文预算：完整输入需要 {prompt_tokens} token，"
+                    f"当前可用输入预算为 {max_length} token（当前输入侧上下文 {max_length + reserved_output_tokens}，"
+                    f"输入侧预留 {reserved_output_tokens} 个生成 token）；"
+                    f"需要至少 {prompt_tokens + reserved_output_tokens} token 上下文。"
+                    "请增大上下文长度，或减少输入图片尺寸、帧数和文本长度；不会裁切图像占位 token 或丢弃视觉张量。"
+                )
+        return encoded
+
+    @staticmethod
     def _unknown_keyword(error: Exception) -> str | None:
         message = str(error)
         patterns = (
@@ -2017,7 +2285,7 @@ class _TransformersChatAdapter:
         detail = errors[-1] if errors else "未返回输入"
         raise RuntimeError(f"原始模型 tokenizer 无法编码提示词：{detail}")
 
-    def _encode_multimodal(self, processor, prompt, images, max_length: int):
+    def _encode_multimodal(self, processor, prompt, images, max_length: int, reserved_output_tokens: int = 1):
         if isinstance(prompt, dict) or hasattr(prompt, "items"):
             encoded = self._as_mapping(prompt)
             visual_fields = {
@@ -2030,7 +2298,7 @@ class _TransformersChatAdapter:
                 "aspect_ratio_mask",
             }
             if "input_ids" in encoded and visual_fields.intersection(encoded):
-                return self._truncate_token_inputs(encoded, max_length)
+                return self._validate_multimodal_context(encoded, max_length, reserved_output_tokens)
             token_ids = encoded.get("input_ids")
             decoder = getattr(self.tokenizer, "batch_decode", None)
             if token_ids is not None and callable(decoder):
@@ -2038,8 +2306,8 @@ class _TransformersChatAdapter:
                 prompt = decoded[0] if isinstance(decoded, (list, tuple)) and decoded else decoded
         errors = []
         attempts = (
-            lambda: processor(text=[prompt], images=images, return_tensors="pt", padding=True, truncation=True, max_length=max_length),
-            lambda: processor(text=[prompt], images=images, return_tensors="pt", truncation=True, max_length=max_length),
+            lambda: processor(text=[prompt], images=images, return_tensors="pt", padding=True, truncation=False),
+            lambda: processor(text=[prompt], images=images, return_tensors="pt", truncation=False),
             lambda: processor(text=[prompt], images=images, return_tensors="pt"),
             lambda: processor(text=prompt, images=images, return_tensors="pt"),
             lambda: processor(prompt, images, "pt"),
@@ -2047,13 +2315,16 @@ class _TransformersChatAdapter:
         for call in attempts:
             try:
                 encoded = self._as_mapping(call())
-                return self._truncate_token_inputs(encoded, max_length)
             except (TypeError, ValueError, KeyError, AttributeError, RuntimeError) as exc:
                 errors.append(f"{type(exc).__name__}: {exc}")
+                continue
+            # Budget errors are not processor-signature errors: do not retry
+            # with truncation defaults or re-encode the same oversized media.
+            return self._validate_multimodal_context(encoded, max_length, reserved_output_tokens)
         detail = errors[-1] if errors else "未返回输入"
         raise RuntimeError(f"原始模型视觉 processor 无法编码图片：{detail}")
 
-    def _prompt_and_inputs(self, messages, max_length: int):
+    def _prompt_and_inputs(self, messages, max_length: int, reserved_output_tokens: int = 1):
         normalized, images = _原始模型消息(messages)
         if images and not self.supports_images:
             load_errors = getattr(self, "component_load_errors", None) or []
@@ -2067,7 +2338,7 @@ class _TransformersChatAdapter:
             raise RuntimeError("原始模型缺少 tokenizer/processor。")
         prompt = self._apply_chat_template(normalized, images)
         if images:
-            encoded = self._encode_multimodal(processor, prompt, images, max_length)
+            encoded = self._encode_multimodal(processor, prompt, images, max_length, reserved_output_tokens)
         else:
             encoded = self._encode_text(prompt, max_length)
         return encoded
@@ -2078,11 +2349,16 @@ class _TransformersChatAdapter:
         if self.model is None:
             raise RuntimeError("原始模型已经卸载，请重新加载模型。")
         max_tokens = max(1, min(int(max_tokens or 512), 32768))
-        context_length = self._context_length()
+        model_config = getattr(self.model, "config", None)
+        generation_config = getattr(self.model, "generation_config", None)
+        is_encoder_decoder = bool(getattr(model_config, "is_encoder_decoder", False))
+        context_length = self._context_length("encoder" if is_encoder_decoder else None)
         # Reserve room for generation without truncating the complete prompt
         # to one token when max_tokens is larger than the selected context.
-        input_limit = max(1, context_length - 1)
-        encoded = self._prompt_and_inputs(messages, input_limit)
+        # Seq2seq encoder inputs do not share a token window with the decoder.
+        reserved_output_tokens = 0 if is_encoder_decoder else 1
+        input_limit = max(1, context_length - reserved_output_tokens)
+        encoded = self._prompt_and_inputs(messages, input_limit, reserved_output_tokens)
         model_device = self.device
         moved = {}
         for key, value in encoded.items():
@@ -2091,7 +2367,30 @@ class _TransformersChatAdapter:
         if input_ids is None or not hasattr(input_ids, "shape"):
             raise RuntimeError("原始模型 tokenizer/processor 未返回 input_ids。")
         prompt_tokens = int(input_ids.shape[-1]) if input_ids is not None and hasattr(input_ids, "shape") else 0
-        if prompt_tokens:
+        if is_encoder_decoder:
+            decoder_context_length = self._context_length("decoder")
+            decoder_prefix_tokens = 1  # Generation starts with a decoder/BOS token.
+            decoder_ids = moved.get("decoder_input_ids")
+            if isinstance(decoder_ids, torch.Tensor) and decoder_ids.ndim >= 2 and decoder_ids.shape[-1]:
+                decoder_prefix_tokens = int(decoder_ids.shape[-1])
+                start_token_id = getattr(generation_config, "decoder_start_token_id", None)
+                if start_token_id is None:
+                    start_token_id = getattr(model_config, "decoder_start_token_id", None)
+                if start_token_id is None:
+                    start_token_id = getattr(generation_config, "bos_token_id", None)
+                if start_token_id is None:
+                    start_token_id = getattr(model_config, "bos_token_id", None)
+                if isinstance(start_token_id, (int, np.integer)) and not bool(
+                    (decoder_ids[:, 0] == int(start_token_id)).all()
+                ):
+                    decoder_prefix_tokens += 1
+            if decoder_prefix_tokens >= decoder_context_length:
+                raise ValueError(
+                    f"原始模型解码器前缀需要 {decoder_prefix_tokens} token，"
+                    f"已占满解码器上下文 {decoder_context_length} token；请缩短解码器前缀或增大上下文长度。"
+                )
+            max_tokens = min(max_tokens, decoder_context_length - decoder_prefix_tokens)
+        elif prompt_tokens:
             max_tokens = min(max_tokens, max(1, context_length - prompt_tokens))
         if seed not in (None, 0):
             torch.manual_seed(int(seed) & 0xFFFFFFFF)
@@ -2111,21 +2410,24 @@ class _TransformersChatAdapter:
                 generation["top_p"] = max(0.01, min(1.0, float(top_p)))
             if top_k is not None and int(top_k) > 0:
                 generation["top_k"] = int(top_k)
-        generation_config = getattr(self.model, "generation_config", None)
-        model_config = getattr(self.model, "config", None)
         pad_token_id = getattr(self.tokenizer, "pad_token_id", None)
         if pad_token_id is None:
             pad_token_id = getattr(generation_config, "pad_token_id", None)
         if pad_token_id is None:
             pad_token_id = getattr(model_config, "pad_token_id", None)
-        eos_token_id = getattr(self.tokenizer, "eos_token_id", None)
-        if eos_token_id is None:
-            eos_token_id = getattr(generation_config, "eos_token_id", None)
+        # Model-native EOS may include several end-of-turn IDs. Do not replace
+        # that list with a tokenizer's single end-of-text token. An explicit
+        # per-call override, including None to disable EOS, remains authoritative.
+        eos_token_id = getattr(generation_config, "eos_token_id", None)
         if eos_token_id is None:
             eos_token_id = getattr(model_config, "eos_token_id", None)
+        if eos_token_id is None:
+            eos_token_id = getattr(self.tokenizer, "eos_token_id", None)
         if pad_token_id is not None:
             generation["pad_token_id"] = pad_token_id
-        if eos_token_id is not None:
+        if "eos_token_id" in _kwargs:
+            generation["eos_token_id"] = _kwargs["eos_token_id"]
+        elif eos_token_id is not None:
             generation["eos_token_id"] = eos_token_id
         stopping_criteria, stop_state = self._generation_stopping_criteria(
             _qwen_te_deadline_monotonic
@@ -2157,7 +2459,6 @@ class _TransformersChatAdapter:
                 raise RuntimeError("原始模型生成返回了无法转换为 token 序列的结果。") from exc
         if getattr(output, "ndim", 0) == 1:
             output = output.unsqueeze(0)
-        is_encoder_decoder = bool(getattr(getattr(self.model, "config", None), "is_encoder_decoder", False))
         generated = (
             output[:, prompt_tokens:]
             if not is_encoder_decoder and prompt_tokens and output.shape[-1] >= prompt_tokens
@@ -2311,15 +2612,15 @@ class _QwenStorage:
     @_锁定模型存储操作
     def load(cls, config: dict, *, force_reload: bool = False) -> _QwenModel:
         config = _规范化本地模型配置(config)
-        if not force_reload and cls.model and cls.model.settings == config:
+        if not force_reload and cls.model and _本地模型加载配置相同(cls.model.settings, config):
             return cls.model
 
         model_path, backend = _解析本地模型路径(config.get("model"))
-        cls.unload()
 
         if backend == "transformers":
             if config.get("mmproj") not in (None, "", "无"):
                 raise RuntimeError("原始 Transformers 模型不使用 GGUF mmproj；请将“视觉投影mmproj”设为“无”。")
+            cls.unload()
             model = _加载Transformers原始模型(config, model_path, cls)
             _更新模型存储记录(cls, model)
             return model
@@ -2327,23 +2628,22 @@ class _QwenStorage:
         if Llama is None:
             raise _llama不可用错误()
 
-        mmproj = config.get("mmproj", "无")
-        mmproj_path = None
-        if mmproj and mmproj != "无":
-            mmproj_path = os.path.join(folder_paths.models_dir, "LLM", mmproj)
-            if not os.path.exists(mmproj_path):
-                raise FileNotFoundError(f"找不到 mmproj 文件：{mmproj_path}")
-
+        mmproj_path = _解析本地视觉投影路径(config.get("mmproj", "无"))
         family = config["family"]
         think = config["think"]
-        cache_type_k = config.get("cache_type_k", 默认KV缓存类型)
-        cache_type_v = config.get("cache_type_v", 默认KV缓存类型)
+        if mmproj_path:
+            _校验GGUF视觉处理器支持(family=family, model_name=config.get("model"))
+        llama_kwargs = _构造GGUF加载参数(config, model_path)
+        prefer_embedded_template = _应使用llama内置聊天模板(
+            family=family,
+            model_name=config.get("model"),
+        )
+        chat_format = _推断llama默认聊天格式(family=family, model_name=config.get("model"))
+        cls.unload()
 
         chat_handler = None
         if mmproj_path:
             if family == "Qwen3-VL":
-                if Qwen3VLChatHandler is None:
-                    raise RuntimeError("当前 llama-cpp-python 不支持 Qwen3VLChatHandler，请更新 llama-cpp-python。")
                 # Qwen3 的 thinking 参数名在不同版本可能不同，这里做兜底。
                 try:
                     chat_handler = Qwen3VLChatHandler(clip_model_path=mmproj_path, force_reasoning=think, verbose=False)
@@ -2353,8 +2653,6 @@ class _QwenStorage:
                     except Exception:
                         chat_handler = Qwen3VLChatHandler(clip_model_path=mmproj_path, verbose=False)
             elif family == "Qwen3.5-VL":
-                if Qwen35ChatHandler is None:
-                    raise RuntimeError("当前 llama-cpp-python 不支持 Qwen35ChatHandler，请更新 llama-cpp-python。")
                 try:
                     chat_handler = Qwen35ChatHandler(
                         clip_model_path=mmproj_path,
@@ -2373,56 +2671,15 @@ class _QwenStorage:
                 # an Invalid chat handler error during model loading.
                 chat_handler = _构造qwen38视觉处理器(mmproj_path, bool(think))
             elif family == "Gemma4":
-                if Gemma4ChatHandler is None:
-                    raise RuntimeError(
-                        "当前 llama-cpp-python 不支持 Gemma4ChatHandler，"
-                        "因此 Gemma4 只能先做纯文本推理；如果要启用 mmproj / 图像推理，请安装带 Gemma4ChatHandler 的版本。"
-                    )
                 chat_handler = Gemma4ChatHandler(
                     clip_model_path=mmproj_path,
                     enable_thinking=think,
                     verbose=False,
                 )
-            else:
-                raise RuntimeError(f"{family} 暂未配置专用视觉 mmproj handler。请把“视觉投影mmproj”设为“无”，按纯文本 GGUF 模型加载。")
-
-        n_ctx = int(config.get("n_ctx", 8192))
-        n_gpu_layers = int(config.get("n_gpu_layers", -1))
-        prefer_embedded_template = _应使用llama内置聊天模板(
-            family=family,
-            model_name=config.get("model"),
-        )
-        chat_format = _推断llama默认聊天格式(family=family, model_name=config.get("model"))
-
-        llama_kwargs = {
-            "model_path": model_path,
-            "n_ctx": n_ctx,
-            "n_gpu_layers": n_gpu_layers,
-            "verbose": False,
-        }
-        _加入llama高级加载参数(llama_kwargs, config)
-        _加入llama自定义参数(llama_kwargs, config)
         if chat_handler is not None:
             llama_kwargs["chat_handler"] = chat_handler
         elif chat_format and _llama构造参数是否可用("chat_format") is not False:
             llama_kwargs["chat_format"] = chat_format
-
-        if _llama构造参数是否可用("ctx_checkpoints") is not False:
-            llama_kwargs["ctx_checkpoints"] = 0
-
-        type_k = _解析kv缓存类型(cache_type_k)
-        type_v = _解析kv缓存类型(cache_type_v)
-        wants_custom_kv_type = type_k is not None or type_v is not None
-        supports_type_k = _llama构造参数是否可用("type_k")
-        supports_type_v = _llama构造参数是否可用("type_v")
-
-        if wants_custom_kv_type and (supports_type_k is False or supports_type_v is False):
-            raise RuntimeError("当前 llama-cpp-python 不支持 type_k/type_v（KV cache 量化），请更新该依赖后再使用 q8_0。")
-
-        if type_k is not None:
-            llama_kwargs["type_k"] = type_k
-        if type_v is not None:
-            llama_kwargs["type_v"] = type_v
 
         try:
             llm = Llama(**llama_kwargs)
@@ -2475,15 +2732,15 @@ class _Gemma4Storage:
     @classmethod
     @_锁定模型存储操作
     def load(cls, config: dict, *, force_reload: bool = False) -> _QwenModel:
-        if not force_reload and cls.model and cls.model.settings == config:
+        if not force_reload and cls.model and _本地模型加载配置相同(cls.model.settings, config):
             return cls.model
 
         model_path, backend = _解析本地模型路径(config.get("model"))
-        cls.unload()
 
         if backend == "transformers":
             if config.get("mmproj") not in (None, "", "无"):
                 raise RuntimeError("原始 Transformers 模型不使用 GGUF mmproj；请将“视觉投影mmproj”设为“无”。")
+            cls.unload()
             model = _加载Transformers原始模型(config, model_path, cls)
             _更新模型存储记录(cls, model)
             return model
@@ -2491,63 +2748,26 @@ class _Gemma4Storage:
         if Llama is None:
             raise _llama不可用错误()
 
-        mmproj = config.get("mmproj", "无")
-        mmproj_path = None
-        if mmproj and mmproj != "无":
-            mmproj_path = os.path.join(folder_paths.models_dir, "LLM", mmproj)
-            if not os.path.exists(mmproj_path):
-                raise FileNotFoundError(f"找不到 mmproj 文件：{mmproj_path}")
-
+        mmproj_path = _解析本地视觉投影路径(config.get("mmproj", "无"))
         think = bool(config.get("think", False))
-        cache_type_k = config.get("cache_type_k", 默认KV缓存类型)
-        cache_type_v = config.get("cache_type_v", 默认KV缓存类型)
+        if mmproj_path:
+            _校验GGUF视觉处理器支持(family="Gemma4")
+        llama_kwargs = _构造GGUF加载参数(config, model_path)
+        chat_format = _推断llama默认聊天格式(family="Gemma4", model_name=config.get("model"))
+        cls.unload()
 
         chat_handler = None
         if mmproj_path:
-            if Gemma4ChatHandler is None:
-                raise RuntimeError(
-                    "当前 llama-cpp-python 不支持 Gemma4ChatHandler，"
-                    "因此 Gemma4 只能先做纯文本推理；如果要启用 mmproj / 图像推理，请安装带 Gemma4ChatHandler 的版本。"
-                )
             chat_handler = Gemma4ChatHandler(
                 clip_model_path=mmproj_path,
                 enable_thinking=think,
                 verbose=False,
             )
 
-        n_ctx = int(config.get("n_ctx", 8192))
-        n_gpu_layers = int(config.get("n_gpu_layers", -1))
-        chat_format = _推断llama默认聊天格式(family="Gemma4", model_name=config.get("model"))
-
-        llama_kwargs = {
-            "model_path": model_path,
-            "n_ctx": n_ctx,
-            "n_gpu_layers": n_gpu_layers,
-            "verbose": False,
-        }
-        _加入llama高级加载参数(llama_kwargs, config)
-        _加入llama自定义参数(llama_kwargs, config)
         if chat_handler is not None:
             llama_kwargs["chat_handler"] = chat_handler
         elif chat_format and _llama构造参数是否可用("chat_format") is not False:
             llama_kwargs["chat_format"] = chat_format
-
-        if _llama构造参数是否可用("ctx_checkpoints") is not False:
-            llama_kwargs["ctx_checkpoints"] = 0
-
-        type_k = _解析kv缓存类型(cache_type_k)
-        type_v = _解析kv缓存类型(cache_type_v)
-        wants_custom_kv_type = type_k is not None or type_v is not None
-        supports_type_k = _llama构造参数是否可用("type_k")
-        supports_type_v = _llama构造参数是否可用("type_v")
-
-        if wants_custom_kv_type and (supports_type_k is False or supports_type_v is False):
-            raise RuntimeError("当前 llama-cpp-python 不支持 type_k/type_v（KV cache 量化），请更新该依赖后再使用 q8_0。")
-
-        if type_k is not None:
-            llama_kwargs["type_k"] = type_k
-        if type_v is not None:
-            llama_kwargs["type_v"] = type_v
 
         llm = Llama(**llama_kwargs)
         _应用llama聊天格式兜底(llm, chat_format)
@@ -2628,6 +2848,10 @@ _安装全局卸载挂钩()
 
 class QwenTE模型加载器:
     @classmethod
+    def VALIDATE_INPUTS(cls, 主模型):
+        return _校验主模型下拉选择(主模型)
+
+    @classmethod
     def INPUT_TYPES(s):
         all_files = _列出llm文件()
         model_list = [f for f in all_files if "mmproj" not in f.lower() and _是本地模型选项(f)]
@@ -2639,13 +2863,13 @@ class QwenTE模型加载器:
         return {
             "required": {
                 "模型系列": (TE通用模型系列选项, {"default": "Qwen3.5-VL", "tooltip": "同一加载器自动支持 GGUF 和 Hugging Face 原始模型目录；明确的文件名会自动纠正模型家族，Qwen3.6 使用 Qwen3.5 兼容路径。"}),
-                "主模型": (model_list, {"tooltip": "选择 GGUF 文件，或选择包含 config.json 与权重的原始模型目录；模型放到 ComfyUI/models/LLM/。"}),
+                "主模型": (model_list, {"tooltip": "选择文本 GGUF 或完整原始模型目录，放到 ComfyUI/models/LLM/。分片 GGUF 只显示首片，同组必须下载完整；图像/视频扩散 GGUF 请使用下游专用加载器。"}),
                 "视觉投影mmproj": (mmproj_list, {"default": "无", "tooltip": "多模态需要 mmproj；纯文本可选“无”。"}),
                 "启用思考": ("BOOLEAN", {"default": False, "tooltip": "Qwen/Gemma 思考开关；通用 GGUF 纯文本模型通常可保持关闭。"}),
                 "上下文长度": ("INT", {"default": 8192, "min": 1024, "max": 327680, "step": 256, "tooltip": "对应 llama.cpp 的 n_ctx。"}),
                 "GPU层数": ("INT", {"default": -1, "min": -1, "max": 9999, "step": 1, "tooltip": "对应 llama.cpp 的 n_gpu_layers；-1=尽可能多上GPU；0=纯CPU。"}),
-                "KV缓存K类型": (KV缓存类型选项, {"default": 默认KV缓存类型, "tooltip": "对应 llama.cpp 的 --cache-type-k / type_k。推荐默认；q8_0-27B模型以上可能提速。"}),
-                "KV缓存V类型": (KV缓存类型选项, {"default": 默认KV缓存类型, "tooltip": "对应 llama.cpp 的 --cache-type-v / type_v。推荐默认；q8_0-27B模型以上可能提速。"}),
+                "KV缓存K类型": (KV缓存类型选项, {"default": 默认KV缓存类型, "tooltip": "KV 缓存精度，与权重 Q4_K_M/IQ/MXFP4 等无关。新增 q4/q5/bf16 需运行时支持；默认 F16 最稳妥。"}),
+                "KV缓存V类型": (KV缓存类型选项, {"default": 默认KV缓存类型, "tooltip": "KV 缓存精度。量化 V 缓存可能需要 Flash Attention 与对应架构支持；不兼容时改回默认 F16。"}),
                 "批处理大小": ("INT", {"default": 2048, "min": 32, "max": 131072, "step": 32, "tooltip": "对应 llama.cpp 的 n_batch；显存不足时降低，长上下文可适当提高。"}),
                 "微批处理大小": ("INT", {"default": 512, "min": 32, "max": 131072, "step": 32, "tooltip": "对应 llama.cpp 的 n_ubatch；通常不大于批处理大小。"}),
                 "线程数": ("INT", {"default": 0, "min": 0, "max": 512, "step": 1, "tooltip": "对应 n_threads；0=由 llama.cpp 自动选择。"}),
@@ -2770,7 +2994,7 @@ class QwenTE图像推理:
         if _QwenStorage.model is None:
             need_reload = True
         elif qwen模型 is not _QwenStorage.model:
-            if hasattr(qwen模型, "settings") and getattr(qwen模型, "settings") == _QwenStorage.model.settings:
+            if _本地模型加载配置相同(getattr(qwen模型, "settings", None), _QwenStorage.model.settings):
                 qwen模型 = _QwenStorage.model
             else:
                 need_reload = True
@@ -2928,6 +3152,10 @@ class QwenTE卸载模型:
 
 class Gemma4TE模型加载器:
     @classmethod
+    def VALIDATE_INPUTS(cls, 主模型):
+        return _校验主模型下拉选择(主模型)
+
+    @classmethod
     def INPUT_TYPES(s):
         all_files = _列出llm文件()
         model_list = [f for f in all_files if "mmproj" not in f.lower() and _是本地模型选项(f)]
@@ -3061,7 +3289,7 @@ class Gemma4TE图像推理:
         if _Gemma4Storage.model is None:
             need_reload = True
         elif gemma4模型 is not _Gemma4Storage.model:
-            if hasattr(gemma4模型, "settings") and getattr(gemma4模型, "settings") == _Gemma4Storage.model.settings:
+            if _本地模型加载配置相同(getattr(gemma4模型, "settings", None), _Gemma4Storage.model.settings):
                 gemma4模型 = _Gemma4Storage.model
             else:
                 need_reload = True

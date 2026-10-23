@@ -28,6 +28,7 @@ def load_nodes(models_dir: Path):
         "llama_cpp",
         "llama_cpp.llama_tokenizer",
         "llama_cpp.llama_chat_format",
+        "llama_cpp._ggml",
         "transformers",
     ]
     saved = {name: sys.modules.get(name) for name in dependency_names}
@@ -62,6 +63,7 @@ def load_nodes(models_dir: Path):
     llama_cpp.__path__ = []
     llama_cpp.Llama = FakeLlama
     llama_cpp.GGML_TYPE_Q8_0 = 8
+    ggml_module = types.ModuleType("llama_cpp._ggml")
     tokenizer_module = types.ModuleType("llama_cpp.llama_tokenizer")
     tokenizer_module.LlamaTokenizer = None
     chat_format = types.ModuleType("llama_cpp.llama_chat_format")
@@ -112,6 +114,7 @@ def load_nodes(models_dir: Path):
         "llama_cpp": llama_cpp,
         "llama_cpp.llama_tokenizer": tokenizer_module,
         "llama_cpp.llama_chat_format": chat_format,
+        "llama_cpp._ggml": ggml_module,
         "transformers": transformers,
     }
     sys.modules.update(injected)

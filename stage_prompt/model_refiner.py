@@ -48,6 +48,7 @@ try:
         classify_repair_reason,
         introduced_human_subject_intrusions,
     )
+    from .video_prompt_skill import video_prompt_contract_violation
 except Exception:  # pragma: no cover - exercised by direct import tests
     from stage_prompt_narrative_test import (  # type: ignore
         GLOBAL_NARRATIVE_MODEL_CONTRACT,
@@ -63,6 +64,7 @@ except Exception:  # pragma: no cover - exercised by direct import tests
         classify_repair_reason,
         introduced_human_subject_intrusions,
     )
+    from stage_prompt_video_prompt_skill_test import video_prompt_contract_violation  # type: ignore
 
 _SCENE_ATTRIBUTE_MODEL_GUIDANCE = {
     "time_of_day": "昼夜只约束天空亮度、环境基准光与时段线索，不自行改变天气或场景",
@@ -1678,6 +1680,18 @@ def _video_story_continuity_violation(text: str, anchor_roles: Any, *, language:
     )
 
 
+def _video_model_contract_violation(
+    text: str,
+    original: str,
+    settings: Mapping[str, Any],
+    *,
+    language: str,
+) -> str:
+    """Compatibility wrapper around the shared video Skill contract."""
+
+    return video_prompt_contract_violation(text, original, settings, language=language)
+
+
 def _postprocess_video_prompt_text(text: str) -> str:
     """Clean model wrappers while preserving storyboard paragraph boundaries."""
 
@@ -2149,7 +2163,7 @@ def _validated_model_blend(
     blended = _blend_model_draft_with_skill_prompt(original_prompt, model_prompt, settings)
     if blended == str(original_prompt or "").strip():
         return str(original_prompt or "").strip()
-    if layout_mode and not prompt_preserves_visual_layout(blended, layout_mode):
+    if layout_mode and not prompt_preserves_visual_layout(blended, layout_mode, non_person=_is_non_person_subject(settings)):
         return str(original_prompt or "").strip()
     if _creative_spine_violation(original_prompt, blended, settings):
         return str(original_prompt or "").strip()
@@ -2174,7 +2188,7 @@ def _resolve_model_prompt_candidate(
     if _violates_subject_type(original_prompt, cleaned, settings):
         return original_prompt, "rejected", "模型响应改变了当前主体类型。"
     layout_mode = str(settings.get("画面结构模式解析结果", "") or "").strip()
-    if layout_mode and not prompt_preserves_visual_layout(cleaned, layout_mode):
+    if layout_mode and not prompt_preserves_visual_layout(cleaned, layout_mode, non_person=_is_non_person_subject(settings)):
         blended = _validated_model_blend(original_prompt, cleaned, settings, layout_mode=layout_mode)
         if blended != str(original_prompt or "").strip():
             return blended, "blended", ""
@@ -2330,6 +2344,24 @@ def _prompt_language_mode(settings: dict[str, Any]) -> str:
     return str(settings.get("提示词语言", "纯中文") or "纯中文").strip()
 
 
+def _is_non_person_subject(settings: Mapping[str, Any]) -> bool:
+    return str(settings.get("主体类型解析结果") or settings.get("主体类型") or "").strip() == "非人物主体"
+
+
+def _multi_view_model_contract(settings: dict[str, Any]) -> str:
+    if not _is_non_person_subject(settings):
+        return MULTI_VIEW_MODEL_CONTRACT
+    return (
+        "非人物三视图自然语言合同：\n"
+        f"{visual_layout_contract('multi_view', non_person=True)}\n"
+        "先完整说明版式，再描述同一主体的外轮廓、体块、表面结构、配色、材质和已选附件。"
+        "三个视图的结构连接与材质细节必须逐项对应，动作只用于确定一致的展示状态；"
+        "场景只用于统一背景和尺度参照，不编造事件推进。"
+        "主体是器物、机械、建筑或其他已选非人物设计，不能换成人物肖像；"
+        "只补充可跨三个视图成立的可见设计事实，保持用户标签、Skill 底稿、媒介风格和视图数量。"
+    )
+
+
 def _language_instruction(settings: dict[str, Any]) -> str:
     language = _prompt_language_mode(settings)
     if language == "纯英文":
@@ -2351,10 +2383,17 @@ def _language_instruction(settings: dict[str, Any]) -> str:
 def _resolve_system_prompt(settings: dict[str, Any]) -> str:
     if str(settings.get("模型任务", "") or "").strip() == "视频提示词":
         if _uses_qwen35_local_incremental_refinement(settings):
-            return _QWEN35_LOCAL_VIDEO_INCREMENTAL_SYSTEM.replace(
+            local_prompt = _QWEN35_LOCAL_VIDEO_INCREMENTAL_SYSTEM.replace(
                 "Qwen3.5",
                 _qwen_local_incremental_label(settings),
             )
+            video_profile = settings.get("视频提示词Profile")
+            if isinstance(video_profile, Mapping):
+                local_prompt += (
+                    f"\nInput contract: {video_profile.get('input_contract', '')}. "
+                    "Preserve the Skill's supplied-frame and reference continuity; never invent missing reference assets."
+                )
+            return local_prompt
         video_prompt = str(settings.get("视频提示词模型系统提示", "") or "").strip()
         if video_prompt:
             video_profile = settings.get("视频提示词Profile")
@@ -2365,6 +2404,9 @@ def _resolve_system_prompt(settings: dict[str, Any]) -> str:
                     f"{video_profile.get('input_mode', 'T2V')}; continuity contract: "
                     f"{video_profile.get('continuity', 'subject_scene_prop_lighting_axis')}; "
                     f"audio schema: {video_profile.get('audio_schema', 'inline_natural_language')}."
+                    f" Input contract: {video_profile.get('input_contract', '')}."
+                    f" Downstream submission unit: {video_profile.get('submission_unit', 'storyboard_or_per_shot')}; "
+                    "this is a prompt-writing contract, not permission to invent reference images, audio or video."
                 )
             language = _prompt_language_mode(settings)
             if language == "纯中文":
@@ -2393,7 +2435,9 @@ def _resolve_system_prompt(settings: dict[str, Any]) -> str:
             return video_prompt
     layout_mode = resolve_visual_layout_mode(settings=settings)
     english_layout = _prompt_language_mode(settings) in {"纯英文", "英文提示词+中文说明"}
-    layout_contract = visual_layout_contract(layout_mode, english=english_layout)
+    non_person = _is_non_person_subject(settings)
+    layout_contract = visual_layout_contract(layout_mode, english=english_layout, non_person=non_person)
+    multi_view_contract = _multi_view_model_contract(settings)
     if _uses_qwen35_local_incremental_refinement(settings) and not str(settings.get("系统提示词覆盖") or "").strip():
         incremental_system = (
             _QWEN_LOCAL_MULTI_VIEW_INCREMENTAL_SYSTEM
@@ -2403,6 +2447,8 @@ def _resolve_system_prompt(settings: dict[str, Any]) -> str:
                 _qwen_local_incremental_label(settings),
             )
         )
+        if layout_mode == "multi_view" and non_person:
+            incremental_system = incremental_system.replace(MULTI_VIEW_MODEL_CONTRACT, multi_view_contract).replace("角色设定图", "非人物三视图")
         return (
             f"{incremental_system}\n\n当前画面结构硬约束：{layout_contract}"
             f"{_language_instruction(settings)}"
@@ -2410,7 +2456,9 @@ def _resolve_system_prompt(settings: dict[str, Any]) -> str:
     custom_system_prompt = str(settings.get("系统提示词覆盖") or "").strip()
     if layout_mode == "multi_view":
         base_prompt = custom_system_prompt or _MULTI_VIEW_IMAGE_REFINER_SYSTEM
-        narrative_contract = "" if MULTI_VIEW_MODEL_CONTRACT in base_prompt else f"\n\n{MULTI_VIEW_MODEL_CONTRACT}"
+        if non_person and not custom_system_prompt:
+            base_prompt = base_prompt.replace(MULTI_VIEW_MODEL_CONTRACT, multi_view_contract).replace("角色设定图", "非人物三视图")
+        narrative_contract = "" if multi_view_contract in base_prompt else f"\n\n{multi_view_contract}"
     else:
         base_prompt = custom_system_prompt or _DEFAULT_IMAGE_REFINER_SYSTEM
         narrative_contract = "" if GLOBAL_NARRATIVE_MODEL_CONTRACT in base_prompt else f"\n\n{GLOBAL_NARRATIVE_MODEL_CONTRACT}"
@@ -2467,7 +2515,7 @@ def is_natural_language_prompt(text: str, settings: dict[str, Any] | None = None
     if active_settings and not _looks_like_narrative_prompt(prompt, active_settings):
         return False
     layout_mode = str(active_settings.get("画面结构模式解析结果", "") or "").strip()
-    if layout_mode and not prompt_preserves_visual_layout(prompt, layout_mode):
+    if layout_mode and not prompt_preserves_visual_layout(prompt, layout_mode, non_person=_is_non_person_subject(active_settings)):
         return False
     return _looks_like_natural_prose_prompt(prompt)
 
@@ -2691,7 +2739,7 @@ def _looks_like_narrative_prompt(text: str, settings: dict[str, Any]) -> bool:
         return False
     layout_mode = str(settings.get("画面结构模式解析结果", "") or "").strip()
     if layout_mode == "multi_view":
-        if not prompt_preserves_visual_layout(body, layout_mode):
+        if not prompt_preserves_visual_layout(body, layout_mode, non_person=_is_non_person_subject(settings)):
             return False
         if _CJK_PATTERN.search(body):
             hits = sum(
@@ -4069,6 +4117,7 @@ def _skill_context_for_model(settings: dict[str, Any]) -> str:
     layout_policy = visual_layout_contract(
         layout_mode,
         english=str(settings.get("提示词语言", "纯中文") or "纯中文").strip() in {"纯英文", "英文提示词+中文说明"},
+        non_person=_is_non_person_subject(settings),
     )
 
     extra_lines = [
@@ -5154,7 +5203,17 @@ def _is_transient_model_error(exc: Exception) -> bool:
     return any(marker in text for marker in _TRANSIENT_MODEL_ERROR_MARKERS)
 
 
-def _raise_if_model_call_interrupted() -> None:
+def _raise_if_model_call_interrupted(error: BaseException | None = None) -> None:
+    interruption_type = getattr(_comfy_mm, "InterruptProcessingException", None)
+    if (
+        error is not None
+        and isinstance(interruption_type, type)
+        and issubclass(interruption_type, BaseException)
+        and isinstance(error, interruption_type)
+    ):
+        # A backend may already have consumed/reset the global interrupt flag.
+        # Its explicit cancellation must still escape all Skill fallbacks.
+        raise error
     checker = getattr(_comfy_mm, "processing_interrupted", None)
     if callable(checker) and bool(checker()):
         error_type = getattr(_comfy_mm, "InterruptProcessingException", RuntimeError)
@@ -5236,6 +5295,7 @@ def _call_model_text_with_retry(
                 clean_think_text=clean_think_text,
                 prompt_count=prompt_count,
             )
+            _raise_if_model_call_interrupted()
             if retry_index:
                 _append_model_runtime_note(
                     settings,
@@ -5243,7 +5303,7 @@ def _call_model_text_with_retry(
                 )
             return text
         except Exception as exc:
-            _raise_if_model_call_interrupted()
+            _raise_if_model_call_interrupted(exc)
             if retry_index >= retry_limit or not _is_transient_model_error(exc):
                 raise
             retry_index += 1
@@ -5326,7 +5386,8 @@ def _retry_invalid_model_output(
             clean_think_text=clean_think_text,
             prompt_count=1,
         )
-    except Exception:
+    except Exception as exc:
+        _raise_if_model_call_interrupted(exc)
         return ""
     settings["模型输出修复重试次数实际"] = max(
         0,
@@ -5359,6 +5420,7 @@ def maybe_model_refine(
             prompt_count=1,
         )
     except Exception as exc:
+        _raise_if_model_call_interrupted(exc)
         _record_model_call_result(settings, outcome="failure", reason=exc)
         return prompt
     resolved, mode, reason = _resolve_model_prompt_candidate(prompt, raw_text, settings)
@@ -5427,6 +5489,7 @@ def maybe_model_refine_video(
             prompt_count=1,
         )
     except Exception as exc:
+        _raise_if_model_call_interrupted(exc)
         _record_model_call_result(video_settings, outcome="failure", reason=exc)
         settings.update({key: value for key, value in video_settings.items() if key.startswith(("模型", "智能定向修复")) or key == "推理纠偏说明"})
         return original
@@ -5439,8 +5502,11 @@ def maybe_model_refine_video(
         settings.get("视频提示词时间轴启用", False)
         or (video_profile.get("timeline_enabled", False) if isinstance(video_profile, Mapping) else False)
     )
+    last_video_validation_reason = ""
 
     def validate_video(text: str) -> bool:
+        nonlocal last_video_validation_reason
+        last_video_validation_reason = ""
         layout_mode = str(
             settings.get(
                 "视频提示词来源画面结构模式",
@@ -5449,7 +5515,7 @@ def maybe_model_refine_video(
             or ""
         ).strip()
         try:
-            return bool(
+            structure_valid = bool(
                 validator(
                     text,
                     language=language,
@@ -5459,11 +5525,17 @@ def maybe_model_refine_video(
             )
         except TypeError:
             try:
-                return bool(validator(text, language=language, allow_timeline=allow_timeline))
+                structure_valid = bool(validator(text, language=language, allow_timeline=allow_timeline))
             except TypeError:
                 # Keep compatibility with third-party validators using the old
                 # language-only signature.
-                return bool(validator(text, language=language))
+                structure_valid = bool(validator(text, language=language))
+        if not structure_valid:
+            return False
+        last_video_validation_reason = _video_model_contract_violation(
+            text, original, settings, language=language,
+        )
+        return not last_video_validation_reason
 
     anchors = [str(item).strip() for item in settings.get("视频提示词必保留锚点", []) if str(item).strip()]
     anchor_roles = settings.get("视频提示词锚点角色")
@@ -5497,7 +5569,7 @@ def maybe_model_refine_video(
     elif world_reason:
         invalid_reason = world_reason
     elif not candidate_structure_valid:
-        invalid_reason = "视频模型候选未通过自然语言、分镜段落或完整剧情校验。"
+        invalid_reason = last_video_validation_reason or "视频模型候选未通过自然语言、分镜段落或完整剧情校验。"
     elif continuity_reason:
         invalid_reason = continuity_reason
 
@@ -5508,7 +5580,7 @@ def maybe_model_refine_video(
             last_blend_reason
             and any(
                 marker in last_blend_reason
-                for marker in ("阶段顺序", "阶段位置", "明确分镜编号", "融合后")
+                for marker in ("阶段顺序", "阶段位置", "明确分镜编号", "融合后", "配置要求", "参考素材边界", "承接约束")
             )
         )
 
@@ -5547,7 +5619,7 @@ def maybe_model_refine_video(
                 elif blended_world_reason:
                     last_blend_reason = blended_world_reason
                 elif not blended_structure_valid:
-                    last_blend_reason = "视频增量融合后破坏了自然语言、分镜段落或完整剧情结构。"
+                    last_blend_reason = last_video_validation_reason or "视频增量融合后破坏了自然语言、分镜段落或完整剧情结构。"
                 elif blended_continuity_reason:
                     last_blend_reason = blended_continuity_reason
             return ""
@@ -5626,7 +5698,9 @@ def maybe_model_refine_video(
                     candidate_valid = False
                     invalid_reason = last_blend_reason or "视频模型定向修复正文仍未能安全融入 Skill 分镜故事基线。"
             else:
-                if repaired_continuity_reason:
+                if not repaired_structure_valid and last_video_validation_reason:
+                    invalid_reason = last_video_validation_reason
+                elif repaired_continuity_reason:
                     invalid_reason = repaired_continuity_reason
                 blended = adopt_blended(repaired_candidate)
                 if blended:
@@ -5705,6 +5779,7 @@ def maybe_model_refine_batch(
             prompt_count=len(clean_prompts),
         )
     except Exception as exc:
+        _raise_if_model_call_interrupted(exc)
         _record_model_call_result(
             settings,
             outcome="failure",
@@ -5731,7 +5806,7 @@ def maybe_model_refine_batch(
             retry_results: list[str] = []
             retry_fallback_count = 0
             for prompt in clean_prompts:
-                failure_count_before = max(0, int(settings.get("模型调用失败次数", 0) or 0))
+                fallback_count_before = max(0, int(settings.get("模型活动回退数量", 0) or 0))
                 result = maybe_model_refine(
                     model,
                     prompt,
@@ -5740,8 +5815,10 @@ def maybe_model_refine_batch(
                     clean_think_text=clean_think_text,
                 )
                 retry_results.append(result)
-                failure_count_after = max(0, int(settings.get("模型调用失败次数", 0) or 0))
-                if failure_count_after > failure_count_before:
+                fallback_count_after = max(0, int(settings.get("模型活动回退数量", 0) or 0))
+                # A successful transport with rejected prose is still an
+                # actual Skill fallback, not a recovered model output.
+                if fallback_count_after > fallback_count_before:
                     retry_fallback_count += 1
             adopted_count = sum(
                 candidate != original

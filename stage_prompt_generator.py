@@ -9,7 +9,9 @@ import os
 import random
 import re
 import secrets
+import select
 import socket
+import ssl
 import threading
 import time
 import weakref
@@ -18,7 +20,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections import OrderedDict
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from copy import deepcopy
 from typing import Any, Iterable
 
@@ -88,7 +90,7 @@ try:
     )
 except Exception:  # pragma: no cover - focused tests may stub .nodes
     _内置模型系列选项 = ["Qwen3-VL", "Qwen3.5-VL", "Qwen3.8-VL", "Gemma4", "Llama", "Mistral", "DeepSeek", "通用模型", "通用GGUF"]
-    _内置模型KV缓存类型选项 = ["默认(F16)", "q8_0"]
+    _内置模型KV缓存类型选项 = ["默认(F16)", "q8_0", "q4_0", "q4_1", "q5_0", "q5_1", "bf16"]
     _内置模型Flash注意力选项 = ["自动", "开启", "关闭"]
     _内置默认KV缓存类型 = "默认(F16)"
     _内置QwenStorage = None
@@ -194,9 +196,13 @@ from .stage_prompt.intelligence import (
 )
 from .stage_prompt.character_sheet_skill import (
     apply_character_sheet_strategy as _apply_character_sheet_strategy_impl,
+    is_non_person_subject as _is_non_person_sheet_subject_impl,
+    NON_PERSON_SHEET_PROMPT_BRIEF,
 )
 from .stage_prompt.normalizer import normalize_inference_state as _normalize_inference_state_impl
+from .stage_prompt.narrative import resolve_visual_layout_mode as _resolve_visual_layout_mode_impl
 from .stage_prompt.prompt_builder import (
+    IMAGE_PROMPT_TARGET_MODEL_OPTIONS,
     _STYLE_POSITIVE_EXCLUSION_TERMS,
     build_prompt_list as _build_prompt_list_impl,
     format_grouped_summary as _format_grouped_summary_impl,
@@ -247,6 +253,7 @@ from .stage_prompt.video_prompt_skill import (
     is_natural_video_prompt as _is_natural_video_prompt_impl,
     project_video_story_settings as _project_video_story_settings_impl,
     video_prompt_anchor_roles as _video_prompt_anchor_roles_impl,
+    video_prompt_contract_violation as _video_prompt_contract_violation_impl,
     video_prompt_required_anchors as _video_prompt_required_anchors_impl,
     resolve_video_prompt_profile as _resolve_video_prompt_profile_impl,
 )
@@ -257,8 +264,17 @@ _COOPERATIVE_WAIT_POLL_SECONDS = 0.25
 _SEED_MAX = 0xFFFFFFFFFFFFFFFF
 
 
-def _raise_if_comfy_interrupted() -> None:
+def _raise_if_comfy_interrupted(error: BaseException | None = None) -> None:
     model_management = _comfy_mm
+    interruption_type = getattr(model_management, "InterruptProcessingException", None)
+    if (
+        error is not None
+        and isinstance(interruption_type, type)
+        and issubclass(interruption_type, BaseException)
+        and isinstance(error, interruption_type)
+    ):
+        # A backend may consume the global flag before propagating cancellation.
+        raise error
     checker = getattr(model_management, "processing_interrupted", None)
     if callable(checker) and bool(checker()):
         error_type = getattr(model_management, "InterruptProcessingException", RuntimeError)
@@ -818,7 +834,7 @@ _RUNTIME_RANDOM_HISTORY_GENERIC_SUBJECTS = {
     *EXPANDED_THEME_POOL_OPTIONS,
 ]
 提示词语言选项 = ["纯中文", "英文提示词+中文说明", "纯英文"]
-图像提示词目标模型选项 = ["通用", "Flux", "SDXL", "Qwen Image", "Krea 2", "Midjourney", "自定义"]
+图像提示词目标模型选项 = list(IMAGE_PROMPT_TARGET_MODEL_OPTIONS)
 视频提示词目标模型选项 = list(_VIDEO_PROMPT_TARGET_MODEL_OPTIONS)
 视频提示词输入模式选项 = list(_VIDEO_PROMPT_INPUT_MODE_OPTIONS)
 视频提示词镜头段数选项 = list(_VIDEO_PROMPT_SHOT_COUNT_OPTIONS)
@@ -868,8 +884,8 @@ API服务商预设 = {
     "OpenAI兼容": {"kind": "openai", "base_url": "", "env": ["QWEN_TE_API_KEY", "OPENAI_API_KEY"], "model": ""},
     "OpenAI": {"kind": "openai", "base_url": "https://api.openai.com/v1", "env": ["OPENAI_API_KEY", "QWEN_TE_API_KEY"], "model": "gpt-4o-mini"},
     "OpenRouter": {"kind": "openai", "base_url": "https://openrouter.ai/api/v1", "env": ["OPENROUTER_API_KEY", "QWEN_TE_API_KEY"], "model": "openai/gpt-4o-mini"},
-    "DeepSeek": {"kind": "openai", "base_url": "https://api.deepseek.com", "env": ["DEEPSEEK_API_KEY", "QWEN_TE_API_KEY"], "model": "deepseek-v4-flash"},
-    "通义千问DashScope": {"kind": "dashscope", "base_url": "https://dashscope.aliyuncs.com/api/v1", "env": ["DASHSCOPE_API_KEY", "QWEN_TE_API_KEY"], "model": "qwen3.7-max"},
+    "DeepSeek": {"kind": "openai", "base_url": "https://api.deepseek.com", "env": ["DEEPSEEK_API_KEY", "QWEN_TE_API_KEY"], "model": "deepseek-flash"},
+    "通义千问DashScope": {"kind": "dashscope", "base_url": "https://dashscope.aliyuncs.com/api/v1", "env": ["DASHSCOPE_API_KEY", "QWEN_TE_API_KEY"], "model": "qwen3.8-max"},
     "Kimi": {"kind": "openai", "base_url": "https://api.moonshot.cn/v1", "env": ["MOONSHOT_API_KEY", "KIMI_API_KEY", "QWEN_TE_API_KEY"], "model": "moonshot-v1-8k"},
     "SiliconFlow": {"kind": "openai", "base_url": "https://api.siliconflow.cn/v1", "env": ["SILICONFLOW_API_KEY", "QWEN_TE_API_KEY"], "model": ""},
     "火山方舟": {"kind": "openai", "base_url": "https://ark.cn-beijing.volces.com/api/v3", "env": ["ARK_API_KEY", "VOLCENGINE_API_KEY", "QWEN_TE_API_KEY"], "model": ""},
@@ -879,9 +895,9 @@ API服务商预设 = {
     "Fireworks": {"kind": "openai", "base_url": "https://api.fireworks.ai/inference/v1", "env": ["FIREWORKS_API_KEY", "QWEN_TE_API_KEY"], "model": ""},
     "Mistral": {"kind": "openai", "base_url": "https://api.mistral.ai/v1", "env": ["MISTRAL_API_KEY", "QWEN_TE_API_KEY"], "model": "mistral-small-latest"},
     "Perplexity": {"kind": "openai", "base_url": "https://api.perplexity.ai", "env": ["PPLX_API_KEY", "PERPLEXITY_API_KEY", "QWEN_TE_API_KEY"], "model": "sonar"},
-    "Gemini OpenAI兼容": {"kind": "openai", "base_url": "https://generativelanguage.googleapis.com/v1beta/openai", "env": ["GEMINI_API_KEY", "GOOGLE_API_KEY", "QWEN_TE_API_KEY"], "model": "gemini-2.5-flash"},
-    "Claude Anthropic": {"kind": "anthropic", "base_url": "https://api.anthropic.com/v1/messages", "env": ["ANTHROPIC_API_KEY", "CLAUDE_API_KEY", "QWEN_TE_API_KEY"], "model": "claude-haiku-4-5"},
-    "Gemini 原生": {"kind": "gemini", "base_url": "https://generativelanguage.googleapis.com/v1beta", "env": ["GEMINI_API_KEY", "GOOGLE_API_KEY", "QWEN_TE_API_KEY"], "model": "gemini-2.5-flash"},
+    "Gemini OpenAI兼容": {"kind": "openai", "base_url": "https://generativelanguage.googleapis.com/v1beta/openai", "env": ["GEMINI_API_KEY", "GOOGLE_API_KEY", "QWEN_TE_API_KEY"], "model": "gemini-flash-latest"},
+    "Claude Anthropic": {"kind": "anthropic", "base_url": "https://api.anthropic.com/v1/messages", "env": ["ANTHROPIC_API_KEY", "CLAUDE_API_KEY", "QWEN_TE_API_KEY"], "model": "claude-haiku-5-5"},
+    "Gemini 原生": {"kind": "gemini", "base_url": "https://generativelanguage.googleapis.com/v1beta", "env": ["GEMINI_API_KEY", "GOOGLE_API_KEY", "QWEN_TE_API_KEY"], "model": "gemini-flash-latest"},
     "Ollama本地": {"kind": "ollama", "base_url": "http://127.0.0.1:11434/api/chat", "env": [], "model": "qwen2.5"},
     "LM Studio本地": {"kind": "openai", "base_url": "http://127.0.0.1:1234/v1", "env": [], "model": ""},
     "自定义": {"kind": "openai", "base_url": "", "env": ["QWEN_TE_API_KEY"], "model": ""},
@@ -1752,6 +1768,112 @@ def _set_http_response_timeout(response: Any, timeout: float) -> None:
             return
 
 
+class _CooperativeHTTPBuffer:
+    """Poll a buffered socket without poisoning it with recoverable timeouts.
+
+    HTTPResponse keeps ownership of content-length/chunk framing. Its fp proxy
+    implements the same read/read1/readline contract, consuming only bytes that
+    a nonblocking peek has already placed in the original buffer.
+    """
+
+    def __init__(self, buffer, socket_obj, remaining):
+        self._buffer = buffer
+        self._socket = socket_obj
+        self._remaining = remaining
+
+    def __getattr__(self, name):
+        return getattr(self._buffer, name)
+
+    def read1(self, size=-1):
+        if size == 0:
+            return b""
+        readable = False
+        while True:
+            remaining = self._remaining()
+            original_timeout = self._socket.gettimeout()
+            wait_for_write = False
+            try:
+                # Unlike a socket timeout, EAGAIN/SSLWantRead does not mark
+                # SocketIO as unusable. peek also sees bytes buffered while
+                # HTTP headers were read, including already decrypted TLS data.
+                self._socket.setblocking(False)
+                buffered = self._buffer.peek(1)
+            except (BlockingIOError, ssl.SSLWantReadError):
+                buffered = None
+            except ssl.SSLWantWriteError:
+                buffered = None
+                wait_for_write = True
+            finally:
+                self._socket.settimeout(original_timeout)
+            if buffered:
+                count = len(buffered) if size < 0 else min(size, len(buffered))
+                return self._buffer.read1(count)
+            if buffered == b"" and readable:
+                # An empty probe is EOF only after actual read readiness; an
+                # empty probe on an idle nonblocking socket means "not yet".
+                return b""
+            ready_read, ready_write, _ = select.select(
+                [] if wait_for_write else [self._socket],
+                [self._socket] if wait_for_write else [],
+                [],
+                min(remaining, _COOPERATIVE_WAIT_POLL_SECONDS),
+            )
+            readable = bool(ready_read) and not bool(ready_write)
+
+    def read(self, size=-1):
+        chunks = []
+        total = 0
+        while size < 0 or total < size:
+            chunk = self.read1(_HTTP_READ_CHUNK_BYTES if size < 0 else size - total)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total += len(chunk)
+        return b"".join(chunks)
+
+    def readline(self, size=-1):
+        line = bytearray()
+        while size < 0 or len(line) < size:
+            chunk = self.read1(1)
+            if not chunk:
+                break
+            line.extend(chunk)
+            if chunk == b"\n":
+                break
+        return bytes(line)
+
+
+@contextmanager
+def _cooperative_http_buffer(response, remaining):
+    # HTTPError wraps an HTTPResponse in fp, whereas a successful urllib
+    # response owns the BufferedReader directly. Limit traversal to wrappers.
+    owner = response
+    for _ in range(3):
+        buffer = getattr(owner, "fp", None)
+        raw = getattr(buffer, "raw", None)
+        socket_obj = getattr(raw, "_sock", None)
+        if isinstance(socket_obj, socket.socket) and callable(getattr(buffer, "peek", None)):
+            proxy = _CooperativeHTTPBuffer(buffer, socket_obj, remaining)
+            original_timeout = socket_obj.gettimeout()
+            owner.fp = proxy
+            try:
+                yield True
+            finally:
+                # HTTPResponse may have closed fp and assigned None at EOF.
+                # Never resurrect that closed stream for the next operation.
+                if getattr(owner, "fp", None) is proxy:
+                    owner.fp = None if buffer.closed else buffer
+                try:
+                    socket_obj.settimeout(original_timeout)
+                except OSError:
+                    pass
+            return
+        if buffer is None or buffer is owner:
+            break
+        owner = buffer
+    yield False
+
+
 def _read_http_response_limited(
     response: Any,
     *,
@@ -1774,32 +1896,39 @@ def _read_http_response_limited(
     reader = getattr(response, "read1", None)
     if not callable(reader):
         reader = response.read
-    while True:
+    def remaining_time():
         _raise_if_comfy_interrupted()
         remaining = deadline - time.monotonic()
         if deadline_monotonic is not None:
             remaining = min(remaining, deadline_monotonic - time.monotonic())
         if remaining <= 0:
             raise TimeoutError(f"{label}读取超过总时限。")
-        _set_http_response_timeout(response, min(remaining, _COOPERATIVE_WAIT_POLL_SECONDS))
-        try:
-            chunk = reader(min(_HTTP_READ_CHUNK_BYTES, max_bytes + 1 - total))
-        except TimeoutError:
-            # A socket read timeout is only a poll boundary; keep the same
-            # response open so cancellation can be observed without waiting
-            # for the full API timeout.
-            _raise_if_comfy_interrupted()
-            if deadline_monotonic is not None and time.monotonic() >= deadline_monotonic:
-                raise TimeoutError(f"{label}读取超过截止时间。")
-            if time.monotonic() >= deadline:
-                raise TimeoutError(f"{label}读取超过总时限。")
-            continue
-        if not chunk:
-            break
-        chunks.append(bytes(chunk))
-        total += len(chunk)
-        if total > max_bytes:
-            raise RuntimeError(f"{label}响应超过 {max_bytes} 字节上限。")
+        return remaining
+
+    with _cooperative_http_buffer(response, remaining_time) as cooperative_buffer:
+        while True:
+            remaining = remaining_time()
+            if not cooperative_buffer:
+                _set_http_response_timeout(response, min(remaining, _COOPERATIVE_WAIT_POLL_SECONDS))
+            try:
+                chunk = reader(min(_HTTP_READ_CHUNK_BYTES, max_bytes + 1 - total))
+            except TimeoutError:
+                # Recognized buffered sockets never use timeouts as polls.
+                # Preserve compatibility with custom non-buffered readers.
+                if cooperative_buffer:
+                    raise
+                _raise_if_comfy_interrupted()
+                if deadline_monotonic is not None and time.monotonic() >= deadline_monotonic:
+                    raise TimeoutError(f"{label}读取超过截止时间。")
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(f"{label}读取超过总时限。")
+                continue
+            if not chunk:
+                break
+            chunks.append(bytes(chunk))
+            total += len(chunk)
+            if total > max_bytes:
+                raise RuntimeError(f"{label}响应超过 {max_bytes} 字节上限。")
     return b"".join(chunks)
 
 
@@ -1857,8 +1986,8 @@ _API_STREAM_TEXT_KEYS = {
 }
 
 
-def _append_api_stream_text(previous: Any, current: Any) -> str:
-    """Append a streamed text fragment while tolerating cumulative chunks."""
+def _append_api_stream_text(previous: Any, current: Any, *, cumulative: bool = True) -> str:
+    """Keep native deltas verbatim; deduplicate only cumulative snapshots."""
 
     left = str(previous or "")
     right = str(current or "")
@@ -1866,6 +1995,8 @@ def _append_api_stream_text(previous: Any, current: Any) -> str:
         return left
     if not left:
         return right
+    if not cumulative:
+        return left + right
     # A few gateways send the complete prefix on every event instead of a
     # delta. Avoid turning ``a``, ``ab``, ``abc`` into ``aababc``.
     if right == left or right.startswith(left):
@@ -1875,14 +2006,14 @@ def _append_api_stream_text(previous: Any, current: Any) -> str:
     return left + right
 
 
-def _merge_api_stream_field(previous: Any, current: Any) -> Any:
+def _merge_api_stream_field(previous: Any, current: Any, *, cumulative: bool = True) -> Any:
     """Merge scalar text and structured content without stringifying blocks."""
 
     if isinstance(current, str) or current is None:
-        return _append_api_stream_text(previous, current)
+        return _append_api_stream_text(previous, current, cumulative=cumulative)
     if isinstance(current, dict):
         if isinstance(previous, dict):
-            return _merge_api_stream_mapping(previous, current)
+            return _merge_api_stream_mapping(previous, current, cumulative=cumulative)
         return deepcopy(current)
     if isinstance(current, list):
         if isinstance(previous, list):
@@ -1914,7 +2045,7 @@ def _merge_api_stream_choices(previous: Any, current: Any) -> list[dict[str, Any
                 target["message"] = target_message
             for key, value in delta.items():
                 if key in _API_STREAM_TEXT_KEYS:
-                    target_message[key] = _merge_api_stream_field(target_message.get(key), value)
+                    target_message[key] = _merge_api_stream_field(target_message.get(key), value, cumulative=False)
                 elif value is not None:
                     target_message[key] = deepcopy(value)
         if isinstance(message, dict):
@@ -1929,7 +2060,7 @@ def _merge_api_stream_choices(previous: Any, current: Any) -> list[dict[str, Any
                     target_message[key] = deepcopy(value)
         for key in ("text", "output_text", "generated_text"):
             if source.get(key) is not None:
-                target[key] = _append_api_stream_text(target.get(key), source[key])
+                target[key] = _append_api_stream_text(target.get(key), source[key], cumulative=False)
     return merged
 
 
@@ -1955,13 +2086,13 @@ def _merge_api_stream_parts(previous: Any, current: Any) -> list[dict[str, Any]]
                 None,
             )
             if target is not None:
-                target["text"] = _append_api_stream_text(target.get("text"), source_text)
+                target["text"] = _append_api_stream_text(target.get("text"), source_text, cumulative=False)
                 continue
         merged.append(deepcopy(source))
     return merged
 
 
-def _merge_api_stream_mapping(previous: Any, current: Any) -> dict[str, Any]:
+def _merge_api_stream_mapping(previous: Any, current: Any, *, cumulative: bool = True) -> dict[str, Any]:
     """Merge one streamed provider payload while preserving provider fields."""
 
     merged = deepcopy(previous) if isinstance(previous, dict) else {}
@@ -1996,8 +2127,13 @@ def _merge_api_stream_mapping(previous: Any, current: Any) -> dict[str, Any]:
             merged[key] = existing
         elif key == "output" and isinstance(value, dict):
             merged[key] = _merge_api_stream_mapping(merged.get(key), value)
+        elif key == "message" and isinstance(value, dict):
+            merged[key] = _merge_api_stream_mapping(
+                merged.get(key), value, cumulative=False if "done" in current else cumulative,
+            )
         elif key in _API_STREAM_TEXT_KEYS:
-            merged[key] = _merge_api_stream_field(merged.get(key), value)
+            is_snapshot = cumulative and key != "delta" and not (key == "response" and "done" in current)
+            merged[key] = _merge_api_stream_field(merged.get(key), value, cumulative=is_snapshot)
         elif key not in merged or value is not None:
             merged[key] = deepcopy(value)
     return merged
@@ -2191,6 +2327,7 @@ def _http_post_json(
             except (json.JSONDecodeError, ValueError):
                 detail = re.sub(r"\s+", " ", text).strip()
         except Exception as read_error:
+            _raise_if_comfy_interrupted(read_error)
             detail = f"错误响应读取失败：{read_error}"
         finally:
             try:
@@ -2379,6 +2516,11 @@ def _dashscope_enable_thinking(model: str) -> bool:
     return bool(re.search(r"(?:^|[/_.-])(?:qwen3|qwq|qvq)(?:[0-9/_.-]|$)", normalized))
 
 
+def _is_deepseek_v4_model(model: str) -> bool:
+    """Cover the current Flash alias as well as pinned V4/V4.1 releases."""
+    return bool(re.fullmatch(r"deepseek-(?:flash|v4(?:\.\d+)?-(?:flash|pro))(?:-[a-z0-9]+)*", str(model or "").strip().casefold()))
+
+
 def _dashscope_response_text(response: dict[str, Any]) -> str:
     if response.get("code") and not response.get("output"):
         raise RuntimeError(f"DashScope API 返回错误：{response.get('message') or response.get('code')}")
@@ -2428,6 +2570,8 @@ _API_OPTIONAL_PARAMETER_NAMES = (
     "stop",
     "thinking",
     "enable_thinking",
+    "thinking_budget",
+    "preserve_thinking",
     "top_k",
     "repetition_penalty",
     "max_tokens",
@@ -2508,6 +2652,8 @@ def _post_dashscope_json_with_compatibility_retry(
         parameters = dict(compatible_payload.get("parameters") or {})
         for key in (
             "enable_thinking",
+            "thinking_budget",
+            "preserve_thinking",
             "seed",
             "top_k",
             "repetition_penalty",
@@ -2699,6 +2845,10 @@ class _TEAPIChatModel:
             raise RuntimeError("API模型为空。请在模型按钮里填写模型名。")
         timeout = _safe_float(self.config.get("timeout"), 120.0, 5.0, 600.0)
         messages = list(kwargs.get("messages") or [])
+        deepseek_v4 = _is_deepseek_v4_model(model) and (
+            provider == "DeepSeek"
+            or urllib.parse.urlsplit(str(self.config.get("url") or "")).hostname == "api.deepseek.com"
+        )
         max_tokens = _safe_int(kwargs.get("max_tokens", 1800), 1800, 1, 8192)
         temperature = _safe_float(kwargs.get("temperature", 0.62), 0.62, 0.0, 2.0)
         top_p = _safe_float(kwargs.get("top_p", 0.9), 0.9, 0.01, 1.0)
@@ -2726,6 +2876,11 @@ class _TEAPIChatModel:
             }
             if _dashscope_enable_thinking(model):
                 parameters["enable_thinking"] = True
+                if re.match(r"(?i)^qwen3\.8(?:-|$)", model):
+                    # Prompt refinement is stateless. Do not inherit the new
+                    # 3.8 preserved-thinking default or its very large budget.
+                    parameters["preserve_thinking"] = False
+                    parameters["thinking_budget"] = max(1, min(1024, max_tokens // 2))
             if top_k > 0:
                 parameters["top_k"] = top_k
             if seed > 0:
@@ -2798,16 +2953,20 @@ class _TEAPIChatModel:
             payload: dict[str, Any] = {
                 "model": model,
                 "max_tokens": max_tokens,
-                "temperature": min(1.0, temperature),
-                "top_p": top_p,
                 "stream": False,
                 "messages": [
                     {"role": "assistant" if item["role"] == "assistant" else "user", "content": _anthropic_content_parts(item.get("content"))}
                     for item in user_messages
                 ],
             }
-            if top_k > 0:
-                payload["top_k"] = top_k
+            # Current Claude 5 SDK request types no longer expose legacy
+            # sampling controls. Keep them for explicitly selected older models
+            # and other Anthropic-compatible gateways, not for Claude 5 IDs.
+            if not re.match(r"(?i)^claude-(?:haiku|sonnet|opus|fable|mythos)-5(?:-|$)", model):
+                payload["temperature"] = min(1.0, temperature)
+                payload["top_p"] = top_p
+                if top_k > 0:
+                    payload["top_k"] = top_k
             if stop_sequences:
                 payload["stop_sequences"] = stop_sequences
             if system_text:
@@ -2899,6 +3058,8 @@ class _TEAPIChatModel:
             if not openai_reasoning_model:
                 payload["temperature"] = temperature
                 payload["top_p"] = top_p
+            if deepseek_v4:
+                payload["reasoning"] = {"effort": "none"}
             return _post_openai_json_with_compatibility_retry(
                 str(self.config.get("url")),
                 payload,
@@ -2925,7 +3086,7 @@ class _TEAPIChatModel:
                 payload["seed"] = seed
             if stop_sequences:
                 payload["stop"] = stop_sequences
-        if provider == "DeepSeek" and model.startswith("deepseek-v4"):
+        if deepseek_v4:
             payload["thinking"] = {"type": "disabled"}
         response = _post_openai_json_with_compatibility_retry(
             str(self.config.get("url")),
@@ -3691,6 +3852,19 @@ def _append_tag_to_state(
         custom_tags.append(text)
 
 
+_NON_PERSON_SHEET_AUTO_TAG_REWRITES = {
+    "正面全身": "正面主体整体",
+    "标准侧面全身": "90度标准侧面整体",
+    "背面全身": "背面主体整体",
+    "相同人物高度": "相同主体高度",
+    "同一头顶线": "同一顶端基准线",
+    "同一地面基线": "同一底部基准线",
+    "中性自然站姿": "一致结构状态",
+    "全身完整入镜": "主体整体完整入镜",
+    "人物完整入镜": "主体整体完整入镜",
+}
+
+
 def _normalize_inference_state(
     selected: OrderedDict[str, list[str]],
     custom_tags: list[str],
@@ -3699,7 +3873,24 @@ def _normalize_inference_state(
     tag_group_index: dict[str, str] | None = None,
     tag_group_memberships: dict[str, frozenset[str]] | None = None,
 ) -> tuple[OrderedDict[str, list[str]], list[str], list[str]]:
-    return _normalize_inference_state_impl(
+    tags = _collect_all_tags(selected, custom_tags)
+    subject_type = str(
+        settings.get("主体类型解析结果") or settings.get("主体类型") or "自动"
+    ).strip()
+    non_person = _infer_subject_type(tags, subject_type) == "非人物主体"
+    non_person_sheet = non_person and (
+        _resolve_visual_layout_mode_impl(tags, settings, non_person=True) == "multi_view"
+        or bool(set(tags) & DANBOORU_REFERENCE_SHEET_TAGS)
+        or bool(str(settings.get("角色设定图内部策略", "") or "").strip())
+    )
+    explicit_sheet_terms = [tag for tag in tags if tag in _NON_PERSON_SHEET_AUTO_TAG_REWRITES] if non_person_sheet else []
+    # Only transform tags at the automatic supplementation boundary. Existing
+    # user-selected words must remain intact, even if they use human terminology.
+    balance_tags = (
+        tuple(_NON_PERSON_SHEET_AUTO_TAG_REWRITES.get(tag, tag) for tag in DANBOORU_REFERENCE_SHEET_BALANCE_TAGS)
+        if non_person else DANBOORU_REFERENCE_SHEET_BALANCE_TAGS
+    )
+    next_selected, next_custom_tags, notes = _normalize_inference_state_impl(
         selected,
         custom_tags,
         settings,
@@ -3708,7 +3899,7 @@ def _normalize_inference_state(
         append_tag_to_state=lambda next_selected, next_custom_tags, tag: _append_tag_to_state(
             next_selected,
             next_custom_tags,
-            tag,
+            _NON_PERSON_SHEET_AUTO_TAG_REWRITES.get(tag, tag) if non_person_sheet else tag,
             tag_group_index=tag_group_index,
             tag_group_memberships=tag_group_memberships,
         ),
@@ -3826,11 +4017,22 @@ def _normalize_inference_state(
             "runtime_quality_reassignments": {"飞剑": "道具世界观"},
             "danbooru_visual_intent_families": DANBOORU_VISUAL_INTENT_FAMILIES,
             "danbooru_reference_sheet_tags": DANBOORU_REFERENCE_SHEET_TAGS,
-            "danbooru_reference_sheet_balance_tags": DANBOORU_REFERENCE_SHEET_BALANCE_TAGS,
+            "danbooru_reference_sheet_balance_tags": balance_tags,
             "danbooru_reference_sheet_background_tags": DANBOORU_REFERENCE_SHEET_BACKGROUND_TAGS,
             "danbooru_reference_sheet_dynamic_tags": DANBOORU_REFERENCE_SHEET_DYNAMIC_TAGS,
         },
     )
+    # Some generic subject guards replace whole buckets instead of using the
+    # removal callback. Restore only these exact, pre-existing manual terms.
+    for tag in explicit_sheet_terms:
+        _append_tag_to_state(
+            next_selected,
+            next_custom_tags,
+            tag,
+            tag_group_index=tag_group_index,
+            tag_group_memberships=tag_group_memberships,
+        )
+    return next_selected, next_custom_tags, notes
 
 
 def _merge_inference_notes(settings: dict[str, Any], notes: list[str]) -> None:
@@ -5357,6 +5559,18 @@ def _extract_chat_text(out: Any) -> str:
 
 def _build_image_reverse_prompt(settings: dict[str, Any]) -> str:
     mode = str(settings.get("图片反推模式", "角色设定图") or "角色设定图").strip()
+    if _is_non_person_sheet_subject_impl(settings):
+        base = (
+            "请反推这张参考图，用一段中文自然语言描述可见非人物主体，不要编造身份、隐藏部件或剧情，不要输出负面词或JSON。"
+            "重点提取实体的几何结构、轮廓、部件数量、相对尺寸、连接位置、表面材质、主配色、功能状态、视角、光影与画质风格。"
+        )
+        if mode == "仅反推描述":
+            return base + "同时描述可见环境与空间关系，便于后续智能文本匹配。"
+        return (
+            base + "当前目标是提取同一实体的设计事实，供后续标准三视图使用。"
+            + NON_PERSON_SHEET_PROMPT_BRIEF
+            + "参考图未显示的侧面或背面细节保持克制且与已见结构一致；风格和配色跟随参考图与用户输入，不要文字标注。"
+        )
     base = (
         "请反推这张参考图，输出一段中文结构化描述，用于后续生成AI绘画正向提示词。"
         "只描述可见画面，不要编造身份和剧情，不要输出负面词，不要输出JSON。"
@@ -5675,7 +5889,10 @@ def _reverse_reference_image(model: Any, image: Any, settings: dict[str, Any]) -
             params=params,
             force_chat_completion=True,
         ).strip()
+        _raise_if_comfy_interrupted()
         text = re.sub(r"^\s*(?:以下是|这是|为你生成的).*?[：:]\s*", "", text)
+        if not text:
+            raise RuntimeError("图片反推 API 返回空文本或清洗后没有有效描述。")
         return text
     except BaseException as exc:
         error = exc
@@ -5694,20 +5911,22 @@ def _apply_image_reverse_to_settings(model: Any, image: Any, settings: dict[str,
     try:
         reversed_text = _reverse_reference_image(model, image, settings).strip()
     except Exception as exc:
+        _raise_if_comfy_interrupted(exc)
         reason = _sanitize_model_error_impl(exc, settings)
         settings["图片反推状态"] = "调用失败，已回退"
         settings["图片反推错误"] = reason
         _record_model_call_result_impl(settings, outcome="failure", reason=f"图片反推回退：{reason}")
         return ""
-    if bool(settings.get("图片反推缓存命中", False)):
-        settings["图片反推状态"] = "缓存命中"
-        return reversed_text
     if not reversed_text:
         reason = "图片反推 API 返回空文本或清洗后没有有效描述。"
+        settings["图片反推缓存命中"] = False
         settings["图片反推状态"] = "调用失败，已回退"
         settings["图片反推错误"] = reason
         _record_model_call_result_impl(settings, outcome="failure", reason=reason)
         return ""
+    if bool(settings.get("图片反推缓存命中", False)):
+        settings["图片反推状态"] = "缓存命中"
+        return reversed_text
     settings["图片反推状态"] = "调用成功"
     _record_model_call_result_impl(settings, outcome="success", changed=True, adopted_outputs=1)
     return reversed_text
@@ -5820,9 +6039,20 @@ def _apply_character_sheet_to_settings(
 ) -> bool:
     if not bool(settings.get("图片反推生成", False) or settings.get("智能设定图意图", False)):
         return False
+    if (
+        str(settings.get("图片反推模式", "角色设定图") or "角色设定图").strip() == "仅反推描述"
+        and not bool(settings.get("智能设定图意图", False))
+    ):
+        # Description-only references feed the normal smart-text path, not
+        # the turnaround strategy, and must keep their visible environment.
+        if str(image_reverse_text or "").strip():
+            settings["智能文本匹配"] = True
+            settings["智能文本输入"] = _merge_requirement_text(settings.get("智能文本输入"), image_reverse_text)
+        return False
     reference_features_available = bool(has_reference_image and settings.get("图片反推生成", False))
+    non_person = _is_non_person_sheet_subject_impl(settings)
     character_groups = OrderedDict(
-        (group_name, list(values))
+        ("结构材质" if non_person and group_name == "服装造型" else group_name, list(values))
         for group_name, values in selected.items()
         if group_name not in {"场景背景", "动作姿态", "构图视角"}
     )
@@ -5843,7 +6073,7 @@ def _apply_character_sheet_to_settings(
     )
     if applied:
         selected["场景背景"] = ["简洁连续中性背景"]
-        selected["动作姿态"] = ["中性自然站姿"]
+        selected["动作姿态"] = ["一致结构状态" if _is_non_person_sheet_subject_impl(settings) else "中性自然站姿"]
     return applied
 
 
@@ -6757,6 +6987,8 @@ def _run_stage_impl(
     settings["视频提示词时间轴启用"] = bool(video_profile.get("timeline_enabled", False))
     settings["视频提示词镜头段数有效"] = int(video_profile.get("shot_count", 5) or 5)
     settings["视频提示词Profile"] = dict(video_profile)
+    for compatibility_note in video_profile.get("compatibility_notes", []):
+        _append_runtime_note(settings, compatibility_note)
     video_prompt = _build_video_prompt_impl(
         selected,
         custom_tags,
@@ -6825,25 +7057,39 @@ def _run_stage_impl(
         for anchor in settings.get("视频提示词必保留锚点", [])
         if str(anchor).strip() and str(anchor).strip() not in deduped_video_prompt
     ]
+    deduped_video_contract_reason = _video_prompt_contract_violation_impl(
+        deduped_video_prompt,
+        pre_dedupe_video_prompt,
+        settings,
+        language=str(settings.get("提示词语言", "纯中文") or "纯中文"),
+    )
     if _is_natural_video_prompt_impl(
         deduped_video_prompt,
         language=str(settings.get("提示词语言", "纯中文") or "纯中文"),
         allow_timeline=bool(video_profile.get("timeline_enabled", False)),
         layout_mode=str(settings.get("画面结构模式解析结果", "") or ""),
-    ) and not deduped_video_missing_anchors:
+    ) and not deduped_video_missing_anchors and not deduped_video_contract_reason:
         video_prompt = deduped_video_prompt
     else:
         video_prompt = pre_dedupe_video_prompt
-        _merge_inference_notes(settings, ["视频提示词避重候选未通过自然语言合同，已保留本轮有效视频正文。"])
+        _merge_inference_notes(settings, [
+            "视频提示词避重候选未通过自然语言、镜头数或参考素材合同，已保留本轮有效视频正文。"
+            + (f" {deduped_video_contract_reason}" if deduped_video_contract_reason else "")
+        ])
     if _is_natural_video_prompt_impl(
         video_prompt,
         language=str(settings.get("提示词语言", "纯中文") or "纯中文"),
         allow_timeline=bool(video_profile.get("timeline_enabled", False)),
         layout_mode=str(settings.get("画面结构模式解析结果", "") or ""),
+    ) and not _video_prompt_contract_violation_impl(
+        video_prompt,
+        pre_dedupe_video_prompt,
+        settings,
+        language=str(settings.get("提示词语言", "纯中文") or "纯中文"),
     ):
         settings["视频提示词Skill状态"] = "已生成"
     else:
-        settings["视频提示词Skill状态"] = "生成结果未通过自然语言校验"
+        settings["视频提示词Skill状态"] = "生成结果未通过自然语言或视频模式合同校验"
     settings["视频提示词Skill版本"] = _VIDEO_PROMPT_SKILL_VERSION
     settings["视频提示词分镜结构"] = _build_video_storyboard_metadata_impl(
         video_prompt,
@@ -7205,6 +7451,11 @@ _STRICT_VARIATION_ACTION_EN = (
 )
 
 _STRICT_VARIATION_SPECIAL_CUES_ZH: dict[str, tuple[str, ...]] = {
+    "non_person_sheet": (
+        "保留非人物三视图、正面0度、90度侧面、背面180度和1:1:1等宽结构，仅调整三栏一致的背景明度与材质呈现",
+        "保持实体等比例、整体等高、顶底基准线和正交镜头一致，仅变化未锁定的统一光线与留白节奏",
+        "保留同一实体的几何结构、部件数量和既定功能状态，用户明确要求的细节仅在独立辅助带变化",
+    ),
     "character_sheet": (
         "保持多视角设定图结构、正面、90度侧面、背面三幅等宽全身视图与同一角色身份不变，只调整背景明度、材质重点和留白节奏",
         "维持多视角设定图结构、1:1:1三栏、相同人物高度、同一头顶线和脚底基线，只在独立辅助带变化用户已明确要求的细节",
@@ -7227,6 +7478,11 @@ _STRICT_VARIATION_SPECIAL_CUES_ZH: dict[str, tuple[str, ...]] = {
     ),
 }
 _STRICT_VARIATION_SPECIAL_CUES_EN: dict[str, tuple[str, ...]] = {
+    "non_person_sheet": (
+        "preserve the non-human three-view design, front at 0 degrees, true side at 90 degrees, back at 180 degrees, and equal 1:1:1 columns; vary only shared background value and material presentation",
+        "keep identical scale, overall height, top and base datums, and orthographic cameras while varying only unlocked common lighting and margin rhythm",
+        "preserve one physical design, geometry, component count, and existing functional state; vary explicitly requested details only in a separate support strip",
+    ),
     "character_sheet": (
         "preserve the multi-view character-sheet structure with equal-width front, true 90-degree side, and back full-body views and one identity while varying backdrop value, material emphasis, and negative-space rhythm",
         "keep the multi-view structure, balanced 1:1:1 columns, identical character height, shared head line, and ground baseline; vary only explicitly requested details in a separate support strip",
@@ -7252,7 +7508,7 @@ _STRICT_VARIATION_SPECIAL_CUES_EN: dict[str, tuple[str, ...]] = {
 
 def _strict_variation_mode(settings: dict[str, Any]) -> str:
     if str(settings.get("角色设定图内部策略", "") or "").strip():
-        return "character_sheet"
+        return "non_person_sheet" if _is_non_person_sheet_subject_impl(settings) else "character_sheet"
     if bool(settings.get("标签块编排启用", False)):
         return "tag_block"
     subject_type = str(settings.get("主体类型解析结果", "") or settings.get("主体类型", "") or "").strip()
@@ -7373,6 +7629,13 @@ def _strip_strict_variation_clause(text: str, *, channel: str = "prompt") -> str
             prompt,
             flags=re.IGNORECASE | re.DOTALL,
         ).strip()
+        prompt = re.sub(
+            r"[ \t]*(?:在本镜已有动作内部，[^\n]*?保持既定开始与结束状态不变。|"
+            r"Within this shot's existing action,[^\n]*?without changing its established start or end state\.)[ \t]*",
+            " ",
+            prompt,
+            flags=re.IGNORECASE,
+        ).strip()
     marker_pattern = re.compile(
         r"(?:[，,；;]\s*)?(?:画面变化方向|visual\s+variation)(?:\s*[（(][^）)]*[）)])?\s*[:：]",
         re.IGNORECASE,
@@ -7382,67 +7645,67 @@ def _strip_strict_variation_clause(text: str, *, channel: str = "prompt") -> str
 
 
 _STRICT_VIDEO_CAMERA_VARIATIONS_ZH: tuple[str, ...] = (
-    "以克制的贴近保持主体重心清楚",
-    "沿主体移动方向缓慢调整前后景距离",
-    "借前景遮挡的自然移开显露行动结果",
-    "先守住空间全貌，再平稳靠近关键动作",
-    "围绕道具与手部关系做一次柔和跟随",
-    "让焦点在主体和环境反馈之间缓慢往返",
-    "顺着视线和动作方向维持稳定的侧向移动",
-    "从空间纵深中逐步确认主体造成的变化",
+    "镜头保留原有轨迹并读清既有轮廓的连续变化",
+    "镜头维持既定构图并分辨主体与背景的原有间距",
+    "镜头沿用原有机位并保留既有遮挡关系",
+    "镜头保持既定景别并读清同一动作的局部细节",
+    "镜头不改变原有视角并突出已经存在的结构联系",
+    "镜头遵循既定焦点并保留主体与环境的连续关系",
+    "镜头延续已有运动节奏并读清原有空间轴线",
+    "镜头保持既有空间纵深并确认原动作造成的变化",
 )
 _STRICT_VIDEO_FEEDBACK_VARIATIONS_ZH: tuple[str, ...] = (
-    "材质受力与反光在动作之后逐层显现",
-    "空气、尘埃和边缘光只响应已经发生的动作",
-    "遮挡关系与景深变化共同确认行动方向",
-    "地面反射和背景结构延迟回应主体移动",
-    "衣料惯性与道具位置延续同一条因果线",
-    "空间明暗随主体位置变化而自然重新分配",
-    "前后景距离在行动完成后才出现可见改变",
-    "局部高光与环境纹理共同回应动作力度",
+    "既有材质的明暗过渡与动作保持同步",
+    "原有光线只响应已经发生的变化",
+    "已有遮挡关系保持前后连贯",
+    "原有背景层次延续同一空间关系",
+    "可见表面细节延续既定因果线",
+    "既有空间明暗保留原来的变化方向",
+    "已有前后景关系伴随动作连续呈现",
+    "原有局部反光与环境纹理保持一致",
 )
 _STRICT_VIDEO_SOUND_VARIATIONS_ZH: tuple[str, ...] = (
-    "环境回声由近及远自然收束",
-    "呼吸与材质摩擦在动作完成后留下短暂余音",
-    "脚步和空间底噪共同标记距离变化",
-    "道具接触声与环境声保持清楚的先后关系",
-    "短促回声跟随动作方向移动并逐渐减弱",
-    "衣料声和远处底噪保持自然的空间层次",
-    "环境声在主体停稳后恢复原有秩序",
-    "细小碰撞声准确落在道具状态变化之后",
-    "动作余音与背景声场在结尾处平稳衔接",
+    "已有环境声保持原来的远近层次",
+    "原有声场随同一动作自然延续",
+    "已有空间底噪保持稳定的方位关系",
+    "原有声音反馈维持既定先后顺序",
+    "既有声音变化沿用原来的动作方向",
+    "已有环境底噪保持自然的空间层次",
+    "原有声场与既定结束状态平稳衔接",
+    "已有声音细节只对应原文可见的变化",
+    "原有动作余音与背景声场保持连续",
 )
 
 _STRICT_VIDEO_CAMERA_VARIATIONS_EN: tuple[str, ...] = (
-    "holds close to the subject's shifting weight",
-    "tracks gently along the direction of movement",
-    "uses a foreground reveal to expose the consequence",
-    "keeps the location readable before approaching the action",
-    "follows the relationship between the hands and the key prop",
-    "lets focus travel slowly between the subject and the response",
-    "maintains a steady lateral move along the subject's sightline",
-    "uses the existing depth to confirm the resulting change",
+    "keeps its existing path while clarifying continuity along the visible outline",
+    "retains its established composition and the existing subject-to-background distance",
+    "preserves its original position and the existing occlusion relationships",
+    "maintains the established shot scale while clarifying the same action's local details",
+    "keeps the original viewpoint and the structural relationships already visible",
+    "follows its established focus while preserving the subject-environment relationship",
+    "continues its existing rhythm without changing the spatial axis",
+    "retains the established depth while clarifying the original action's consequence",
 )
 _STRICT_VIDEO_FEEDBACK_VARIATIONS_EN: tuple[str, ...] = (
-    "material response follows the action",
-    "light and depth react only after the movement",
-    "prop placement confirms the same causal line",
-    "reflections reveal the direction and weight of the action",
-    "foreground spacing changes only after the subject moves",
-    "fabric inertia and surface detail preserve continuity",
-    "the location redistributes light around the new position",
-    "background structure makes the consequence readable",
+    "existing material shading remains synchronized with the action",
+    "the established light responds only to the existing changes",
+    "the visible occlusion relationships remain continuous",
+    "the original background layers retain their spatial relationships",
+    "the existing surface details follow the same causal line",
+    "the established tonal changes retain their original direction",
+    "the existing depth relationships stay continuous through the action",
+    "the original reflections remain consistent with the existing surfaces",
 )
 _STRICT_VIDEO_SOUND_VARIATIONS_EN: tuple[str, ...] = (
-    "ambient sound settles naturally behind the result",
-    "footsteps and room tone mark the change in distance",
-    "material contact leaves a restrained natural echo",
-    "breathing and fabric movement remain grounded in the location",
-    "prop contact follows the visible movement in the correct order",
-    "the sound field narrows gently as the action ends",
-    "small impacts arrive only after the prop changes position",
-    "the final ambience holds the consequence without narration",
-    "background noise returns to its prior balance at the end",
+    "existing ambient sound retains its established sense of distance",
+    "the original sound field continues through the same action",
+    "the existing background noise keeps its established direction",
+    "the original sound responses retain their causal order",
+    "the existing sound changes follow the original action's direction",
+    "the established ambience preserves its original spatial layers",
+    "the original sound field connects smoothly to the established ending",
+    "the existing sound details correspond only to already visible changes",
+    "the original residual sounds remain continuous with the background ambience",
 )
 
 
@@ -7450,6 +7713,19 @@ def _append_video_variation_clause(text: str, cursor: int, settings: dict[str, A
     prompt = _strip_strict_variation_clause(text, channel="video")
     index = max(0, int(cursor))
     language = str(settings.get("提示词语言", "纯中文") or "纯中文").strip()
+
+    def insert_detail(body: str, detail: str) -> str:
+        paragraphs = [part.strip() for part in re.split(r"\n\s*\n+", body.strip()) if part.strip()]
+        if not paragraphs:
+            return body
+        # Leave both boundary shots untouched whenever an interior shot exists.
+        # A single take receives detail inside its existing paragraph instead.
+        target = 1 + index % (len(paragraphs) - 2) if len(paragraphs) >= 3 else 0
+        paragraph = paragraphs[target]
+        first_sentence = re.search(r"[。！？]|[.!?](?=\s|$)", paragraph)
+        insertion = first_sentence.end() if first_sentence else len(paragraph)
+        paragraphs[target] = f"{paragraph[:insertion].rstrip()} {detail} {paragraph[insertion:].lstrip()}".strip()
+        return "\n\n".join(paragraphs)
 
     def append_english(body: str) -> str:
         camera = _STRICT_VIDEO_CAMERA_VARIATIONS_EN[index % len(_STRICT_VIDEO_CAMERA_VARIATIONS_EN)]
@@ -7460,14 +7736,11 @@ def _append_video_variation_clause(text: str, cursor: int, settings: dict[str, A
             (index // (len(_STRICT_VIDEO_CAMERA_VARIATIONS_EN) * len(_STRICT_VIDEO_FEEDBACK_VARIATIONS_EN)))
             % len(_STRICT_VIDEO_SOUND_VARIATIONS_EN)
         ]
-        shot_count = len(re.findall(r"(?im)^\s*(?:shot|scene)\s*\d+", body))
-        paragraph = (
-            f"Shot {shot_count + 1} (continuity variation): The camera {camera}, carrying forward the visible "
-            f"result of the previous shot instead of starting a new storyline. As {feedback}, the subject's "
-            f"next response remains causally tied to that result. The shot resolves with {sound}, leaving the "
-            "story in a changed but coherent state."
+        detail = (
+            f"Within this shot's existing action, the camera {camera}; {feedback}, and {sound}, "
+            "without changing its established start or end state."
         )
-        return f"{body.rstrip()}\n\n{paragraph}"
+        return insert_detail(body, detail)
 
     def append_chinese(body: str) -> str:
         camera = _STRICT_VIDEO_CAMERA_VARIATIONS_ZH[index % len(_STRICT_VIDEO_CAMERA_VARIATIONS_ZH)]
@@ -7478,15 +7751,10 @@ def _append_video_variation_clause(text: str, cursor: int, settings: dict[str, A
             (index // (len(_STRICT_VIDEO_CAMERA_VARIATIONS_ZH) * len(_STRICT_VIDEO_FEEDBACK_VARIATIONS_ZH)))
             % len(_STRICT_VIDEO_SOUND_VARIATIONS_ZH)
         ]
-        shot_count = len(re.findall(r"(?m)^\s*(?:分镜|镜头)\s*[一二三四五六七八九十百0-9]+", body))
-        numerals = ("一", "二", "三", "四", "五", "六", "七", "八", "九", "十")
-        label = numerals[shot_count] if shot_count < len(numerals) else str(shot_count + 1)
-        paragraph = (
-            f"分镜{label}（连续避重）：镜头承接上一分镜已经造成的结果，{camera}，不另起无关剧情。"
-            f"随着{feedback}，主体针对这一变化作出下一步回应，动作仍沿用前文的因果方向。"
-            f"画面最后让{sound}，使故事停在发生变化但仍然连贯的状态。"
+        detail = (
+            f"在本镜已有动作内部，{camera}，{feedback}，{sound}，保持既定开始与结束状态不变。"
         )
-        return f"{body.rstrip()}\n\n{paragraph}"
+        return insert_detail(body, detail)
 
     if language == "纯英文":
         return append_english(prompt)
@@ -8166,8 +8434,8 @@ def 构建状态可视化预览(payload: dict[str, Any]) -> dict[str, Any]:
 _阶段输入参数说明 = {
     "内置上下文长度": "内置模型上下文窗口。GGUF 对应 llama.cpp 的 n_ctx；原始 Transformers 会再与 config.json 的模型上限取较小值，并按实际输入自动为输出预留空间。默认 8192；越大越占内存/显存，普通提示词生成通常不需要超过 16384。",
     "内置GPU层数": "内置 GGUF 路线的 GPU 卸载层数。-1=尽可能使用 GPU，0=纯 CPU；显存不足时逐步降低。",
-    "内置KV缓存K类型": "本地模型 K 缓存精度。默认 F16 最稳；显存紧张且 llama-cpp-python 支持时可用 q8_0。",
-    "内置KV缓存V类型": "本地模型 V 缓存精度。默认 F16 最稳；显存紧张且 llama-cpp-python 支持时可用 q8_0。",
+    "内置KV缓存K类型": "K 缓存精度，与权重的 Q4_K_M/IQ/MXFP4 等无关。可选 q8_0、q4_0/q4_1、q5_0/q5_1、bf16，须运行时支持；默认 F16 最稳。",
+    "内置KV缓存V类型": "V 缓存精度，与权重量化无关。量化 V 缓存可能需要 Flash Attention、对应架构和运行时内核；不兼容时改回默认 F16。",
     "内置批处理大小": "llama.cpp n_batch。控制提示词预填充批量；显存不足先降低，长上下文或高吞吐可提高。",
     "内置微批处理大小": "llama.cpp n_ubatch。控制微批量，通常设置为不大于批处理大小的 1/4 到 1/2。",
     "内置线程数": "llama.cpp n_threads。0 表示自动；CPU 推理可按物理核心数小幅调整。",
@@ -8244,14 +8512,62 @@ class QwenTE提示词合集拆分器:
         return tuple(outputs)
 
 
+_STAGE_MODEL_INPUT_ABSENT = object()
+
+
 class QwenTE阶段式提示词生成器:
+    @classmethod
+    def VALIDATE_INPUTS(
+        cls,
+        内置主模型=None,
+        模型来源="仅Skill",
+        qwen模型=_STAGE_MODEL_INPUT_ABSENT,
+        内置视觉投影mmproj=None,
+    ):
+        # Explicit parameter names exempt only these widgets from ComfyUI's
+        # default checks. Keep other numeric bounds, combos and linked types
+        # under the host's validation (no **kwargs or input_types catch-all).
+        if 模型来源 is None:
+            # Linked widgets have no resolved value during prompt validation.
+            # The runtime loader validates their actual values before use.
+            return True
+        if 模型来源 not in 模型来源选项:
+            return "模型来源无效；请选择仅Skill、本地模型或API接口。"
+        if _normalize_stage_model_source(模型来源) != 本地模型来源:
+            return True
+        if qwen模型 is not _STAGE_MODEL_INPUT_ABSENT:
+            # A connected optional input is passed as None by ComfyUI here;
+            # absent inputs are omitted. If it resolves to None at execution,
+            # run() still invokes the normal, strict built-in model loader.
+            return True
+
+        # The continuation shards are hidden in new dropdowns, but old graph
+        # values must reach the loader's first-shard normalization rather than
+        # being rejected by ComfyUI's default combo-value validation.
+        options, mmproj_options = _内置模型文件选项()
+        if 内置主模型 is not None:
+            selected = str(内置主模型 or "").replace("\\", "/")
+            match = re.fullmatch(r"(.*)-(\d{5})-of-(\d{5})(\.gguf)", selected, re.IGNORECASE)
+            if match:
+                prefix, index, total, extension = match.groups()
+                if not 1 <= int(index) <= int(total) <= 4096:
+                    return "GGUF 分片编号无效。"
+                selected = f"{prefix}-00001-of-{total}{extension}"
+            if selected not in options:
+                return "内置主模型不在当前 models/LLM 列表中；请检查文件并刷新节点选项。"
+        if 内置视觉投影mmproj is not None:
+            selected_mmproj = str(内置视觉投影mmproj).replace("\\", "/")
+            if selected_mmproj not in mmproj_options:
+                return "内置视觉投影mmproj不在当前 models/LLM 列表中；请检查文件并刷新节点选项。"
+        return True
+
     @classmethod
     def INPUT_TYPES(cls):
         model_list, mmproj_list = _内置模型文件选项()
         required = OrderedDict()
         required["模型来源"] = (模型来源选项, {"default": "仅Skill", "tooltip": "仅Skill=本地Skill直接生成图像、智能文本和视频提示词；本地模型=Skill先生成可靠底稿，再由外接兼容模型或 models/LLM 中的内置模型后置润色；API接口=Skill底稿交给云端、Ollama、LM Studio 或其他兼容服务润色。旧值本地GGUF会自动迁移。"})
         required["内置模型系列"] = (_内置模型系列选项, {"default": "Qwen3.5-VL", "tooltip": "本地模型未连接外部输入时，阶段提示词节点会按这里的设置直接加载 GGUF 或 Hugging Face 原始模型目录；支持 Qwen3、Qwen3.5 和 Qwen3.8。"})
-        required["内置主模型"] = (model_list, {"default": model_list[0], "tooltip": "内置加载路线使用的 GGUF 文件或包含 config.json 的原始模型目录，放到 ComfyUI/models/LLM/；其他模型也可连接 qwen模型 输入。"})
+        required["内置主模型"] = (model_list, {"default": model_list[0], "tooltip": "文本 GGUF 或完整原始模型目录放到 ComfyUI/models/LLM/；分片仅选首片，必须下载同组全部分片。图像/视频扩散 GGUF 由下游专用加载器处理，不是提示词润色模型。"})
         required["内置视觉投影mmproj"] = (mmproj_list, {"default": "无", "tooltip": "多模态需要 mmproj；纯文本提示词生成可选“无”。"})
         required["内置启用思考"] = ("BOOLEAN", {"default": False, "tooltip": "Qwen/Gemma 思考开关；提示词生成通常可关闭。"})
         required["内置上下文长度"] = ("INT", {"default": 8192, "min": 1024, "max": 327680, "step": 256})
@@ -8300,14 +8616,14 @@ class QwenTE阶段式提示词生成器:
             图像提示词目标模型选项,
             {
                 "default": "通用",
-                "tooltip": "选择下游图像模型的提示词偏好。通用保持兼容；Krea 2 使用自然语言主体、空间、材质和光影描述，不写平台参数。",
+                "tooltip": "下游图像提示词格式：支持 Qwen Image 2.1/Turbo、MOSS Image、FLUX.3/Klein/FLUX.2 等；只生成自然语言提示词，不加载生图权重或调用生图接口。旧版 Profile 保留。",
             },
         )
         required["视频提示词目标模型"] = (
             视频提示词目标模型选项,
             {
                 "default": "通用",
-                "tooltip": "视频输出 Profile。通用保持自然语言兼容；H3、LTX、Seedance 等 Profile 会在 JSON 中提供对应时间轴、音频和连续性策略。",
+                "tooltip": "视频提示词格式：支持 FLUX.3 Video、Wan 3.0/2.7、LTX 2.5、HappyHorse 1.1、Veo 3.1 及旧版 Profile。JSON 包含输入合同与下游提交单位；不会上传参考素材或直接生成视频。",
             },
         )
         required["视频提示词输入模式"] = (
@@ -8455,6 +8771,12 @@ class QwenTE阶段式提示词生成器:
 
 
 class QwenTE通用模型阶段式提示词生成器(QwenTE阶段式提示词生成器):
+    @classmethod
+    def VALIDATE_INPUTS(cls):
+        # This node has no built-in model widgets. Do not inherit a validator
+        # requiring removed inputs; leave its own inputs to ComfyUI defaults.
+        return True
+
     @classmethod
     def INPUT_TYPES(cls):
         data = super().INPUT_TYPES()
