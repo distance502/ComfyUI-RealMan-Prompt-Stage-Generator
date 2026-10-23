@@ -301,6 +301,18 @@ def build_json_payload(
             "positive_contract",
             "negative_contract",
             "parameter_policy",
+            "family",
+            "model_ids",
+            "task_modes",
+            "reference_contract",
+            "catalog_checked_on",
+            "max_reference_images",
+            "layout_contract",
+            "transparency_contract",
+            "prompt_expansion_policy",
+            "preferred_language",
+            "prompt_token_limit",
+            "weight_format_policy",
         )
         if key in image_profile
     } if isinstance(image_profile, dict) else {}

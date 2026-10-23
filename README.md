@@ -84,7 +84,17 @@ flowchart LR
 
 API 面板内置 OpenAI compatible、OpenAI、OpenRouter、DeepSeek、通义千问 DashScope、Kimi、硅基流动、火山方舟、智谱、Groq、Together、Fireworks、Mistral、Perplexity、Claude、Gemini、Ollama、LM Studio 和自定义服务。
 
-图像提示词目标模型可选择 `通用`、`Flux`、`SDXL`、`Qwen Image`、`Krea 2`、`Midjourney` 或 `自定义`。每个 Profile 都会实际调整 Skill 正文首段的信息顺序，并在 JSON 的 `image_prompt_contract` 中记录同一份组织顺序、正向语言合同、负面词通道和参数策略；后续剧情、事实锚点和一致性护栏保持共用。Krea 2 使用“主体 → 镜头 → 环境 → 动作 → 材质 → 光影”的自然语言开场，不把平台参数写入正向正文。角色设定图会优先写入 `1:1:1` 正面、90 度侧面、背面三视图合同，再应用目标 Profile 的主体与材质顺序，不会混入普通单图的单动作或电影定格叙事；此时 JSON 会标记 `layout_priority=hard_first` 和 `narrative_mode=parallel_design_reference`，本地模型与 API 也改用三视图设计验收。单条、批量、定向修复与智能文本通道会过滤普通剧情规划、景深、运动模糊和透视镜头要求，只保留跨视图硬锚点；智能文本模型失败或只返回标签时，也会恢复为保留用户设计事实的自然语言三视图 Skill 结果。
+### 模型与格式更新（2026-10-23）
+
+- API 快捷预设更新为 `qwen3.8-max`、`deepseek-flash`、`claude-haiku-5-5` 和 `gemini-flash-latest`。模型名输入框按服务商提供候选，仍可自由输入；已有工作流中的旧型号不会自动替换。
+- 图像格式新增 `Qwen Image 2.1`／`Turbo`、`MOSS Image`、`FLUX.3`／`Klein`、`FLUX.2`、`Qwen Image 2512`／`Edit 2511`／`3.0`、`Wan 2.7 Image` 和 `Gemini Image`。新格式实际调整自然语言开场；三视图仍优先锁定正面、90 度侧面、背面。原生权重与 GGUF 量化版使用同一提示词格式。
+- 视频格式新增 `FLUX.3 Video`、`Wan 3.0`、`Wan 2.7`、`LTX 2.5`、`HappyHorse 1.1` 和 `Veo 3.1`，JSON 记录输入素材合同、已确认的输入模式及下游提交单位。未确认的组合会提示，不会自动改写用户选择。
+- GGUF 加载新增有限大小的元数据识别、分片完整性检查与旧分片选择归一化；KV 缓存增加 `q4_0`／`q4_1`／`q5_0`／`q5_1`／`bf16`，按已安装运行时检查类型常量。权重量化与 KV 量化互不混用，不自动更新二进制依赖。
+- DeepSeek 当前与旧版 V4 别名分别适配 Chat Completions / Responses 参数；Qwen3.8 限制思考预算并关闭跨轮思考继承；Claude 5 不再发送旧采样字段。
+
+这些是**提示词格式和文本模型调用适配**，不代表节点会下载图像／视频权重或直接执行媒体生成。OpenAI 最新型号本次未能通过官方文档核实，保留原预设与自定义型号输入。完整型号、运行时要求、核实来源及限制见 [模型与格式兼容表](docs/MODEL_COMPATIBILITY.md)。
+
+图像提示词目标模型保留 `通用`、`Flux`、`SDXL`、`Qwen Image`、`Krea 2`、`Midjourney`、`自定义`，并增加上面的新版格式。每个 Profile 都会实际调整 Skill 正文首段的信息顺序，并在 JSON 的 `image_prompt_contract` 中记录同一份组织顺序、正向语言合同、负面词通道和参数策略；后续剧情、事实锚点和一致性护栏保持共用。Krea 2 使用“主体 → 镜头 → 环境 → 动作 → 材质 → 光影”的自然语言开场，不把平台参数写入正向正文。角色设定图会优先写入 `1:1:1` 正面、90 度侧面、背面三视图合同，再应用目标 Profile 的主体与材质顺序，不会混入普通单图的单动作或电影定格叙事；此时 JSON 会标记 `layout_priority=hard_first` 和 `narrative_mode=parallel_design_reference`，本地模型与 API 也改用三视图设计验收。单条、批量、定向修复与智能文本通道会过滤普通剧情规划、景深、运动模糊和透视镜头要求，只保留跨视图硬锚点；智能文本模型失败或只返回标签时，也会恢复为保留用户设计事实的自然语言三视图 Skill 结果。
 
 地址可以填写服务商 `base_url`，也可以填写完整端点。节点会按服务商识别 OpenAI Chat Completions、Responses、Anthropic Messages、Gemini、DashScope 和 Ollama 原生格式；当选择“自定义”或“OpenAI兼容”并填写完整的 `/messages`、`:generateContent` 或 `/api/chat` 端点时，也会自动切换对应协议，避免把一种协议的路径拼到另一种服务商地址上。已知服务商地址若残留其他协议的完整端点（例如 DeepSeek 下的 `/anthropic/chat/completions`），会在发送前恢复为该服务商预设路径；同协议的自定义网关路径仍会保留。自动识别结果会写入运行诊断，旧的协议修复说明不会带入下一次运行。OpenAI、DashScope、Anthropic 和 Gemini 若明确返回某个可选采样参数不受支持，节点会移除该字段后有界重试一次；Gemini 使用官方 `systemInstruction` 字段，深度思考分片不会进入最终提示词。
 
@@ -134,7 +144,7 @@ env:DASHSCOPE_API_KEY
 
 视频输出不是在图像提示词后追加“运镜”。它会生成连续编号的自然语言分镜，并在每段中说明景别或机位、摄影机运动、人物动作、环境反馈和前后镜头关系。
 
-视频提示词目标模型支持 `通用`、`H3`、`Wan`、`LTX`、`Seedance` 和 `自定义`；输入模式支持 `T2V`、`I2V`、`FL2V`、`L2V`、`Ref2V`。正文继续使用自然语言，JSON 额外提供 `video_prompt_profile` 和 `video_storyboard`，记录镜头编号、阶段、空间锚点、连续性交接、音频策略和目标输入模式。`视频提示词镜头段数` 可选单镜头、短动作、标准剧情或长剧情；打开 `视频提示词启用时间轴` 后，非通用 Profile 会在标题和 JSON 中写入连续时间段，默认关闭时不会污染旧工作流。
+视频提示词目标模型保留 `通用`、`H3`、`Wan`、`LTX`、`Seedance`、`自定义`，并增加上面的新版格式；输入模式支持 `T2V`、`I2V`、`FL2V`、`L2V`、`Ref2V`。正文继续使用自然语言，JSON 额外提供 `video_prompt_profile` 和 `video_storyboard`，记录镜头编号、阶段、空间锚点、连续性交接、音频策略和目标输入模式。`视频提示词镜头段数` 可选单镜头、短动作、标准剧情或长剧情；打开 `视频提示词启用时间轴` 后，非通用 Profile 会在标题和 JSON 中写入连续时间段，默认关闭时不会污染旧工作流。
 
 每个 `video_storyboard` 镜头还拆出 `overall_soundscape`、`dialogue`、`sound_effects` 和 `non_diegetic_music` 四个音频字段，JSON 顶层的 `video_audio` 同步提供首镜头音频合同。图像负面词保留原有 `推荐负面词` 字符串，同时在 JSON 中提供 `negative_core`（重复主体、额外头部、分屏、文字水印、身体结构和布局护栏）与 `negative_optional`（风格、画质和细节抑制词），下游可以先使用核心组再按预算追加可选组。
 

@@ -594,8 +594,8 @@ const MODEL_API_PROVIDER_BUTTONS = [
 	{ value: "OpenAI兼容", label: "兼容", baseUrl: "", model: "", keyRef: "", hint: "自定义 OpenAI 兼容接口：填写 Base URL、Key 和模型名。" },
 	{ value: "OpenAI", label: "OpenAI", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini", keyRef: "env:OPENAI_API_KEY" },
 	{ value: "OpenRouter", label: "Router", baseUrl: "https://openrouter.ai/api/v1", model: "openai/gpt-4o-mini", keyRef: "env:OPENROUTER_API_KEY" },
-	{ value: "DeepSeek", label: "DeepSeek", baseUrl: "https://api.deepseek.com", model: "deepseek-v4-flash", keyRef: "env:DEEPSEEK_API_KEY" },
-	{ value: "通义千问DashScope", label: "通义", baseUrl: "https://dashscope.aliyuncs.com/api/v1", model: "qwen3.7-max", keyRef: "env:DASHSCOPE_API_KEY", hint: "DashScope 原生 Generation：支持自由填写通义文本或视觉模型名，Qwen3 系列自动启用思考。" },
+	{ value: "DeepSeek", label: "DeepSeek", baseUrl: "https://api.deepseek.com", model: "deepseek-flash", keyRef: "env:DEEPSEEK_API_KEY" },
+	{ value: "通义千问DashScope", label: "通义", baseUrl: "https://dashscope.aliyuncs.com/api/v1", model: "qwen3.8-max", keyRef: "env:DASHSCOPE_API_KEY", hint: "DashScope 原生 Generation：支持自由填写通义文本或视觉模型名，Qwen3 系列自动启用思考；Qwen3.8 使用有界思考预算。" },
 	{ value: "Kimi", label: "Kimi", baseUrl: "https://api.moonshot.cn/v1", model: "moonshot-v1-8k", keyRef: "env:MOONSHOT_API_KEY" },
 	{ value: "SiliconFlow", label: "硅基", baseUrl: "https://api.siliconflow.cn/v1", model: "", keyRef: "env:SILICONFLOW_API_KEY" },
 	{ value: "火山方舟", label: "方舟", baseUrl: "https://ark.cn-beijing.volces.com/api/v3", model: "", keyRef: "env:ARK_API_KEY" },
@@ -605,13 +605,39 @@ const MODEL_API_PROVIDER_BUTTONS = [
 	{ value: "Fireworks", label: "Fireworks", baseUrl: "https://api.fireworks.ai/inference/v1", model: "", keyRef: "env:FIREWORKS_API_KEY" },
 	{ value: "Mistral", label: "Mistral", baseUrl: "https://api.mistral.ai/v1", model: "mistral-small-latest", keyRef: "env:MISTRAL_API_KEY" },
 	{ value: "Perplexity", label: "PPLX", baseUrl: "https://api.perplexity.ai", model: "sonar", keyRef: "env:PPLX_API_KEY" },
-	{ value: "Gemini OpenAI兼容", label: "Gemini兼容", baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", model: "gemini-2.5-flash", keyRef: "env:GEMINI_API_KEY" },
-	{ value: "Claude Anthropic", label: "Claude", baseUrl: "https://api.anthropic.com/v1/messages", model: "claude-haiku-4-5", keyRef: "env:ANTHROPIC_API_KEY", hint: "Anthropic 原生 Messages API：支持填写官方或代理 base_url，域名根地址会自动补全 /v1/messages。" },
-	{ value: "Gemini 原生", label: "Gemini", baseUrl: "https://generativelanguage.googleapis.com/v1beta", model: "gemini-2.5-flash", keyRef: "env:GEMINI_API_KEY" },
+	{ value: "Gemini OpenAI兼容", label: "Gemini兼容", baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", model: "gemini-flash-latest", keyRef: "env:GEMINI_API_KEY" },
+	{ value: "Claude Anthropic", label: "Claude", baseUrl: "https://api.anthropic.com/v1/messages", model: "claude-haiku-5-5", keyRef: "env:ANTHROPIC_API_KEY", hint: "Anthropic 原生 Messages API：支持填写官方或代理 base_url，域名根地址会自动补全 /v1/messages。" },
+	{ value: "Gemini 原生", label: "Gemini", baseUrl: "https://generativelanguage.googleapis.com/v1beta", model: "gemini-flash-latest", keyRef: "env:GEMINI_API_KEY" },
 	{ value: "Ollama本地", label: "Ollama", baseUrl: "http://127.0.0.1:11434/api/chat", model: "qwen2.5", keyRef: "" },
 	{ value: "LM Studio本地", label: "LMStudio", baseUrl: "http://127.0.0.1:1234/v1", model: "", keyRef: "" },
 	{ value: "自定义", label: "自定义", baseUrl: "", model: "", keyRef: "", hint: "完全自定义：手动填写兼容接口地址、Key、模型名和额外请求头。" },
 ];
+// Official model IDs checked on 2026-10-23; suggestions are never an allowlist.
+// Keep image/video generation IDs out of this text-refinement picker.
+const MODEL_API_MODEL_SUGGESTIONS = {
+	"DeepSeek": ["deepseek-flash", "deepseek-v4-pro"],
+	"通义千问DashScope": ["qwen3.8-max", "qwen3.8-flash", "qwen3.7-plus", "qwen3.7-max", "qwen3.8-omni-flash", "deepseek-v4.1-flash", "deepseek-v4-pro-0813", "kimi-k3", "glm-5.2", "ZHIPU/GLM-5.3", "MiniMax-M3.1-Flash"],
+	"Claude Anthropic": ["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-1", "claude-mythos-5-1", "claude-sonnet-4-6", "claude-opus-4-6", "claude-haiku-4-5"],
+	"Gemini 原生": ["gemini-flash-latest", "gemini-3.1-pro-preview", "gemini-2.5-flash"],
+	"Gemini OpenAI兼容": ["gemini-flash-latest", "gemini-3.1-pro-preview", "gemini-2.5-flash"],
+};
+let modelApiSuggestionListSequence = 0;
+
+function getModelApiModelSuggestions(provider) {
+	return [...(MODEL_API_MODEL_SUGGESTIONS[String(provider ?? "").trim()] ?? [])];
+}
+
+function refreshModelApiModelSuggestions(deck, provider) {
+	const list = deck?.apiModelSuggestionList;
+	if (!list || list.dataset.provider === provider) return;
+	list.dataset.provider = provider;
+	list.replaceChildren();
+	for (const model of getModelApiModelSuggestions(provider)) {
+		const option = document.createElement("option");
+		option.value = model;
+		list.appendChild(option);
+	}
+}
 const MODEL_API_PROVIDER_VALUES = new Set(MODEL_API_PROVIDER_BUTTONS.map((item) => item.value));
 const MODEL_API_PROVIDER_HOST_HINTS = [
 	{ token: "api.openai.com", label: "OpenAI" },
@@ -5742,6 +5768,7 @@ function refreshModelLoaderDeck(deck, node) {
 	const apiKey = String(getModelWidget(node, "API密钥")?.value ?? "").trim();
 	const apiTimeout = Number(getModelWidget(node, "API超时秒")?.value ?? 120);
 	const apiProviderDisplay = getApiProviderDisplayName(provider, apiBaseUrl);
+	refreshModelApiModelSuggestions(deck, provider);
 	if (deck.statusEl) {
 		const text = getModelLoaderSummary(node);
 		deck.statusEl.textContent = text;
@@ -5784,7 +5811,7 @@ function refreshModelLoaderDeck(deck, node) {
 	if (deck.kqvButton) deck.kqvButton.classList.toggle("is-active", kqv);
 	if (deck.mmapButton) deck.mmapButton.classList.toggle("is-active", mmap);
 	if (deck.mlockButton) deck.mlockButton.classList.toggle("is-active", mlock);
-	if (deck.flashSelect) deck.flashSelect.value = flash;
+	if (deck.flashSelect) refreshModelLoaderSelectOptions(deck.flashSelect, node);
 	if (deck.sectionValues) {
 		const values = deck.sectionValues;
 		if (values.source) {
@@ -5833,8 +5860,7 @@ function refreshModelLoaderDeck(deck, node) {
 		}
 	}
 	for (const select of deck.selects ?? []) {
-		const widget = getModelWidget(node, select.dataset.widgetName);
-		if (widget) select.value = String(widget.value ?? "");
+		refreshModelLoaderSelectOptions(select, node);
 	}
 	for (const input of deck.inputs ?? []) {
 		const widget = getModelWidget(node, input.dataset.widgetName);
@@ -5908,20 +5934,38 @@ function createModelLoaderButton(node, label, value, onClick) {
 	return button;
 }
 
+function refreshModelLoaderSelectOptions(select, node) {
+	if (!select) return false;
+	const widgetName = select.dataset.widgetName;
+	const widget = getModelWidget(node, widgetName);
+	if (!widget) return false;
+	const current = String(widget.value ?? "");
+	const values = [...new Set(getModelWidgetOptions(node, widgetName))];
+	// Retain saved selections (including legacy GGUF shards) even when file scans
+	// no longer list them. A select without a matching option displays blank.
+	if (current && !values.includes(current)) values.push(current);
+	const signature = JSON.stringify(values);
+	const changed = select.dataset.optionSignature !== signature;
+	if (changed) {
+		select.replaceChildren();
+		for (const value of values) {
+			const option = document.createElement("option");
+			option.value = value;
+			option.textContent = value;
+			select.appendChild(option);
+		}
+		select.dataset.optionSignature = signature;
+	}
+	select.value = current;
+	return changed;
+}
+
 function createModelLoaderSelect(node, widgetName, label) {
 	const select = document.createElement("select");
 	select.className = "qwen-te-model__select";
 	select.dataset.widgetName = widgetName;
 	select.title = label;
-	const options = getModelWidgetOptions(node, widgetName);
-	const current = String(getModelWidget(node, widgetName)?.value ?? "");
-	for (const value of options.length ? options : [current].filter(Boolean)) {
-		const option = document.createElement("option");
-		option.value = value;
-		option.textContent = value;
-		select.appendChild(option);
-	}
-	select.value = current;
+	refreshModelLoaderSelectOptions(select, node);
 	select.addEventListener("pointerdown", (event) => { event.stopPropagation(); });
 	select.addEventListener("mousedown", (event) => { event.stopPropagation(); });
 	select.addEventListener("change", (event) => {
@@ -6034,7 +6078,12 @@ function buildModelLoaderDeck(node, options = {}) {
 	apiTextSection.section.appendChild(apiInputGrid);
 	const apiBaseInput = createModelLoaderTextInput(node, "API地址", "API 地址", { placeholder: "Base URL，或完整 /chat/completions、/responses、/v1/messages、/api/chat 地址" });
 	const apiKeyInput = createModelLoaderTextInput(node, "API密钥", "API Key", { placeholder: "推荐 env:变量名；自定义地址需授权来源" });
-	const apiModelInput = createModelLoaderTextInput(node, "API模型", "API 模型名", { placeholder: "例如 gpt-4o-mini / deepseek-chat / qwen-plus" });
+	const apiModelInput = createModelLoaderTextInput(node, "API模型", "API 模型名（可自填，下拉仅供参考）", { placeholder: "例如 deepseek-flash / qwen3.8-max；可填写自定义型号" });
+	const apiModelSuggestionList = document.createElement("datalist");
+	apiModelSuggestionList.id = `qwen-te-model-candidates-${++modelApiSuggestionListSequence}`;
+	apiModelInput.setAttribute("list", apiModelSuggestionList.id);
+	apiModelInput.autocomplete = "off";
+	apiInputGrid.appendChild(apiModelSuggestionList);
 	const apiTimeoutInput = createModelLoaderTextInput(node, "API超时秒", "超时秒", { placeholder: "建议 90-180，瞬时错误自动重试" });
 	apiInputGrid.appendChild(apiBaseInput);
 	apiInputGrid.appendChild(apiKeyInput);
@@ -6181,6 +6230,7 @@ function buildModelLoaderDeck(node, options = {}) {
 		},
 		sourceButtons,
 		providerButtons,
+		apiModelSuggestionList,
 		familyButtons,
 		ctxButtons,
 		batchButtons,
@@ -15553,14 +15603,18 @@ function openExampleDialog(node, library) {
 	searchInput.addEventListener("input", render);
 
 	const applySelectedExample = async (options = {}) => {
+		if (overlay.__qwenDisposed) return false;
 		const preset = selectedPreset;
-		if (!preset) return;
+		if (!preset) return false;
+		const extraTags = parseCustomTags(customInput.value);
+		const shouldQueue = !!options.queue;
 		const mutationRevision = beginNodeStateMutation(node);
-		const nextLibrary = await getFreshLibraryForUi(node, library, { mutationRevision });
-		if (!isNodeStateMutationCurrent(node, mutationRevision)) return;
+		const commitGuard = () => !overlay.__qwenDisposed && isNodeStateMutationCurrent(node, mutationRevision);
+		if (!commitGuard()) return false;
+		const nextLibrary = await getFreshLibraryForUi(node, library, { mutationRevision, commitGuard });
+		if (!commitGuard()) return false;
 		const nextState = createPresetBaseState(node, nextLibrary, preset);
 		applyPreset(nextState, nextLibrary, preset, statusEl);
-		const extraTags = parseCustomTags(customInput.value);
 		const mapping = buildTagGroupIndex(nextLibrary);
 		for (const tag of extraTags) {
 			const groupName = mapping.get(tag);
@@ -15576,17 +15630,23 @@ function openExampleDialog(node, library) {
 			if ((nextState.selected[groupName] ?? []).length < Number(groupConfig.slots ?? 0)) addUniqueTag(nextState.selected[groupName], tag);
 			else addUniqueTag(nextState.customTags, tag);
 		}
+		if (!commitGuard()) return false;
 		recordNodeHistory(node, collectNodeState(node, nextLibrary), "before-random");
-		if (!applyNodeState(node, nextLibrary, nextState, { recordHistory: true, historySource: "example", mutationRevision })) return;
-		if (options.queue) {
+		if (!commitGuard()) return false;
+		if (!applyNodeState(node, nextLibrary, nextState, { recordHistory: true, historySource: "example", mutationRevision })) return false;
+		if (!commitGuard()) return false;
+		disposeModalOverlay(overlay);
+		if (shouldQueue) {
+			// Successful application closes this dialog; its requested queue still belongs to this revision.
+			if (!isNodeStateMutationCurrent(node, mutationRevision)) return false;
 			const queued = await queueWorkflowFromNode(node);
-			if (!isNodeStateMutationCurrent(node, mutationRevision)) return;
+			if (!isNodeStateMutationCurrent(node, mutationRevision)) return false;
 			setNodeStatusText(node, queued ? `已应用示例锚点并加入队列：${preset.name}` : `已应用示例锚点：${preset.name}，但未能自动入队。`);
 		}
-		disposeModalOverlay(overlay);
+		return true;
 	};
-	applyButton.onclick = async () => { await applySelectedExample(); };
-	applyRunButton.onclick = async () => { await applySelectedExample({ queue: true }); };
+	applyButton.onclick = () => applySelectedExample();
+	applyRunButton.onclick = () => applySelectedExample({ queue: true });
 
 	const closeExample = () => disposeModalOverlay(overlay);
 	cancelButton.onclick = closeExample;
@@ -17902,25 +17962,34 @@ function openCharacterSheetDialog(node, library) {
 	disableButton.textContent = "停用";
 	footer.appendChild(disableButton);
 
+	const closeCharacterSheet = () => disposeModalOverlay(overlay);
 	const enableSheet = async () => {
+		if (overlay.__qwenDisposed) return false;
+		const requestedMode = activeMode;
+		const requestedUserText = String(promptInput.value ?? "");
 		const mutationRevision = beginNodeStateMutation(node);
-		const nextLibrary = await getFreshLibraryForUi(node, library, { mutationRevision });
-		if (!isNodeStateMutationCurrent(node, mutationRevision)) return;
-		const nextState = buildCharacterSheetState(node, nextLibrary, { mode: activeMode, userText: promptInput.value });
-		if (!applyNodeState(node, nextLibrary, nextState, { recordHistory: true, historySource: "manual-apply", mutationRevision })) return;
-		setNodeStatusText(node, `已启用角色设定图：${CHARACTER_SHEET_MODE_OPTIONS.find((item) => item.key === activeMode)?.label ?? activeMode}。`);
+		const commitGuard = () => !overlay.__qwenDisposed && isNodeStateMutationCurrent(node, mutationRevision);
+		const nextLibrary = await getFreshLibraryForUi(node, library, { mutationRevision, commitGuard });
+		if (!commitGuard()) return false;
+		const nextState = buildCharacterSheetState(node, nextLibrary, { mode: requestedMode, userText: requestedUserText });
+		if (!applyNodeState(node, nextLibrary, nextState, { recordHistory: true, historySource: "manual-apply", mutationRevision })) return false;
+		setNodeStatusText(node, `已启用角色设定图：${CHARACTER_SHEET_MODE_OPTIONS.find((item) => item.key === requestedMode)?.label ?? requestedMode}。`);
 		refreshNodeActionButtons(node);
-		overlay.remove();
+		closeCharacterSheet();
+		return true;
 	};
 	const disableSheet = async () => {
+		if (overlay.__qwenDisposed) return false;
 		const mutationRevision = beginNodeStateMutation(node);
-		const nextLibrary = await getFreshLibraryForUi(node, library, { mutationRevision });
-		if (!isNodeStateMutationCurrent(node, mutationRevision)) return;
+		const commitGuard = () => !overlay.__qwenDisposed && isNodeStateMutationCurrent(node, mutationRevision);
+		const nextLibrary = await getFreshLibraryForUi(node, library, { mutationRevision, commitGuard });
+		if (!commitGuard()) return false;
 		const nextState = buildCharacterSheetDisabledState(node, nextLibrary);
-		if (!applyNodeState(node, nextLibrary, nextState, { recordHistory: true, historySource: "manual-apply", mutationRevision })) return;
+		if (!applyNodeState(node, nextLibrary, nextState, { recordHistory: true, historySource: "manual-apply", mutationRevision })) return false;
 		setNodeStatusText(node, "已停用角色设定图模式。");
 		refreshNodeActionButtons(node);
-		overlay.remove();
+		closeCharacterSheet();
+		return true;
 	};
 	const updatePreview = () => {
 		preview.textContent = [String(promptInput.value ?? "").trim(), CHARACTER_SHEET_PROMPTS[activeMode]].filter(Boolean).join("\n\n");
@@ -17933,11 +18002,11 @@ function openCharacterSheetDialog(node, library) {
 			updatePreview();
 		};
 	}
-	cancelButton.onclick = () => overlay.remove();
-	closeButton.onclick = () => overlay.remove();
-	applyButton.onclick = () => { void enableSheet(); };
-	disableButton.onclick = () => { void disableSheet(); };
-	overlay.addEventListener("click", (event) => { if (event.target === overlay) overlay.remove(); });
+	cancelButton.onclick = closeCharacterSheet;
+	closeButton.onclick = closeCharacterSheet;
+	applyButton.onclick = enableSheet;
+	disableButton.onclick = disableSheet;
+	overlay.addEventListener("click", (event) => { if (event.target === overlay) closeCharacterSheet(); });
 	document.body.appendChild(overlay);
 	refreshModes();
 	promptInput.focus();

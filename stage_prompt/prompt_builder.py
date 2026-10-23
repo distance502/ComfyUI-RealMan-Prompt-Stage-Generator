@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import re
 from collections import OrderedDict
+from copy import deepcopy
 from typing import Any, Callable, Mapping, NotRequired, TypedDict
 
 try:  # Keep direct file loading in tests working when the package context is absent.
@@ -3959,7 +3960,84 @@ IMAGE_PROMPT_TARGET_PROFILES: dict[str, dict[str, Any]] = {
         "negative_contract": "structural_errors_in_negative_channel",
         "parameter_policy": "omit_unknown_parameters",
     },
+    "FLUX.3": {
+        "family": "FLUX.3",
+        "label_zh": "FLUX.3 自然语言图像提示词",
+        "label_en": "FLUX.3 natural-language image prompt",
+        "guidance": "describe medium, subject positions, visible relationships, lighting and background in complete sentences; quote requested text exactly; identify supplied references by position without inventing assets",
+        "prompt_order": ["style", "subject", "spatial_relation", "action", "lighting", "material", "background"],
+        "positive_contract": "concrete_caption_with_exact_requested_text",
+        "negative_contract": "no_native_negative_field_do_not_merge_into_positive",
+        "parameter_policy": "omit_platform_parameters",
+        "model_ids": ["flux-3-image"],
+        "task_modes": ["T2I", "Edit", "MultiRef", "Layout"],
+        "max_reference_images": 10,
+        "layout_contract": "natural_language_positions; optional bounding boxes require downstream schema and canvas",
+        "reference_contract": "identify supplied references by order and role; preserve unchanged facts",
+        "prompt_expansion_policy": "hosted_api_expands_prompt_downstream",
+        "catalog_checked_on": "2026-10-23",
+    },
+    "MOSS Image": {
+        "family": "MOSS Image",
+        "label_zh": "MOSS-Image 自然语言图像提示词",
+        "label_en": "MOSS-Image natural-language image prompt",
+        "guidance": "write a detailed visible-image caption: composition, subjects, action, setting, colors, light and style; preserve requested text verbatim with its position and line breaks; use the selected language, never invent text or JSON coordinates",
+        "prompt_order": ["composition", "subject", "relation", "action", "scene", "lighting", "style", "requested_text"],
+        "positive_contract": "visible_caption_with_exact_requested_text",
+        "negative_contract": "structural_errors_in_negative_channel",
+        "parameter_policy": "omit_platform_parameters",
+        "model_ids": ["OpenMOSS-Team/MOSS-Image-Base", "OpenMOSS-Team/MOSS-Image-SFT"],
+        "task_modes": ["T2I", "Layout"],
+        "layout_contract": "natural_language_positions; optional summary/items JSON requires downstream canvas and centered yxyx coordinates",
+        "reference_contract": "do not claim native reference-image editing from the released Base/SFT caption profile",
+        "preferred_language": "English; preserve the user's selected language",
+        "prompt_token_limit": 4096,
+        "catalog_checked_on": "2026-10-23",
+    },
 }
+
+
+_VERSIONED_IMAGE_TARGETS = {
+    "FLUX.2": ("Flux", ["FLUX.2 [dev]", "FLUX.2 [klein]"], ["T2I", "Edit", "MultiRef"]),
+    "FLUX.3 Klein": ("FLUX.3", ["black-forest-labs/flux-3-image-klein", "black-forest-labs/flux-3-image-klein-base"], ["T2I", "Edit", "MultiRef", "Layout"]),
+    "Qwen Image 2512": ("Qwen Image", ["Qwen/Qwen-Image-2512"], ["T2I"]),
+    "Qwen Image Edit 2511": ("Qwen Image", ["Qwen/Qwen-Image-Edit-2511"], ["Edit", "MultiRef"]),
+    "Qwen Image 2.1": ("Qwen Image", ["Qwen/Qwen-Image-2.1", "qwen-image-2.1-pro"], ["T2I", "Edit", "MultiRef"]),
+    "Qwen Image 2.1 Turbo": ("Qwen Image", ["Qwen/Qwen-Image-2.1-Turbo", "qwen-image-2.1-turbo"], ["T2I", "Edit", "MultiRef"]),
+    "Qwen Image 3.0": ("Qwen Image", ["qwen-image-3.0-pro"], ["T2I", "Edit"]),
+    "Wan 2.7 Image": ("通用", ["wan2.7-image-pro"], ["T2I", "Edit"]),
+    "Gemini Image": ("通用", ["gemini-3.1-flash-lite-image"], ["T2I", "Edit"]),
+}
+for _target, (_family, _model_ids, _task_modes) in _VERSIONED_IMAGE_TARGETS.items():
+    IMAGE_PROMPT_TARGET_PROFILES[_target] = {
+        **deepcopy(IMAGE_PROMPT_TARGET_PROFILES[_family]),
+        "label_zh": f"{_target} 自然语言提示词",
+        "label_en": f"{_target} natural-language prompt",
+        "family": _family,
+        "model_ids": _model_ids,
+        "task_modes": _task_modes,
+        "catalog_checked_on": "2026-10-23",
+        "reference_contract": "preserve supplied identity, layout and unchanged facts; describe only requested visible changes",
+        "parameter_policy": "omit_platform_parameters",
+    }
+for _target in ("Qwen Image 2.1", "Qwen Image 2.1 Turbo"):
+    IMAGE_PROMPT_TARGET_PROFILES[_target].update({
+        "max_reference_images": 10,
+        "transparency_contract": "RGBA only when requested and supported by the downstream pipeline; never add transparency to an ordinary scene",
+        "guidance": "describe the finished picture in complete sentences with explicit spatial relations; quote requested text exactly; for editing specify only requested changes and preserve the supplied references in order",
+    })
+IMAGE_PROMPT_TARGET_PROFILES["FLUX.3 Klein"].update({
+    "prompt_expansion_policy": "official_prompt_upsampler_required_downstream; plugin prose is not a verified replacement",
+    "negative_contract": "runtime_dependent_do_not_merge_into_positive",
+    "reference_contract": "up to 10 supplied references in order; first reference sets output size in the official local pipeline",
+})
+# Quantization changes downstream loading, not the natural-language format.
+for _profile in IMAGE_PROMPT_TARGET_PROFILES.values():
+    _profile["weight_format_policy"] = "same_prompt_for_native_and_GGUF_weights; downstream_loader_must_support_architecture"
+# Keep legacy choices stable, and always leave the custom escape hatch last.
+IMAGE_PROMPT_TARGET_MODEL_OPTIONS = (
+    *[name for name in IMAGE_PROMPT_TARGET_PROFILES if name != "自定义"], "自定义"
+)
 
 
 def resolve_image_prompt_target_profile(settings: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -3967,7 +4045,7 @@ def resolve_image_prompt_target_profile(settings: Mapping[str, Any] | None) -> d
 
     active_settings = settings or {}
     target = str(active_settings.get("图像提示词目标模型", "通用") or "通用").strip()
-    profile = IMAGE_PROMPT_TARGET_PROFILES.get(target, IMAGE_PROMPT_TARGET_PROFILES["通用"])
+    profile = deepcopy(IMAGE_PROMPT_TARGET_PROFILES.get(target, IMAGE_PROMPT_TARGET_PROFILES["通用"]))
     resolved = {
         "target": target if target in IMAGE_PROMPT_TARGET_PROFILES else "通用",
         **profile,
@@ -3988,6 +4066,12 @@ def resolve_image_prompt_target_profile(settings: Mapping[str, Any] | None) -> d
         resolved["layout_priority"] = "profile_default"
         resolved["narrative_mode"] = "single_image_visual_story"
     return resolved
+
+
+def _image_prompt_render_family(settings: Mapping[str, Any]) -> str:
+    target = str(settings.get("图像提示词目标模型有效") or settings.get("图像提示词目标模型") or "通用").strip()
+    profile = IMAGE_PROMPT_TARGET_PROFILES.get(target, IMAGE_PROMPT_TARGET_PROFILES["通用"])
+    return str(profile.get("family") or (target if target in IMAGE_PROMPT_TARGET_PROFILES else "通用"))
 
 
 def _localize_prompt_fragments(fragments: list[str], settings: dict[str, Any]) -> list[str]:
@@ -4692,10 +4776,7 @@ def _build_concise_chinese_prompt(
         "support": subject_support_narrative_anchor(settings.get("智能场景关系图")),
         "style_track": context.get("style_track", ""),
         "layout_mode": layout_mode,
-        "image_target": str(
-            settings.get("图像提示词目标模型有效", settings.get("图像提示词目标模型", "通用"))
-            or "通用"
-        ),
+        "image_target": _image_prompt_render_family(settings),
     }
     recent_history = [
         *list(context.get("recent_tracks", [])),
@@ -4812,10 +4893,7 @@ def _build_concise_english_prompt(
         ),
         "style_track": context.get("style_track", ""),
         "layout_mode": layout_mode,
-        "image_target": str(
-            settings.get("图像提示词目标模型有效", settings.get("图像提示词目标模型", "通用"))
-            or "通用"
-        ),
+        "image_target": _image_prompt_render_family(settings),
     }
     recent_history = [
         *list(context.get("recent_tracks", [])),

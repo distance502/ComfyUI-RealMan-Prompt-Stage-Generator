@@ -6,6 +6,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from .narrative import visual_layout_contract
+
 
 CHARACTER_SHEET_STRATEGY_NOTE = "角色设定图策略：启用时将当前节点提示词重构为多视角角色设定展示；停用时不介入全局生成。"
 CHARACTER_SHEET_PROMPT_BRIEF = (
@@ -34,6 +36,26 @@ CHARACTER_SHEET_INTERNAL_POLICY = (
     "参考图地点和背景物件不得带入主背景，只能转化为配色、光感和材质线索；头像、表情或材质细节仅在用户明确要求时进入独立辅助带；"
     "不要把策略说明、Thinking Process、任务分析、输出要求或规则文本写进最终提示词。"
 )
+NON_PERSON_SHEET_PROMPT_BRIEF = (
+    visual_layout_contract("multi_view", non_person=True)
+    + "三栏共用简洁连续中性背景；参考图地点和背景物件仅转化为配色、光感与材质线索，不带入主背景。"
+)
+NON_PERSON_SHEET_PROMPT_BRIEF_EN = (
+    visual_layout_contract("multi_view", english=True, non_person=True)
+    + " All columns share one simple continuous neutral background; reference locations and background objects inform only palette, lighting, and materials."
+)
+NON_PERSON_SHEET_INTERNAL_POLICY = (
+    "非人物设定图内部策略：只整理参考图可见实体、当前标签和用户补充中的结构与材质事实；"
+    "参考图模式优先保留几何轮廓、部件数量、连接关系、功能状态、配色和材质逻辑。"
+    + NON_PERSON_SHEET_PROMPT_BRIEF
+    + "不要将策略说明、任务分析或输出规则写入最终提示词。"
+)
+
+
+def is_non_person_subject(settings: dict[str, Any]) -> bool:
+    explicit = str(settings.get("主体类型", "自动") or "自动").strip()
+    resolved = explicit if explicit not in {"", "自动"} else str(settings.get("主体类型解析结果", "") or "").strip()
+    return resolved == "非人物主体"
 
 _META_FRAGMENT_MARKERS = (
     "thinking process",
@@ -162,17 +184,26 @@ def _merge_unique_lines(*parts: Any) -> str:
     return "\n".join(lines)
 
 
-def build_character_sheet_instruction(*, has_reference_image: bool, source_text: str = "", reference_text: str = "") -> str:
+def build_character_sheet_instruction(
+    *, has_reference_image: bool, source_text: str = "", reference_text: str = "", non_person: bool = False
+) -> str:
     """Build a drawable, non-locking seed for character reference sheets.
 
     This text is fed to smart matching, so it must stay close to visible/material
     content and avoid internal rules that could leak into the final prompt.
     """
-    mode_line = (
-        "参考单人图模式，参考图可见角色特征优先，节点标签作为风格、场景、光影和气氛补充"
-        if has_reference_image
-        else "纯提示词模式，使用当前节点标签和用户补充生成角色设定展示"
-    )
+    if non_person:
+        mode_line = (
+            "参考实体图模式，优先保留可见几何结构、部件与材质，节点标签补充风格和光影"
+            if has_reference_image
+            else "纯提示词模式，使用当前节点标签和用户补充生成非人物实体设计展示"
+        )
+    else:
+        mode_line = (
+            "参考单人图模式，参考图可见角色特征优先，节点标签作为风格、场景、光影和气氛补充"
+            if has_reference_image
+            else "纯提示词模式，使用当前节点标签和用户补充生成角色设定展示"
+        )
     source_line = _clean_visual_context(source_text, max_fragments=16)
     reference_line = _clean_visual_context(_strip_reference_background_sections(reference_text), max_fragments=18)
     context_lines = []
@@ -183,7 +214,7 @@ def build_character_sheet_instruction(*, has_reference_image: bool, source_text:
     return _merge_unique_lines(
         mode_line,
         *context_lines,
-        CHARACTER_SHEET_PROMPT_BRIEF,
+        NON_PERSON_SHEET_PROMPT_BRIEF if non_person else CHARACTER_SHEET_PROMPT_BRIEF,
     )
 
 
@@ -196,17 +227,24 @@ def apply_character_sheet_strategy(
     merge_requirement_text,
 ) -> bool:
     """Apply character-sheet strategy to settings only when enabled."""
-    if not bool(settings.get("图片反推生成", False) or settings.get("智能设定图意图", False)):
+    reverse_sheet_enabled = bool(settings.get("图片反推生成", False)) and str(
+        settings.get("图片反推模式", "角色设定图") or "角色设定图"
+    ).strip() == "角色设定图"
+    if not (reverse_sheet_enabled or bool(settings.get("智能设定图意图", False))):
         return False
+    non_person = is_non_person_subject(settings)
+    brief = NON_PERSON_SHEET_PROMPT_BRIEF if non_person else CHARACTER_SHEET_PROMPT_BRIEF
+    brief_en = NON_PERSON_SHEET_PROMPT_BRIEF_EN if non_person else CHARACTER_SHEET_PROMPT_BRIEF_EN
     settings["图片反推模式"] = "角色设定图"
-    settings["主体类型"] = "人物角色"
+    settings["主体类型"] = "非人物主体" if non_person else "人物角色"
     settings["案例输出结构"] = "案例长段版"
     settings["详细度"] = "详细"
     settings["输出模式"] = "完整结果"
-    settings["优先柔和肤质"] = True
+    if not non_person:
+        settings["优先柔和肤质"] = True
     settings["抑制文字伪影"] = True
     settings["智能文本匹配"] = True
-    settings["角色设定图内部策略"] = CHARACTER_SHEET_INTERNAL_POLICY
+    settings["角色设定图内部策略"] = NON_PERSON_SHEET_INTERNAL_POLICY if non_person else CHARACTER_SHEET_INTERNAL_POLICY
     clean_user_text = _clean_visual_context(settings.get("智能文本输入"), max_fragments=10, max_chars=700)
     clean_extra = _clean_visual_context(settings.get("额外要求"), max_fragments=10, max_chars=700)
     clean_reference = _clean_visual_context(
@@ -218,6 +256,7 @@ def apply_character_sheet_strategy(
         has_reference_image=has_reference_image,
         source_text=source_text,
         reference_text=reference_text,
+        non_person=non_person,
     )
     seed_text = merge_requirement_text(clean_user_text, clean_extra, instruction)
     settings["智能文本输入"] = seed_text
@@ -227,11 +266,15 @@ def apply_character_sheet_strategy(
             for text in (clean_extra, clean_reference)
             if text and not re.search(r"[\u4e00-\u9fff]", text)
         ]
-        settings["额外要求"] = merge_requirement_text(*english_context, CHARACTER_SHEET_PROMPT_BRIEF_EN)
+        settings["额外要求"] = merge_requirement_text(*english_context, brief_en)
     else:
-        settings["额外要求"] = merge_requirement_text(clean_extra, clean_reference, CHARACTER_SHEET_PROMPT_BRIEF)
+        settings["额外要求"] = merge_requirement_text(clean_extra, clean_reference, brief)
     notes = [str(note).strip() for note in settings.get("推理纠偏说明", []) if str(note).strip()]
-    if CHARACTER_SHEET_STRATEGY_NOTE not in notes:
-        notes.append(CHARACTER_SHEET_STRATEGY_NOTE)
+    strategy_note = (
+        "非人物设定图策略：保留实体主体类型，用几何结构、部件关系和统一功能状态组织等比例三视图。"
+        if non_person else CHARACTER_SHEET_STRATEGY_NOTE
+    )
+    if strategy_note not in notes:
+        notes.append(strategy_note)
     settings["推理纠偏说明"] = notes
     return True

@@ -19,6 +19,13 @@ MODEL_CALL_SKILL_VERSION = "1"
 def _is_argument_binding_type_error(error: TypeError) -> bool:
     """Identify TypeErrors caused by a call shape, not backend business logic."""
 
+    traceback = error.__traceback__
+    if traceback is not None and traceback.tb_next is not None:
+        # Binding fails at our call site, before entering a Python backend.
+        # A deeper frame means backend code already ran; even a genuine
+        # decoder TypeError mentioning "takes" or "unexpected keyword" must
+        # not trigger another potentially billable call with fewer controls.
+        return False
     message = str(error or "").casefold()
     return any(
         marker in message
