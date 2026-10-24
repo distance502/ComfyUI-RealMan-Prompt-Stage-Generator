@@ -12700,10 +12700,16 @@ class TestStagePromptIntelligence(unittest.TestCase):
             style_track="fantasy concept design",
             subject_type="人物角色",
         )[0]
+        unsupported_surface_pattern = (
+            r"\b(?:chairs?|seats?|platforms?|stairs?|staircases?)\b"
+            r"|\b(?:on|onto|atop|upon)\s+(?:(?:a|an|the|stone|wooden|concrete|metal)\s+)*steps?\b"
+        )
+        # A narrative "next step" is not a raised support surface.
+        self.assertRegex("standing on a stone step", unsupported_surface_pattern)
+        self.assertNotRegex("the next step is one decisive step forward", unsupported_surface_pattern)
         for english_prompt in (english_skill_prompt, english_block_prompt):
             self.assertIn("Both feet press directly into the current ground surface", english_prompt)
-            for forbidden in ("chair", "seat", "step", "platform"):
-                self.assertNotIn(forbidden, english_prompt.casefold())
+            self.assertNotRegex(english_prompt.casefold(), unsupported_surface_pattern)
 
     def test_atmospheric_medium_context_removes_only_conflicting_soft_anchors(self) -> None:
         selected = OrderedDict(
