@@ -187,6 +187,7 @@ from .stage_prompt.intelligence import (
     apply_relation_hint_resolution as _apply_relation_hint_resolution_impl,
     build_intelligence_profile as _build_intelligence_profile_impl,
     infer_task_intent as _infer_task_intent_impl,
+    prompt_preserves_anchor as _prompt_preserves_anchor_impl,
     resolve_model_strategy as _resolve_model_strategy_impl,
     resolve_preference_hints as _resolve_preference_hints_impl,
     resolve_relation_hints as _resolve_relation_hints_impl,
@@ -6849,6 +6850,11 @@ def _run_stage_impl(
     settings["最近提示词指纹"] = _prompt_history_fingerprints(cache_key)
     tag_block_payload = _parse_tag_block_payload_impl(settings.get("标签块编排JSON", ""))
     tag_block_enabled = bool(settings.get("标签块编排启用", False)) and bool(tag_block_payload.get("blocks"))
+    settings["标签块显式文本"] = [
+        str(block.get("text", "") or "").strip()
+        for block in tag_block_payload.get("blocks", [])
+        if block.get("type") == "text" and str(block.get("text", "") or "").strip()
+    ] if tag_block_enabled else []
     if tag_block_enabled:
         grouped_summary_for_blocks = _format_grouped_summary(selected, custom_tags)
         settings["标签块编排摘要"] = _summarize_tag_block_payload_impl(tag_block_payload)
@@ -6900,6 +6906,29 @@ def _run_stage_impl(
             infer_output_structure=_infer_output_structure,
         )
         natural_contract_fallback_list = list(prompt_list)
+    if settings.get("图像提示词待翻译锚点") and settings.get("图像提示词中文回退"):
+        if tag_block_enabled:
+            chinese_settings = {**settings, "提示词语言": "纯中文", "全局剧情规划": []}
+            prompt_list = _build_tag_block_prompt_list_impl(
+                tag_block_payload,
+                selected,
+                custom_tags,
+                chinese_settings,
+                grouped_summary=grouped_summary_for_blocks,
+                style_track=style_track,
+                subject_type=subject_type,
+                template_style=template_style,
+                generation_count=int(settings.get("生成数量", 1) or 1),
+            )
+            for index, prompt in enumerate(prompt_list):
+                missing = [anchor for anchor in settings["图像提示词待翻译锚点"] if anchor not in prompt]
+                if missing:
+                    prompt_list[index] = prompt + "画面同时保留这些具体特征：" + "；".join(missing) + "。"
+            settings["全局剧情规划"] = list(chinese_settings.get("全局剧情规划", []) or [])
+            settings["图像提示词中文回退"] = list(prompt_list)
+            natural_contract_fallback_list = list(prompt_list)
+        else:
+            prompt_list = list(settings["图像提示词中文回退"])
     raw_prompt_list = list(prompt_list)
     image_model_counters_before = {
         key: max(0, int(settings.get(key, 0) or 0))
@@ -7226,7 +7255,7 @@ def _run_stage_impl(
     deduped_video_missing_anchors = [
         str(anchor).strip()
         for anchor in settings.get("视频提示词必保留锚点", [])
-        if str(anchor).strip() and str(anchor).strip() not in deduped_video_prompt
+        if str(anchor).strip() and not _prompt_preserves_anchor_impl(deduped_video_prompt, str(anchor).strip())
     ]
     deduped_video_contract_reason = _video_prompt_contract_violation_impl(
         deduped_video_prompt,
@@ -7350,6 +7379,12 @@ def _run_stage_impl(
     json_payload["normalization_notes"] = list(settings.get("推理纠偏说明", []))
     json_payload["prompt_skill_context"] = dict(settings.get("提示词Skill上下文", {}) or {})
     json_payload["prompt_skill_summary"] = str(settings.get("提示词Skill摘要", "") or "")
+    json_payload["image_prompt_languages"] = list(settings.get("主提示词实际输出语言", []) or [])
+    json_payload["image_prompt_translation_pending"] = (
+        list(settings.get("图像提示词待翻译锚点", []) or [])
+        if any(language != settings.get("提示词语言", "纯中文") for language in json_payload["image_prompt_languages"])
+        else []
+    )
     json_payload["nsfw_result_contract"] = dict(settings.get("NSFW结果合同", {}) or {})
     if nsfw_output is not None:
         json_payload["nsfw_workspace"] = dict(nsfw_workspace)
@@ -8008,6 +8043,7 @@ def _strict_dedupe_prompt_list(
     )
     key = str(node_key or "").strip()
     changed_count = 0
+    exhausted_count = 0
     transaction_lock = _cache_key_lock(key) if key else nullcontext()
 
     with transaction_lock:
@@ -8081,7 +8117,7 @@ def _strict_dedupe_prompt_list(
                         changed_count += 1
                         resolved = True
                         break
-                while not resolved:
+                while not resolved and channel_name != "video":
                     variation_cursor = cursor
                     cursor += 1
                     varied = _append_strict_unique_fallback(
@@ -8101,6 +8137,8 @@ def _strict_dedupe_prompt_list(
                         candidate_hash = varied_hash
                         changed_count += 1
                         resolved = True
+                if not resolved:
+                    exhausted_count += 1
             if not candidate:
                 continue
             if not candidate_hash:
@@ -8140,6 +8178,8 @@ def _strict_dedupe_prompt_list(
         if changed_count:
             channel_label = {"prompt": "主提示词", "smart": "智能文本", "video": "视频提示词"}[channel_name]
             _merge_inference_notes(settings, [f"{channel_label}严格避重：改写 {changed_count} 条与最近输出完全相同的提示词。"])
+        if exhausted_count:
+            _merge_inference_notes(settings, [f"视频提示词严格避重：变化候选已耗尽，保留 {exhausted_count} 条本轮有效正文。"])
         return accepted
 
 
@@ -8299,6 +8339,27 @@ def _enforce_natural_prompt_list_outputs(
     secondary = [str(prompt or "").strip() for prompt in secondary_fallbacks]
     result: list[str] = []
     fallback_indices: list[int] = []
+    language_fallback_count = 0
+    requested_language = str(settings.get("提示词语言", "纯中文") or "纯中文")
+    fallback_language = str(settings.get("图像提示词Skill回退语言", "") or "")
+    language_fallbacks = {
+        _canonical_prompt_hash(form)
+        for prompt in settings.get("图像提示词中文回退", [])
+        if str(prompt or "").strip()
+        for form in (str(prompt).strip(), _stabilize_prompt_output_impl(str(prompt), settings))
+    }
+    fallback_settings = {**settings, "提示词语言": fallback_language} if fallback_language else settings
+    output_languages: list[str] = []
+
+    def is_valid_output(option: str) -> bool:
+        if _is_natural_language_prompt_impl(option, settings):
+            return True
+        return bool(
+            fallback_language
+            and _canonical_prompt_hash(option) in language_fallbacks
+            and _is_natural_language_prompt_impl(option, fallback_settings)
+        )
+
     for index, candidate in enumerate(prompts):
         options = (
             candidate,
@@ -8306,16 +8367,30 @@ def _enforce_natural_prompt_list_outputs(
             secondary[index] if index < len(secondary) else "",
         )
         accepted = next(
-            (option for option in options if _is_natural_language_prompt_impl(option, settings)),
+            (option for option in options if is_valid_output(option)),
             next((option for option in options if option), ""),
         )
         if accepted != candidate:
             fallback_indices.append(index)
         result.append(accepted)
+        if (
+            fallback_language
+            and not _is_natural_language_prompt_impl(accepted, settings)
+            and is_valid_output(accepted)
+        ):
+            output_languages.append(fallback_language)
+            language_fallback_count += 1
+        else:
+            output_languages.append(requested_language)
 
     channel_name = "智能文本" if channel == "smart" else "主提示词"
     settings["自然语言输出合同"] = "所有模式的正向输出必须为完整自然语言画面描述"
     settings[f"{channel_name}自然语言回退索引"] = fallback_indices
+    settings[f"{channel_name}实际输出语言"] = output_languages
+    if language_fallback_count:
+        _merge_inference_notes(settings, [
+            f"{channel_name}语言回退：{language_fallback_count} 条未完成英文翻译，已保留完整中文底稿与用户要求。"
+        ])
     if fallback_indices:
         fallback_count = len(fallback_indices)
         settings["自然语言输出回退数量"] = max(

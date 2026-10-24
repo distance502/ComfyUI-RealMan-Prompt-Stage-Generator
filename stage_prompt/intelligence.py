@@ -2409,6 +2409,32 @@ _DIRECT_NEGATION_RE = re.compile(
     r"(?:没有|不含|无|非|\bno\b)\s*(?:任何|任意|any)?\s*$",
     flags=re.IGNORECASE,
 )
+_WITHOUT_LOCATION_PREDICATE_RE = re.compile(
+    r"\b(?:waits?|waited|stands?|stood|sits?|sat|walks?|walked|runs?|ran|moves?|moved|"
+    r"remains?|remained|pauses?|paused|arrives?|arrived|enters?|entered)\s+"
+    r"(?:in|inside|within|into|at|on|beside|near|under|outside)\b",
+    flags=re.IGNORECASE,
+)
+_ANCHOR_ABSENCE_PREFIX_RE = re.compile(
+    r"(?:(?:没有|并未|未曾|未|不再|不|不是|并非)(?:穿着?|佩戴|携带|持有|拿着|手持|带着|出现|展示|呈现)?|"
+    r"并无|毫无|不存在|移除|去掉|省略|删除|"
+    r"(?:不要|禁止|排除|避免)(?:出现|展示|呈现|加入|增加|画出|描绘|包含|添加)?|"
+    r"\b(?:without|no|not|lacks?|lacking|omit(?:ted)?|remov(?:e|ed))\b|"
+    r"\b(?:do(?:es)?\s+not|don't|doesn't|not|never)\s+"
+    r"(?:wear(?:ing)?|carry(?:ing)?|hold(?:ing)?|feature|include|show|have)\b)\s*"
+    r"(?:(?:任何|该|原有的|原本的)|\b(?:a|an|the|any|visible|existing)\b\s*)*$",
+    flags=re.IGNORECASE,
+)
+_ANCHOR_ABSENCE_SUFFIX_RE = re.compile(
+    r"\s*(?:(?:本身)?(?:并不|不再|不)(?:存在|出现)|(?:已经|已)?(?:缺失|被移除|被删除|被省略)|"
+    r"\s+\b(?:is|are|was|were)\s+(?:absent|missing|removed|omitted|not\s+(?:present|visible))\b)",
+    flags=re.IGNORECASE,
+)
+_ANCHOR_DETAIL_SUFFIX_RE = re.compile(
+    r"\s*(?:(?:正在|在)?(?:遮挡|挡住|遮住|遮盖|投下|产生|照亮|引导|指引)|"
+    r"\b(?:with|blocking|obscuring|covering|casting|creating|illuminating)\b)",
+    flags=re.IGNORECASE,
+)
 _PRIMARY_SCENE_CUE_PATTERNS = (
     re.compile(
         r"(?:主场景|主要场景|核心地点|主要地点|故事发生地)\s*"
@@ -2483,6 +2509,14 @@ def _marker_match_is_negated(source: str, match_start: int) -> bool:
     prefix = source[max(0, match_start - 80) : match_start]
     clause_prefix = _CLAUSE_BOUNDARY_RE.split(prefix)[-1][-48:]
     broad_negation = _BROAD_NEGATION_RE.search(clause_prefix)
+    if broad_negation and re.match(r"\bwithout\b", broad_negation.group(0), flags=re.IGNORECASE):
+        without_tail = re.split(r"\bwithout\b", broad_negation.group(0), flags=re.IGNORECASE)[-1]
+        predicate = _WITHOUT_LOCATION_PREDICATE_RE.search(without_tail)
+        # A local missing item does not negate a subsequent affirmative location.
+        if predicate and without_tail[:predicate.start()].strip() and not re.search(
+            r"\b(?:who|which|that)\b", without_tail[:predicate.start()], flags=re.IGNORECASE,
+        ):
+            broad_negation = None
     return bool(
         (broad_negation and not _NEGATION_CANCEL_RE.search(clause_prefix))
         or _DIRECT_NEGATION_RE.search(clause_prefix)
@@ -2503,6 +2537,24 @@ def _marker_polarity(text: str, marker: str) -> tuple[bool, bool]:
 
 def _marker_present(text: str, marker: str) -> bool:
     return _marker_polarity(text, marker)[0]
+
+
+def prompt_preserves_anchor(text: Any, anchor: Any) -> bool:
+    """Require an affirmative anchor without an explicit contradictory absence."""
+    source = str(text or "").casefold()
+    needle = str(anchor or "").strip()
+    if not needle or not _marker_present(source, needle):
+        return False
+    for match in _marker_matches(source, needle):
+        prefix = _CLAUSE_BOUNDARY_RE.split(source[max(0, match.start() - 80):match.start()])[-1]
+        suffix = source[match.end():match.end() + 64]
+        if (
+            _ANCHOR_ABSENCE_PREFIX_RE.search(prefix)
+            and not _NEGATION_CANCEL_RE.search(prefix)
+            and not _ANCHOR_DETAIL_SUFFIX_RE.match(suffix)
+        ) or _ANCHOR_ABSENCE_SUFFIX_RE.match(suffix):
+            return False
+    return True
 
 
 def detect_world_families(text: Any) -> dict[str, list[str]]:

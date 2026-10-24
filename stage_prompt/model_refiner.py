@@ -47,6 +47,7 @@ try:
         candidate_world_violation,
         classify_repair_reason,
         introduced_human_subject_intrusions,
+        prompt_preserves_anchor,
     )
     from .video_prompt_skill import video_prompt_contract_violation
 except Exception:  # pragma: no cover - exercised by direct import tests
@@ -63,6 +64,7 @@ except Exception:  # pragma: no cover - exercised by direct import tests
         candidate_world_violation,
         classify_repair_reason,
         introduced_human_subject_intrusions,
+        prompt_preserves_anchor,
     )
     from stage_prompt_video_prompt_skill_test import video_prompt_contract_violation  # type: ignore
 
@@ -617,6 +619,8 @@ def _uses_qwen35_local_incremental_refinement(settings: dict[str, Any]) -> bool:
     contract, while the model-specific handler remains optional in nodes.py.
     """
 
+    if settings.get("图像提示词待翻译锚点") and str(settings.get("模型任务", "") or "").strip() != "视频提示词":
+        return False
     if str(settings.get("提示词语言", "纯中文") or "纯中文").strip() != "纯中文":
         return False
     source = _normalize_model_source_label(
@@ -651,6 +655,8 @@ def _qwen_local_incremental_label(settings: dict[str, Any]) -> str:
 
 
 def _uses_incremental_refinement(settings: dict[str, Any]) -> bool:
+    if settings.get("图像提示词待翻译锚点") and str(settings.get("模型任务", "") or "").strip() != "视频提示词":
+        return False
     strategy = settings.get("智能模型策略")
     return bool(isinstance(strategy, dict) and strategy.get("mode") == "incremental_blend")
 
@@ -1452,8 +1458,7 @@ def _video_anchor_role_values(anchor_roles: Any) -> dict[str, list[str]]:
 
 
 def _video_paragraph_has_anchor(paragraph: str, anchors: list[str]) -> bool:
-    lowered = str(paragraph or "").casefold()
-    return any(anchor.casefold() in lowered for anchor in anchors)
+    return any(prompt_preserves_anchor(paragraph, anchor) for anchor in anchors)
 
 
 def _video_identity_family(value: str) -> frozenset[str]:
@@ -2160,6 +2165,8 @@ def _validated_model_blend(
     *,
     layout_mode: str,
 ) -> str:
+    if settings.get("图像提示词待翻译锚点"):
+        return str(original_prompt or "").strip()
     blended = _blend_model_draft_with_skill_prompt(original_prompt, model_prompt, settings)
     if blended == str(original_prompt or "").strip():
         return str(original_prompt or "").strip()
@@ -2179,8 +2186,12 @@ def _resolve_model_prompt_candidate(
     if not prepared or _looks_like_broken_prompt(prepared):
         return original_prompt, "rejected", "模型响应清洗后仍只有分析、占位符、标签串或不可用正文。"
     cleaned = _postprocess_prompt_text(prepared)
-    cleaned = _restore_composition_anchors(original_prompt, cleaned)
-    cleaned = _restore_mode_literal_guards(original_prompt, cleaned)
+    translated_image = bool(settings.get("图像提示词待翻译锚点")) and _prompt_language_mode(settings) in {
+        "纯英文", "英文提示词+中文说明",
+    }
+    if not translated_image:
+        cleaned = _restore_composition_anchors(original_prompt, cleaned)
+        cleaned = _restore_mode_literal_guards(original_prompt, cleaned)
     if not cleaned or _looks_like_broken_prompt(cleaned):
         return original_prompt, "rejected", "模型响应清洗后没有可用提示词正文。"
     if _violates_language(cleaned, settings):
@@ -2652,12 +2663,9 @@ def _creative_spine_violation(original_prompt: str, candidate_prompt: str, setti
     candidate = str(candidate_prompt or "")
     language = str(settings.get("提示词语言", "纯中文") or "纯中文").strip()
     if language not in {"纯英文", "英文提示词+中文说明"}:
-        original_key = original.casefold()
-        candidate_key = candidate.casefold()
         for group_name in _CREATIVE_SPINE_REQUIRED_ANCHOR_GROUPS:
             for anchor in _bounded_creative_spine_values(groups.get(group_name, []), 6):
-                anchor_key = anchor.casefold()
-                if anchor_key in original_key and anchor_key not in candidate_key:
+                if prompt_preserves_anchor(original, anchor) and not prompt_preserves_anchor(candidate, anchor):
                     return f"模型响应改变了当前创作主线：缺少{group_name}锚点“{anchor}”。"
 
     allowed_style_values = [str(contract.get("template", "") or "")]
@@ -4513,6 +4521,22 @@ def _skill_context_for_model(settings: dict[str, Any]) -> str:
         )
     if model_fallback_note:
         extra_lines.append(f"模型回退状态：{model_fallback_note}")
+    pending_translation = settings.get("图像提示词待翻译锚点", [])
+    if isinstance(pending_translation, str):
+        pending_translation = [pending_translation]
+    if (
+        str(settings.get("模型任务", "") or "").strip() != "视频提示词"
+        and _prompt_language_mode(settings) in {"纯英文", "英文提示词+中文说明"}
+        and isinstance(pending_translation, (list, tuple))
+        and pending_translation
+    ):
+        extra_lines.append(
+            "待翻译图像要求（完整源文）：\n"
+            + "\n".join(str(item).strip() for item in pending_translation if str(item).strip())
+            + "\n本次中文底稿是保留用户要求的源文，不是最终语言。必须将完整底稿与以上要求完整翻译为当前请求的英文正文，"
+            "逐项保留人物、物件、数量、位置、属性与动作关系；不得省略、泛化成 selected tags 或替换成词库默认内容。"
+            "必须输出完整成品，不得只追加新增句子或返回短增量草稿。英中模式另附中文说明。"
+        )
     extra_context = ("\n" + "\n".join(extra_lines)) if extra_lines else ""
     image_target_profile = settings.get("图像提示词目标模型Profile")
     image_target_guidance = (
@@ -5539,7 +5563,7 @@ def maybe_model_refine_video(
 
     anchors = [str(item).strip() for item in settings.get("视频提示词必保留锚点", []) if str(item).strip()]
     anchor_roles = settings.get("视频提示词锚点角色")
-    missing = [anchor for anchor in anchors if anchor not in candidate]
+    missing = [anchor for anchor in anchors if not prompt_preserves_anchor(candidate, anchor)]
     world_reason = candidate_world_violation(
         original,
         candidate,
@@ -5593,7 +5617,7 @@ def maybe_model_refine_video(
             diagnostics=blend_diagnostics,
         )
         last_blend_reason = str(blend_diagnostics.get("reason", "") or "").strip()
-        blended_missing = [anchor for anchor in anchors if anchor not in blended_prompt]
+        blended_missing = [anchor for anchor in anchors if not prompt_preserves_anchor(blended_prompt, anchor)]
         blended_world_reason = candidate_world_violation(
             original,
             blended_prompt,
@@ -5658,7 +5682,7 @@ def maybe_model_refine_video(
         if repaired_raw:
             repaired_prepared, repaired_recovered = _prepare_model_response_text(repaired_raw)
             repaired_candidate = _repair_common_video_fragment_errors(_postprocess_video_prompt_text(repaired_prepared))
-            repaired_missing = [anchor for anchor in anchors if anchor not in repaired_candidate]
+            repaired_missing = [anchor for anchor in anchors if not prompt_preserves_anchor(repaired_candidate, anchor)]
             repaired_world_reason = candidate_world_violation(
                 original,
                 repaired_candidate,

@@ -95,6 +95,32 @@ class TestVideoDedupeContracts(unittest.TestCase):
                 second, original, settings, language=language,
             ), "")
 
+    def test_exhausted_variations_keep_valid_video_without_unbounded_fallback(self):
+        module = self.module
+        original, settings = self.build(count="单镜头", non_person=True)
+        base_hash = module._canonical_prompt_hash(original)
+        hashes = [
+            module._canonical_prompt_hash(module._append_video_variation_clause(original, cursor, settings))
+            for cursor in range(576)
+        ]
+        self.assertEqual(len(set(hashes)), 576)
+        key = "video-exhausted-variation-pool"
+        memory_state = {"version": 3, "channels": {"video": {
+            "hashes": hashes[:512], "base_hashes": [base_hash], "cursor": 0,
+        }}}
+        settings["连续生成避重缓存"] = json.dumps({"version": 3, "channels": {"video": {
+            "hashes": hashes[512:], "base_hashes": [base_hash], "cursor": 0,
+        }}})
+        with mock.patch.dict(module._CACHE, {key: {"strict_prompt_dedupe": memory_state}}), mock.patch.object(
+            module, "_append_strict_unique_fallback", side_effect=AssertionError("finite video pool must not retry forever"),
+        ):
+            output = module._strict_dedupe_prompt_list(key, [original], settings, channel="video")
+        self.assertEqual(output, [original])
+        self.assertTrue(any("变化候选已耗尽" in note for note in settings["推理纠偏说明"]))
+        self.assertEqual(video_prompt_skill.video_prompt_contract_violation(
+            output[0], original, settings, language="纯中文",
+        ), "")
+
     def stage_kwargs(self, settings, cache=None):
         english = settings.get("提示词语言") == "纯英文"
         return {
