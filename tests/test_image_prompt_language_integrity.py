@@ -83,7 +83,10 @@ class TestImagePromptLanguageIntegrity(unittest.TestCase):
             self.assertIn(unknown, prompt)
 
     def test_known_chinese_and_negative_only_requirements_keep_english_output(self):
-        for requirement in ("高细节", "中画幅质感", "港式武侠胶片", "无水印", ""):
+        for requirement in (
+            "高细节", "中画幅质感", "港式武侠胶片", "霓虹侧逆光", "雨夜街头",
+            "CG感", "浮空水晶", "无水印", "",
+        ):
             with self.subTest(requirement=requirement):
                 prompts, settings = self.build(extra=requirement)
                 self.assertEqual(settings["图像提示词待翻译锚点"], [])
@@ -101,6 +104,23 @@ class TestImagePromptLanguageIntegrity(unittest.TestCase):
         self.assertEqual(settings["图像提示词待翻译锚点"], [])
         self.assertEqual(settings["图像提示词Skill回退语言"], "")
         self.assertEqual(settings["图像提示词中文回退"], [])
+
+    def test_known_selected_source_anchors_do_not_force_chinese_fallback(self):
+        for group, tag in (
+            ("主体", "成年女性冒险者"), ("动作姿态", "站姿放松"),
+            ("光影氛围", "霓虹逆光"), ("光影氛围", "霓虹侧逆光"),
+            ("场景背景", "雨夜街头"), ("画面风格", "CG感"),
+            ("道具世界观", "浮空水晶"),
+        ):
+            with self.subTest(group=group, tag=tag):
+                selected = OrderedDict({"主体": ["成年男性"], "构图视角": ["全景全身"]})
+                selected[group] = [tag]
+                prompts, settings = self.build(selected=selected)
+                self.assertEqual(settings["图像提示词待翻译锚点"], [])
+                self.assertEqual(settings["图像提示词Skill回退语言"], "")
+                self.assertFalse(prompt_builder._has_cjk(prompts[0]))
+                self.assertIn(prompt_builder._translate_prompt_fragment(tag), prompts[0])
+        self.assertEqual(prompt_builder._translate_prompt_fragment("浮空水晶"), "floating crystals")
 
     def test_fallback_keeps_resolved_target_and_non_person_subject_contract(self):
         selected = OrderedDict({"主体": ["a mechanical clock"], "构图视角": ["三视图"]})

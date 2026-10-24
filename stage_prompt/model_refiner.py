@@ -379,6 +379,7 @@ _META_LINE_PATTERN = re.compile(
 _BATCH_SEPARATOR = "<<<QWEN_TE_SPLIT>>>"
 _CJK_PATTERN = re.compile(r"[\u4e00-\u9fff]")
 _ENGLISH_WORD_PATTERN = re.compile(r"\b[A-Za-z][A-Za-z'-]{2,}\b")
+_BILINGUAL_NOTE_MARKER_PATTERN = re.compile(r"中文说明\s*[:：]")
 _LEADING_SCENE_WRAPPER_PATTERN = re.compile(
     r"^\s*(?:一张|一幅)\s*(?:描绘|展示|呈现|表现|刻画)?\s*(.+?)\s*的(?:画面|图像)(?:中)?\s*[，,]?\s*(.*)$"
 )
@@ -970,8 +971,14 @@ _NATURAL_SINGLE_SENTENCE_MARKERS = (
 _NATURAL_SENTENCE_PATTERN = re.compile(r".+?(?:[。！？.!?]+|$)", re.DOTALL)
 
 
+def _normalize_bilingual_note_marker(text: str) -> str:
+    """Keep equivalent note delimiters consistent without supplying missing content."""
+
+    return _BILINGUAL_NOTE_MARKER_PATTERN.sub("中文说明：", str(text or ""), count=1)
+
+
 def _looks_like_natural_prose_prompt(text: str) -> bool:
-    body = str(text or "").split("中文说明：", 1)[0].strip()
+    body = _normalize_bilingual_note_marker(text).split("中文说明：", 1)[0].strip()
     if not body:
         return False
     lowered = f" {body.casefold()} "
@@ -1028,7 +1035,7 @@ def _dedupe_natural_prompt_units(text: str) -> str:
 
 
 def _postprocess_natural_prompt_text(text: str) -> str:
-    normalized = str(text or "").strip().replace("\r\n", "\n").replace("\r", "\n")
+    normalized = _normalize_bilingual_note_marker(text).strip().replace("\r\n", "\n").replace("\r", "\n")
     normalized = re.sub(r"^\s*```[a-zA-Z0-9_-]*\s*", "", normalized)
     normalized = re.sub(r"\s*```\s*$", "", normalized)
     lines: list[str] = []
@@ -1060,7 +1067,7 @@ def _postprocess_natural_prompt_text(text: str) -> str:
     return _dedupe_natural_prompt_units(collapsed)
 
 def _postprocess_prompt_text(text: str) -> str:
-    normalized = str(text or "").strip()
+    normalized = _normalize_bilingual_note_marker(text).strip()
     if not normalized:
         return ""
     normalized = normalized.replace("\r\n", "\n").replace("\r", "\n")
@@ -1664,7 +1671,7 @@ def _video_story_continuity_violation(text: str, anchor_roles: Any, *, language:
     roles = _video_anchor_role_values(anchor_roles)
     if not roles:
         return ""
-    prompt = str(text or "").strip()
+    prompt = _normalize_bilingual_note_marker(text).strip()
     mode = str(language or "纯中文").strip()
     if mode == "英文提示词+中文说明":
         english_text, marker, chinese_text = prompt.partition("中文说明：")
@@ -1700,7 +1707,7 @@ def _video_model_contract_violation(
 def _postprocess_video_prompt_text(text: str) -> str:
     """Clean model wrappers while preserving storyboard paragraph boundaries."""
 
-    normalized = str(text or "").strip().replace("\r\n", "\n").replace("\r", "\n")
+    normalized = _normalize_bilingual_note_marker(text).strip().replace("\r\n", "\n").replace("\r", "\n")
     normalized = re.sub(r"^\s*```[a-zA-Z0-9_-]*\s*", "", normalized)
     normalized = re.sub(r"\s*```\s*$", "", normalized)
     paragraphs = _video_storyboard_paragraphs(normalized)
@@ -1881,7 +1888,7 @@ def _video_blend_placement_summary(diagnostics: Any) -> str:
 
 
 def _dedupe_prompt_fragments(text: str) -> str:
-    normalized = str(text or "").strip()
+    normalized = _normalize_bilingual_note_marker(text).strip()
     if not normalized:
         return ""
     note_prefix = "中文说明："
@@ -1938,7 +1945,7 @@ def _dedupe_prompt_fragments(text: str) -> str:
 def _looks_like_tag_chain_prompt(text: str) -> bool:
     """Detect unique but list-like model output so the natural Skill prompt can be retained."""
 
-    body = str(text or "").split("中文说明：", 1)[0].strip()
+    body = _normalize_bilingual_note_marker(text).split("中文说明：", 1)[0].strip()
     if not body:
         return False
     fragments = [item.strip() for item in re.split(r"[，,、；;]+", body) if item.strip()]
@@ -2078,7 +2085,9 @@ def _prepare_model_response_text(text: str) -> tuple[str, bool]:
                 continue
             prompt_body_started = True
         cleaned_lines.append(line.replace("**", ""))
-    return "\n".join(cleaned_lines).strip(), recovered
+    cleaned = "\n".join(cleaned_lines).strip()
+    normalized = _normalize_bilingual_note_marker(cleaned)
+    return normalized, recovered or normalized != cleaned
 
 
 def _split_prompt_sentences(text: str) -> list[str]:
@@ -2488,7 +2497,7 @@ def _violates_language(text: str, settings: dict[str, Any]) -> bool:
     if "提示词语言" not in settings:
         return False
     language = _prompt_language_mode(settings)
-    source = str(text or "").strip()
+    source = _normalize_bilingual_note_marker(text).strip()
     if language == "纯英文":
         return bool(_CJK_PATTERN.search(source))
     if language == "纯中文":
@@ -2500,7 +2509,7 @@ def _violates_language(text: str, settings: dict[str, Any]) -> bool:
             and english_letter_count > max(12, cjk_count * 2)
         )
     if language == "英文提示词+中文说明":
-        marker = re.search(r"中文说明\s*[:：]", source)
+        marker = _BILINGUAL_NOTE_MARKER_PATTERN.search(source)
         if marker is None:
             return True
         english_body = source[: marker.start()].strip(" ，,;；。")
@@ -2662,11 +2671,31 @@ def _creative_spine_violation(original_prompt: str, candidate_prompt: str, setti
     original = str(original_prompt or "")
     candidate = str(candidate_prompt or "")
     language = str(settings.get("提示词语言", "纯中文") or "纯中文").strip()
-    if language not in {"纯英文", "英文提示词+中文说明"}:
-        for group_name in _CREATIVE_SPINE_REQUIRED_ANCHOR_GROUPS:
-            for anchor in _bounded_creative_spine_values(groups.get(group_name, []), 6):
-                if prompt_preserves_anchor(original, anchor) and not prompt_preserves_anchor(candidate, anchor):
-                    return f"模型响应改变了当前创作主线：缺少{group_name}锚点“{anchor}”。"
+    english_output = language in {"纯英文", "英文提示词+中文说明"}
+    anchor_original = original
+    anchor_candidate = candidate
+    if language == "英文提示词+中文说明":
+        # The English prompt must preserve its own anchors; the companion note
+        # cannot conceal an omission from the independently usable main body.
+        anchor_original = _normalize_bilingual_note_marker(original).split("中文说明：", 1)[0]
+        anchor_candidate = _normalize_bilingual_note_marker(candidate).split("中文说明：", 1)[0]
+    for group_name in _CREATIVE_SPINE_REQUIRED_ANCHOR_GROUPS:
+        for anchor in _bounded_creative_spine_values(groups.get(group_name, []), 6):
+            # Chinese source labels need translation, so literal matching would
+            # reject valid English output. Already comparable anchors still apply.
+            if english_output and _CJK_PATTERN.search(anchor):
+                continue
+            # Articles can change with natural grammar; keep the complete entity
+            # phrase after the article, including modifiers and word boundaries.
+            comparable_anchor = anchor
+            if english_output:
+                comparable_anchor = re.sub(
+                    r"^(?:a|an|the)\s+", "", anchor, count=1, flags=re.IGNORECASE
+                )
+            if prompt_preserves_anchor(anchor_original, comparable_anchor) and not prompt_preserves_anchor(
+                anchor_candidate, comparable_anchor
+            ):
+                return f"模型响应改变了当前创作主线：缺少{group_name}锚点“{anchor}”。"
 
     allowed_style_values = [str(contract.get("template", "") or "")]
     for group_values in groups.values():
@@ -2742,7 +2771,7 @@ _MULTI_VIEW_DESIGN_MARKER_GROUPS_EN = (
 
 
 def _looks_like_narrative_prompt(text: str, settings: dict[str, Any]) -> bool:
-    body = str(text or "").split("中文说明：", 1)[0].strip()
+    body = _normalize_bilingual_note_marker(text).split("中文说明：", 1)[0].strip()
     if not body:
         return False
     layout_mode = str(settings.get("画面结构模式解析结果", "") or "").strip()

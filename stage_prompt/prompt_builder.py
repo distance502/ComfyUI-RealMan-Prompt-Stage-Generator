@@ -579,6 +579,12 @@ _PROMPT_FRAGMENT_TRANSLATION_MAP.update(
         "港片胶片质感": "Hong Kong wuxia film stock look",
         "港式武侠胶片": "Hong Kong wuxia film stock look",
         "中画幅质感": "medium-format photographic texture",
+        "霓虹侧逆光": "neon side and rim lighting",
+        "雨夜街头": "a city street on a rainy night",
+        "CG感": "cinematic CG render",
+        "成年女性冒险者": "adult female adventurer",
+        "站姿放松": "a relaxed standing pose",
+        "霓虹逆光": "neon backlighting",
         "成年女性侦探": "adult female detective",
         "雨夜旧车站": "old railway station on a rainy night",
         "停步回望": "pausing and looking back",
@@ -4955,14 +4961,26 @@ def _build_mixed_language_companion(
     custom_tags: list[str],
     settings: dict[str, Any],
     context: _PromptBuildContext,
+    fragments: list[str],
 ) -> str:
+    fragment_keys = {_fragment_key(fragment) for fragment in fragments}
+
+    def current_values(group_name: str) -> list[str]:
+        return [
+            value for value in _nonempty_group_values(selected, group_name)
+            if _fragment_key(_translate_prompt_fragment(value)) in fragment_keys
+        ]
+
     non_person = _is_non_person_subject(settings)
-    subject = _join_limited(_nonempty_group_values(selected, "主体"), limit=3) or _clean_fragment(context.get("identity")) or ("非人物主体" if non_person else "人物主体")
-    style = _join_coherent_values(_nonempty_group_values(selected, "画面风格"), limit=2, clusters=_STYLE_CLUSTER_PRIORITY_ZH)
-    scene = _join_coherent_values(_nonempty_group_values(selected, "场景背景"), limit=2, clusters=_SCENE_CLUSTER_PRIORITY_ZH) or _display_scene_group(context.get("scene_group"), english=False)
-    action = _join_coherent_values(_nonempty_group_values(selected, "动作姿态"), limit=2)
-    lighting = _join_coherent_values(_nonempty_group_values(selected, "光影氛围"), limit=2)
-    custom = _join_limited(_prioritize_custom_prompt_values(custom_tags), limit=3)
+    subject = _join_limited(current_values("主体"), limit=3) or _clean_fragment(context.get("identity")) or ("非人物主体" if non_person else "人物主体")
+    style = _join_coherent_values(current_values("画面风格"), limit=2, clusters=_STYLE_CLUSTER_PRIORITY_ZH)
+    scene = _join_coherent_values(current_values("场景背景"), limit=2, clusters=_SCENE_CLUSTER_PRIORITY_ZH) or _display_scene_group(context.get("scene_group"), english=False)
+    action = _join_coherent_values(current_values("动作姿态"), limit=2)
+    lighting = _join_coherent_values(current_values("光影氛围"), limit=2)
+    custom = _join_limited([
+        value for value in _prioritize_custom_prompt_values(custom_tags)
+        if _fragment_key(_translate_prompt_fragment(value)) in fragment_keys
+    ], limit=3)
     sentence = f"中文说明：画面以{subject}为核心"
     if style:
         sentence += f"，遵循{style}的统一视觉方向"
@@ -4983,6 +5001,8 @@ def _expand_prompt_fragments_locally(
     custom_tags: list[str],
     settings: dict[str, Any],
     context: _PromptBuildContext,
+    *,
+    companion_selected: OrderedDict[str, list[str]] | None = None,
 ) -> str:
     clean_fragments = [_clean_fragment(fragment) for fragment in fragments if _clean_fragment(fragment)]
     if not clean_fragments:
@@ -4990,7 +5010,11 @@ def _expand_prompt_fragments_locally(
     if _use_english_prompt(settings):
         prompt = _build_concise_english_prompt(clean_fragments, selected, custom_tags, settings, context)
         if _prompt_language_mode(settings) == "英文提示词+中文说明":
-            return f"{prompt}\n{_build_mixed_language_companion(selected, custom_tags, settings, context)}"
+            companion = _build_mixed_language_companion(
+                companion_selected if companion_selected is not None else selected,
+                custom_tags, settings, context, clean_fragments,
+            )
+            return f"{prompt}\n{companion}"
         return prompt
     return _build_concise_chinese_prompt(clean_fragments, selected, custom_tags, settings, context)
 
@@ -5019,7 +5043,16 @@ def _is_negative_constraint_fragment(fragment: str) -> bool:
         )
     ):
         return True
-    return bool(re.search(r"\b(?:no|without|avoid|exclude)\b", text, flags=re.IGNORECASE))
+    if re.search(r"\b(?:avoid|exclude)\b", text, flags=re.IGNORECASE):
+        return True
+    if re.match(r"without\b", text, flags=re.IGNORECASE):
+        visual_statement = re.search(
+            r"\b(?:he|she|it|they|we|you|I|(?:a|an|the|this|that)\s+[a-z][a-z'-]*(?:\s+[a-z][a-z'-]*){0,3})\s+"
+            r"(?:is|are|has|have|carries|carry|holds|hold|wears|wear|stands|stand|sits|sit|walks|walk|looks|look|waits|wait|faces|face|rests|rest)\b",
+            text, flags=re.IGNORECASE,
+        )
+        return not visual_statement
+    return bool(re.match(r"no\b", text, flags=re.IGNORECASE))
 
 
 def _strip_negative_constraint_clauses(fragment: str) -> str:
@@ -5027,12 +5060,23 @@ def _strip_negative_constraint_clauses(fragment: str) -> str:
     if not text:
         return ""
     clauses = [clause.strip() for clause in re.split(r"[，,；;。！？!?]+", text) if clause.strip()]
-    positive = [
-        clause
-        for clause in clauses
-        if clause.casefold() not in _NEGATIVE_ONLY_POSITIVE_FRAGMENT_KEYS
-        and not _is_negative_constraint_fragment(clause)
-    ]
+    positive: list[str] = []
+    index = 0
+    while index < len(clauses):
+        clause = clauses[index]
+        index += 1
+        technical_negative = re.sub(r"^without\s+(?:a\s+)?", "no ", clause, flags=re.IGNORECASE)
+        if clause.casefold() in _NEGATIVE_ONLY_POSITIVE_FRAGMENT_KEYS or technical_negative.casefold() in _NEGATIVE_ONLY_POSITIVE_FRAGMENT_KEYS:
+            continue
+        if re.match(r"without\b", clause, flags=re.IGNORECASE) and index < len(clauses):
+            following = clauses[index]
+            if not _is_negative_constraint_fragment(f"{clause}, {following}"):
+                # A fronted absence descriptor belongs to the following visual sentence.
+                positive.append(f"{clause}, {following}")
+                index += 1
+                continue
+        if not _is_negative_constraint_fragment(clause):
+            positive.append(clause)
     return "，".join(positive)
 
 
@@ -5989,6 +6033,7 @@ def build_prompt_list(
             priority=_PROMPT_TAIL_PRIORITY["lead"],
             order_index=order_index,
         )
+        companion_selected: OrderedDict[str, list[str]] = OrderedDict()
         for group_name in ordered_groups:
             group_fragments = _variant_group_fragments(
                 group_name,
@@ -5997,6 +6042,7 @@ def build_prompt_list(
                 style_variant_profile,
                 diversity_variant_profile,
             )
+            companion_selected[group_name] = list(group_fragments)
             group_priority = _PROMPT_GROUP_PRIORITY.get(group_name, 70)
             for offset, fragment in enumerate(group_fragments):
                 order_index = _append_prompt_fragment(
@@ -6053,6 +6099,7 @@ def build_prompt_list(
             custom_tags,
             render_settings,
             prompt_context,
+            companion_selected=companion_selected,
         )
         missing = [text for text in untranslated if _fragment_key(text) not in _fragment_key(prompt)]
         if missing:
