@@ -934,6 +934,134 @@ def _source_brief(settings: Mapping[str, Any]) -> str:
     return ""
 
 
+def _split_video_source_requirements(source: str, boundary: str) -> list[str]:
+    quoted = list(re.finditer(r'"(?:\\.|[^"\\])*"|“[^”]*”|「[^」]*」|『[^』]*』', source))
+    clauses: list[str] = []
+    start = quote_index = 0
+    for match in re.finditer(boundary, source, re.IGNORECASE):
+        while quote_index < len(quoted) and quoted[quote_index].end() <= match.start():
+            quote_index += 1
+        if quote_index < len(quoted) and quoted[quote_index].start() <= match.start() < quoted[quote_index].end():
+            continue
+        prefix = source[max(0, match.start() - 32):match.start()]
+        if prefix.endswith(".") and re.search(
+            r"\b(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|St|vs|etc|e\.g|i\.e)\.$|\b(?:[A-Za-z]\.){2,}$",
+            prefix, re.IGNORECASE,
+        ):
+            continue
+        clauses.append(source[start:match.start()])
+        start = match.end()
+    clauses.append(source[start:])
+    return clauses
+
+
+def _video_source_requirements(settings: Mapping[str, Any]) -> list[tuple[str, str]]:
+    language = str(settings.get("提示词语言", "纯中文") or "纯中文").strip()
+    if language not in {"纯中文", "纯英文"} or _video_result_contract(settings):
+        return []
+    english = language == "纯英文"
+    ending = (
+        r"(?:结尾(?:时)?(?!的)|最后(?![一的])|最终(?!的)|收尾(?:时)?|结束时|finally\b|"
+        r"at the end of (?:the )?(?:story|scene|sequence|video|shot|take)\b|"
+        r"at the end\b(?!\s+of\b)|in the end\b|by the final frame\b)"
+    )
+    opening = r"(?:开场(?:时)?|开头|起初|一开始|最初|initially\b|at the beginning\b|at the start\b|at the opening\b)"
+    requirements: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for key in ("智能文本输入", "额外要求"):
+        source = str(settings.get(key, "") or "").strip()
+        clauses = _split_video_source_requirements(
+            source, rf"[。！？!?；;\r\n]+|(?<=\.)\s+|[，,]\s*(?={ending}|{opening})"
+            rf"|(?<=[\"”」』])\s+(?={ending}|{opening})",
+        )
+        for raw in clauses:
+            clause = _clean(raw, limit=len(raw))
+            if not clause:
+                continue
+            has_chinese = bool(re.search(r"[\u4e00-\u9fff]", clause))
+            if (english and has_chinese) or (not english and not has_chinese):
+                continue
+            if not english and re.search(r"[A-Za-z]", clause):
+                continue
+            if re.match(r"(?:不要|避免|禁止|不得|请勿|avoid\b|exclude\b|do not\b|don't\b)", clause, re.IGNORECASE):
+                continue
+            phase = "action"
+            for name, marker in (("ending", ending), ("opening", opening)):
+                match = re.match(marker + r"\s*[，,:：]?\s*", clause, re.IGNORECASE)
+                if match:
+                    phase, clause = name, clause[match.end():].strip()
+                    break
+            if phase == "action" and re.search(
+                r"始终|全程|一直|持续|\b(?:throughout|always|continues? to|keeps?)\b",
+                re.split(r"[，,]", clause, maxsplit=1)[0], re.IGNORECASE,
+            ):
+                phase = "ongoing"
+            normalized = re.sub(r"[\s，,。；;：:.!?！？]+", "", clause).casefold()
+            identity = (phase, normalized)
+            if not normalized or identity in seen:
+                continue
+            seen.add(identity)
+            requirements.append((phase, clause))
+    return requirements
+
+
+def _bind_video_source_requirements(
+    shots: Sequence[str], requirements: Sequence[tuple[str, str]], *, english: bool,
+) -> list[str]:
+    result = list(shots)
+    if not result or not requirements:
+        return result
+    additions: list[list[tuple[int, int, str]]] = [[] for _ in result]
+    actions = [(index, text) for index, (phase, text) in enumerate(requirements) if phase == "action"]
+    endings = [text for phase, text in requirements if phase == "ending"]
+    last_action = max(0, len(result) - (2 if endings else 1))
+    starts_with_state = next((phase for phase, _ in requirements if phase in {"action", "ongoing"}), "") == "ongoing"
+    action_positions: dict[int, int] = {}
+    for index, (order, text) in enumerate(actions):
+        position = (
+            (index + 1) * last_action // len(actions) if starts_with_state else
+            index * last_action // max(1, len(actions) - 1)
+        )
+        action_positions[order] = position
+        additions[position].append((1, order, text))
+    for order, (phase, text) in enumerate(requirements):
+        if phase == "opening":
+            additions[0].append((0, order, text))
+        elif phase == "ongoing":
+            previous = [position for index, position in action_positions.items() if index < order]
+            following = [position for index, position in action_positions.items() if index > order]
+            start = previous[-1] if previous else 0
+            # A later supplied action may change this state. Keep source order
+            # within its shot, then stop echoing an earlier state afterwards.
+            stop = following[0] if following else len(result) - 1
+            for index in range(start, stop + 1):
+                prefix = ("Before the closing action, " if english else "结束动作前，") if endings and index == len(result) - 1 else ""
+                additions[index].append((1, order, prefix + text))
+    separator = " " if english else ""
+
+    def prose(values: Sequence[str]) -> str:
+        return separator.join(
+            value if re.search(r"[。！？.!?]$", value) else value + ("." if english else "。")
+            for value in values
+        )
+
+    pattern = _STORYBOARD_LABEL_EN if english else _STORYBOARD_LABEL_ZH
+    for index, entries in enumerate(additions):
+        if not entries:
+            continue
+        values = [text for _, _, text in sorted(entries)]
+        match = pattern.match(result[index])
+        body_start = match.end() if match else 0
+        # Establish the subject first, then bind its continuing state before
+        # this shot's stock action rather than after a terminal state change.
+        boundary = re.search(r"[。！？]|[.!?](?=\s|$)", result[index][body_start:])
+        position = body_start + boundary.end() if index == 0 and boundary else body_start
+        result[index] = result[index][:position] + separator + prose(values) + separator + result[index][position:].lstrip()
+    if endings:
+        result[-1] = result[-1].rstrip() + separator + prose(endings)
+    return result
+
+
 def _personalize(text: Any, subject: str, scene: str) -> str:
     value = _clean(text, limit=180)
     if not value:
@@ -1109,10 +1237,15 @@ def _english_source_clause(primary_prompt: str, *, reference_framing: bool = Fal
 
 def _finalize_video_storyboard(
     paragraphs: Sequence[str], settings: Mapping[str, Any], *, english: bool,
+    requirements: Sequence[tuple[str, str]] = (),
 ) -> str:
     """Bind references after shot-count projection, including single/long stories."""
 
     shots = list(_adapt_storyboard_paragraphs(paragraphs, settings, english=english))
+    if requirements:
+        shots = _bind_video_source_requirements(
+            [_dedupe_sentences(shot) for shot in shots], requirements, english=english,
+        )
     if not shots:
         return ""
     opening, closing = _video_reference_prose(settings, english=english)
@@ -1127,6 +1260,8 @@ def _finalize_video_storyboard(
         # In long mode the original resolution becomes the penultimate shot.
         # The supplied end frame must remain the actual final visible state.
         shots[-1] = shots[-1].rstrip() + separator + closing
+    if requirements:
+        return "\n\n".join(shot.strip() for shot in shots if shot.strip())
     return _join_storyboard_paragraphs(shots)
 
 
@@ -1164,7 +1299,9 @@ def _build_chinese_video_prompt(
         medium = _remove_multi_view_markers(medium)
         rendering = _remove_multi_view_markers(rendering)
         video_rules = _remove_multi_view_markers(video_rules)
-    brief = "" if multi_view_source else _source_brief(settings)
+    requirements = [] if multi_view_source else _video_source_requirements(settings)
+    brief = "" if multi_view_source or requirements else _source_brief(settings)
+    has_user_ending = any(phase == "ending" for phase, _ in requirements)
     seed = int(settings.get("运行时随机有效种子", 0) or settings.get("seed", 0) or 0)
     anchors = {
         "subject": subject,
@@ -1221,7 +1358,7 @@ def _build_chinese_video_prompt(
     )
     resolution = (
         f"前一分镜的动作与光影变化逐步收束，{reference}与{props}的状态沿同一因果链完成过渡"
-        if supplied_last else
+        if supplied_last or has_user_ending else
         f"{ending}；{reference}的{'结构朝向' if non_person else '视线'}、{props}的状态和背景光共同说明前后状态的变化"
     )
     focus_relation = f"{reference}的结构朝向、接触点" if non_person else f"{reference}的视线、手部"
@@ -1240,7 +1377,7 @@ def _build_chinese_video_prompt(
             f"{props}在动作过程中的归属与空间关系始终清楚，{ending_clause}"
             f"{result_phrases.get('setup', '')}{result_phrases.get('action', '')}{result_phrases.get('ending', '')}"
         )
-        return _finalize_video_storyboard((paragraph,), settings, english=False)
+        return _finalize_video_storyboard((paragraph,), settings, english=False, requirements=requirements)
     paragraphs = (
         (
             f"{_timeline_label(1, '建立', settings, english=False)}{setup}{details_clause}{brief_clause}{opening}；{motive}。"
@@ -1272,7 +1409,7 @@ def _build_chinese_video_prompt(
             f"全程遵守{video_rules or '同一媒介、空间与主体的连续性'}。{result_phrases.get('ending', '')}"
         ),
     )
-    return _finalize_video_storyboard(paragraphs, settings, english=False)
+    return _finalize_video_storyboard(paragraphs, settings, english=False, requirements=requirements)
 
 
 def _english_group_value(groups: Mapping[str, list[str]] | None, name: str) -> str:
@@ -1320,6 +1457,8 @@ def _build_english_video_prompt(
     groups: Mapping[str, list[str]] | None = None,
     narrative_plan: Mapping[str, Any] | None = None,
 ) -> str:
+    requirements = [] if _is_multi_view_story_source(settings, groups) else _video_source_requirements(settings)
+    has_user_ending = any(phase == "ending" for phase, _ in requirements)
     seed = int(settings.get("运行时随机有效种子", 0) or settings.get("seed", 0) or 0)
     input_mode = resolve_video_prompt_profile(settings)["input_mode"]
     supplied_first = input_mode in {"I2V", "FL2V"}
@@ -1374,7 +1513,7 @@ def _build_english_video_prompt(
     )
     resolution = (
         "the established action and its visible consequences settle along the same causal path"
-        if supplied_last else ending
+        if supplied_last or has_user_ending else ending
     )
     final_image = (
         f"The visible consequence remains readable and {style} stays visually consistent."
@@ -1392,7 +1531,7 @@ def _build_english_video_prompt(
             "The action settles into its visible consequence on the same camera axis, without a cut to a different event. "
             f"{result_phrases.get('setup', '')} {result_phrases.get('action', '')} {result_phrases.get('ending', '')}"
         )
-        return _finalize_video_storyboard((paragraph,), settings, english=True)
+        return _finalize_video_storyboard((paragraph,), settings, english=True, requirements=requirements)
     paragraphs = (
         f"{_timeline_label(1, 'setup', settings, english=True)} {setup} {anchor_sentence} {opening}. {motive}. {style} shapes the medium and material language, while {lighting} and ambient sound establish the location before the conflict begins. {result_phrases.get('setup', '')}",
         f"{_timeline_label(2, 'trigger', settings, english=True)} The camera moves from {scene} to {focus_relation} and {prop}. At first the rhythm remains controlled; when {trigger}, that rhythm breaks and the focus returns to {subject}'s reaction. This shot turns the setup into a clear cause that the next action must continue. {result_phrases.get('trace', '')}",
@@ -1400,7 +1539,7 @@ def _build_english_video_prompt(
         f"{_timeline_label(4, 'escalation', settings, english=True)} The camera changes scale to reveal the consequence across foreground, middle ground, and background of {scene}. {escalation}; {feedback}. {turning_state}, and {climax}. {lighting} and sound expand the result without introducing an unrelated storyline. {result_phrases.get('result', '')}",
         f"{_timeline_label(5, 'resolution', settings, english=True)} The camera settles after the climax and observes the new relationship between {subject}, {prop}, and {scene}. Finally, {resolution}. {final_image} {result_phrases.get('ending', '')}",
     )
-    return _finalize_video_storyboard(paragraphs, settings, english=True)
+    return _finalize_video_storyboard(paragraphs, settings, english=True, requirements=requirements)
 
 
 _STORYBOARD_LABEL_ZH = re.compile(
