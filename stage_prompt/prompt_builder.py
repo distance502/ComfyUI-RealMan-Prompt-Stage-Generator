@@ -577,6 +577,15 @@ _PROMPT_FRAGMENT_TRANSLATION_MAP.update(
         "柔和光晕": "soft halation",
         "老胶片褪色感": "faded old-film patina",
         "港片胶片质感": "Hong Kong wuxia film stock look",
+        "港式武侠胶片": "Hong Kong wuxia film stock look",
+        "中画幅质感": "medium-format photographic texture",
+        "成年女性侦探": "adult female detective",
+        "雨夜旧车站": "old railway station on a rainy night",
+        "停步回望": "pausing and looking back",
+        "深色长风衣": "dark long trench coat",
+        "旧信封": "old envelope",
+        "青蓝侧光": "blue-cyan side lighting",
+        "电影写实": "cinematic photorealism",
         "湿发": "wet hair",
         "长款大衣": "long overcoat",
         "风衣": "trench coat",
@@ -3847,7 +3856,7 @@ def _clean_fragment(value: Any) -> str:
         return ""
     if compact and not compact.strip("[]{}()（）【】"):
         return ""
-    return text.replace("brief", "").replace("Brief", "").strip("，,;； ")
+    return "" if text.casefold() == "brief" else text
 
 
 def _prompt_language_mode(settings: dict[str, Any]) -> str:
@@ -3877,6 +3886,26 @@ def _translate_prompt_fragment(fragment: Any) -> str:
         if source in translated:
             translated = translated.replace(source, target)
     return "" if _has_cjk(translated) else translated
+
+
+def _untranslated_explicit_prompt_values(
+    selected: OrderedDict[str, list[str]], custom_tags: list[str], settings: dict[str, Any]
+) -> list[str]:
+    if not _use_english_prompt(settings):
+        return []
+    user_skill = settings.get("用户标签Skill")
+    explicit = user_skill.get("protected_tags") if isinstance(user_skill, Mapping) else None
+    if not isinstance(explicit, (list, tuple)):
+        explicit = [tag for values in selected.values() for tag in values] + list(custom_tags)
+    block_texts = settings.get("标签块显式文本", [])
+    if not isinstance(block_texts, (list, tuple)):
+        block_texts = []
+    pending: list[str] = []
+    for value in [*explicit, *block_texts, settings.get("额外要求", "")]:
+        text = _strip_negative_constraint_clauses(value)
+        if text and _has_cjk(text) and not _translate_prompt_fragment(text) and text not in pending:
+            pending.append(text)
+    return pending
 
 
 _NEGATIVE_ONLY_POSITIVE_FRAGMENT_KEYS = {
@@ -5834,6 +5863,16 @@ def build_prompt_list(
                 else:
                     selected[group_name] = hints
     custom_tags = [_clean_fragment(tag) for tag in custom_tags if _clean_fragment(tag)]
+    untranslated = _untranslated_explicit_prompt_values(selected, custom_tags, settings)
+    settings["图像提示词待翻译锚点"] = untranslated
+    settings["图像提示词Skill回退语言"] = "纯中文" if untranslated else ""
+    settings["图像提示词中文回退"] = []
+    if untranslated:
+        notes = list(settings.get("推理纠偏说明", []) or [])
+        note = "英文提示词翻译待处理：显式中文要求无法由本地词表完整翻译，Skill 已保留完整中文底稿；后置模型仍按所选语言翻译，未完成时使用中文回退。"
+        if note not in notes:
+            notes.append(note)
+        settings["推理纠偏说明"] = notes
     tags = [tag for group_tags in selected.values() for tag in group_tags] + list(custom_tags)
     style = infer_template_style(tags, str(settings["模板风格"]))
     subject = infer_subject_type(tags, str(settings["主体类型"]))
@@ -5857,7 +5896,7 @@ def build_prompt_list(
     ordered_groups = order_map.get(mode, order_map["自动平衡"])
     prompt_list: list[str] = []
     explicit_template_style = str(settings.get("模板风格", "") or "").strip()
-    english_prompt = _use_english_prompt(settings)
+    english_prompt = _use_english_prompt(settings) and not untranslated
     generation_count = int(settings["生成数量"])
     runtime_random_enabled = bool(settings.get("运行时随机标签", False))
     runtime_random_mode = str(settings.get("运行时随机模式解析结果", "") or settings.get("运行时随机模式", "")).strip()
@@ -5877,6 +5916,7 @@ def build_prompt_list(
     runtime_diversity_markers: list[str] = []
     settings["运行时随机档案标记"] = runtime_diversity_markers
     settings["全局剧情规划"] = []
+    render_settings = {**settings, "提示词语言": "纯中文"} if untranslated else settings
     style_lead = _resolve_prompt_style_lead(
         selected,
         explicit_template_style=explicit_template_style,
@@ -6006,16 +6046,21 @@ def build_prompt_list(
             fragment_items,
             style,
         )
-        fragments = _localize_prompt_fragments(fragments, settings)
-        prompt_list.append(
-            _expand_prompt_fragments_locally(
-                fragments,
-                selected,
-                custom_tags,
-                settings,
-                prompt_context,
-            )
+        fragments = _localize_prompt_fragments(fragments, render_settings)
+        prompt = _expand_prompt_fragments_locally(
+            fragments,
+            selected,
+            custom_tags,
+            render_settings,
+            prompt_context,
         )
+        missing = [text for text in untranslated if _fragment_key(text) not in _fragment_key(prompt)]
+        if missing:
+            prompt += "画面同时保留这些具体特征：" + "；".join(missing) + "。"
+        prompt_list.append(prompt)
+    if untranslated:
+        settings["图像提示词中文回退"] = list(prompt_list)
+        settings["全局剧情规划"] = list(render_settings.get("全局剧情规划", []) or [])
     return prompt_list
 
 

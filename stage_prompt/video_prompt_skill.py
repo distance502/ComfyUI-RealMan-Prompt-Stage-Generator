@@ -1135,6 +1135,7 @@ def _build_chinese_video_prompt(
     settings: Mapping[str, Any],
     *,
     primary_prompt: str,
+    narrative_plan: Mapping[str, Any] | None = None,
 ) -> str:
     subject_type = str(settings.get("主体类型解析结果", "") or settings.get("主体类型", "自动") or "自动").strip()
     non_person = subject_type == "非人物主体"
@@ -1176,7 +1177,7 @@ def _build_chinese_video_prompt(
         "composition": composition,
         "source": primary_prompt[:600],
     }
-    plan = build_narrative_plan(anchors, seed=seed, output_count=1)
+    plan = narrative_plan if narrative_plan is not None else build_narrative_plan(anchors, seed=seed, output_count=1)
     if non_person:
         plan = _non_person_video_plan(plan)
     opening = _personalize(plan.get("opening_zh"), reference, scene)
@@ -1317,6 +1318,7 @@ def _build_english_video_prompt(
     *,
     primary_prompt: str,
     groups: Mapping[str, list[str]] | None = None,
+    narrative_plan: Mapping[str, Any] | None = None,
 ) -> str:
     seed = int(settings.get("运行时随机有效种子", 0) or settings.get("seed", 0) or 0)
     input_mode = resolve_video_prompt_profile(settings)["input_mode"]
@@ -1333,7 +1335,7 @@ def _build_english_video_prompt(
     style = _english_group_value(groups, "画面风格") or "the selected visual style"
     lighting = _english_group_value(groups, "光影氛围") or "the established lighting"
     composition = _english_group_value(groups, "构图视角") or "a readable wide composition"
-    plan = build_narrative_plan({"source": source}, seed=seed, output_count=1)
+    plan = narrative_plan if narrative_plan is not None else build_narrative_plan({"source": source}, seed=seed, output_count=1)
     if non_person:
         plan = _non_person_video_plan(plan)
     opening = _clean(plan.get("opening_en"), limit=220)
@@ -1789,14 +1791,21 @@ def build_video_prompt(
     language = str(settings.get("提示词语言", "纯中文") or "纯中文").strip()
     story_source = _video_story_source(groups, settings, primary_prompt)
     if language in {"纯英文", "英文提示词+中文说明"}:
+        input_mode = resolve_video_prompt_profile(settings)["input_mode"]
+        source = _english_source_clause(story_source, reference_framing=input_mode in {"I2V", "FL2V"})
+        seed = int(settings.get("运行时随机有效种子", 0) or settings.get("seed", 0) or 0)
+        narrative_plan = build_narrative_plan({"source": source}, seed=seed, output_count=1)
         english = _build_english_video_prompt(
             settings,
             primary_prompt=story_source,
             groups=groups,
+            narrative_plan=narrative_plan,
         )
         if language == "纯英文":
             return english
-        chinese = _build_chinese_video_prompt(groups, settings, primary_prompt=story_source)
+        chinese = _build_chinese_video_prompt(
+            groups, settings, primary_prompt=story_source, narrative_plan=narrative_plan,
+        )
         return f"{english}\n中文说明：{chinese}"
     return _build_chinese_video_prompt(groups, settings, primary_prompt=story_source)
 
