@@ -156,6 +156,105 @@ class TestTypedAPIStreamContracts(unittest.TestCase):
                 {"type": "error", "code": "server_error", "message": "Generation aborted"},
             ])
 
+    def test_multiline_sse_text_data_is_one_json_event_with_metadata_and_newlines(self):
+        body = (
+            ': keep-alive\n'
+            'event: response.output_text.delta\n'
+            'id: visible-text-1\n'
+            'retry: 1000\n'
+            'data: {\n'
+            'data: "type": "response.output_text.delta",\n'
+            ': keep-alive inside the event\n'
+            'data:\n'
+            'data: "delta": "A torch lights the hall."\n'
+            'data: }\n\n'
+        )
+        for newline in ("\n", "\r\n", "\r"):
+            with self.subTest(newline=repr(newline)):
+                result = self.stage._decode_api_json(
+                    body.replace("\n", newline).encode(), charset="utf-8", label="offline SSE",
+                )
+                self.assertEqual(self.visible(result), "A torch lights the hall.")
+
+    def test_multiline_sse_failed_or_error_event_is_not_dropped_after_text(self):
+        terminal_events = (
+            {"type": "response.failed", "response": {
+                "status": "failed", "error": {"code": "server_error", "message": "Generation aborted"},
+            }},
+            {"type": "error", "code": "server_error", "message": "Generation aborted"},
+        )
+        for event in terminal_events:
+            body = (
+                'data: {"type":"response.output_text.delta","delta":"Partial scene."}\n\n'
+                + "\n".join("data: " + line for line in json.dumps(event, indent=2).splitlines())
+                + "\n\n"
+            )
+            with self.subTest(event=event["type"]), self.assertRaisesRegex(RuntimeError, "Generation aborted"):
+                self.stage._decode_api_json(body.encode(), charset="utf-8", label="offline SSE")
+
+    def test_multiline_anthropic_text_and_error_events_use_sse_boundaries(self):
+        text_event = {"type": "content_block_delta", "index": 0,
+                      "delta": {"type": "text_delta", "text": "A stone hall."}}
+        body = "\n".join("data: " + line for line in json.dumps(text_event, indent=2).splitlines()) + "\n\n"
+        result = self.stage._decode_api_json(body.encode(), charset="utf-8", label="offline SSE")
+        self.assertEqual(self.visible(result), "A stone hall.")
+        error = {"type": "error", "error": {"type": "overloaded_error", "message": "Server overloaded"}}
+        body += "\n".join("data: " + line for line in json.dumps(error, indent=2).splitlines()) + "\n\n"
+        with self.assertRaisesRegex(RuntimeError, "Server overloaded"):
+            self.stage._decode_api_json(body.encode(), charset="utf-8", label="offline SSE")
+
+    def test_sse_single_data_legacy_unseparated_data_ndjson_and_done_stay_compatible(self):
+        events = [
+            {"type": "response.output_text.delta", "delta": "go"},
+            {"type": "response.output_text.delta", "delta": "go"},
+        ]
+        encoded = [json.dumps(event) for event in events]
+        bodies = (
+            ("data: " + encoded[0], "go"),
+            ("\n".join("data: " + event for event in encoded), "gogo"),
+            ("\n".join(encoded), "gogo"),
+            ("\n\n".join("data: " + event for event in encoded) + "\n\ndata: [DONE]\n\n", "gogo"),
+            ("\n".join("data: " + event for event in encoded) + "\ndata: [DONE]", "gogo"),
+        )
+        for body, expected in bodies:
+            with self.subTest(body=body):
+                result = self.stage._decode_api_json(body.encode(), charset="utf-8", label="offline stream")
+                self.assertEqual(self.visible(result), expected)
+
+    def test_sse_terminal_event_metadata_rejects_malformed_data_or_missing_payload_type(self):
+        events = (
+            ("response.failed", '{"response":', "流式失败事件"),
+            ("error", '{"error":', "流式失败事件"),
+            ("response.failed", json.dumps({"response": {
+                "status": "failed", "error": {"message": "Generation aborted"},
+            }}), "Generation aborted"),
+            ("error", json.dumps({"error": {"message": "Server overloaded"}}), "Server overloaded"),
+            ("error", "null", "流式失败事件"),
+            ("error", '"Server overloaded"', "流式失败事件"),
+            ("error", "[]", "流式失败事件"),
+            ("error", "[DONE]", "流式失败事件"),
+            ("error", json.dumps([{"error": {"message": "Server overloaded"}}]), "Server overloaded"),
+            ("error", json.dumps({"type": "response.output_text.delta", "message": "Server overloaded"}), "Server overloaded"),
+        )
+        for event_type, data, expected in events:
+            body = (
+                'data: {"type":"response.output_text.delta","delta":"Partial scene."}\n\n'
+                f'event: {event_type}\ndata: {data}\n\n'
+            )
+            with self.subTest(event=event_type, data=data), self.assertRaisesRegex(RuntimeError, expected):
+                self.stage._decode_api_json(body.encode(), charset="utf-8", label="offline SSE")
+
+    def test_sse_terminal_metadata_does_not_leak_past_blank_event_or_into_keepalives(self):
+        body = (
+            'event: response.failed\n\n'
+            'event: ping\ndata: [PING]\n\n'
+            'data:\n\n'
+            'data: {"type":"response.output_text.delta","delta":"A visible scene."}\n\n'
+            'data: [DONE]\n\n'
+        )
+        result = self.stage._decode_api_json(body.encode(), charset="utf-8", label="offline SSE")
+        self.assertEqual(self.visible(result), "A visible scene.")
+
     def test_responses_incomplete_visible_text_retains_original_status_and_reason(self):
         result = self.invoke("openai_responses", [
             {"type": "response.output_text.delta", "delta": "A visible scene."},

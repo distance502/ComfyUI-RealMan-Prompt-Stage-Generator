@@ -2145,31 +2145,61 @@ def _parse_api_stream_payloads(text: str) -> list[dict[str, Any]]:
     source = str(text or "").replace("\r\n", "\n").replace("\r", "\n")
     if not source.strip():
         return []
-    candidates: list[str] = []
+    candidates: list[tuple[str, str]] = []
+    data_lines: list[str] = []
+    event_type = ""
     has_sse_data = False
     for line in source.split("\n"):
         stripped = line.strip()
-        if not stripped or stripped.startswith(":") or stripped.casefold().startswith("event:"):
+        if not stripped:
+            if data_lines:
+                candidates.append(("\n".join(data_lines), event_type))
+                data_lines = []
+            event_type = ""
+            continue
+        if stripped.startswith(":"):
+            continue
+        if stripped.casefold().startswith("event:"):
+            event_type = stripped[6:].lstrip()
             continue
         if stripped.casefold().startswith("data:"):
             has_sse_data = True
-            payload = stripped[5:].lstrip()
-            if payload and payload != "[DONE]":
-                candidates.append(payload)
+            data_lines.append(stripped[5:].lstrip())
+    if data_lines:
+        candidates.append(("\n".join(data_lines), event_type))
     if not has_sse_data:
-        candidates = [line.strip() for line in source.split("\n") if line.strip()]
+        candidates = [(line.strip(), "") for line in source.split("\n") if line.strip()]
     payloads: list[dict[str, Any]] = []
-    for candidate in candidates:
-        if candidate == "[DONE]":
+    for candidate, event_type in candidates:
+        terminal_event = event_type in {"error", "response.failed"}
+        if candidate == "[DONE]" and not terminal_event:
             continue
         try:
-            decoded = json.loads(candidate)
-        except (json.JSONDecodeError, TypeError, ValueError):
-            continue
-        if isinstance(decoded, dict):
-            payloads.append(decoded)
-        elif isinstance(decoded, list):
-            payloads.extend(item for item in decoded if isinstance(item, dict))
+            decoded_items = [json.loads(candidate)]
+        except (json.JSONDecodeError, TypeError, ValueError) as exc:
+            decoded_items = []
+            # Some gateways omit SSE blank separators. Accept that legacy form
+            # only when every data line is independently valid JSON.
+            if has_sse_data and "\n" in candidate:
+                try:
+                    decoded_items = [
+                        json.loads(line) for line in candidate.split("\n")
+                        if line and line != "[DONE]"
+                    ]
+                except (json.JSONDecodeError, TypeError, ValueError):
+                    pass
+            if not decoded_items:
+                if terminal_event:
+                    raise RuntimeError(f"模型 API 返回了 {event_type} 流式失败事件，但事件数据不是有效 JSON。") from exc
+                continue
+        payload_start = len(payloads)
+        for decoded in decoded_items:
+            items = decoded if isinstance(decoded, list) else [decoded]
+            for item in items:
+                if isinstance(item, dict):
+                    payloads.append({**item, "type": event_type} if terminal_event else item)
+        if terminal_event and len(payloads) == payload_start:
+            raise RuntimeError(f"模型 API 返回了 {event_type} 流式失败事件，但事件数据不包含 JSON 对象。")
     return payloads
 
 
