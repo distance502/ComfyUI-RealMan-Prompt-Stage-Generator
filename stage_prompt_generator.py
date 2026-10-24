@@ -2145,31 +2145,61 @@ def _parse_api_stream_payloads(text: str) -> list[dict[str, Any]]:
     source = str(text or "").replace("\r\n", "\n").replace("\r", "\n")
     if not source.strip():
         return []
-    candidates: list[str] = []
+    candidates: list[tuple[str, str]] = []
+    data_lines: list[str] = []
+    event_type = ""
     has_sse_data = False
     for line in source.split("\n"):
         stripped = line.strip()
-        if not stripped or stripped.startswith(":") or stripped.casefold().startswith("event:"):
+        if not stripped:
+            if data_lines:
+                candidates.append(("\n".join(data_lines), event_type))
+                data_lines = []
+            event_type = ""
+            continue
+        if stripped.startswith(":"):
+            continue
+        if stripped.casefold().startswith("event:"):
+            event_type = stripped[6:].lstrip()
             continue
         if stripped.casefold().startswith("data:"):
             has_sse_data = True
-            payload = stripped[5:].lstrip()
-            if payload and payload != "[DONE]":
-                candidates.append(payload)
+            data_lines.append(stripped[5:].lstrip())
+    if data_lines:
+        candidates.append(("\n".join(data_lines), event_type))
     if not has_sse_data:
-        candidates = [line.strip() for line in source.split("\n") if line.strip()]
+        candidates = [(line.strip(), "") for line in source.split("\n") if line.strip()]
     payloads: list[dict[str, Any]] = []
-    for candidate in candidates:
-        if candidate == "[DONE]":
+    for candidate, event_type in candidates:
+        terminal_event = event_type in {"error", "response.failed"}
+        if candidate == "[DONE]" and not terminal_event:
             continue
         try:
-            decoded = json.loads(candidate)
-        except (json.JSONDecodeError, TypeError, ValueError):
-            continue
-        if isinstance(decoded, dict):
-            payloads.append(decoded)
-        elif isinstance(decoded, list):
-            payloads.extend(item for item in decoded if isinstance(item, dict))
+            decoded_items = [json.loads(candidate)]
+        except (json.JSONDecodeError, TypeError, ValueError) as exc:
+            decoded_items = []
+            # Some gateways omit SSE blank separators. Accept that legacy form
+            # only when every data line is independently valid JSON.
+            if has_sse_data and "\n" in candidate:
+                try:
+                    decoded_items = [
+                        json.loads(line) for line in candidate.split("\n")
+                        if line and line != "[DONE]"
+                    ]
+                except (json.JSONDecodeError, TypeError, ValueError):
+                    pass
+            if not decoded_items:
+                if terminal_event:
+                    raise RuntimeError(f"模型 API 返回了 {event_type} 流式失败事件，但事件数据不是有效 JSON。") from exc
+                continue
+        payload_start = len(payloads)
+        for decoded in decoded_items:
+            items = decoded if isinstance(decoded, list) else [decoded]
+            for item in items:
+                if isinstance(item, dict):
+                    payloads.append({**item, "type": event_type} if terminal_event else item)
+        if terminal_event and len(payloads) == payload_start:
+            raise RuntimeError(f"模型 API 返回了 {event_type} 流式失败事件，但事件数据不包含 JSON 对象。")
     return payloads
 
 
@@ -2186,7 +2216,7 @@ def _decode_api_json(raw: bytes, *, charset: str, label: str) -> dict[str, Any]:
     except (json.JSONDecodeError, ValueError) as exc:
         streamed = _parse_api_stream_payloads(text)
         if streamed:
-            return _merge_api_stream_mapping({}, streamed[0]) if len(streamed) == 1 else _merge_api_stream_payloads(streamed)
+            return _merge_api_stream_payloads(streamed)
         excerpt = re.sub(r"\s+", " ", text).strip()
         if len(excerpt) > 320:
             excerpt = f"{excerpt[:317]}..."
@@ -2206,10 +2236,151 @@ def _decode_api_json(raw: bytes, *, charset: str, label: str) -> dict[str, Any]:
 
 
 def _merge_api_stream_payloads(payloads: list[dict[str, Any]]) -> dict[str, Any]:
+    typed_events = [payload for payload in payloads if isinstance(payload.get("type"), str)]
+    if any(
+        event_type in {
+            "error",
+            "content_block_start",
+            "content_block_delta",
+            "content_block_stop",
+            "message_start",
+            "message_delta",
+            "message_stop",
+        }
+        for event_type in (str(payload.get("type") or "") for payload in typed_events)
+    ) or any(str(payload.get("type") or "").startswith("response.") for payload in typed_events):
+        return _merge_typed_api_stream_payloads(payloads)
     merged: dict[str, Any] = {}
     for payload in payloads:
         merged = _merge_api_stream_mapping(merged, payload)
     return merged
+
+
+def _merge_typed_api_stream_payloads(payloads: list[dict[str, Any]]) -> dict[str, Any]:
+    """Normalize Anthropic and Responses typed SSE events to visible text."""
+
+    anthropic_events = {
+        "message_start", "content_block_start", "content_block_delta",
+        "content_block_stop", "message_delta", "message_stop",
+    }
+    is_anthropic = any(str(item.get("type") or "") in anthropic_events for item in payloads)
+    if is_anthropic:
+        result: dict[str, Any] = {"type": "message", "content": []}
+        blocks: dict[int, dict[str, Any]] = {}
+        for event in payloads:
+            event_type = str(event.get("type") or "")
+            if event_type == "error" or event.get("error"):
+                detail = _api_error_detail(event.get("error") or event)
+                raise RuntimeError(f"Anthropic API 流返回错误：{detail or event_type or 'unknown_error'}")
+            if event_type == "message_start":
+                message = event.get("message")
+                if isinstance(message, dict):
+                    for key in ("id", "model", "role", "type"):
+                        if message.get(key) is not None:
+                            result[key] = deepcopy(message[key])
+                    usage = message.get("usage")
+                    if isinstance(usage, dict):
+                        result["usage"] = deepcopy(usage)
+            elif event_type == "content_block_start":
+                try:
+                    index = int(event.get("index", 0))
+                except (TypeError, ValueError, OverflowError):
+                    continue
+                block = event.get("content_block")
+                if isinstance(block, dict) and block.get("type") == "text":
+                    blocks[index] = {"type": "text", "text": str(block.get("text") or "")}
+            elif event_type == "content_block_delta":
+                try:
+                    index = int(event.get("index", 0))
+                except (TypeError, ValueError, OverflowError):
+                    continue
+                delta = event.get("delta")
+                if isinstance(delta, dict) and delta.get("type") == "text_delta":
+                    block = blocks.setdefault(index, {"type": "text", "text": ""})
+                    block["text"] = _append_api_stream_text(
+                        block.get("text"), delta.get("text"), cumulative=False,
+                    )
+            elif event_type == "message_delta":
+                delta = event.get("delta")
+                if isinstance(delta, dict):
+                    for key in ("stop_reason", "stop_sequence"):
+                        if key in delta:
+                            result[key] = deepcopy(delta[key])
+                usage = event.get("usage")
+                if isinstance(usage, dict):
+                    result["usage"] = {**result.get("usage", {}), **deepcopy(usage)}
+        result["content"] = [blocks[index] for index in sorted(blocks)]
+        return result
+
+    response: dict[str, Any] = {}
+    text_parts: dict[tuple[int, int], str] = {}
+    for event in payloads:
+        event_type = str(event.get("type") or "")
+        if event_type in {"error", "response.failed"} or event.get("error"):
+            detail_source = event.get("response") if isinstance(event.get("response"), dict) else event
+            detail = _api_error_detail(detail_source.get("error") or detail_source)
+            raise RuntimeError(f"Responses API 流返回错误：{detail or event_type or 'unknown_error'}")
+        if event_type in {"response.created", "response.in_progress", "response.completed", "response.incomplete"}:
+            snapshot = event.get("response")
+            if isinstance(snapshot, dict):
+                for key, value in snapshot.items():
+                    response[key] = deepcopy(value)
+        elif event_type == "response.output_text.delta":
+            try:
+                position = (
+                    max(0, int(event.get("output_index", 0))),
+                    max(0, int(event.get("content_index", 0))),
+                )
+            except (TypeError, ValueError, OverflowError):
+                position = (0, 0)
+            text_parts[position] = _append_api_stream_text(
+                text_parts.get(position), event.get("delta"), cumulative=False,
+            )
+        elif event_type == "response.output_text.done":
+            try:
+                position = (
+                    max(0, int(event.get("output_index", 0))),
+                    max(0, int(event.get("content_index", 0))),
+                )
+            except (TypeError, ValueError, OverflowError):
+                position = (0, 0)
+            text_parts[position] = str(event.get("text") or "")
+        elif event_type in {"response.content_part.added", "response.content_part.done"}:
+            part = event.get("part")
+            if isinstance(part, dict) and part.get("type") == "output_text":
+                try:
+                    position = (
+                        max(0, int(event.get("output_index", 0))),
+                        max(0, int(event.get("content_index", 0))),
+                    )
+                except (TypeError, ValueError, OverflowError):
+                    position = (0, 0)
+                snapshot = str(part.get("text") or "")
+                if event_type.endswith(".done") or position not in text_parts:
+                    text_parts[position] = snapshot
+        elif event_type == "response.output_item.done":
+            item = event.get("item")
+            if isinstance(item, dict) and item.get("type") == "message":
+                try:
+                    output_index = max(0, int(event.get("output_index", 0)))
+                except (TypeError, ValueError, OverflowError):
+                    output_index = 0
+                for content_index, part in enumerate(item.get("content", [])):
+                    if isinstance(part, dict) and part.get("type") == "output_text":
+                        text_parts[(output_index, content_index)] = str(part.get("text") or "")
+
+    merged_text = "".join(text_parts[position] for position in sorted(text_parts))
+    if response:
+        visible_snapshot = _extract_model_response_text_impl(response)
+        if visible_snapshot:
+            merged_text = visible_snapshot
+    result = dict(response)
+    if merged_text:
+        result["output_text"] = merged_text
+        # Keep the earlier decoder contract while excluding non-visible typed
+        # deltas: callers using the Responses adapter consume output_text.
+        result["delta"] = merged_text
+    return result
 
 
 def _perform_api_http_request(

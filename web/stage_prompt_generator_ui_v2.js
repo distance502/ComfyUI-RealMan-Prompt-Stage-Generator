@@ -3852,22 +3852,28 @@ function buildQualityAuditHistoryMeta(node) {
 async function runNodeQualityAudit(node, options = {}) {
 	const revision = Math.max(0, Number(node?.[NODE_QUALITY_AUDIT_REVISION_KEY] ?? 0) || 0) + 1;
 	if (node) node[NODE_QUALITY_AUDIT_REVISION_KEY] = revision;
-	const isCurrent = () => !node?.[NODE_REMOVED_KEY] && node?.[NODE_QUALITY_AUDIT_REVISION_KEY] === revision;
+	const isCurrent = () => !node?.[NODE_REMOVED_KEY] && node?.[NODE_QUALITY_AUDIT_REVISION_KEY] === revision && !options.shouldCancel?.();
 	const limit = Math.max(1, Math.min(24, Number(options.limit ?? 6) || 6));
 	const payload = { limit };
-	const historyPromptIds = await resolveNodeWorkflowAuditPromptIds(node, {
-		...options,
-		shouldCancel: () => !isCurrent() || options.shouldCancel?.(),
-		shouldCommit: isCurrent,
-	});
-	if (!isCurrent()) return { ok: false, stale: true, result: null, markdown: "", summaryText: "" };
-	if (historyPromptIds.length) payload.history_prompt_ids = historyPromptIds;
-	else if (options.afterTimestamp != null) payload.after_timestamp = Number(options.afterTimestamp);
-	const data = await requestQualityAudit(payload, {
-		owner: options.requestOwner ?? node,
-		key: options.requestKey ?? "quality-audit",
-		timeoutMs: options.requestTimeoutMs,
-	});
+	let data;
+	try {
+		const historyPromptIds = await resolveNodeWorkflowAuditPromptIds(node, {
+			...options,
+			shouldCancel: () => !isCurrent(),
+			shouldCommit: isCurrent,
+		});
+		if (!isCurrent()) return { ok: false, stale: true, result: null, markdown: "", summaryText: "" };
+		if (historyPromptIds.length) payload.history_prompt_ids = historyPromptIds;
+		else if (options.afterTimestamp != null) payload.after_timestamp = Number(options.afterTimestamp);
+		data = await requestQualityAudit(payload, {
+			owner: options.requestOwner ?? node,
+			key: options.requestKey ?? "quality-audit",
+			timeoutMs: options.requestTimeoutMs,
+		});
+	} catch (error) {
+		if (!isCurrent()) return { ok: false, stale: true, result: null, markdown: "", summaryText: "" };
+		throw error;
+	}
 	if (!isCurrent()) return { ok: false, stale: true, result: null, markdown: "", summaryText: "" };
 	const result = data?.result ?? { summary: { total_images: 0, ocr_risk_images: 0, wrinkle_risk_images: 0, oversmooth_risk_images: 0 }, images: [] };
 	const summaryText = formatQualityAuditSummary(result.summary);
@@ -10088,20 +10094,22 @@ function clearNodeContinuousRunArtifacts(node, library){
 }
 async function applyPresetStateToNode(node, library, state, options = {}) {
 	const mutationRevision = Math.max(0, Number(options.mutationRevision ?? 0) || 0) || beginNodeStateMutation(node);
-	const nextLibrary = await getFreshLibraryForUi(node, library, { mutationRevision });
-	if (!isNodeStateMutationCurrent(node, mutationRevision)) return { ok: false, queued: false, stale: true, library: nextLibrary };
+	const isCurrent = () => isNodeStateMutationCurrent(node, mutationRevision) && (typeof options.commitGuard !== "function" || options.commitGuard());
+	if (!isCurrent()) return { ok: false, queued: false, stale: true, library };
+	const nextLibrary = await getFreshLibraryForUi(node, library, { mutationRevision, commitGuard: isCurrent });
+	if (!isCurrent()) return { ok: false, queued: false, stale: true, library: nextLibrary };
 	if (node?.[PANEL_KEY]) node[PANEL_KEY].library = nextLibrary;
 	if (!applyNodeState(node, nextLibrary, clonePresetState(state), { recordHistory: true, historySource: "preset-load", mutationRevision })) {
 		return { ok: false, queued: false, stale: true, library: nextLibrary };
 	}
 	if (options.randomizeAfterLoad) {
-		const applied = await buildAndApplyRandomState(node, nextLibrary, { mutationRevision });
+		const applied = await buildAndApplyRandomState(node, nextLibrary, { mutationRevision, commitGuard: isCurrent });
 		if (!applied) return { ok: false, queued: false, stale: true, library: nextLibrary };
 	}
 	if (!options.queue) return { ok: true, queued: false, library: nextLibrary };
-	if (!isNodeStateMutationCurrent(node, mutationRevision)) return { ok: false, queued: false, stale: true, library: nextLibrary };
+	if (!isCurrent()) return { ok: false, queued: false, stale: true, library: nextLibrary };
 	const queued = await queueWorkflowFromNode(node);
-	if (!isNodeStateMutationCurrent(node, mutationRevision)) return { ok: false, queued: false, queueSubmitted: queued, stale: true, library: nextLibrary };
+	if (!isCurrent()) return { ok: false, queued: false, queueSubmitted: queued, stale: true, library: nextLibrary };
 	return { ok: queued, queued, library: nextLibrary };
 }
 async function runNodeContinuousPresetSequence(node, library, selectedPresets, totalRuns, mode = "cycle") {
@@ -10126,7 +10134,7 @@ async function runNodeContinuousPresetSequence(node, library, selectedPresets, t
 		const baselineStamp = getNodeExecutionStamp(node);
 			pushNodeContinuousRunReport(node, library, "提交", `第 ${step + 1}/${totalRuns} 轮：${preset.name}`, { presetName: preset.name, round: step + 1, total: totalRuns, origin: "continuous" });
 		setNodeStatusText(node, `连续测试 ${step + 1}/${totalRuns}：准备提交 ${preset.name}`);
-		const result = await applyPresetStateToNode(node, library, preset.state, { queue: true });
+		const result = await applyPresetStateToNode(node, library, preset.state, { queue: true, commitGuard: () => token === ensureNodeContinuousRuntime(node).token });
 		library = result.library;
 		if (token !== ensureNodeContinuousRuntime(node).token) return false;
 		if (!result.queued) {
@@ -10176,9 +10184,13 @@ async function runNodeContinuousPresetSequence(node, library, selectedPresets, t
 	try {
 		const audit = await runNodeQualityAudit(
 			node,
-			targetedPromptIds.length
-				? { limit: totalRuns, historyPromptIds: targetedPromptIds, historyWaitTimeoutMs: 0 }
-				: { limit: totalRuns, afterTimestamp: qualityAuditStartAt },
+			{
+				limit: totalRuns,
+				...(targetedPromptIds.length
+					? { historyPromptIds: targetedPromptIds, historyWaitTimeoutMs: 0 }
+					: { afterTimestamp: qualityAuditStartAt }),
+				shouldCancel: () => token !== ensureNodeContinuousRuntime(node).token,
+			},
 		);
 		if (token !== ensureNodeContinuousRuntime(node).token) return false;
 		if (audit.ok && audit.summaryText) {
@@ -12534,10 +12546,12 @@ function openContinuousReportDialog(node, library) {
 								detailWrap.appendChild(actionBar);
 								const targetPreset = getUserPresets().find((preset) => String(preset.name ?? "").trim() === item.presetName);
 								if (targetPreset) {
+									const isReportActionCurrent = () => !overlay.__qwenDisposed && overlay.isConnected && !node?.[NODE_REMOVED_KEY];
 									const refreshReportIfOpen = () => {
 										if (overlay.isConnected) render();
 									};
 										const appendManualReport = (level, message) => {
+											if (!isReportActionCurrent()) return;
 											pushNodeContinuousRunReport(node, library, level, message, { presetName: targetPreset.name, origin: "manual" });
 											refreshReportIfOpen();
 										};
@@ -12548,7 +12562,15 @@ function openContinuousReportDialog(node, library) {
 										button.textContent = label;
 									button.onclick = async (event) => {
 										event.stopPropagation();
-										await handler();
+										if (!isReportActionCurrent()) return;
+										try {
+											await handler();
+										} catch (error) {
+											if (!isReportActionCurrent()) return;
+											const message = `${label}失败：${error?.message ?? error}`;
+											appendManualReport("失败", message);
+											statusEl.textContent = message;
+										}
 										};
 										actionBar.appendChild(button);
 									};
@@ -12629,15 +12651,26 @@ function openContinuousReportDialog(node, library) {
 										statusEl.textContent = `已将 ${targetPreset.name} 设为唯一连测批次并启动轮流连测。`;
 									});
 									makeAction("载入预设", async () => {
-										await applyPresetToNode(targetPreset);
+										if (!isReportActionCurrent()) return;
+										const result = await applyPresetStateToNode(node, library, targetPreset.state, {
+											commitGuard: isReportActionCurrent,
+										});
+										if (!result.ok || !isReportActionCurrent()) return;
+										library = result.library ?? library;
 										appendManualReport("手动载入", `从聚合统计载入预设：${targetPreset.name}`);
 										statusEl.textContent = `已从聚合统计载入预设：${targetPreset.name}`;
 									});
 								makeAction("重跑并入队", async () => {
+									if (!isReportActionCurrent()) return;
 									const baselineStamp = getNodeExecutionStamp(node);
 									appendManualReport("提交", `手动重跑：${targetPreset.name}`);
-										const queued = await applyPresetToNode(targetPreset, { queue: true });
-										if (!queued) {
+										const result = await applyPresetStateToNode(node, library, targetPreset.state, {
+											queue: true,
+											commitGuard: isReportActionCurrent,
+										});
+										if (result.stale || !isReportActionCurrent()) return;
+										library = result.library ?? library;
+										if (!result.queued) {
 											appendManualReport("失败", `手动重跑：${targetPreset.name} 已载入，但未能自动入队。`);
 											statusEl.textContent = `已从聚合统计载入预设：${targetPreset.name}，但未能自动入队`;
 											return;
@@ -12645,15 +12678,23 @@ function openContinuousReportDialog(node, library) {
 										appendManualReport("入队", `手动重跑：${targetPreset.name} 已入队。`);
 										statusEl.textContent = `已从聚合统计重跑并入队：${targetPreset.name}`;
 										const executed = await waitForNodeExecution(node, baselineStamp, 180000, 500, {
-											shouldCancel: () => !overlay.isConnected,
+											shouldCancel: () => !isReportActionCurrent(),
 										});
+										if (!isReportActionCurrent()) return;
 										appendManualReport(executed ? "完成" : "超时", executed ? `手动重跑：${targetPreset.name} 执行完成。` : `手动重跑：${targetPreset.name} 等待执行完成超时。`);
 									});
 								makeAction("随机跑", async () => {
+										if (!isReportActionCurrent()) return;
 										const baselineStamp = getNodeExecutionStamp(node);
 										appendManualReport("提交", `手动随机跑：${targetPreset.name}`);
-										const queued = await applyPresetToNode(targetPreset, { randomizeAfterLoad: true, queue: true });
-										if (!queued) {
+										const result = await applyPresetStateToNode(node, library, targetPreset.state, {
+											randomizeAfterLoad: true,
+											queue: true,
+											commitGuard: isReportActionCurrent,
+										});
+										if (result.stale || !isReportActionCurrent()) return;
+										library = result.library ?? library;
+										if (!result.queued) {
 											appendManualReport("失败", `手动随机跑：${targetPreset.name} 已随机化，但未能自动入队。`);
 											statusEl.textContent = `已从聚合统计随机化预设：${targetPreset.name}，但未能自动入队`;
 											return;
@@ -12661,8 +12702,9 @@ function openContinuousReportDialog(node, library) {
 										appendManualReport("入队", `手动随机跑：${targetPreset.name} 已入队。`);
 										statusEl.textContent = `已从聚合统计随机跑：${targetPreset.name}`;
 										const executed = await waitForNodeExecution(node, baselineStamp, 180000, 500, {
-											shouldCancel: () => !overlay.isConnected,
+											shouldCancel: () => !isReportActionCurrent(),
 										});
+										if (!isReportActionCurrent()) return;
 										appendManualReport(executed ? "完成" : "超时", executed ? `手动随机跑：${targetPreset.name} 执行完成。` : `手动随机跑：${targetPreset.name} 等待执行完成超时。`);
 									});
 								makeAction("连测轮流", async () => {
@@ -13416,12 +13458,13 @@ async function buildRandomState(node, library, sourceState = null) {
 
 async function buildAndApplyRandomState(node, library, options = {}) {
 	const mutationRevision = Math.max(0, Number(options.mutationRevision ?? 0) || 0) || beginNodeStateMutation(node);
-	if (!isNodeStateMutationCurrent(node, mutationRevision)) return false;
+	const isCurrent = () => isNodeStateMutationCurrent(node, mutationRevision) && (typeof options.commitGuard !== "function" || options.commitGuard());
+	if (!isCurrent()) return false;
 	if (options.recordBefore !== false) {
 		recordNodeHistory(node, collectNodeState(node, library), String(options.beforeHistorySource ?? "before-random"));
 	}
 	const randomState = await buildRandomState(node, library, options.sourceState ?? null);
-	if (!isNodeStateMutationCurrent(node, mutationRevision)) return false;
+	if (!isCurrent()) return false;
 	return applyNodeState(node, library, randomState, {
 		recordHistory: options.recordHistory !== false,
 		historySource: String(options.historySource ?? "random"),
@@ -14292,7 +14335,7 @@ function openPresetManager(node, library) {
 				const baselineStamp = getNodeExecutionStamp(node);
 				statusEl.textContent = `连续测试 ${step + 1}/${totalRuns}：准备提交 ${preset.name}`;
 			pushContinuousRunReport("提交", `第 ${step + 1}/${totalRuns} 轮：${preset.name}`);
-			const queued = await applyPresetToNode(preset, { queue: true });
+			const queued = await applyPresetToNode(preset, { queue: true, commitGuard: () => token === continuousRunToken });
 			if (token !== continuousRunToken) return;
 			if (!queued) {
 				pushContinuousRunReport("失败", `第 ${step + 1}/${totalRuns} 轮：${preset.name} 已载入，但未能自动入队。`);
@@ -14342,9 +14385,14 @@ function openPresetManager(node, library) {
 			try {
 				const audit = await runNodeQualityAudit(
 					node,
-					targetedPromptIds.length
-						? { limit: totalRuns, historyPromptIds: targetedPromptIds, historyWaitTimeoutMs: 0, requestOwner: overlay }
-						: { limit: totalRuns, afterTimestamp: qualityAuditStartAt, requestOwner: overlay },
+					{
+						limit: totalRuns,
+						...(targetedPromptIds.length
+							? { historyPromptIds: targetedPromptIds, historyWaitTimeoutMs: 0 }
+							: { afterTimestamp: qualityAuditStartAt }),
+						requestOwner: overlay,
+						shouldCancel: () => token !== continuousRunToken || overlay.__qwenDisposed,
+					},
 				);
 				if (token !== continuousRunToken) return;
 				if (audit.ok && audit.summaryText) {
@@ -14357,7 +14405,8 @@ function openPresetManager(node, library) {
 		};
 	const applyPresetToNode = async (preset, options = {}) => {
 		if (!preset) return false;
-		const result = await applyPresetStateToNode(node, library, preset.state, options);
+		const commitGuard = () => !overlay.__qwenDisposed && (typeof options.commitGuard !== "function" || options.commitGuard());
+		const result = await applyPresetStateToNode(node, library, preset.state, { ...options, commitGuard });
 		library = result.library ?? library;
 		return options.queue ? !!result.queued : !!result.ok;
 	};
