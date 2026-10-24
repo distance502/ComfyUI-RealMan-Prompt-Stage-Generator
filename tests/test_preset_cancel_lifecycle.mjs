@@ -246,7 +246,7 @@ function makeReportActionFixture({ queueResult = true } = {}) {
 		},
 	});
 	const actionWrapperSource = sourceBetween("const isReportActionCurrent =", 'makeAction("复制单预设", async () => {');
-	const actionsSource = sourceBetween('makeAction("载入预设", async () => {', 'makeAction("连测轮流", async () => {');
+	const actionsSource = sourceBetween('makeAction("载入预设", async (', 'makeAction("连测轮流", async () => {');
 	vm.runInNewContext(`${actionWrapperSource}\n${actionsSource}`, fixture.context, { filename: UI_PATH.pathname });
 	return { ...fixture, handlers, reports, randomized, execution, waitRequested, overlay, statusEl, initialLibrary };
 }
@@ -262,6 +262,8 @@ for (const [label, queue, randomize] of [["载入预设", false, false], ["重�
 
 		assert.equal(fixture.applied.length, 1);
 		assert.equal(fixture.applied[0].options.recordHistory, true);
+		assert.equal(fixture.node[fixture.context.NODE_STATE_MUTATION_REVISION_KEY], 1);
+		assert.equal(fixture.applied[0].options.mutationRevision, 1);
 		assert.equal(fixture.context.library, freshLibrary);
 		assert.equal(fixture.queued.length, Number(queue));
 		assert.equal(fixture.randomized.length, Number(randomize));
@@ -300,23 +302,108 @@ for (const [label, queue, randomize] of [["载入预设", false, false], ["重�
 		assert.match(fixture.statusEl.textContent, /Preset refresh unavailable/u);
 	});
 
-	test(`continuous report ${label} ignores a late refresh error after close`, async () => {
-		const fixture = makeReportActionFixture();
-		const pending = fixture.handlers.get(label)();
-		const reportCount = fixture.reports.length;
-		fixture.overlay.__qwenDisposed = true;
-		fixture.overlay.isConnected = false;
-		fixture.refresh.reject(new Error("Request aborted"));
-		await pending;
+	for (const cancellation of ["closed", "superseded"]) {
+		test(`continuous report ${label} ignores a late refresh error after ${cancellation}`, async () => {
+			const fixture = makeReportActionFixture();
+			const pending = fixture.handlers.get(label)();
+			const reportCount = fixture.reports.length;
+			if (cancellation === "closed") {
+				fixture.overlay.__qwenDisposed = true;
+				fixture.overlay.isConnected = false;
+			} else fixture.context.beginNodeStateMutation(fixture.node);
+			fixture.refresh.reject(new Error("Request aborted"));
+			await pending;
 
-		assert.equal(fixture.applied.length, 0);
-		assert.equal(fixture.queued.length, 0);
-		assert.equal(fixture.reports.length, reportCount);
-		assert.equal(fixture.statusEl.textContent, "Report ready");
-	});
+			assert.equal(fixture.applied.length, 0);
+			assert.equal(fixture.queued.length, 0);
+			assert.equal(fixture.reports.length, reportCount);
+			assert.equal(fixture.statusEl.textContent, "Report ready");
+		});
+	}
+}
+
+function useRealReportExecutionWait(fixture) {
+	let stamp = 123;
+	let now = 0;
+	fixture.context.getNodeExecutionStamp = () => stamp;
+	fixture.context.Date = { now: () => now };
+	fixture.context.sleep = () => fixture.execution.promise;
+	const waitSource = sourceBetween("async function waitForNodeExecution(", "function pushNodeContinuousRunReport(");
+	vm.runInNewContext(`${waitSource}\nglobalThis.realReportExecutionWait = waitForNodeExecution;`, fixture.context, { filename: UI_PATH.pathname });
+	fixture.context.waitForNodeExecution = (...args) => {
+		fixture.waitRequested.resolve(args[4]);
+		return fixture.context.realReportExecutionWait(...args);
+	};
+	return {
+		advanceExecution: () => { stamp += 1; },
+		expire: () => { now = 180001; },
+	};
 }
 
 for (const label of ["重跑并入队", "随机跑"]) {
+	for (const replacement of ["node edit", "new preset load"]) {
+		for (const outcome of ["execution", "timeout", "error"]) {
+			test(`continuous report ${label} ignores late ${outcome} after ${replacement}`, async () => {
+				const fixture = makeReportActionFixture();
+				const clock = useRealReportExecutionWait(fixture);
+				fixture.refresh.resolve({ version: "fresh" });
+				const pending = fixture.handlers.get(label)();
+				const waitOptions = await fixture.waitRequested.promise;
+				if (replacement === "node edit") fixture.context.beginNodeStateMutation(fixture.node);
+				else await fixture.handlers.get("载入预设")();
+				const reportCount = fixture.reports.length;
+				const statusText = fixture.statusEl.textContent;
+				const cancelled = waitOptions.shouldCancel();
+				if (outcome === "error") fixture.execution.reject(new Error("Old execution failed"));
+				else {
+					if (outcome === "execution") clock.advanceExecution();
+					else clock.expire();
+					fixture.execution.resolve();
+				}
+				await pending;
+
+				assert.equal(cancelled, true);
+				assert.equal(fixture.reports.length, reportCount);
+				assert.equal(fixture.statusEl.textContent, statusText);
+				assert.equal(fixture.queued.length, 1);
+			});
+		}
+	}
+
+	test(`continuous report ${label} still completes its active real execution wait`, async () => {
+		const fixture = makeReportActionFixture();
+		const clock = useRealReportExecutionWait(fixture);
+		fixture.refresh.resolve({ version: "fresh" });
+		const pending = fixture.handlers.get(label)();
+		const waitOptions = await fixture.waitRequested.promise;
+		assert.equal(waitOptions.shouldCancel(), false);
+		clock.advanceExecution();
+		fixture.execution.resolve();
+		await pending;
+
+		assert.equal(fixture.node[fixture.context.NODE_STATE_MUTATION_REVISION_KEY], 1);
+		assert.equal(fixture.reports.at(-1)?.level, "完成");
+	});
+
+	for (const outcome of ["timeout", "error"]) {
+		test(`continuous report ${label} retains an active execution ${outcome} diagnostic`, async () => {
+			const fixture = makeReportActionFixture();
+			const clock = useRealReportExecutionWait(fixture);
+			fixture.refresh.resolve({ version: "fresh" });
+			const pending = fixture.handlers.get(label)();
+			await fixture.waitRequested.promise;
+			if (outcome === "error") fixture.execution.reject(new Error("Current execution failed"));
+			else {
+				clock.expire();
+				fixture.execution.resolve();
+			}
+			await pending;
+
+			assert.equal(fixture.reports.at(-1)?.level, outcome === "timeout" ? "超时" : "失败");
+			if (outcome === "error") assert.match(fixture.statusEl.textContent, /Current execution failed/u);
+		});
+	}
+
 	test(`continuous report ${label} does not report an in-flight queue as failed after close`, async () => {
 		const fixture = makeReportActionFixture();
 		const queueResponse = deferred();
@@ -370,3 +457,22 @@ for (const label of ["重跑并入队", "随机跑"]) {
 		assert.equal(fixture.reports.at(-1)?.level, "入队");
 	});
 }
+
+test("copying a preset report does not invalidate an active preset execution wait", async () => {
+	const fixture = makeReportActionFixture();
+	fixture.context.item = {};
+	fixture.context.buildSinglePresetContinuousRunReportText = () => "Preset report";
+	fixture.context.copyToClipboard = async () => true;
+	const copySource = sourceBetween('makeAction("复制单预设", async () => {', 'makeAction("导出单预设", async () => {');
+	vm.runInNewContext(copySource, fixture.context, { filename: UI_PATH.pathname });
+	fixture.refresh.resolve({ version: "fresh" });
+	const pending = fixture.handlers.get("重跑并入队")();
+	const waitOptions = await fixture.waitRequested.promise;
+	await fixture.handlers.get("复制单预设")();
+
+	assert.equal(fixture.node[fixture.context.NODE_STATE_MUTATION_REVISION_KEY], 1);
+	assert.equal(waitOptions.shouldCancel(), false);
+	fixture.execution.resolve(true);
+	await pending;
+	assert.equal(fixture.reports.at(-1)?.level, "完成");
+});

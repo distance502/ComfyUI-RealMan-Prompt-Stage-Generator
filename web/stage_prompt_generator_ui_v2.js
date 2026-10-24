@@ -12555,7 +12555,7 @@ function openContinuousReportDialog(node, library) {
 											pushNodeContinuousRunReport(node, library, level, message, { presetName: targetPreset.name, origin: "manual" });
 											refreshReportIfOpen();
 										};
-									const makeAction = (label, handler) => {
+									const makeAction = (label, handler, options = {}) => {
 										const button = document.createElement("button");
 										button.type = "button";
 										button.className = "qwen-te-modal__mini-button";
@@ -12563,10 +12563,12 @@ function openContinuousReportDialog(node, library) {
 									button.onclick = async (event) => {
 										event.stopPropagation();
 										if (!isReportActionCurrent()) return;
+										const mutationRevision = options.trackNodeState ? beginNodeStateMutation(node) : 0;
+										const isCurrent = () => isReportActionCurrent() && (!options.trackNodeState || isNodeStateMutationCurrent(node, mutationRevision));
 										try {
-											await handler();
+											await handler(mutationRevision, isCurrent);
 										} catch (error) {
-											if (!isReportActionCurrent()) return;
+											if (!isCurrent()) return;
 											const message = `${label}失败：${error?.message ?? error}`;
 											appendManualReport("失败", message);
 											statusEl.textContent = message;
@@ -12650,25 +12652,27 @@ function openContinuousReportDialog(node, library) {
 										await startNodeContinuousPresetRun(node, library, "cycle");
 										statusEl.textContent = `已将 ${targetPreset.name} 设为唯一连测批次并启动轮流连测。`;
 									});
-									makeAction("载入预设", async () => {
-										if (!isReportActionCurrent()) return;
+									makeAction("载入预设", async (mutationRevision, isCurrent) => {
+										if (!isCurrent()) return;
 										const result = await applyPresetStateToNode(node, library, targetPreset.state, {
-											commitGuard: isReportActionCurrent,
+											mutationRevision,
+											commitGuard: isCurrent,
 										});
-										if (!result.ok || !isReportActionCurrent()) return;
+										if (!result.ok || !isCurrent()) return;
 										library = result.library ?? library;
 										appendManualReport("手动载入", `从聚合统计载入预设：${targetPreset.name}`);
 										statusEl.textContent = `已从聚合统计载入预设：${targetPreset.name}`;
-									});
-								makeAction("重跑并入队", async () => {
-									if (!isReportActionCurrent()) return;
+									}, { trackNodeState: true });
+								makeAction("重跑并入队", async (mutationRevision, isCurrent) => {
+									if (!isCurrent()) return;
 									const baselineStamp = getNodeExecutionStamp(node);
 									appendManualReport("提交", `手动重跑：${targetPreset.name}`);
 										const result = await applyPresetStateToNode(node, library, targetPreset.state, {
 											queue: true,
-											commitGuard: isReportActionCurrent,
+											mutationRevision,
+											commitGuard: isCurrent,
 										});
-										if (result.stale || !isReportActionCurrent()) return;
+										if (result.stale || !isCurrent()) return;
 										library = result.library ?? library;
 										if (!result.queued) {
 											appendManualReport("失败", `手动重跑：${targetPreset.name} 已载入，但未能自动入队。`);
@@ -12678,21 +12682,22 @@ function openContinuousReportDialog(node, library) {
 										appendManualReport("入队", `手动重跑：${targetPreset.name} 已入队。`);
 										statusEl.textContent = `已从聚合统计重跑并入队：${targetPreset.name}`;
 										const executed = await waitForNodeExecution(node, baselineStamp, 180000, 500, {
-											shouldCancel: () => !isReportActionCurrent(),
+											shouldCancel: () => !isCurrent(),
 										});
-										if (!isReportActionCurrent()) return;
+										if (!isCurrent()) return;
 										appendManualReport(executed ? "完成" : "超时", executed ? `手动重跑：${targetPreset.name} 执行完成。` : `手动重跑：${targetPreset.name} 等待执行完成超时。`);
-									});
-								makeAction("随机跑", async () => {
-										if (!isReportActionCurrent()) return;
+									}, { trackNodeState: true });
+								makeAction("随机跑", async (mutationRevision, isCurrent) => {
+										if (!isCurrent()) return;
 										const baselineStamp = getNodeExecutionStamp(node);
 										appendManualReport("提交", `手动随机跑：${targetPreset.name}`);
 										const result = await applyPresetStateToNode(node, library, targetPreset.state, {
 											randomizeAfterLoad: true,
 											queue: true,
-											commitGuard: isReportActionCurrent,
+											mutationRevision,
+											commitGuard: isCurrent,
 										});
-										if (result.stale || !isReportActionCurrent()) return;
+										if (result.stale || !isCurrent()) return;
 										library = result.library ?? library;
 										if (!result.queued) {
 											appendManualReport("失败", `手动随机跑：${targetPreset.name} 已随机化，但未能自动入队。`);
@@ -12702,11 +12707,11 @@ function openContinuousReportDialog(node, library) {
 										appendManualReport("入队", `手动随机跑：${targetPreset.name} 已入队。`);
 										statusEl.textContent = `已从聚合统计随机跑：${targetPreset.name}`;
 										const executed = await waitForNodeExecution(node, baselineStamp, 180000, 500, {
-											shouldCancel: () => !isReportActionCurrent(),
+											shouldCancel: () => !isCurrent(),
 										});
-										if (!isReportActionCurrent()) return;
+										if (!isCurrent()) return;
 										appendManualReport(executed ? "完成" : "超时", executed ? `手动随机跑：${targetPreset.name} 执行完成。` : `手动随机跑：${targetPreset.name} 等待执行完成超时。`);
-									});
+									}, { trackNodeState: true });
 								makeAction("连测轮流", async () => {
 									await startSinglePresetContinuousRun(node, library, targetPreset, "cycle");
 									statusEl.textContent = `已从聚合统计启动单预设轮流连测：${targetPreset.name}`;
